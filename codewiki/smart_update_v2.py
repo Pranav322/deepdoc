@@ -744,20 +744,13 @@ class SmartUpdater:
         return merged
 
     def _rebuild_nav(self, plan: DocPlan) -> None:
-        """Rebuild Mintlify config from the current plan."""
+        """Rebuild the generated Fumadocs site from the current plan."""
         try:
-            from .site.mintlify_builder_v2 import build_mintlify_from_plan
+            from .pipeline_v2 import stage_openapi_assets
+            from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
 
-            has_openapi = any(
-                (self.repo_root / p).exists()
-                for p in [
-                    "openapi.json",
-                    "openapi.yaml",
-                    "swagger.json",
-                    "swagger.yaml",
-                ]
-            )
-            build_mintlify_from_plan(
+            has_openapi = stage_openapi_assets(self.repo_root)
+            build_fumadocs_from_plan(
                 self.repo_root, self.output_dir, self.cfg, plan, has_openapi
             )
             console.print("[green]✓[/green] Site nav rebuilt")

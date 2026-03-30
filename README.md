@@ -2,7 +2,7 @@
 
 Auto-generate deep engineering documentation from real codebases using AI.
 
-CodeWiki scans your repo, builds a bucket-based documentation plan, generates rich Markdown pages with Mermaid diagrams, and builds a static MkDocs site you can host on GitHub Pages.
+CodeWiki scans your repo, builds a bucket-based documentation plan, generates rich MDX pages with Mermaid diagrams, and builds a local-first Fumadocs site with Orama search.
 
 ---
 
@@ -20,8 +20,9 @@ CodeWiki scans your repo, builds a bucket-based documentation plan, generates ri
 - **Multi-Language Support** — JavaScript/TypeScript, Python, Go, PHP/Laravel with tree-sitter AST parsing and regex fallback.
 - **Configurable LLM** — Works with Anthropic, OpenAI, Azure OpenAI, Ollama, and other LiteLLM-compatible providers.
 - **Mermaid Diagrams** — Generated pages can include architecture, flow, and request-sequence diagrams.
-- **API Playground** — Auto-detects OpenAPI/Swagger specs and builds a Swagger UI playground page.
-- **GitHub Pages Deploy** — Docusaurus-powered static site with built-in GitHub Pages deployment.
+- **OpenAPI-Aware API Docs** — Auto-detects OpenAPI/Swagger specs and stages canonical interactive `/api/*` pages in the generated site.
+- **Local-First Fumadocs Site** — Generates a `site/` Next.js app with Fumadocs UI, Mermaid rendering, and built-in Orama search.
+- **Static Export** — `codewiki deploy` exports a static site to `site/out/` for any static host.
 
 ---
 
@@ -69,7 +70,7 @@ codewiki generate
 
 # 5. Preview locally
 codewiki serve
-# → Open http://localhost:8000
+# → Open http://localhost:3000
 ```
 
 ---
@@ -115,7 +116,7 @@ Full documentation generation. This is the first-run or explicit full-refresh co
 codewiki generate
 codewiki generate --force           # Full refresh of CodeWiki-managed docs
 codewiki generate --clean --yes     # Wipe output + state and rebuild from scratch
-codewiki generate --deploy          # Generate + deploy to GitHub Pages
+codewiki generate --deploy          # Generate + export the static site
 codewiki generate --batch-size 3    # Smaller batches for rate-limited APIs
 codewiki generate --include "src/**" --include "lib/**"
 codewiki generate --exclude "tests/**"
@@ -141,8 +142,8 @@ codewiki generate --exclude "tests/**"
 1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, integration signals, and OpenAPI specs.
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
 3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; per-endpoint reference pages are derived from scan data and generated individually.
-4. **Phase 4: Playground** — Build Swagger UI playground docs if an OpenAPI/Swagger spec exists.
-5. **Phase 5: Build** — Write `docusaurus.config.js`, `sidebars.js`, theme CSS, and static assets from the generated plan.
+4. **Phase 4: API Ref** — Stage OpenAPI assets for the generated Fumadocs `/api/*` pages when a spec exists.
+5. **Phase 5: Build** — Write the generated `site/` Fumadocs scaffold, page tree, search route, and static assets from the generated plan.
 
 **Options:**
 
@@ -153,7 +154,7 @@ codewiki generate --exclude "tests/**"
 | `--yes` | off | Skip destructive confirmation for `--clean` |
 | `--include` | all files | Glob patterns to include (can be repeated) |
 | `--exclude` | see config | Additional glob patterns to exclude |
-| `--deploy` | off | Deploy to GitHub Pages after generation |
+| `--deploy` | off | Build and export the static site after generation |
 | `--batch-size` | 10 | Pages per batch before pausing (helps with rate limits) |
 
 ### `codewiki update`
@@ -201,27 +202,24 @@ This is useful after `generate` or `update` when you want a quick health check w
 
 ### `codewiki serve`
 
-Preview the generated docs locally with live reload. CodeWiki uses polling-based file watching here because some machines hit file-watch limits with the default Docusaurus watcher setup.
+Preview the generated docs locally with live reload using the generated Fumadocs app in `site/`.
 
 ```bash
 codewiki serve
 codewiki serve --port 3000
-codewiki serve --host 127.0.0.1 --port 3000
 ```
 
-If the live dev server still cannot start cleanly, CodeWiki automatically falls back to a static preview server so you can still inspect the generated docs.
-
-Requires Node.js >= 18 to be installed. Docusaurus dependencies are auto-installed on first run.
+Requires Node.js >= 18 to be installed. Site dependencies are auto-installed into `site/node_modules/` on first run.
 
 ### `codewiki deploy`
 
-Deploy the built docs to GitHub Pages.
+Build and export the generated Fumadocs site.
 
 ```bash
 codewiki deploy
 ```
 
-This builds the Docusaurus site and deploys to GitHub Pages. Make sure GitHub Pages is enabled in your repo settings (Settings → Pages → Source: `gh-pages` branch).
+This runs `next build` inside `site/` and writes the static export to `site/out/`. You can deploy that directory to Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any static host.
 
 ### `codewiki config`
 
@@ -452,7 +450,7 @@ site:
 | `github_pages.branch` | `gh-pages` | Branch for GitHub Pages deploy |
 | `github_pages.remote` | `origin` | Git remote for deploy |
 | **Site** | | |
-| `site.repo_url` | `""` | Repo URL shown in Mintlify navigation |
+| `site.repo_url` | `""` | Repo URL shown in the generated Fumadocs navigation |
 | `site.favicon` | `""` | Path to favicon |
 | `site.logo` | `""` | Path to logo |
 
@@ -550,18 +548,20 @@ your-repo/
 ├── .codewiki_manifest.json     # Legacy source hash manifest
 ├── .codewiki_plan.json         # Legacy compatibility plan file
 ├── .codewiki_file_map.json     # Legacy compatibility file map
-├── mint.json                   # Mintlify site config generated from the plan
 ├── docs/                       # Generated MDX pages
-│   ├── introduction.mdx
+│   ├── index.mdx
 │   ├── architecture.mdx
 │   ├── setup-and-configuration.mdx
 │   ├── orders-api.mdx
 │   ├── get-api-v1-orders.mdx
-│   ├── openapi.mdx             # Mintlify API reference landing page (when OpenAPI exists)
 │   └── ...
-├── logo/                       # Optional generated/copied logo assets
-├── favicon.svg                 # Optional favicon asset
-└── site/                       # Built static output after `codewiki deploy`
+└── site/                       # Generated Fumadocs app
+    ├── app/
+    ├── components/
+    ├── lib/
+    ├── openapi/                # Staged OpenAPI assets (when a spec exists)
+    ├── public/
+    └── out/                    # Static export after `codewiki deploy`
 ```
 
 ---
@@ -623,7 +623,7 @@ codewiki init --provider anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 codewiki generate
 codewiki serve                      # Preview at localhost:3000
-codewiki deploy                     # Push to GitHub Pages
+codewiki deploy                     # Export a static site to site/out/
 ```
 
 **Every time you update code:**

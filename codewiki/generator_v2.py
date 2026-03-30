@@ -1302,7 +1302,7 @@ class BucketGenerationEngine:
             # Step 7: Write to disk
             bucket_hints = bucket.generation_hints or {}
             filename = (
-                "introduction.mdx"
+                "index.mdx"
                 if bucket_hints.get("is_introduction_page")
                 else f"{bucket.slug}.mdx"
             )
@@ -1321,7 +1321,12 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
             # Graceful degradation: generate a stub page
             stub = self._generate_stub_page(bucket)
-            filename = f"{bucket.slug}.mdx"
+            bucket_hints = bucket.generation_hints or {}
+            filename = (
+                "index.mdx"
+                if bucket_hints.get("is_introduction_page")
+                else f"{bucket.slug}.mdx"
+            )
             doc_path = self.output_dir / filename
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(stub, encoding="utf-8")
@@ -1427,10 +1432,10 @@ class BucketGenerationEngine:
         # Fix 3: Add a notice for very short pages
         if validation.word_count < 100:
             notice = (
-                "\n\n<Warning>\n"
+                "\n\n<Callout type=\"warn\">\n"
                 "This page was auto-generated with limited evidence. "
                 "Some sections may be incomplete.\n"
-                "</Warning>\n"
+                "</Callout>\n"
             )
             content = notice + content
 
@@ -1453,10 +1458,10 @@ class BucketGenerationEngine:
 
         return f"""# {bucket.title}
 
-<Warning>
+<Callout type="warn">
 This page could not be fully generated. It contains a file listing only.
 Re-run `codewiki generate` to retry.
-</Warning>
+</Callout>
 
 ## Description
 

@@ -30,6 +30,13 @@ from .persistence_v2 import (
 console = Console()
 
 
+def _doc_filename(page: DocPage) -> str:
+    """Resolve the output filename for a page."""
+    if getattr(page, "page_type", None) == "overview":
+        return "index.mdx"
+    return f"{page.slug}.mdx"
+
+
 class UpdaterV2:
     def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
         self.repo_root = repo_root
@@ -99,7 +106,7 @@ class UpdaterV2:
         for page in affected_pages:
             try:
                 doc_content = self._update_page(page, changed_rels)
-                doc_path = self.output_dir / f"{page.slug}.mdx"
+                doc_path = self.output_dir / _doc_filename(page)
                 doc_path.parent.mkdir(parents=True, exist_ok=True)
                 doc_path.write_text(doc_content, encoding="utf-8")
 
@@ -121,13 +128,11 @@ class UpdaterV2:
         self.manifest.save()
 
         # Step 6: Rebuild nav
-        from .site.mintlify_builder_v2 import build_mintlify_from_plan
+        from .pipeline_v2 import stage_openapi_assets
+        from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
         if plan:
-            has_openapi = any(
-                (self.repo_root / p).exists()
-                for p in ["openapi.json", "openapi.yaml", "swagger.json", "swagger.yaml"]
-            )
-            build_mintlify_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
+            has_openapi = stage_openapi_assets(self.repo_root)
+            build_fumadocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} page(s)[/bold green]")
         return updated
@@ -135,7 +140,7 @@ class UpdaterV2:
     def _update_page(self, page: DocPage, changed_files: set[str]) -> str:
         """Regenerate a page with context about what changed."""
         # Load previous doc
-        doc_path = self.output_dir / f"{page.slug}.mdx"
+        doc_path = self.output_dir / _doc_filename(page)
         previous_doc = ""
         if doc_path.exists():
             previous_doc = doc_path.read_text(encoding="utf-8")
@@ -310,12 +315,10 @@ class UpdaterV2:
         updated = sum(1 for r in gen_results if r.content and not r.error)
 
         # Step 5: Rebuild nav
-        from .site.mintlify_builder_v2 import build_mintlify_from_plan
-        has_openapi = any(
-            (self.repo_root / p).exists()
-            for p in ["openapi.json", "openapi.yaml", "swagger.json", "swagger.yaml"]
-        )
-        build_mintlify_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
+        from .pipeline_v2 import stage_openapi_assets
+        from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
+        has_openapi = stage_openapi_assets(self.repo_root)
+        build_fumadocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} bucket page(s)[/bold green]")
         return updated

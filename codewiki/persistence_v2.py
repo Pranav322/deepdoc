@@ -427,7 +427,7 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
             "title": bucket.title,
             "bucket_type": bucket.bucket_type,
             "section": bucket.section,
-            "doc_path": "introduction.mdx" if (bucket.generation_hints or {}).get("is_introduction_page") else f"{bucket.slug}.mdx",
+            "doc_path": "index.mdx" if (bucket.generation_hints or {}).get("is_introduction_page") else f"{bucket.slug}.mdx",
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),
@@ -665,7 +665,7 @@ def _fallback_doc_path(record: dict[str, Any]) -> str | None:
         return None
     hints = record.get("generation_hints", {})
     if hints.get("is_introduction_page"):
-        return "introduction.mdx"
+        return "index.mdx"
     return f"{slug}.mdx"
 
 

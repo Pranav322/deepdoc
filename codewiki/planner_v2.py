@@ -598,12 +598,12 @@ if the repo needs something different.
 Each bucket MUST also include a "generation_hints" object with these boolean flags \
 (set true only when applicable):
 - include_endpoint_detail: this bucket documents API endpoints (assemble endpoint listing)
-- is_endpoint_ref: this is a single-endpoint reference page (Mintlify API interactive layout)
+- is_endpoint_ref: this is a single-endpoint reference page (canonical OpenAPI page when a spec exists)
 - is_endpoint_family: this groups related endpoints (e.g. all /orders/* routes)
 - include_openapi: inject OpenAPI spec context when generating
 - include_database_context: inject DB schema, ER diagrams, model definitions
 - include_integration_detail: full external-system integration context
-- is_introduction_page: this is the landing/overview page (becomes introduction.mdx)
+- is_introduction_page: this is the landing/overview page (becomes index.mdx)
 - prompt_style: selects writing-guidance template — one of "system", "feature", \
   "endpoint", "endpoint_ref", "integration", "database", or "general"
 - icon: Heroicon name for nav (e.g. "server", "bolt", "globe-alt", "database", \

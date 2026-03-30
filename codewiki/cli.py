@@ -107,8 +107,17 @@ def init(name, description, provider, model, output_dir):
 
     save_config(cfg, cwd / CONFIG_FILE)
 
-    # Create .gitignore entry for site/
-    _add_gitignore_entries(cwd, ["site/", ".codewiki_manifest.json"])
+    # Create .gitignore entries for the generated site build artifacts
+    _add_gitignore_entries(
+        cwd,
+        [
+            "site/node_modules/",
+            "site/.next/",
+            "site/.source/",
+            "site/out/",
+            ".codewiki_manifest.json",
+        ],
+    )
 
     next_steps = [
         f"  1. Review config:     [bold]codewiki config show[/bold]",
@@ -167,8 +176,8 @@ def generate(force, clean, yes, include, exclude, deploy, batch_size):
       1. Scan       Collect files, symbols, endpoints, and OpenAPI specs
       2. Plan       Build a bucket-based docs plan with the LLM
       3. Generate   Write pages batch-by-batch
-      4. API Ref     Generate native Mintlify API pages from OpenAPI spec
-      5. Build      Write mint.json and theme assets
+      4. API Ref     Stage OpenAPI assets for Fumadocs API pages
+      5. Build      Write the generated Fumadocs site scaffold
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
@@ -356,20 +365,21 @@ def status():
 
 @main.command(short_help="Serve the generated docs locally with live reload.")
 @click.option("--port", default=3000, show_default=True,
-              help="Port to bind the local Mintlify development server to.")
+              help="Port to bind the local Fumadocs development server to.")
 def serve(port):
     """Preview the generated docs locally with live reload.
 
     \b
-    Run `codewiki generate` first so the mint.json config and docs exist.
+    Run `codewiki generate` first so the generated Fumadocs app and docs exist.
     Requires Node.js >= 18 to be installed.
     """
-    cfg = _load_or_exit()
+    _load_or_exit()
     repo_root = _find_repo_root()
+    site_dir = repo_root / "site"
 
-    mint_json = repo_root / "mint.json"
-    if not mint_json.exists():
-        console.print("[red]mint.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
+    package_json = site_dir / "package.json"
+    if not package_json.exists():
+        console.print("[red]site/package.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
         sys.exit(1)
 
     preview_url = f"http://localhost:{port}"
@@ -377,14 +387,21 @@ def serve(port):
     console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
     try:
+        if not (site_dir / "node_modules").exists():
+            console.print("[dim]Installing site dependencies...[/dim]")
+            install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
+            if install.returncode != 0:
+                console.print("[red]npm install failed.[/red]")
+                sys.exit(1)
+
         subprocess.run(
-            ["npx", "mintlify", "dev", "--port", str(port)],
-            cwd=str(repo_root),
+            ["npx", "next", "dev", "--port", str(port)],
+            cwd=str(site_dir),
         )
     except KeyboardInterrupt:
         pass
     except FileNotFoundError:
-        console.print("[red]npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
+        console.print("[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
         sys.exit(1)
 
 
@@ -397,27 +414,26 @@ def _deploy():
     """Deploy the generated documentation.
 
     \b
-    Mintlify supports two deployment models:
-      1. Mintlify Hosting — connect your GitHub repo at https://mintlify.com
-      2. Static build — run `npx mintlify build` and host anywhere
+    Fumadocs builds a static Next.js export:
+      1. Run `codewiki deploy`
+      2. Publish `site/out/` to any static host
     """
-    cfg = _load_or_exit()
+    _load_or_exit()
     repo_root = _find_repo_root()
+    site_dir = repo_root / "site"
 
-    mint_json = repo_root / "mint.json"
-    if not mint_json.exists():
-        console.print("[red]mint.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
+    package_json = site_dir / "package.json"
+    if not package_json.exists():
+        console.print("[red]site/package.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
         sys.exit(1)
 
     console.print(Panel.fit(
-        "[bold]Mintlify Deployment Options:[/bold]\n\n"
-        "1. [bold cyan]Mintlify Hosting (recommended):[/bold cyan]\n"
-        "   Sign up at [link=https://mintlify.com]https://mintlify.com[/link]\n"
-        "   Connect your GitHub repository\n"
-        "   Push your docs — auto-deploys on every commit\n\n"
-        "2. [bold cyan]Static build:[/bold cyan]\n"
-        "   Run: [bold]npx mintlify build[/bold]\n"
-        "   Deploy the output to any static host (Vercel, Netlify, GitHub Pages)",
+        "[bold]Fumadocs Deployment:[/bold]\n\n"
+        "1. [bold cyan]Static export:[/bold cyan]\n"
+        "   Run: [bold]codewiki deploy[/bold]\n"
+        "   Publish [bold]site/out/[/bold] to any static host\n\n"
+        "2. [bold cyan]Suggested hosts:[/bold cyan]\n"
+        "   Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any CDN/static server",
         title="Deploy",
         border_style="green",
     ))
@@ -425,17 +441,24 @@ def _deploy():
     # Offer to run a static build
     console.print("\n[dim]Running static build...[/dim]")
     try:
+        if not (site_dir / "node_modules").exists():
+            console.print("[dim]Installing site dependencies...[/dim]")
+            install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
+            if install.returncode != 0:
+                console.print("[red]npm install failed.[/red]")
+                sys.exit(1)
+
         build_result = subprocess.run(
-            ["npx", "mintlify", "build"],
-            cwd=str(repo_root),
+            ["npx", "next", "build"],
+            cwd=str(site_dir),
             capture_output=False,
         )
         if build_result.returncode == 0:
-            console.print("[bold green]✓ Build complete![/bold green]")
+            console.print("[bold green]✓ Build complete! Static files are in site/out/[/bold green]")
         else:
             console.print("[red]Build failed.[/red]")
     except FileNotFoundError:
-        console.print("[red]npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
+        console.print("[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
         sys.exit(1)
 
 
@@ -547,6 +570,8 @@ def _confirm_clean(repo_root: Path, output_dir: Path, yes: bool) -> None:
         targets.append(str(output_dir))
     if (repo_root / ".codewiki").exists():
         targets.append(str(repo_root / ".codewiki"))
+    if (repo_root / "site").exists():
+        targets.append(str(repo_root / "site"))
 
     target_text = ", ".join(targets) if targets else str(output_dir)
     if not click.confirm(
@@ -563,6 +588,10 @@ def _wipe_codewiki_output(repo_root: Path, output_dir: Path) -> None:
     state_dir = repo_root / ".codewiki"
     if state_dir.exists():
         shutil.rmtree(state_dir)
+
+    site_dir = repo_root / "site"
+    if site_dir.exists():
+        shutil.rmtree(site_dir)
 
     for path in (
         repo_root / ".codewiki_plan.json",

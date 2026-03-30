@@ -7,14 +7,11 @@
 
 # Generated docs/site output
 /docs/
-/site/
 /build/
-
-# Mintlify
-/mint.json
-/.mintlify/
-/logo/
-/favicon.svg
+/site/node_modules/
+/site/.next/
+/site/.source/
+/site/out/
 
 # Packaging/build artifacts
 /codewiki.egg-info/

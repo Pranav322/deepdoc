@@ -16,7 +16,7 @@ Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 - Console entrypoint: `codewiki = codewiki.cli:main`.
 - Main implementation path: the v2 bucket-based planner/generator pipeline.
 - Legacy v1 modules still exist; preserve compatibility unless cleanup is the explicit task.
-- Site generation now targets Mintlify, not the older Docusaurus builder.
+- Site generation now targets a generated Fumadocs app, not the older Mintlify site layer.
 
 ## Important Paths
 - `pyproject.toml` - package metadata and pytest discovery config.
@@ -28,7 +28,7 @@ Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 - `codewiki/generator_v2.py` - page generation and manifest updates.
 - `codewiki/persistence_v2.py` - `.codewiki/` state persistence.
 - `codewiki/parser/` - parser registry and language-specific parsers.
-- `codewiki/site/mintlify_builder_v2.py` - Mintlify config/assets generation.
+- `codewiki/site/fumadocs_builder_v2.py` - generated Fumadocs site scaffold/page-tree generation.
 - `tests/` - pytest suite, fixtures, and regression coverage.
 
 ## Install And Build Commands
@@ -54,10 +54,10 @@ codewiki init
 codewiki generate
 codewiki update
 codewiki serve --port 3000
-npx mintlify build
+npx next build
 ```
 
-`python -m build` is the packaging build. `npx mintlify build` only makes sense after docs/site files exist. Avoid `codewiki deploy` unless deployment is explicitly requested.
+`python -m build` is the packaging build. `npx next build` only makes sense after docs/site files exist. Avoid `codewiki deploy` unless deployment is explicitly requested.
 
 ## Lint, Type-Check, And Test Commands
 - There is no repo-configured formatter, linter, or type checker in `pyproject.toml`.
@@ -95,7 +95,7 @@ python -m pytest
 ## Generated And Derived Files
 Treat these as generated outputs or persisted state; do not hand-edit them unless the task is specifically about their format or generation logic.
 - `.codewiki/` contents, sync state, and legacy compatibility outputs like `.codewiki_plan.json` and `.codewiki_file_map.json`.
-- Generated docs/site artifacts such as `docs/`, `mint.json`, `logo/`, `favicon.svg`, and `site/`.
+- Generated docs/site artifacts such as `docs/`, `site/`, and `site/public/`.
 - Build/cache directories such as `build/`, `dist/`, `codewiki.egg-info/`, `__pycache__/`, `.pytest_cache/`, and `.ruff_cache/`.
 - Test fixture apps under `tests/fixtures/` are intentional fixtures; edit them only when the test scenario requires it.
 ## Code Style
@@ -150,7 +150,7 @@ Treat these as generated outputs or persisted state; do not hand-edit them unles
 - Match surrounding style before introducing a new pattern.
 - Do not delete legacy compatibility code unless the task clearly calls for it.
 - If you change persisted state formats, audit both save and load paths, including legacy compatibility files.
-- If you change Mintlify build behavior, review both the builder module and CLI commands that invoke `mintlify`.
+- If you change Fumadocs build behavior, review both the builder module and CLI commands that invoke `next`.
 - If you change user-visible CLI flows, examples, or defaults, update `README.md` in the same task.
 
 ## Verification Expectations

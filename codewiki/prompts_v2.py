@@ -41,28 +41,31 @@ standard Markdown: `[Page Title](/page-slug)`. \
 Every prompt includes a sitemap of all available pages — use it. \
 If a page is listed in "Dependency Links", you MUST link to it at least once where it is \
 first mentioned. Think of each page as part of a wiki, not a standalone document.
-7. **Mintlify UI components**: This documentation site runs on Mintlify. Use its rich \
+7. **Fumadocs UI components**: This documentation site runs on Fumadocs. Use its rich \
 JSX components to make pages beautiful and scannable. Never use `:::type` admonition syntax.
 
 **Callouts** — for tips, warnings, notes, gotchas:
 ```
-<Note>This behaviour changed in v2.</Note>
-<Warning>Running this in production will drop all existing sessions.</Warning>
-<Tip>Use batch processing for large datasets — it's 10x faster.</Tip>
-<Info>This module is auto-generated. Do not edit manually.</Info>
-<Check>All three environment variables must be set before starting.</Check>
+<Callout>This behaviour changed in v2.</Callout>
+<Callout type="warn">Running this in production will drop all existing sessions.</Callout>
+<Callout type="info">Use batch processing for large datasets — it's 10x faster.</Callout>
+<Callout>This module is auto-generated. Do not edit manually.</Callout>
+<Callout>All three environment variables must be set before starting.</Callout>
 ```
 
 **Steps** — for setup guides, workflows, any ordered procedure (use instead of a numbered list):
 ```
 <Steps>
-  <Step title="Install dependencies">
+  <Step>
+    ### Install dependencies
     Run `npm install` from the project root.
   </Step>
-  <Step title="Configure environment">
+  <Step>
+    ### Configure environment
     Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
   </Step>
-  <Step title="Start the server">
+  <Step>
+    ### Start the server
     Run `npm run dev`. The API will be available at `http://localhost:3000`.
   </Step>
 </Steps>
@@ -70,13 +73,13 @@ JSX components to make pages beautiful and scannable. Never use `:::type` admoni
 
 **Tabs** — for showing the same concept in multiple languages or environments:
 ```
-<Tabs>
-  <Tab title="Node.js">
+<Tabs items={['Node.js', 'Python']}>
+  <Tab value="Node.js">
     ```javascript
     const client = new ApiClient({ apiKey: process.env.API_KEY });
     ```
   </Tab>
-  <Tab title="Python">
+  <Tab value="Python">
     ```python
     client = ApiClient(api_key=os.environ["API_KEY"])
     ```
@@ -84,38 +87,35 @@ JSX components to make pages beautiful and scannable. Never use `:::type` admoni
 </Tabs>
 ```
 
-**CardGroup** — for feature overviews, linking to related pages, listing capabilities. \
+**Cards** — for feature overviews, linking to related pages, listing capabilities. \
 Use at the end of overview/architecture pages to create a visual navigation grid:
 ```
-<CardGroup cols={2}>
-  <Card title="Authentication" icon="lock" href="/auth">
+<Cards>
+  <Card title="Authentication" href="/auth">
     JWT-based auth with refresh token rotation.
   </Card>
-  <Card title="Database Layer" icon="database" href="/database">
+  <Card title="Database Layer" href="/database">
     PostgreSQL schema and migration strategy.
   </Card>
-</CardGroup>
+</Cards>
 ```
-Card icons come from the Heroicons set. Good choices: `rocket`, `bolt`, `code`, `lock`, \
-`database`, `server`, `cloud`, `shield`, `chart-bar`, `cog`, `puzzle-piece`, \
-`arrow-path`, `squares-2x2`, `command-line`, `globe-alt`, `bell`, `key`.
 
 **Accordion** — for FAQ sections, detailed option references, or collapsible details:
 ```
-<AccordionGroup>
+<Accordions type="single">
   <Accordion title="Why does the worker restart every 30 seconds?">
     The heartbeat timeout is set in `config/worker.yaml`. Increase `heartbeat_interval`
     to reduce restarts on slow jobs.
   </Accordion>
-</AccordionGroup>
+</Accordions>
 ```
 
 **When to use each**:
 - Use `<Steps>` for ANY setup, installation, or ordered workflow — never a numbered list.
-- Use `<CardGroup>` at the end of overview and architecture pages to link to sub-pages.
+- Use `<Cards>` at the end of overview and architecture pages to link to sub-pages.
 - Use `<Tabs>` when showing the same thing in multiple languages, environments, or configs.
-- Use `<Accordion>` for reference material with many options or a FAQ section.
-- Use callouts (`<Note>`, `<Tip>`, etc.) liberally — they draw the eye to important info.
+- Use `<Accordions>` and `<Accordion>` for reference material with many options or a FAQ section.
+- Use callouts (`<Callout>`, `<Callout type="warn">`, etc.) liberally — they draw the eye to important info.
 """
 
 
@@ -186,10 +186,9 @@ Use a `<Steps>` component (not a numbered list) for the installation and run ste
 Infer from config files. Link to the Setup page from the sitemap if it exists.
 
 ## Explore the Docs
-End the page with a `<CardGroup cols={{2}}>` that links to the most important pages \
-from the sitemap. Each `<Card>` must have a `title`, a relevant Heroicon `icon` \
-(e.g. `"bolt"`, `"database"`, `"lock"`, `"server"`, `"cog"`, `"puzzle-piece"`), \
-an `href` (the `/slug`), and a 1-sentence description.
+End the page with a `<Cards>` block that links to the most important pages \
+from the sitemap. Each `<Card>` must have a `title`, an `href` (the `/slug`), \
+and a 1-sentence description.
 
 Be detailed and specific. Reference actual file paths everywhere. \
 This overview is the entry point — make sure every major feature links to its deep-dive page.
@@ -658,9 +657,9 @@ Reference EVERY file path. Link to related pages throughout. Be deep and specifi
 ENDPOINT_BUCKET_V2 = """\
 Generate **API reference documentation** for a family of related endpoints.
 
-This page covers multiple endpoints in one group. Use Mintlify's API components \
-(`<ParamField>`, `<ResponseField>`, `<RequestExample>`, `<ResponseExample>`) \
-to make it beautiful and scannable. Do NOT use markdown tables for parameters or responses.
+This page covers multiple endpoints in one group. Use markdown tables and fenced \
+code blocks for parameters, request bodies, response fields, and examples. \
+Do NOT use JSX field components.
 
 Page: {title}
 Description: {page_description}
@@ -704,54 +703,35 @@ One sentence on what this endpoint does.
 
 #### Parameters
 
-(Use `<ParamField>` for every parameter. Examples:)
-```
-<ParamField path="id" type="string" required>
-  The resource ID.
-</ParamField>
+Use a markdown table like this (adapt it to the real fields and types):
 
-<ParamField query="status" type="string">
-  Filter by status. One of: `active`, `cancelled`.
-</ParamField>
+| Location | Name | Type | Required | Description |
+|----------|------|------|----------|-------------|
+| path | id | string | yes | Resource ID |
+| query | status | string | no | Filter by status |
+| body | name | string | yes | Resource name |
 
-<ParamField body="name" type="string" required>
-  Name of the resource to create.
-</ParamField>
-```
-
-For nested body objects, wrap children in `<Expandable title="properties">`:
-```
-<ParamField body="address" type="object">
-  <Expandable title="properties">
-    <ParamField body="street" type="string">Street address.</ParamField>
-    <ParamField body="city" type="string">City name.</ParamField>
-  </Expandable>
-</ParamField>
-```
+If the request body is nested, add a short nested bullet list or subsection below the table.
 
 #### Response
 
-Use `<ResponseField>` for every field in the success response:
-```
-<ResponseField name="id" type="string">Unique resource ID.</ResponseField>
-<ResponseField name="status" type="string">
-  Current status: `pending`, `active`, or `cancelled`.
-</ResponseField>
-```
+Use a markdown table for success response fields:
+
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Unique resource ID |
+| status | string | Current status |
 
 Then show a realistic request + response example:
 ```
-<RequestExample>
 ```bash
 curl https://api.example.com/v1/resource/123 \\
   -H "Authorization: Bearer $TOKEN"
 ```
-</RequestExample>
 
-<ResponseExample>
-```json {{ "id": "res_123", "status": "active" }}
+```json
+{{ "id": "res_123", "status": "active" }}
 ```
-</ResponseExample>
 ```
 
 #### Errors
@@ -980,9 +960,10 @@ Reference EVERY file path. Include actual column types and constraints from the 
 ENDPOINT_REF_V2 = """\
 Generate a **single-endpoint API reference page** for one specific API endpoint.
 
-This page will be rendered by Mintlify with the full two-column interactive layout:
-- Left column: description, parameters, response fields
-- Right column: live "Try it" panel + code examples
+Write this as a narrative endpoint reference page that can stand on its own in MDX.
+If the provided sitemap includes a canonical `/api/...` page, treat that interactive \
+OpenAPI page as the primary reference and use this page to explain the handler flow, \
+validation, side effects, and implementation details.
 
 Page: {title}
 Description: {page_description}
@@ -999,23 +980,7 @@ Handler source code and evidence:
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
 
-CRITICAL: Output MUST start with this YAML frontmatter block (fill in real values from source):
-
-```
----
-title: "{title}"
-api: "METHOD /actual/path/here"
-description: "One-sentence description of what this endpoint does."
-authMethod: "bearer"
----
-```
-
-Replace `METHOD` with the real HTTP verb (GET, POST, PUT, DELETE, PATCH).
-Replace `/actual/path/here` with the real path from the source code (e.g. `/api/v1/orders/:id`).
-Set `authMethod` to `"bearer"` if JWT/token auth is required, or omit it if public.
-Do NOT wrap the frontmatter in a code block — it must be literal `---` at the start of the file.
-
-After the frontmatter, write the page body:
+Write the page body directly — do NOT emit YAML frontmatter or interactive API JSX components.
 
 ## Overview
 One paragraph describing what this endpoint does, when to use it, and any important \
@@ -1029,51 +994,33 @@ Reference the exact handler function name and file path (`handlerName()` in `pat
 
 ## Parameters
 
-For path parameters, use `<ParamField path="paramName" type="string" required>`:
-```
-<ParamField path="id" type="string" required>
-  The unique identifier for the resource.
-</ParamField>
-```
+Document parameters with a markdown table:
 
-For query parameters, use `<ParamField query="paramName" type="string">`:
-```
-<ParamField query="page" type="integer" default="1">
-  Page number for pagination. Starts at 1.
-</ParamField>
-```
+| Location | Name | Type | Required | Description |
+|----------|------|------|----------|-------------|
+| path | id | string | yes | Unique resource identifier |
+| query | page | integer | no | Page number |
 
-For request body fields, use `<ParamField body="fieldName" type="type" required>`.
-For nested objects, wrap child fields in `<Expandable title="properties">`.
-Do NOT use markdown tables for parameters — use ONLY `<ParamField>` components.
+If the body schema is nested, add a short subsection for nested properties below the table.
 
 ## Response
 
-For each field in the success response, use `<ResponseField name="field" type="type">`:
-```
-<ResponseField name="id" type="string">
-  Unique identifier of the created resource.
-</ResponseField>
-<ResponseField name="status" type="string">
-  Current status. One of: `pending`, `active`, `cancelled`.
-</ResponseField>
-```
-For nested response objects, wrap child fields in `<Expandable title="properties">`.
-Do NOT use markdown tables for response fields — use ONLY `<ResponseField>` components.
+Document the success response with a markdown table:
 
-After the `<ResponseField>` blocks, include a `<RequestExample>` showing a realistic \
-request + a `<ResponseExample>` showing the actual response shape:
+| Field | Type | Description |
+|-------|------|-------------|
+| id | string | Unique identifier of the created resource |
+| status | string | Current status |
+
+After the response field table, include a realistic request and response example:
 ```
-<RequestExample>
 ```bash
 curl -X POST https://api.example.com/v1/orders \\
   -H "Authorization: Bearer $TOKEN" \\
   -H "Content-Type: application/json" \\
   -d '{{"product_id": "prod_123", "quantity": 2}}'
 ```
-</RequestExample>
 
-<ResponseExample>
 ```json
 {{
   "id": "ord_abc",
@@ -1081,7 +1028,6 @@ curl -X POST https://api.example.com/v1/orders \\
   "total": 2999
 }}
 ```
-</ResponseExample>
 ```
 
 ## Validation
@@ -1093,7 +1039,7 @@ Database writes, cache updates, events, queue jobs, or webhooks triggered by thi
 Reference exact functions and files.
 
 ## Error Responses
-Use a compact `<ResponseField>` for each error status code, or a clean table:
+Use a clean table:
 | Status | Condition |
 |--------|-----------|
 | 400 | ... |
@@ -1104,7 +1050,6 @@ Use a compact `<ResponseField>` for each error status code, or a clean table:
 Link to other endpoint_ref pages for related endpoints (same resource family). \
 Link to the parent endpoint bucket page for the full family overview.
 
-REMEMBER: Start the file with the frontmatter `---` block, NOT with `# {title}`.
 Reference EVERY file path. Use the actual handler function names from the source code.
 """
 

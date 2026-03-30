@@ -4,8 +4,8 @@ Flow:
     1. SCAN  — collect file tree, symbols, endpoints, OpenAPI specs (no LLM)
     2. PLAN  — multi-step bucket planner (3 LLM calls) OR legacy single-call planner
     3. GENERATE — execute plan page-by-page, batched (N LLM calls)
-    4. API REF — generate native Mintlify API pages from OpenAPI spec (one page per endpoint)
-    5. BUILD — write mint.json from AI's nav plan
+    4. API REF — stage OpenAPI assets for generated Fumadocs API reference pages
+    5. BUILD — write the generated Fumadocs site scaffold + page tree
 
 The manifest tracks: source_file → content_hash → [page_slugs]
 So `codewiki update` can diff changed files → find affected pages → regenerate only those.
@@ -66,6 +66,100 @@ RATE_LIMIT_BACKOFF = 3.0
 MAX_RETRIES = 5
 
 
+def _page_is_overview(page: Any) -> bool:
+    """Check whether a planned page is the landing page."""
+    hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
+    return hints.get("is_introduction_page") or getattr(page, "page_type", None) == "overview"
+
+
+def _page_uses_openapi_route(page: Any, has_openapi: bool) -> bool:
+    """Check whether a page should resolve to /api/<slug>."""
+    if not has_openapi:
+        return False
+    hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
+    return hints.get("is_endpoint_ref") or getattr(page, "page_type", None) == "endpoint_ref"
+
+
+def _page_url(page: Any, has_openapi: bool) -> str:
+    """Resolve the public URL for a generated page."""
+    if _page_is_overview(page):
+        return "/"
+    if _page_uses_openapi_route(page, has_openapi):
+        return f"/api/{page.slug}"
+    return f"/{page.slug}"
+
+
+def _endpoint_ref_slug(method: str, path: str) -> str:
+    """Build the canonical endpoint_ref slug used by the planner."""
+    import re
+
+    path_slug = re.sub(r"[/:{}]+", "-", path).strip("-").lower()
+    return f"{method.lower()}-{path_slug}"
+
+
+def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None) -> bool:
+    """Stage the first detected OpenAPI spec for the generated Fumadocs app."""
+    site_openapi_dir = repo_root / "site" / "openapi"
+    site_openapi_dir.mkdir(parents=True, exist_ok=True)
+
+    for existing in site_openapi_dir.iterdir():
+        if existing.is_file():
+            existing.unlink()
+
+    detected_paths = openapi_paths
+    if detected_paths is None:
+        detected_paths = [str(path.relative_to(repo_root)) for path in find_openapi_specs(repo_root)]
+
+    for spec_rel_path in detected_paths:
+        spec_src = repo_root / spec_rel_path
+        if not spec_src.exists():
+            continue
+
+        spec_name = Path(spec_rel_path).name
+        staged_spec = site_openapi_dir / spec_name
+        shutil.copy2(spec_src, staged_spec)
+
+        spec = parse_openapi_spec(spec_src)
+        if not spec:
+            console.print(
+                f"[yellow]⚠[/yellow] Could not parse {spec_name} — skipping API pages"
+            )
+            return False
+
+        endpoints = extract_endpoints_from_spec(spec)
+        manifest: list[dict[str, str]] = []
+        for ep in endpoints:
+            if ep.get("deprecated"):
+                continue
+
+            method = ep["method"].upper()
+            path = ep["path"]
+            summary = ep.get("summary") or f"{method} {path}"
+            manifest.append(
+                {
+                    "slug": _endpoint_ref_slug(method, path),
+                    "title": summary,
+                    "method": method,
+                    "path": path,
+                }
+            )
+
+        if manifest:
+            (site_openapi_dir / "manifest.json").write_text(
+                json.dumps(manifest, indent=2) + "\n",
+                encoding="utf-8",
+            )
+            console.print(
+                f"[green]✓[/green] Staged {len(manifest)} Fumadocs OpenAPI pages"
+            )
+            return True
+
+        console.print(f"[yellow]⚠[/yellow] No endpoints found in {spec_name}")
+        return False
+
+    return False
+
+
 class PipelineV2:
     def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
         self.repo_root = repo_root
@@ -121,6 +215,7 @@ class PipelineV2:
         stats["status"] = generation_summary.status
 
         # ── Phase 4: API Playground ────────────────────────────────────
+        openapi_ready = False
         if scan.has_openapi:
             console.print(
                 Panel(
@@ -128,8 +223,8 @@ class PipelineV2:
                     border_style="blue",
                 )
             )
-            self._setup_playground(scan)
-            stats["playground"] = 1
+            openapi_ready = self._setup_playground(scan)
+            stats["playground"] = 1 if openapi_ready else 0
         else:
             console.print(
                 Panel(
@@ -143,7 +238,7 @@ class PipelineV2:
         console.print(
             Panel("[bold]Phase 5/5: Building site[/bold]", border_style="blue")
         )
-        self._build_site(plan, scan)
+        self._build_site(plan, has_openapi=openapi_ready)
         stats["site"] = 1
 
         # ── Persist state ──────────────────────────────────────────────
@@ -249,13 +344,7 @@ class PipelineV2:
                     doc_content = self._generate_single_page(page, scan, plan)
 
                     # Sub-step 2: write to disk
-                    # Overview page → introduction.mdx (Mintlify landing page)
-                    # Check is_introduction_page hint via adapter, fall back to page_type
-                    _is_intro = (
-                        hasattr(page, "_b")
-                        and (page._b.generation_hints or {}).get("is_introduction_page")
-                    ) or page.page_type == "overview"
-                    filename = "introduction.mdx" if _is_intro else f"{page.slug}.mdx"
+                    filename = "index.mdx" if _page_is_overview(page) else f"{page.slug}.mdx"
                     doc_path = self.output_dir / filename
                     doc_path.parent.mkdir(parents=True, exist_ok=True)
                     doc_path.write_text(doc_content, encoding="utf-8")
@@ -545,9 +634,7 @@ class PipelineV2:
         for section, pages in by_section.items():
             lines.append(f"**{section}**")
             for page in pages:
-                page_path = (
-                    "/introduction" if page.page_type == "overview" else f"/{page.slug}"
-                )
+                page_path = _page_url(page, has_openapi=self._scan_has_openapi(plan))
                 key_files = ", ".join(f"`{f}`" for f in page.source_files[:4])
                 if len(page.source_files) > 4:
                     key_files += f" +{len(page.source_files) - 4} more"
@@ -619,11 +706,37 @@ class PipelineV2:
         lines = [
             "**Dependency Links** (pages this module's files import from — you MUST link to these):"
         ]
+        has_openapi = self._scan_has_openapi(plan)
         for p in related.values():
-            page_path = "/introduction" if p.page_type == "overview" else f"/{p.slug}"
+            page_path = _page_url(p, has_openapi=has_openapi)
             lines.append(f"- [{p.title}]({page_path}) — {p.description}")
 
         return "\n".join(lines)
+
+    def _scan_has_openapi(self, plan: DocPlan | None = None) -> bool:
+        """Check whether the current repo has an OpenAPI spec available."""
+        return any(
+            (self.repo_root / path).exists()
+            for path in (
+                "openapi.json",
+                "openapi.yaml",
+                "openapi.yml",
+                "swagger.json",
+                "swagger.yaml",
+                "swagger.yml",
+                "docs/openapi.json",
+                "docs/openapi.yaml",
+                "docs/openapi.yml",
+                "docs/swagger.json",
+                "docs/swagger.yaml",
+                "docs/swagger.yml",
+                "api/openapi.json",
+                "api/openapi.yaml",
+                "api/openapi.yml",
+                "spec/openapi.json",
+                "spec/openapi.yaml",
+            )
+        )
 
     def _normalize_import_statement(self, stmt: str, lang: str) -> list[str]:
         """Extract raw module path(s) from a full import statement string.
@@ -1082,92 +1195,22 @@ class PipelineV2:
     # Phase 4: API Playground
     # ──────────────────────────────────────────────────────────────────────
 
-    def _setup_playground(self, scan: RepoScan) -> None:
-        """Generate native Mintlify API reference pages from the OpenAPI spec.
-
-        For each endpoint in the spec we generate a minimal MDX file:
-            ---
-            title: "Get Order"
-            openapi: "GET /api/v1/orders/{id}"
-            ---
-        Mintlify detects the `openapi:` frontmatter and renders the full
-        two-column interactive page (parameters + response on the left,
-        live "Try it" panel on the right) automatically — no Swagger UI needed.
-        """
-        for spec_rel_path in scan.openapi_paths:
-            spec_src = self.repo_root / spec_rel_path
-            spec_name = Path(spec_rel_path).name
-
-            # Copy spec to repo root so mint.json can reference it
-            spec_root_dest = self.repo_root / spec_name
-            if spec_src != spec_root_dest:
-                shutil.copy2(spec_src, spec_root_dest)
-
-            spec = parse_openapi_spec(spec_src)
-            if not spec:
-                console.print(
-                    f"[yellow]⚠[/yellow] Could not parse {spec_name} — skipping API pages"
-                )
-                break
-
-            endpoints = extract_endpoints_from_spec(spec)
-            api_dir = self.output_dir / "api"
-            api_dir.mkdir(parents=True, exist_ok=True)
-
-            generated = 0
-            for ep in endpoints:
-                if ep.get("deprecated"):
-                    continue
-
-                method = ep["method"]
-                path = ep["path"]
-                summary = ep.get("summary") or f"{method} {path}"
-                operation_id = ep.get("operation_id", "")
-
-                # Derive a clean slug from operationId or method+path
-                if operation_id:
-                    slug = operation_id.lower().replace("_", "-")
-                else:
-                    clean_path = (
-                        path.strip("/")
-                        .replace("/", "-")
-                        .replace("{", "")
-                        .replace("}", "")
-                    )
-                    slug = f"{method.lower()}-{clean_path}"
-                # Trim very long slugs
-                if len(slug) > 60:
-                    slug = slug[:60].rstrip("-")
-
-                mdx_content = f"""\
----
-title: "{summary}"
-openapi: "{method} {path}"
----
-"""
-                (api_dir / f"{slug}.mdx").write_text(mdx_content, encoding="utf-8")
-                generated += 1
-
-            if generated:
-                console.print(
-                    f"[green]✓[/green] Generated {generated} native Mintlify API reference pages"
-                )
-            else:
-                console.print(f"[yellow]⚠[/yellow] No endpoints found in {spec_name}")
-            break  # Use first spec found
+    def _setup_playground(self, scan: RepoScan) -> bool:
+        """Stage OpenAPI assets for the generated Fumadocs API reference route."""
+        return stage_openapi_assets(self.repo_root, scan.openapi_paths)
 
     # ──────────────────────────────────────────────────────────────────────
     # Phase 5: Build site
     # ──────────────────────────────────────────────────────────────────────
 
-    def _build_site(self, plan: DocPlan, scan: RepoScan) -> None:
-        """Build Mintlify config from the AI's nav plan."""
-        from .site.mintlify_builder_v2 import build_mintlify_from_plan
+    def _build_site(self, plan: DocPlan, has_openapi: bool) -> None:
+        """Build the generated Fumadocs site from the AI's nav plan."""
+        from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
 
-        build_mintlify_from_plan(
-            self.repo_root, self.output_dir, self.cfg, plan, scan.has_openapi
+        build_fumadocs_from_plan(
+            self.repo_root, self.output_dir, self.cfg, plan, has_openapi
         )
-        console.print("[green]✓[/green] Mintlify config built")
+        console.print("[green]✓[/green] Fumadocs site built")
 
     # ──────────────────────────────────────────────────────────────────────
     # Persistence helpers

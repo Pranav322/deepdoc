@@ -608,7 +608,9 @@ class SmartUpdater:
             return []
 
         known_integrations = {
-            b.title.lower() for b in plan.buckets if b.bucket_type == "integration"
+            b.title.lower()
+            for b in plan.buckets
+            if (b.generation_hints or {}).get("include_integration_detail")
         }
 
         # Lightweight static scan — HTTP client patterns + SDK imports

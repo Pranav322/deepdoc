@@ -1,165 +1,159 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
-this is stale either update or dont read it 
+Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 
 ## Scope
-- Applies to the repository root: `/Users/apple/tss/codegen/codewiki`.
-- No preexisting root `AGENTS.md` was present when this file was created.
+- Applies to the repository root only.
+- This file replaces the earlier stale root `AGENTS.md`.
 - No Cursor rules were found in `.cursor/rules/` or `.cursorrules`.
 - No Copilot rules were found in `.github/copilot-instructions.md`.
-- Treat this file as the main repo-specific instruction source for agents.
+- Treat this file as the primary repo-specific instruction source for agents.
 
 ## Repo Snapshot
-- Project type: Python package plus CLI.
-- Package name: `codewiki`.
-- Python requirement: `>=3.10`.
+- Python package with a Click CLI and pytest suite.
+- Package name: `codewiki`; Python requirement: `>=3.10`.
 - Packaging backend: setuptools via `pyproject.toml`.
-- Console script: `codewiki = codewiki.cli:main`.
-- Primary implementation path: bucket-based v2 pipeline.
-- Legacy v1 modules still exist for compatibility and fallback behavior.
+- Console entrypoint: `codewiki = codewiki.cli:main`.
+- Main implementation path: the v2 bucket-based planner/generator pipeline.
+- Legacy v1 modules still exist; preserve compatibility unless cleanup is the explicit task.
+- Site generation now targets Mintlify, not the older Docusaurus builder.
 
 ## Important Paths
-- `pyproject.toml` - package metadata and entrypoint.
-- `README.md` - user-facing command docs and workflow notes.
+- `pyproject.toml` - package metadata and pytest discovery config.
+- `README.md` - user-facing CLI docs and workflow notes.
 - `codewiki/cli.py` - Click commands and top-level UX.
-- `codewiki/config.py` - default config and YAML load/save.
-- `codewiki/pipeline_v2.py` - main v2 orchestration.
-- `codewiki/planner_v2.py` - repo scan and bucket planning.
-- `codewiki/generator_v2.py` - evidence assembly and page generation.
-- `codewiki/persistence_v2.py` - `.codewiki/` state handling.
-- `codewiki/updater_v2.py` - incremental refresh behavior.
-- `codewiki/parser/` - registry plus language-specific parsers.
-- `codewiki/llm/client.py` - LiteLLM wrapper.
-- `codewiki/site/docusaurus_builder_v2.py` - Docusaurus config, sidebar, and theme asset generation.
+- `codewiki/config.py` - default config and YAML load/save helpers.
+- `codewiki/pipeline_v2.py` - main scan/plan/generate/build orchestration.
+- `codewiki/planner_v2.py` - repo scan and bucket planning logic.
+- `codewiki/generator_v2.py` - page generation and manifest updates.
+- `codewiki/persistence_v2.py` - `.codewiki/` state persistence.
+- `codewiki/parser/` - parser registry and language-specific parsers.
+- `codewiki/site/mintlify_builder_v2.py` - Mintlify config/assets generation.
+- `tests/` - pytest suite, fixtures, and regression coverage.
 
-## Install And Verify Commands
+## Install And Build Commands
 ```bash
+python -m pip install --upgrade pip
 python -m pip install -e .
-python -m pip install click litellm gitpython rich pyyaml jinja2
-python -m pip install -e . --no-deps
-codewiki --version
-codewiki --help
-python -m codewiki.cli --help
-```
-
-## Build, Generate, And Runtime Commands
-```bash
+python -m pip install -e . pytest
 python -m pip install build
 python -m build
+codewiki --help
+python -m codewiki --help
+python -m codewiki.cli --help
+```
+If tree-sitter builds are slow locally, the README-supported fallback is:
+```bash
+python -m pip install click litellm gitpython rich pyyaml jinja2
+python -m pip install -e . --no-deps
+python -m pip install pytest
+```
+Useful runtime commands once the package is installed:
+```bash
 codewiki init
 codewiki generate
-codewiki generate --force
-codewiki generate --clean --yes
 codewiki update
-codewiki update --replan
-codewiki update --since HEAD~3
-codewiki status
-codewiki config show
-codewiki config set llm.model gpt-4o
 codewiki serve --port 3000
-codewiki deploy
+npx mintlify build
 ```
 
-## Lint, Format, Type-Check, And Test Status
-- No repo-configured lint, format, or type-check tool was found; there is no config for `ruff`, `black`, `isort`, `flake8`, `mypy`, `pyright`, `tox`, or `nox`.
-- No checked-in automated test suite was found; there is no `tests/` directory and no `pytest` or `unittest` config.
-- There is no current repo-native single-test command.
-- Do not invent a repo-standard lint or test command unless the user asks you to add one.
+`python -m build` is the packaging build. `npx mintlify build` only makes sense after docs/site files exist. Avoid `codewiki deploy` unless deployment is explicitly requested.
 
-## Smallest Useful Verification Commands
+## Lint, Type-Check, And Test Commands
+- There is no repo-configured formatter, linter, or type checker in `pyproject.toml`.
+- There is no checked-in config for `ruff`, `black`, `isort`, `flake8`, `mypy`, `pyright`, `tox`, or `nox`.
+- Do not invent a new lint/type-check command unless the user asks for that tooling.
+- The practical verification stack here is `compileall`, CLI/import smoke checks, and pytest.
+
+Useful commands:
 ```bash
 python -m compileall codewiki
-python -m codewiki.cli --help
-python -c "import codewiki; print(codewiki.__version__)"
+python -m pytest
+python -m pytest tests/test_state.py
+python -m pytest tests/test_state.py::test_save_and_load_sync_state_roundtrip -q
+python -m pytest -k baseline -q
 ```
-
-If you add a pytest suite as part of a task, the normal single-test form should be:
-
+Single-test guidance:
+- File: `python -m pytest tests/test_state.py`
+- Test node: `python -m pytest tests/test_state.py::test_name -q`
+- Keyword filter: `python -m pytest -k "search_term" -q`
+CI currently runs:
 ```bash
-python -m pytest tests/test_file.py::test_name -q
+python -m pip install -e . pytest
+python -m compileall codewiki
+python -m pytest
 ```
-
-That command shape is conventional, but pytest is not currently preconfigured by this repo.
 
 ## Architecture Priorities
-- Prefer the v2 bucket-based flow for new work.
-- Treat v1 modules as legacy compatibility paths unless the task explicitly targets legacy behavior.
-- If you touch behavior shared by both paths, preserve compatibility rather than deleting the older path casually.
-- Follow the existing versioned naming convention: `_v2.py` modules and `V2` classes where appropriate.
-- Parser architecture is layered: registry -> language parser -> `ParsedFile` / `Symbol` -> endpoint detection.
-- Keep endpoint detection separate from syntax parsing.
-- If you change CLI behavior, update `README.md` so command docs stay aligned.
+- Prefer the v2 flow in `codewiki/pipeline_v2.py`, `codewiki/planner_v2.py`, and related `_v2` modules.
+- Treat `planner.py` and other v1-era modules as compatibility paths, not the default extension point.
+- Keep bucket terminology consistent: `system`, `feature`, `endpoint`, `endpoint_ref`, `integration`, `database`.
+- Keep parser responsibilities layered: registry -> language parser -> parsed symbols/imports -> endpoint detection.
+- Preserve incremental-update and persisted-state behavior when changing planning or generation logic.
+- If you change CLI behavior or documented commands, update `README.md` to match.
 
 ## Generated And Derived Files
-Treat these as outputs or persisted state; do not hand-edit them unless the task is explicitly about generated artifacts or state format changes.
-- `.codewiki/`, `.codewiki/plan.json`, `.codewiki/scan_cache.json`, `.codewiki/ledger.json`, `.codewiki/file_map.json`
-- `.codewiki_plan.json`, `.codewiki_file_map.json`, `.codewiki_manifest.json`
-- `docs/`, `docusaurus.config.js`, `sidebars.js`, `package.json`, `node_modules/`, `build/`, `.docusaurus/`, `site/`, `codewiki.egg-info/`, `__pycache__/`
-Do not treat `codewiki/planner.py.bak` as an authoritative source file.
-
+Treat these as generated outputs or persisted state; do not hand-edit them unless the task is specifically about their format or generation logic.
+- `.codewiki/` contents, sync state, and legacy compatibility outputs like `.codewiki_plan.json` and `.codewiki_file_map.json`.
+- Generated docs/site artifacts such as `docs/`, `mint.json`, `logo/`, `favicon.svg`, and `site/`.
+- Build/cache directories such as `build/`, `dist/`, `codewiki.egg-info/`, `__pycache__/`, `.pytest_cache/`, and `.ruff_cache/`.
+- Test fixture apps under `tests/fixtures/` are intentional fixtures; edit them only when the test scenario requires it.
 ## Code Style
 ### Imports And Module Layout
-- Start modules with a concise module docstring.
-- Use `from __future__ import annotations` at the top of normal Python modules.
+- Start Python modules with a short module docstring.
+- Use `from __future__ import annotations` in normal package modules; this is the dominant pattern.
 - Group imports as standard library, third-party, then local package imports.
-- Use direct relative imports inside the package, matching existing files.
+- Use relative imports inside the package when matching surrounding code.
 
-### Formatting And Comments
+### Formatting And Structure
 - Follow existing PEP 8-ish formatting with 4-space indentation.
-- Keep lines readable; the repo is not formatter-enforced.
-- Large orchestration files often use divider comments; keep them when they improve navigation.
-- Prefer small, descriptive helpers over large inline blocks when extending complex modules.
+- Match surrounding style; there is no enforced formatter.
+- Preserve useful divider comments in large orchestration modules.
 - Keep comments sparse and practical.
 
 ### Types And Data Modeling
 - Add type hints to new public functions, methods, and constructors.
-- Prefer modern built-in generics like `dict[str, Any]`, `list[str]`, and `set[str]`.
-- Prefer `Path | None` and similar union syntax over `Optional[...]` unless matching nearby code.
-- Use `Literal[...]` for small closed sets of string values when it helps clarity.
-- Use `Any` at integration boundaries when exact typing would add noise.
-- Use dataclasses for structured domain records, matching `DocBucket`, `DocPlan`, `RepoScan`, `ParsedFile`, and `Symbol`.
+- Prefer built-in generics like `dict[str, Any]` and `list[str]`.
+- Prefer `Path | None` style unions over `Optional[...]` unless nearby code uses the older form.
+- Use `Literal[...]` for narrow string domains when it clarifies behavior.
+- Use dataclasses for structured records, matching models like `DocBucket`, `DocPlan`, `RepoScan`, `ParsedFile`, and `Symbol`.
+- Use `Any` at integration boundaries where exact typing would add noise.
 
-### Naming
-- Modules and functions: `snake_case`.
+### Naming Conventions
+- Functions, variables, and modules: `snake_case`.
 - Classes and dataclasses: `PascalCase`.
 - Constants: `UPPER_CASE`.
-- Click commands should stay short and CLI-friendly.
-- Keep bucket terminology consistent: `system`, `feature`, `endpoint`, `endpoint_ref`, `integration`, `database`.
+- Follow the repository's versioned naming convention for major flows: `_v2.py` modules and `V2` class names.
 
-## Error Handling And IO
-- CLI-facing failures should usually raise `click.ClickException` or print a clear Rich message and exit.
-- Library code usually degrades gracefully instead of crashing the whole pipeline.
-- Preserve parser fallback behavior when tree-sitter is unavailable or parsing fails.
-- Broad exception handling is already used at repo boundaries; if you catch broadly, return a safe fallback or re-raise with context.
-- Prefer `pathlib.Path` for new code.
-- Prefer `Path.read_text()` and `Path.write_text()` with `encoding="utf-8"`.
-- When reading arbitrary repo files, use `errors="replace"` where the surrounding code does.
+### Error Handling And UX
+- CLI-facing failures should usually raise `click.ClickException` or present a clear Rich message.
+- Use Rich for user-facing output; the common pattern is a module-level `console = Console()`.
+- Broad `except Exception` blocks already exist around parsing, git, and persistence boundaries; if you catch broadly, return a safe fallback or re-raise with context.
+- Avoid introducing the standard `logging` module for one-off CLI status output unless making a broader logging change.
+
+### Paths, Files, And Persistence
+- Prefer `pathlib.Path` for new file-system code.
+- Use `Path.read_text()` and `Path.write_text()` with `encoding="utf-8"`.
+- When reading arbitrary repo files, prefer `errors="replace"` because the codebase already does this in scan/generation paths.
 - Create parent directories with `mkdir(parents=True, exist_ok=True)`.
-- Persist repo-relative paths as strings in saved plan or ledger data.
+- Persist repo-relative paths as strings in saved manifests, plans, ledgers, and related state.
 
-## Output And UX
-- Use Rich for user-facing CLI output.
-- Reuse a module-level `console = Console()` pattern when adding CLI or pipeline output.
-- Prefer `Panel`, `Table`, and `Progress` for major workflow stages, matching the existing CLI.
-- Avoid introducing the standard `logging` module for one-off status output unless you are making a broader logging change.
-
-## Parser And Scan Guidance
-- New language support should register through `codewiki/parser/registry.py`.
-- Return `ParsedFile` objects with `symbols`, `imports`, and `raw_content` populated as consistently as practical.
-- Keep endpoint detection separate from AST/syntax parsing logic.
-- Preserve regex fallback behavior if tree-sitter-based parsing is unavailable.
-- Be careful with performance in repo scans; current code scans whole repos and uses character budgets during generation.
+## Testing Conventions
+- The suite uses pytest and is discovered from `tests/` via `pyproject.toml`.
+- Test modules and functions follow the configured `test_*.py` and `test_*` naming.
+- Shared fixtures live in `tests/conftest.py`.
+- Existing tests prefer real temporary git repositories when diff semantics matter.
+- Mock LLM boundaries rather than deeply mocking every internal helper around planning or generation.
 
 ## Editing Guidance For Agents
 - Prefer minimal, targeted edits.
 - Match surrounding style before introducing a new pattern.
-- Do not add a new toolchain just because it is common elsewhere.
-- Do not delete legacy code paths unless the task explicitly calls for cleanup.
-- If you change persistence formats in `.codewiki/`, audit both save and load paths, including legacy compatibility files.
-- If you modify docs-generation behavior, also check whether `README.md` examples or command descriptions need updates.
+- Do not delete legacy compatibility code unless the task clearly calls for it.
+- If you change persisted state formats, audit both save and load paths, including legacy compatibility files.
+- If you change Mintlify build behavior, review both the builder module and CLI commands that invoke `mintlify`.
+- If you change user-visible CLI flows, examples, or defaults, update `README.md` in the same task.
 
 ## Verification Expectations
-- Because there is no enforced lint/test stack, do at least one narrow verification step for non-trivial Python changes.
-- Prefer the smallest check that matches the edited area.
-- Good defaults are `python -m compileall codewiki`, `python -m codewiki.cli --help`, and a targeted import smoke test.
+- For non-trivial Python changes, run at least one narrow verification step.
+- Prefer the smallest command that exercises the edited area: `python -m compileall codewiki`, `python -m codewiki.cli --help`, `python -c "import codewiki; print(codewiki.__version__)"`, or a targeted `python -m pytest ...` invocation.
+- If you could not run verification, say so explicitly and provide the exact command to run next.

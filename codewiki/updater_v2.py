@@ -19,7 +19,8 @@ from rich.panel import Panel
 from .llm import LLMClient
 from .manifest import Manifest, file_hash
 from .parser import parse_file, supported_extensions
-from .planner import DocPage, DocPlan, RepoScan, scan_repo
+from ._legacy_types import DocPage, DocPlan, RepoScan
+from .planner_v2 import scan_repo
 from .prompts_v2 import SYSTEM_V2, UPDATE_PAGE_V2
 from .persistence_v2 import (
     load_plan, load_file_map, load_generation_ledger,
@@ -249,7 +250,6 @@ class UpdaterV2:
         """
         from .planner_v2 import DocPlan as BucketDocPlan
         from .generator_v2 import BucketGenerationEngine
-        from .planner_v2 import scan_repo as bucket_scan_repo
 
         # Step 1: Determine stale buckets via ledger + current file hashes
         stale_slugs = set(find_stale_buckets(plan, self.repo_root, output_dir=self.output_dir))
@@ -277,7 +277,7 @@ class UpdaterV2:
 
         # Step 2: Re-scan (lightweight — no LLM)
         console.print("\n[dim]Re-scanning repo...[/dim]")
-        scan = bucket_scan_repo(self.repo_root, self.cfg)
+        scan = scan_repo(self.repo_root, self.cfg)
 
         # Step 3: Build a mini-plan containing only stale buckets
         # (generator uses full plan for sitemap/cross-refs, but only generates stale ones)

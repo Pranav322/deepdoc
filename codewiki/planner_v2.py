@@ -23,7 +23,7 @@ import fnmatch
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
@@ -48,16 +48,11 @@ console = Console()
 # Data structures
 # ─────────────────────────────────────────────────────────────────────────────
 
-BucketType = Literal[
-    "system", "feature", "endpoint", "endpoint_ref", "integration", "database"
-]
-
-
 @dataclass
 class DocBucket:
     """A single documentation bucket — the core planning unit in v2."""
 
-    bucket_type: BucketType
+    bucket_type: str  # free-form label — LLM decides (e.g. "architecture", "feature", "cli-commands", "etl-stage")
     title: str
     slug: str
     section: str  # nav section: "Architecture", "Features", etc.
@@ -73,6 +68,7 @@ class DocBucket:
     required_sections: list[str] = field(default_factory=list)
     required_diagrams: list[str] = field(default_factory=list)
     coverage_targets: list[str] = field(default_factory=list)  # what must be covered
+    generation_hints: dict[str, Any] = field(default_factory=dict)  # metadata flags for generator
     priority: int = 0
 
 
@@ -111,7 +107,7 @@ class _BucketAsPage:
 
     @property
     def page_type(self):
-        return self._b.bucket_type
+        return self._b.generation_hints.get("prompt_style", self._b.bucket_type)
 
     @property
     def description(self):
@@ -593,26 +589,37 @@ PROPOSE_SYSTEM = """\
 You are a senior documentation architect. Given a classified repository, propose \
 documentation buckets. Respond with valid JSON only — no markdown, no explanation.
 
-Bucket types:
-- system: architecture, setup, testing, deployment/ops, auth/middleware, \
-  observability, shared cross-cutting concerns
-- database: dedicated database/schema documentation — ER diagrams, table definitions, \
-  relationships, migrations. Use this when models/ORM are detected.
-- feature: business workflows (checkout, cancel/refund, order status, etc.)
-- endpoint: endpoint FAMILY documentation (all /orders/* endpoints grouped together)
-- integration: external systems (payment providers, warehouses, delivery partners, etc.)
+bucket_type is a FREE-FORM label — you decide what categories fit this specific repo. \
+Common examples: "architecture", "setup", "feature", "endpoint-family", "integration", \
+"database", "deployment", "testing", "cli-commands", "sdk-module", "plugin", \
+"pipeline-stage", "package", "middleware", "auth", "config" — but invent your own \
+if the repo needs something different.
+
+Each bucket MUST also include a "generation_hints" object with these boolean flags \
+(set true only when applicable):
+- include_endpoint_detail: this bucket documents API endpoints (assemble endpoint listing)
+- is_endpoint_ref: this is a single-endpoint reference page (Mintlify API interactive layout)
+- is_endpoint_family: this groups related endpoints (e.g. all /orders/* routes)
+- include_openapi: inject OpenAPI spec context when generating
+- include_database_context: inject DB schema, ER diagrams, model definitions
+- include_integration_detail: full external-system integration context
+- is_introduction_page: this is the landing/overview page (becomes introduction.mdx)
+- prompt_style: selects writing-guidance template — one of "system", "feature", \
+  "endpoint", "endpoint_ref", "integration", "database", or "general"
+- icon: Heroicon name for nav (e.g. "server", "bolt", "globe-alt", "database", \
+  "puzzle-piece", "book-open", "command-line", "cube", "cog")
 
 Rules:
 - BE COMPREHENSIVE: create as many buckets as the codebase warrants. Every important \
   area deserves its own bucket. Do NOT artificially compress or merge areas.
-- A feature bucket groups files by BUSINESS WORKFLOW, not by file path.
-- An endpoint bucket covers an endpoint FAMILY (all /orders/* endpoints, not one per route).
-- A system bucket covers cross-cutting concerns that span many features.
-- A database bucket covers the data model, schema, ER diagrams, and migrations.
-- An integration bucket covers a third-party system that appears in multiple files/flows.
+- Group by BUSINESS WORKFLOW or LOGICAL CONCERN, not by file path.
+- Endpoint family buckets cover a resource family (all /orders/* endpoints, not one per route).
 - If an integration is trivial (used in one place, no setup complexity), embed it in the \
-  relevant feature bucket instead of creating a standalone integration bucket.
-- Every bucket MUST have required_sections and required_diagrams.
+  relevant bucket instead of creating a standalone one.
+- Every bucket MUST have required_sections and required_diagrams that make sense for \
+  its specific content — do NOT use generic sections for everything.
+- The nav_structure section names should fit this repo — do NOT force standard names \
+  like "Features" or "API Reference" if they don't fit. Use whatever makes sense.
 """
 
 PROPOSE_PROMPT = """\
@@ -638,24 +645,24 @@ Based on this repository classification, propose documentation buckets.
 
 ## Constraints
 {max_pages_instruction}
-- Must include at minimum: 1 system bucket for architecture/overview, 1 system bucket \
-  for setup (if setup artifacts exist)
-- If database models are detected, include a dedicated system bucket (or bucket_type "database") \
-  for "Database & Schema" with required_sections including "er_diagram", "table_definitions", \
-  "relationships", "migrations", and required_diagrams including "er_diagram"
-- Feature buckets should represent business workflows, NOT file directories
-- Endpoint buckets should group by resource family, NOT one-per-route
+- Must include at minimum: 1 bucket for architecture/overview (set is_introduction_page: true)
+- If setup artifacts exist, include a setup/getting-started bucket
+- If database models are detected, include a database bucket with is_introduction_page: false, \
+  include_database_context: true, prompt_style: "database", and required_sections including \
+  "er_diagram", "table_definitions", "relationships", "migrations"
+- Group by business workflow or logical concern, NOT file directories
+- Endpoint family buckets should group by resource family, NOT one-per-route
 - Create as many buckets as needed for thorough coverage — prefer depth and completeness \
   over brevity. Every important area should have its own bucket.
 - Individual per-endpoint reference pages will be created in a follow-up step — do NOT \
-  create endpoint_ref buckets here. Focus on system, feature, endpoint (family), \
-  integration, and database buckets only.
+  create single-endpoint reference buckets here.
+- Choose nav_structure section names that fit THIS repo. Do not force generic names.
 
 Return JSON:
 {{
   "buckets": [
     {{
-      "bucket_type": "system|feature|endpoint|integration|database",
+      "bucket_type": "your-chosen-category-label",
       "title": "Page Title",
       "slug": "page-slug",
       "section": "Nav Section Name",
@@ -666,20 +673,33 @@ Return JSON:
       "depends_on": ["other-bucket-slug"],
       "required_sections": ["overview", "main_workflows", "state_transitions", ...],
       "required_diagrams": ["architecture_flow", "sequence_diagram", "er_diagram", ...],
-      "coverage_targets": ["OrderController checkout flow", "Juspay payment auth", ...]
+      "coverage_targets": ["OrderController checkout flow", "Juspay payment auth", ...],
+      "generation_hints": {{
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "system|feature|endpoint|endpoint_ref|integration|database|general",
+        "icon": "heroicon-name"
+      }}
     }}
   ],
   "nav_structure": {{
-    "Overview": ["architecture"],
-    "Getting Started": ["setup"],
-    "Database": ["database-schema"],
-    "Features": ["orders-checkout", "orders-management"],
-    "API Reference": ["orders-api"],
-    "API Endpoints": ["get-orders", "post-orders", "get-orders-id", "post-payments-initiate"],
-    "Integrations": ["juspay-integration", "vinculum-integration"],
-    "Operations": ["deployment", "testing"]
+    "Section Name": ["slug-1", "slug-2"],
+    "Another Section": ["slug-3"]
   }}
 }}
+
+Examples of good nav structures for different repo types:
+- API service: "Overview" > "Getting Started" > "Core Features" > "API Families" > "Integrations" > "Operations"
+- CLI tool: "Overview" > "Installation" > "Commands" > "Configuration" > "Plugins"
+- Library/SDK: "Overview" > "Getting Started" > "Core API" > "Modules" > "Advanced"
+- Data pipeline: "Overview" > "Architecture" > "Pipeline Stages" > "Data Models" > "Monitoring"
+
+Choose what fits THIS repo — these are just examples.
 """
 
 
@@ -698,9 +718,10 @@ Rules:
   Giant-file decomposition happens later in the pipeline.
 - artifact_refs: config/env/deploy/test files relevant to this bucket.
 - owned_symbols: specific classes/functions from shared files (for focused docs).
-- For endpoint_ref buckets (individual endpoint pages), assign the handler file and \
+- For buckets with is_endpoint_ref hint, assign the handler file and \
   the specific handler function as owned_symbols.
-- For database buckets, assign model definition files, migration files, and schema files.
+- For buckets with include_database_context hint, assign model definition files, \
+  migration files, and schema files.
 """
 
 ASSIGN_PROMPT = """\
@@ -1030,7 +1051,7 @@ def _merge_plan(
         assign = assigned_by_slug.get(slug, {})
 
         bucket = DocBucket(
-            bucket_type=prop.get("bucket_type", "feature"),
+            bucket_type=prop.get("bucket_type", "general"),
             title=prop.get("title", slug),
             slug=slug,
             section=prop.get("section", ""),
@@ -1041,10 +1062,11 @@ def _merge_plan(
             artifact_refs=assign.get("artifact_refs", []),
             required_sections=prop.get(
                 "required_sections",
-                _default_sections(prop.get("bucket_type", "feature")),
+                ["overview", "details", "diagrams"],
             ),
             required_diagrams=prop.get("required_diagrams", []),
             coverage_targets=prop.get("coverage_targets", []),
+            generation_hints=prop.get("generation_hints", {}),
             priority=assign.get("priority", 0),
         )
         buckets.append(bucket)
@@ -1077,7 +1099,7 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
         return plan
 
     # Map endpoints to their family bucket by matching resource group
-    family_buckets = [b for b in plan.buckets if b.bucket_type == "endpoint"]
+    family_buckets = [b for b in plan.buckets if b.generation_hints.get("is_endpoint_family")]
 
     # Build resource → family bucket slug mapping
     def _resource_from_path(path: str) -> str:
@@ -1123,14 +1145,24 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
 
         ref_buckets.append(
             DocBucket(
-                bucket_type="endpoint_ref",
+                bucket_type="endpoint-ref",
                 title=f"{method} {path}",
                 slug=ref_slug,
                 section="API Endpoints",
                 description=f"API reference for {method} {path} — handler: {handler}",
                 owned_files=[ep_file] if ep_file else [],
                 owned_symbols=[handler] if handler else [],
-                required_sections=_default_sections("endpoint_ref"),
+                required_sections=[
+                    "endpoint_summary", "handler", "parameters", "request_body",
+                    "response_format", "error_responses", "auth", "sequence_diagram",
+                ],
+                generation_hints={
+                    "is_endpoint_ref": True,
+                    "include_endpoint_detail": True,
+                    "include_openapi": True,
+                    "prompt_style": "endpoint_ref",
+                    "icon": "globe-alt",
+                },
                 priority=25,
                 depends_on=[parent_slug] if parent_slug else [],
             )
@@ -1141,7 +1173,7 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
 
         # Group endpoint_refs by family in nav — nested under parent family title
         family_slug_to_title: dict[str, str] = {
-            b.slug: b.title for b in plan.buckets if b.bucket_type == "endpoint"
+            b.slug: b.title for b in plan.buckets if b.generation_hints.get("is_endpoint_family")
         }
         family_refs: dict[str, list[str]] = defaultdict(list)
         ungrouped: list[str] = []
@@ -1171,75 +1203,6 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
         )
 
     return plan
-
-
-def _default_sections(bucket_type: str) -> list[str]:
-    """Default required sections per bucket type."""
-    if bucket_type == "system":
-        return [
-            "overview",
-            "architecture",
-            "key_components",
-            "configuration",
-            "diagrams",
-        ]
-    elif bucket_type == "feature":
-        return [
-            "overview",
-            "main_workflows",
-            "participating_endpoints",
-            "core_helpers",
-            "state_transitions",
-            "integrations_involved",
-            "config_dependencies",
-            "edge_cases",
-            "diagrams",
-        ]
-    elif bucket_type == "endpoint":
-        return [
-            "route_overview",
-            "auth_validation",
-            "execution_flow",
-            "downstream_calls",
-            "integrations_touched",
-            "state_changes",
-            "async_side_effects",
-            "response_errors",
-            "diagrams",
-        ]
-    elif bucket_type == "integration":
-        return [
-            "what_it_does",
-            "where_it_enters",
-            "participating_features",
-            "request_response_flow",
-            "auth_configuration",
-            "retry_failure_handling",
-            "operational_gotchas",
-            "diagrams",
-        ]
-    elif bucket_type == "endpoint_ref":
-        return [
-            "endpoint_summary",
-            "handler",
-            "parameters",
-            "request_body",
-            "response_format",
-            "error_responses",
-            "auth",
-            "sequence_diagram",
-        ]
-    elif bucket_type == "database":
-        return [
-            "overview",
-            "er_diagram",
-            "table_definitions",
-            "relationships",
-            "migrations",
-            "query_patterns",
-            "configuration",
-        ]
-    return ["overview", "details", "diagrams"]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1274,16 +1237,17 @@ def _validate_coverage(plan: DocPlan, scan: RepoScan) -> DocPlan:
                     break
 
             if not matched:
-                # Create a catch-all feature bucket
+                # Create a catch-all module bucket
                 plan.buckets.append(
                     DocBucket(
-                        bucket_type="feature",
+                        bucket_type="module",
                         title=f"{group_name.replace('_', ' ').replace('-', ' ').title()} Module",
                         slug=f"{group_name.lower().replace(' ', '-').replace('_', '-')}-module",
                         section="Modules",
                         description=f"Documentation for the {group_name} module",
                         owned_files=files,
-                        required_sections=_default_sections("feature"),
+                        required_sections=["overview", "details", "diagrams"],
+                        generation_hints={"prompt_style": "general", "icon": "cube"},
                         priority=50,
                     )
                 )
@@ -1309,28 +1273,33 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
     nav: dict[str, list[str]] = defaultdict(list)
     assigned_files: set[str] = set()
 
-    # ── System bucket: Architecture/Overview ─────────────────────────────
+    # ── Architecture/Overview ────────────────────────────────────────────
     overview_files = scan.entry_points[:5] + scan.config_files[:3]
     buckets.append(
         DocBucket(
-            bucket_type="system",
+            bucket_type="architecture",
             title="Architecture & Overview",
             slug="architecture",
             section="Overview",
             description="Project overview, architecture, and high-level design",
             owned_files=overview_files,
-            required_sections=_default_sections("system"),
+            required_sections=["overview", "architecture", "key_components", "configuration", "diagrams"],
+            generation_hints={
+                "is_introduction_page": True,
+                "prompt_style": "system",
+                "icon": "server",
+            },
             priority=0,
         )
     )
     nav["Overview"].append("architecture")
     assigned_files.update(overview_files)
 
-    # ── System bucket: Setup ─────────────────────────────────────────────
+    # ── Setup ────────────────────────────────────────────────────────────
     if scan.config_files:
         buckets.append(
             DocBucket(
-                bucket_type="system",
+                bucket_type="setup",
                 title="Setup & Configuration",
                 slug="setup",
                 section="Getting Started",
@@ -1338,13 +1307,10 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
                 owned_files=[],
                 artifact_refs=scan.config_files[:10],
                 required_sections=[
-                    "overview",
-                    "prerequisites",
-                    "installation",
-                    "configuration",
-                    "environment_variables",
-                    "verification",
+                    "overview", "prerequisites", "installation",
+                    "configuration", "environment_variables", "verification",
                 ],
+                generation_hints={"prompt_style": "system", "icon": "cog"},
                 priority=1,
             )
         )
@@ -1391,9 +1357,8 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
                 group = "root"
             domain_buckets_map[group].append(rel_path)
 
-    # ── Database bucket: Schema & Models ────────────────────────────────
+    # ── Database: Schema & Models ────────────────────────────────────────
     model_files = role_buckets_map.get("models", [])
-    # Also grab model files from database scan if available
     db_model_files: list[str] = list(model_files)
     if (
         scan.artifact_scan
@@ -1416,26 +1381,35 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
                 section="Database",
                 description="Database schemas, models, ER diagrams, relationships, and migrations",
                 owned_files=db_model_files,
-                required_sections=_default_sections("database"),
+                required_sections=[
+                    "overview", "er_diagram", "table_definitions",
+                    "relationships", "migrations", "query_patterns", "configuration",
+                ],
                 required_diagrams=["er_diagram"],
+                generation_hints={
+                    "include_database_context": True,
+                    "prompt_style": "database",
+                    "icon": "database",
+                },
                 priority=3,
             )
         )
         nav["Database"].append("database-schema")
         assigned_files.update(db_model_files)
 
-    # ── System bucket: Middleware & Auth ──────────────────────────────────
+    # ── Middleware & Auth ─────────────────────────────────────────────────
     mw_files = role_buckets_map.get("middleware", [])
     if mw_files:
         buckets.append(
             DocBucket(
-                bucket_type="system",
+                bucket_type="middleware",
                 title="Middleware & Authentication",
                 slug="middleware-auth",
                 section="Architecture",
                 description="Authentication, authorization, rate limiting, and middleware pipeline",
                 owned_files=mw_files,
-                required_sections=_default_sections("system"),
+                required_sections=["overview", "architecture", "key_components", "configuration", "diagrams"],
+                generation_hints={"prompt_style": "system", "icon": "shield-check"},
                 priority=4,
             )
         )
@@ -1458,7 +1432,11 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
                 section="Features",
                 description=f"Documentation for {group_name} feature area",
                 owned_files=files,
-                required_sections=_default_sections("feature"),
+                required_sections=[
+                    "overview", "main_workflows", "core_helpers",
+                    "state_transitions", "edge_cases", "diagrams",
+                ],
+                generation_hints={"prompt_style": "feature", "icon": "bolt"},
                 priority=10,
             )
         )
@@ -1470,10 +1448,9 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
         files = [f for f in role_buckets_map.get(role, []) if f not in assigned_files]
         if not files:
             continue
-        # Try to merge into an existing feature bucket
         merged = False
         for bucket in buckets:
-            if bucket.bucket_type == "feature":
+            if bucket.generation_hints.get("prompt_style") == "feature":
                 overlap = set(f.split("/")[0] for f in files) & set(
                     f.split("/")[0] for f in bucket.owned_files
                 )
@@ -1485,20 +1462,21 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
         if not merged:
             buckets.append(
                 DocBucket(
-                    bucket_type="feature",
+                    bucket_type="module",
                     title=f"{role.replace('_', ' ').title()}",
                     slug=f"{role}",
                     section="Modules",
                     description=f"{role.title()} layer documentation",
                     owned_files=files,
-                    required_sections=_default_sections("feature"),
+                    required_sections=["overview", "details", "diagrams"],
+                    generation_hints={"prompt_style": "general", "icon": "cube"},
                     priority=15,
                 )
             )
             nav["Modules"].append(role)
             assigned_files.update(files)
 
-    # ── Endpoint bucket ──────────────────────────────────────────────────
+    # ── Endpoint families ────────────────────────────────────────────────
     if scan.api_endpoints:
         resource_groups: dict[str, list[dict]] = defaultdict(list)
         for ep in scan.api_endpoints:
@@ -1517,39 +1495,58 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
             slug = f"{resource}-api"
             buckets.append(
                 DocBucket(
-                    bucket_type="endpoint",
+                    bucket_type="endpoint-family",
                     title=f"{resource.replace('_', ' ').replace('-', ' ').title()} API",
                     slug=slug,
                     section="API Reference",
                     description=f"API reference for {resource} endpoints ({len(eps)} endpoints)",
                     owned_files=ep_files,
-                    required_sections=_default_sections("endpoint"),
+                    required_sections=[
+                        "route_overview", "auth_validation", "execution_flow",
+                        "downstream_calls", "state_changes", "response_errors", "diagrams",
+                    ],
+                    generation_hints={
+                        "is_endpoint_family": True,
+                        "include_endpoint_detail": True,
+                        "include_openapi": True,
+                        "prompt_style": "endpoint",
+                        "icon": "globe-alt",
+                    },
                     priority=20,
                 )
             )
             nav["API Reference"].append(slug)
             assigned_files.update(ep_files)
 
-            # Individual endpoint_ref pages for each endpoint in this family
+            # Individual endpoint reference pages
             for ep in eps:
                 method = ep.get("method", "GET").upper()
                 path = ep.get("path", "/unknown")
                 handler = ep.get("handler", "")
                 ep_file = ep.get("file", "")
-                # Build a slug from method + path
                 path_slug = re.sub(r"[/:{}]+", "-", path).strip("-").lower()
                 ref_slug = f"{method.lower()}-{path_slug}"
                 ref_title = f"{method} {path}"
                 buckets.append(
                     DocBucket(
-                        bucket_type="endpoint_ref",
+                        bucket_type="endpoint-ref",
                         title=ref_title,
                         slug=ref_slug,
                         section="API Endpoints",
                         description=f"API reference for {method} {path} — handler: {handler}",
                         owned_files=[ep_file] if ep_file else [],
                         owned_symbols=[handler] if handler else [],
-                        required_sections=_default_sections("endpoint_ref"),
+                        required_sections=[
+                            "endpoint_summary", "handler", "parameters", "request_body",
+                            "response_format", "error_responses", "auth", "sequence_diagram",
+                        ],
+                        generation_hints={
+                            "is_endpoint_ref": True,
+                            "include_endpoint_detail": True,
+                            "include_openapi": True,
+                            "prompt_style": "endpoint_ref",
+                            "icon": "globe-alt",
+                        },
                         priority=25,
                         depends_on=[slug],
                     )

@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from .planner_v2 import DocBucket, DocPlan
-from .planner import DocPage, DocPlan as LegacyDocPlan
+from ._legacy_types import DocPage, DocPlan as LegacyDocPlan
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -228,13 +228,42 @@ def _bucket_to_dict(b: DocBucket) -> dict:
         "required_sections": b.required_sections,
         "required_diagrams": b.required_diagrams,
         "coverage_targets": b.coverage_targets,
+        "generation_hints": b.generation_hints,
         "priority": b.priority,
     }
 
 
+# Infer generation_hints from legacy bucket_type for old serialized plans
+_LEGACY_TYPE_HINTS: dict[str, dict] = {
+    "system": {"prompt_style": "system", "icon": "server"},
+    "feature": {"prompt_style": "feature", "icon": "bolt"},
+    "endpoint": {
+        "is_endpoint_family": True, "include_endpoint_detail": True,
+        "include_openapi": True, "prompt_style": "endpoint", "icon": "globe-alt",
+    },
+    "endpoint_ref": {
+        "is_endpoint_ref": True, "include_endpoint_detail": True,
+        "include_openapi": True, "prompt_style": "endpoint_ref", "icon": "globe-alt",
+    },
+    "integration": {
+        "include_integration_detail": True, "prompt_style": "integration",
+        "icon": "puzzle-piece",
+    },
+    "database": {
+        "include_database_context": True, "prompt_style": "database",
+        "icon": "database",
+    },
+}
+
+
 def _dict_to_bucket(d: dict) -> DocBucket:
+    hints = d.get("generation_hints", {})
+    # Backward compat: infer hints from legacy bucket_type if hints are missing
+    if not hints:
+        legacy_type = d.get("bucket_type", "")
+        hints = dict(_LEGACY_TYPE_HINTS.get(legacy_type, {}))
     return DocBucket(
-        bucket_type=d.get("bucket_type", "system"),
+        bucket_type=d.get("bucket_type", "general"),
         title=d["title"],
         slug=d["slug"],
         section=d.get("section", ""),
@@ -246,6 +275,7 @@ def _dict_to_bucket(d: dict) -> DocBucket:
         required_sections=d.get("required_sections", []),
         required_diagrams=d.get("required_diagrams", []),
         coverage_targets=d.get("coverage_targets", []),
+        generation_hints=hints,
         priority=d.get("priority", 0),
     )
 
@@ -397,7 +427,7 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
             "title": bucket.title,
             "bucket_type": bucket.bucket_type,
             "section": bucket.section,
-            "doc_path": "introduction.mdx" if bucket.bucket_type == "overview" else f"{bucket.slug}.mdx",
+            "doc_path": "introduction.mdx" if (bucket.generation_hints or {}).get("is_introduction_page") else f"{bucket.slug}.mdx",
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),
@@ -633,7 +663,8 @@ def _fallback_doc_path(record: dict[str, Any]) -> str | None:
     slug = record.get("slug")
     if not slug:
         return None
-    if record.get("bucket_type") == "overview":
+    hints = record.get("generation_hints", {})
+    if hints.get("is_introduction_page"):
         return "introduction.mdx"
     return f"{slug}.mdx"
 

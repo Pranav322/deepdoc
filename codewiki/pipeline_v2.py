@@ -250,11 +250,12 @@ class PipelineV2:
 
                     # Sub-step 2: write to disk
                     # Overview page → introduction.mdx (Mintlify landing page)
-                    filename = (
-                        "introduction.mdx"
-                        if page.page_type == "overview"
-                        else f"{page.slug}.mdx"
-                    )
+                    # Check is_introduction_page hint via adapter, fall back to page_type
+                    _is_intro = (
+                        hasattr(page, "_b")
+                        and (page._b.generation_hints or {}).get("is_introduction_page")
+                    ) or page.page_type == "overview"
+                    filename = "introduction.mdx" if _is_intro else f"{page.slug}.mdx"
                     doc_path = self.output_dir / filename
                     doc_path.parent.mkdir(parents=True, exist_ok=True)
                     doc_path.write_text(doc_content, encoding="utf-8")
@@ -307,21 +308,28 @@ class PipelineV2:
         sitemap_context = self._build_sitemap_context(plan, page.slug)
         dependency_links = self._build_dependency_context(page, scan, plan)
 
-        # Get the right prompt for this page type
-        prompt_template = get_prompt_for_page_type(page.page_type)
+        # Get the right prompt — prefer bucket hints, fall back to page_type
+        if hasattr(page, "_b"):
+            from .prompts_v2 import get_prompt_for_bucket
+            prompt_template = get_prompt_for_bucket(page._b)
+        else:
+            prompt_template = get_prompt_for_page_type(page.page_type)
 
-        # Build OpenAPI context if this is an API/endpoint page
+        # Build OpenAPI context if hints or page_type indicate endpoint/api content
+        _hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
+        _wants_openapi = _hints.get("include_openapi") or page.page_type in ("api_reference", "endpoint")
         openapi_context = ""
-        if page.page_type in ("api_reference", "endpoint") and scan.has_openapi:
+        if _wants_openapi and scan.has_openapi:
             for spec_path in scan.openapi_paths:
                 spec = parse_openapi_spec(self.repo_root / spec_path)
                 if spec:
                     openapi_context = f"\n## OpenAPI Spec ({spec_path}):\n{spec_to_context_string(spec)[:4000]}"
                     break
 
-        # Build endpoints detail for API/endpoint pages
+        # Build endpoints detail
+        _wants_endpoints = _hints.get("include_endpoint_detail") or page.page_type in ("api_reference", "endpoint")
         endpoints_detail = ""
-        if page.page_type in ("api_reference", "endpoint"):
+        if _wants_endpoints:
             page_files = set(page.source_files)
             relevant_eps = [
                 ep for ep in scan.api_endpoints if ep.get("file", "") in page_files

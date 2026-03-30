@@ -96,7 +96,8 @@ def _build_navigation_from_plan(
     # Collect slugs with actual .mdx files
     existing_slugs: set[str] = set()
     for page in plan.pages:
-        if page.page_type == "overview":
+        _hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
+        if _hints.get("is_introduction_page") or page.page_type == "overview":
             if (output_dir / "introduction.mdx").exists():
                 existing_slugs.add(page.slug)
         elif (output_dir / f"{page.slug}.mdx").exists():
@@ -148,8 +149,12 @@ def _build_navigation_from_plan(
     for _section_name, slugs in plan.nav_structure.items():
         in_nav.update(slugs)
 
+    def _is_intro(p):
+        _h = (p._b.generation_hints or {}) if hasattr(p, "_b") else {}
+        return _h.get("is_introduction_page") or p.page_type == "overview"
+
     orphan_pages = [
-        _prefixed("introduction") if p.page_type == "overview" else _prefixed(p.slug)
+        _prefixed("introduction") if _is_intro(p) else _prefixed(p.slug)
         for p in plan.pages
         if p.slug not in in_nav and p.slug in existing_slugs
     ]
@@ -390,13 +395,15 @@ def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> 
     # Group existing pages by section for the CardGroup
     sections: dict[str, list[tuple[str, str, str]]] = {}  # section → [(title, slug, icon)]
     for page in plan.pages:
-        if page.page_type == "overview":
+        _ph = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
+        if _ph.get("is_introduction_page") or page.page_type == "overview":
             continue
         slug = page.slug
         if not (output_dir / f"{slug}.mdx").exists():
             continue
         section = getattr(page, "section", None) or "Docs"
-        icon = _ICON_BY_TYPE.get(str(page.page_type), "book-open")
+        # Prefer icon from hints, fall back to type-based lookup
+        icon = _ph.get("icon") or _ICON_BY_TYPE.get(str(page.page_type), "book-open")
         sections.setdefault(section, []).append((page.title, slug, icon))
 
     # Build card blocks per section
@@ -444,9 +451,12 @@ Welcome to the **{project_name}** developer documentation.
 # ─────────────────────────────────────────────────────────────────────────────
 
 def _is_overview(plan: DocPlan, slug: str) -> bool:
-    """Check if a slug corresponds to an overview page."""
+    """Check if a slug corresponds to an overview/introduction page."""
     page = next((p for p in plan.pages if p.slug == slug), None)
-    return page is not None and page.page_type == "overview"
+    if page is None:
+        return False
+    _h = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
+    return _h.get("is_introduction_page") or page.page_type == "overview"
 
 
 def _docs_relative_slug(output_dir: Path, filename: str, repo_root: Path) -> str | None:

@@ -1109,23 +1109,36 @@ Reference EVERY file path. Use the actual handler function names from the source
 """
 
 
-# New bucket-type mapping
-BUCKET_TYPE_PROMPTS = {
+# Prompt style templates — keyed by prompt_style hint, NOT by bucket_type
+PROMPT_STYLE_TEMPLATES = {
     "system": SYSTEM_BUCKET_V2,
     "feature": FEATURE_BUCKET_V2,
     "endpoint": ENDPOINT_BUCKET_V2,
     "endpoint_ref": ENDPOINT_REF_V2,
     "integration": INTEGRATION_BUCKET_V2,
     "database": DATABASE_SYSTEM_V2,
+    "general": GUIDE_V2,
 }
+
+# Legacy alias for backward compatibility
+BUCKET_TYPE_PROMPTS = PROMPT_STYLE_TEMPLATES
+
+
+def get_prompt_for_bucket(bucket) -> str:
+    """Select writing-guidance template based on generation_hints.prompt_style.
+
+    Works with DocBucket objects or anything with a generation_hints dict.
+    """
+    hints = getattr(bucket, "generation_hints", {}) or {}
+    style = hints.get("prompt_style", "general")
+    return PROMPT_STYLE_TEMPLATES.get(style, PROMPT_STYLE_TEMPLATES["general"])
 
 
 def get_prompt_for_page_type(page_type: str) -> str:
-    """Return the appropriate prompt template for a page type.
+    """Legacy compat — select template by page_type string.
 
-    Works for both legacy page_type values AND new bucket_type values.
-    Also supports sub-type hints: e.g. slug containing 'database' or 'model'
-    routes to the dedicated DATABASE_SYSTEM_V2 template.
+    Falls back through: PROMPT_STYLE_TEMPLATES → PAGE_TYPE_PROMPTS → GUIDE_V2.
     """
-    # Try bucket type first, then legacy page type, then default to guide
-    return BUCKET_TYPE_PROMPTS.get(page_type, PAGE_TYPE_PROMPTS.get(page_type, GUIDE_V2))
+    return PROMPT_STYLE_TEMPLATES.get(
+        page_type, PAGE_TYPE_PROMPTS.get(page_type, GUIDE_V2)
+    )

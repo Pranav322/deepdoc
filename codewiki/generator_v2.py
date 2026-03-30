@@ -34,7 +34,7 @@ from .llm import LLMClient
 from .parser import parse_file, supported_extensions
 from .parser.base import ParsedFile, Symbol
 from .planner_v2 import DocBucket, DocPlan, RepoScan, _BucketAsPage
-from .prompts_v2 import SYSTEM_V2, get_prompt_for_page_type
+from .prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
 
 console = Console()
 
@@ -295,7 +295,8 @@ class EvidenceAssembler:
         For feature buckets: find endpoints whose handler files overlap with owned_files.
         For others: minimal or empty.
         """
-        if bucket.bucket_type not in ("endpoint", "endpoint_ref", "feature"):
+        hints = bucket.generation_hints or {}
+        if not hints.get("include_endpoint_detail"):
             return ""
 
         page_files = set(bucket.owned_files)
@@ -303,7 +304,7 @@ class EvidenceAssembler:
         lines: list[str] = []
 
         # ── endpoint_ref: match specific endpoint, pull deep evidence ─────
-        if bucket.bucket_type == "endpoint_ref":
+        if hints.get("is_endpoint_ref"):
             # The title is e.g. "GET /api/v1/orders" — extract method+path
             title_parts = bucket.title.split(" ", 1)
             ref_method = title_parts[0].upper() if len(title_parts) >= 1 else ""
@@ -426,8 +427,9 @@ class EvidenceAssembler:
         page_files = set(bucket.owned_files)
         lines: list[str] = []
 
+        hints = bucket.generation_hints or {}
         for identity in self.scan.integration_identities:
-            if bucket.bucket_type == "integration":
+            if hints.get("include_integration_detail"):
                 # Match if slug contains the identity name
                 if (
                     identity.name.lower() in bucket.slug.lower()
@@ -603,16 +605,9 @@ class EvidenceAssembler:
         migration info from the DatabaseScan attached to the artifact_scan.
         Only activates for buckets that look like database/model documentation.
         """
-        # Only enrich database-relevant buckets
-        db_keywords = ("database", "data model", "schema", "model", "table", "orm")
-        is_db_bucket = (
-            bucket.bucket_type == "system"
-            and any(
-                kw in bucket.title.lower() or kw in bucket.slug.lower()
-                for kw in db_keywords
-            )
-        ) or bucket.bucket_type == "database"
-        if not is_db_bucket:
+        # Only enrich buckets with database context hint
+        hints = bucket.generation_hints or {}
+        if not hints.get("include_database_context"):
             return ""
 
         # Get the database scan from artifact_scan
@@ -735,17 +730,8 @@ class PageGenerator:
         """Generate the complete page from evidence. Returns markdown string."""
         bucket = evidence.bucket
 
-        # Route system buckets about the database to the dedicated database prompt
-        effective_type = bucket.bucket_type
-        if bucket.bucket_type == "system":
-            db_keywords = ("database", "data model", "schema", "model", "table", "orm")
-            if any(
-                kw in bucket.title.lower() or kw in bucket.slug.lower()
-                for kw in db_keywords
-            ):
-                effective_type = "database"
-
-        prompt_template = get_prompt_for_page_type(effective_type)
+        # Select prompt template via generation_hints.prompt_style
+        prompt_template = get_prompt_for_bucket(bucket)
 
         # Compose the enriched source context
         full_source = evidence.source_context
@@ -1275,7 +1261,8 @@ class BucketGenerationEngine:
 
             # Step 2: Build OpenAPI context for endpoint pages
             openapi_context = ""
-            if bucket.bucket_type == "endpoint" and self.scan.has_openapi:
+            hints = bucket.generation_hints or {}
+            if hints.get("include_openapi") and self.scan.has_openapi:
                 from .openapi import parse_openapi_spec, spec_to_context_string
 
                 for spec_path in self.scan.openapi_paths:
@@ -1313,9 +1300,10 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
 
             # Step 7: Write to disk
+            bucket_hints = bucket.generation_hints or {}
             filename = (
                 "introduction.mdx"
-                if bucket.bucket_type == "overview"
+                if bucket_hints.get("is_introduction_page")
                 else f"{bucket.slug}.mdx"
             )
             doc_path = self.output_dir / filename

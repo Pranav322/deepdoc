@@ -4,8 +4,8 @@ Flow:
     1. SCAN  — collect file tree, symbols, endpoints, OpenAPI specs (no LLM)
     2. PLAN  — multi-step bucket planner (3 LLM calls) OR legacy single-call planner
     3. GENERATE — execute plan page-by-page, batched (N LLM calls)
-    4. PLAYGROUND — embed Swagger UI if OpenAPI spec exists
-    5. BUILD — write mkdocs.yml from AI's nav plan + custom CSS
+    4. API REF — generate native Mintlify API pages from OpenAPI spec (one page per endpoint)
+    5. BUILD — write mint.json from AI's nav plan
 
 The manifest tracks: source_file → content_hash → [page_slugs]
 So `codewiki update` can diff changed files → find affected pages → regenerate only those.
@@ -22,7 +22,13 @@ from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+)
 
 from .config import load_config
 from .llm import LLMClient
@@ -30,8 +36,8 @@ from .manifest import Manifest, file_hash
 from .openapi import (
     find_openapi_specs,
     parse_openapi_spec,
+    extract_endpoints_from_spec,
     spec_to_context_string,
-    generate_swagger_ui_html,
 )
 from .planner_v2 import (
     DocBucket,
@@ -41,7 +47,7 @@ from .planner_v2 import (
     scan_repo as bucket_scan_repo,
 )
 from .prompts_v2 import SYSTEM_V2, get_prompt_for_page_type
-from .generator_v2 import BucketGenerationEngine
+from .generator_v2 import BucketGenerationEngine, summarize_generation_results
 from .persistence_v2 import (
     cleanup_stale_generated_files,
     load_generation_ledger,
@@ -49,6 +55,7 @@ from .persistence_v2 import (
     save_all,
     save_plan,
     save_file_map,
+    save_sync_state,
 )
 
 console = Console()
@@ -68,26 +75,35 @@ class PipelineV2:
         self.manifest = Manifest(self.output_dir)
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
 
-    def run(self, force: bool = False, reconcile: bool = False) -> dict[str, int]:
-        stats: dict[str, int] = {}
+    def run(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
+        stats: dict[str, Any] = {}
         previous_ledger = load_generation_ledger(self.repo_root) if reconcile else {}
 
         # ── Phase 1: Scan ──────────────────────────────────────────────
-        console.print(Panel("[bold]Phase 1/5: Scanning repository[/bold]", border_style="blue"))
+        console.print(
+            Panel("[bold]Phase 1/5: Scanning repository[/bold]", border_style="blue")
+        )
         scan = bucket_scan_repo(self.repo_root, self.cfg)
         self._print_scan(scan)
         stats["files_scanned"] = scan.total_files
 
         # ── Phase 2: Plan ──────────────────────────────────────────────
-        console.print(Panel("[bold]Phase 2/5: Multi-step bucket planner (3 LLM calls)[/bold]", border_style="blue"))
+        console.print(
+            Panel(
+                "[bold]Phase 2/5: Multi-step bucket planner (3 LLM calls)[/bold]",
+                border_style="blue",
+            )
+        )
         plan = bucket_plan_docs(scan, self.cfg, self.llm)
         stats["pages_planned"] = len(plan.pages)
 
         # ── Phase 3: Generate ──────────────────────────────────────────
-        console.print(Panel(
-            f"[bold]Phase 3/5: Generating {len(plan.pages)} doc pages[/bold]",
-            border_style="blue",
-        ))
+        console.print(
+            Panel(
+                f"[bold]Phase 3/5: Generating {len(plan.pages)} doc pages[/bold]",
+                border_style="blue",
+            )
+        )
         engine = BucketGenerationEngine(
             repo_root=self.repo_root,
             cfg=self.cfg,
@@ -98,25 +114,56 @@ class PipelineV2:
         )
         gen_results = engine.generate_all(force=force)
         engine.update_manifest(gen_results)
-        generated = sum(1 for r in gen_results if r.content and not r.error)
-        stats["pages_generated"] = generated
+        generation_summary = summarize_generation_results(gen_results)
+        stats["pages_generated"] = generation_summary.succeeded
+        stats["pages_failed"] = generation_summary.failed
+        stats["pages_skipped"] = generation_summary.skipped
+        stats["status"] = generation_summary.status
 
         # ── Phase 4: API Playground ────────────────────────────────────
         if scan.has_openapi:
-            console.print(Panel("[bold]Phase 4/5: Setting up API playground[/bold]", border_style="blue"))
+            console.print(
+                Panel(
+                    "[bold]Phase 4/5: Generating API reference pages[/bold]",
+                    border_style="blue",
+                )
+            )
             self._setup_playground(scan)
             stats["playground"] = 1
         else:
-            console.print(Panel("[dim]Phase 4/5: No OpenAPI spec — skipping playground[/dim]", border_style="dim"))
+            console.print(
+                Panel(
+                    "[dim]Phase 4/5: No OpenAPI spec — skipping API reference generation[/dim]",
+                    border_style="dim",
+                )
+            )
             stats["playground"] = 0
 
         # ── Phase 5: Build site ────────────────────────────────────────
-        console.print(Panel("[bold]Phase 5/5: Building site[/bold]", border_style="blue"))
+        console.print(
+            Panel("[bold]Phase 5/5: Building site[/bold]", border_style="blue")
+        )
         self._build_site(plan, scan)
         stats["site"] = 1
 
         # ── Persist state ──────────────────────────────────────────────
         save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+
+        # ── Persist commit baseline for future updates ────────────────
+        try:
+            import git as _git
+
+            _repo = _git.Repo(self.repo_root)
+            plan_version = "v2_buckets" if hasattr(plan, "buckets") else "v1_legacy"
+            save_sync_state(
+                self.repo_root,
+                commit_sha=_repo.head.commit.hexsha,
+                status=generation_summary.status,
+                generator_version=plan_version,
+                advance_baseline=generation_summary.failed == 0,
+            )
+        except Exception:
+            pass  # Not a git repo or detached HEAD — skip silently
 
         if reconcile:
             keep_slugs = {bucket.slug for bucket in plan.buckets}
@@ -142,6 +189,7 @@ class PipelineV2:
 
     def _print_scan(self, scan: RepoScan) -> None:
         from rich.table import Table
+
         t = Table(show_header=True, header_style="bold")
         t.add_column("Metric", style="cyan")
         t.add_column("Value", justify="right")
@@ -190,16 +238,23 @@ class PipelineV2:
                         description=(
                             f"[bold cyan]{page.title}[/bold cyan] "
                             f"[dim]({page.page_type}, {len(page.source_files)} source files)[/dim]"
-                        )
+                        ),
                     )
 
                     # Sub-step 1: building context
-                    progress.update(task, description=f"[dim]{page.title} — reading source files...[/dim]")
+                    progress.update(
+                        task,
+                        description=f"[dim]{page.title} — reading source files...[/dim]",
+                    )
                     doc_content = self._generate_single_page(page, scan, plan)
 
                     # Sub-step 2: write to disk
-                    # Overview page → index.md (MkDocs homepage)
-                    filename = "index.md" if page.page_type == "overview" else f"{page.slug}.md"
+                    # Overview page → introduction.mdx (Mintlify landing page)
+                    filename = (
+                        "introduction.mdx"
+                        if page.page_type == "overview"
+                        else f"{page.slug}.mdx"
+                    )
                     doc_path = self.output_dir / filename
                     doc_path.parent.mkdir(parents=True, exist_ok=True)
                     doc_path.write_text(doc_content, encoding="utf-8")
@@ -209,8 +264,12 @@ class PipelineV2:
                         src_path = self.repo_root / src_file
                         if src_path.exists():
                             try:
-                                content = src_path.read_text(encoding="utf-8", errors="replace")
-                                self.manifest.update(src_file, file_hash(content), page.slug)
+                                content = src_path.read_text(
+                                    encoding="utf-8", errors="replace"
+                                )
+                                self.manifest.update(
+                                    src_file, file_hash(content), page.slug
+                                )
                             except Exception:
                                 pass
 
@@ -265,8 +324,7 @@ class PipelineV2:
         if page.page_type in ("api_reference", "endpoint"):
             page_files = set(page.source_files)
             relevant_eps = [
-                ep for ep in scan.api_endpoints
-                if ep.get("file", "") in page_files
+                ep for ep in scan.api_endpoints if ep.get("file", "") in page_files
             ]
             if relevant_eps:
                 lines = []
@@ -284,12 +342,22 @@ class PipelineV2:
         required_sections = ""
         required_diagrams = ""
         coverage_targets = ""
-        if hasattr(page, '_b'):
+        if hasattr(page, "_b"):
             # This is a _BucketAsPage adapter
             bucket = page._b
-            required_sections = ", ".join(bucket.required_sections) if bucket.required_sections else "default"
-            required_diagrams = ", ".join(bucket.required_diagrams) if bucket.required_diagrams else "architecture_flow"
-            coverage_targets = ", ".join(bucket.coverage_targets) if bucket.coverage_targets else ""
+            required_sections = (
+                ", ".join(bucket.required_sections)
+                if bucket.required_sections
+                else "default"
+            )
+            required_diagrams = (
+                ", ".join(bucket.required_diagrams)
+                if bucket.required_diagrams
+                else "architecture_flow"
+            )
+            coverage_targets = (
+                ", ".join(bucket.coverage_targets) if bucket.coverage_targets else ""
+            )
 
         # Format the prompt — all templates accept these kwargs; unused ones are silently ignored
         user_prompt = prompt_template.format(
@@ -386,7 +454,10 @@ class PipelineV2:
             if remaining <= 200:
                 omitted.append(src_file)
                 # Still include the header block so LLM knows the file exists
-                parts.append(header + "> *[Source omitted — context budget reached. See symbols above.]*\n")
+                parts.append(
+                    header
+                    + "> *[Source omitted — context budget reached. See symbols above.]*\n"
+                )
                 continue
 
             if len(code) > remaining:
@@ -408,7 +479,9 @@ class PipelineV2:
         """Tier 2: extract function/class signatures + up to 10 body lines each."""
         if not parsed or not parsed.symbols:
             lines = content.splitlines()
-            return "\n".join(lines[:100]) + ("\n... [truncated]" if len(lines) > 100 else "")
+            return "\n".join(lines[:100]) + (
+                "\n... [truncated]" if len(lines) > 100 else ""
+            )
 
         content_lines = content.splitlines()
         result: list[str] = []
@@ -451,7 +524,7 @@ class PipelineV2:
         """Build a formatted sitemap of all pages for cross-linking.
 
         The LLM uses this to know what other pages exist and what they cover,
-        so it can link to them using [Title](slug.md) syntax.
+        so it can link to them using [Title](/slug) syntax.
         """
         lines: list[str] = []
         by_section: dict[str, list] = {}
@@ -464,17 +537,23 @@ class PipelineV2:
         for section, pages in by_section.items():
             lines.append(f"**{section}**")
             for page in pages:
-                md_file = "index.md" if page.page_type == "overview" else f"{page.slug}.md"
+                page_path = (
+                    "/introduction" if page.page_type == "overview" else f"/{page.slug}"
+                )
                 key_files = ", ".join(f"`{f}`" for f in page.source_files[:4])
                 if len(page.source_files) > 4:
                     key_files += f" +{len(page.source_files) - 4} more"
-                lines.append(f"- [{page.title}]({md_file}) — {page.description}")
+                lines.append(f"- [{page.title}]({page_path}) — {page.description}")
                 if key_files:
                     lines.append(f"  *Covers: {key_files}*")
 
-        return "\n".join(lines) if lines else "(no other pages in this documentation site)"
+        return (
+            "\n".join(lines) if lines else "(no other pages in this documentation site)"
+        )
 
-    def _build_dependency_context(self, page: DocPage, scan: RepoScan, plan: DocPlan) -> str:
+    def _build_dependency_context(
+        self, page: DocPage, scan: RepoScan, plan: DocPlan
+    ) -> str:
         """Find pages that this page's files import from — these become cross-page links.
 
         Two sources of dependency info (combined):
@@ -511,7 +590,9 @@ class PipelineV2:
                     # Normalize: extract module path(s) from full import statement text
                     path_hints = self._normalize_import_statement(imp_stmt, lang)
                     for path_hint in path_hints:
-                        resolved = self._resolve_import(path_hint, src_file, scan.file_summaries)
+                        resolved = self._resolve_import(
+                            path_hint, src_file, scan.file_summaries
+                        )
                         if resolved and resolved in file_to_pages:
                             for linked in file_to_pages[resolved]:
                                 if linked.slug != page.slug:
@@ -520,17 +601,19 @@ class PipelineV2:
                 continue
 
         # Source 2: explicit depends_on from the AI plan (previously parsed but unused)
-        for dep_slug in (page.depends_on or []):
+        for dep_slug in page.depends_on or []:
             if dep_slug in slug_to_page and dep_slug != page.slug:
                 related[dep_slug] = slug_to_page[dep_slug]
 
         if not related:
             return ""
 
-        lines = ["**Dependency Links** (pages this module's files import from — you MUST link to these):"]
+        lines = [
+            "**Dependency Links** (pages this module's files import from — you MUST link to these):"
+        ]
         for p in related.values():
-            md_file = "index.md" if p.page_type == "overview" else f"{p.slug}.md"
-            lines.append(f"- [{p.title}]({md_file}) — {p.description}")
+            page_path = "/introduction" if p.page_type == "overview" else f"/{p.slug}"
+            lines.append(f"- [{p.title}]({page_path}) — {p.description}")
 
         return "\n".join(lines)
 
@@ -542,6 +625,7 @@ class PipelineV2:
         This strips the keyword/syntax and returns just the importable path(s).
         """
         import re
+
         stmt = stmt.strip()
         paths: list[str] = []
 
@@ -550,20 +634,22 @@ class PipelineV2:
             # 'from ..models import X'    → '../models'
             # 'from app.services import X'→ 'app/services'
             # 'import app.config'         → 'app/config'
-            m = re.match(r'^from\s+(\.+)(\S*)\s+import', stmt)
+            m = re.match(r"^from\s+(\.+)(\S*)\s+import", stmt)
             if m:
                 dots = len(m.group(1))
                 module = m.group(2)
                 prefix = "./" if dots == 1 else "../" * (dots - 1)
-                paths.append(prefix + module.replace(".", "/") if module else prefix.rstrip("/"))
+                paths.append(
+                    prefix + module.replace(".", "/") if module else prefix.rstrip("/")
+                )
                 return paths
 
-            m = re.match(r'^from\s+(\S+)\s+import', stmt)
+            m = re.match(r"^from\s+(\S+)\s+import", stmt)
             if m:
                 paths.append(m.group(1).replace(".", "/"))
                 return paths
 
-            m = re.match(r'^import\s+(\S+)', stmt)
+            m = re.match(r"^import\s+(\S+)", stmt)
             if m:
                 # 'import os' → 'os' (stdlib filtered later); 'import app.config' → 'app/config'
                 paths.append(m.group(1).replace(".", "/"))
@@ -574,11 +660,11 @@ class PipelineV2:
             # 'import X from "./config"'            → './config'
             # 'import type { X } from "@/types"'   → '@/types'
             # 'const x = require("./config")'       → './config'
-            m = re.search(r'''from\s+['"]([^'"]+)['"]''', stmt)
+            m = re.search(r"""from\s+['"]([^'"]+)['"]""", stmt)
             if m:
                 paths.append(m.group(1))
                 return paths
-            m = re.search(r'''require\s*\(\s*['"]([^'"]+)['"]\s*\)''', stmt)
+            m = re.search(r"""require\s*\(\s*['"]([^'"]+)['"]\s*\)""", stmt)
             if m:
                 paths.append(m.group(1))
                 return paths
@@ -593,15 +679,17 @@ class PipelineV2:
         elif lang == "php":
             # 'use App\Services\AuthService;'         → 'App/Services/AuthService'
             # 'use App\Services\{AuthService, User};' → 'App/Services/AuthService', 'App/Services/User'
-            m = re.match(r'^use\s+([\w\\]+)', stmt)
+            m = re.match(r"^use\s+([\w\\]+)", stmt)
             if m:
                 base = m.group(1).replace("\\", "/")
-                grouped = re.findall(r'\{([^}]+)\}', stmt)
+                grouped = re.findall(r"\{([^}]+)\}", stmt)
                 if grouped:
                     base_ns = base.rsplit("/", 1)[0]
                     for group in grouped:
                         for name in group.split(","):
-                            paths.append(base_ns + "/" + name.strip().replace("\\", "/"))
+                            paths.append(
+                                base_ns + "/" + name.strip().replace("\\", "/")
+                            )
                 else:
                     paths.append(base)
             return paths
@@ -609,7 +697,9 @@ class PipelineV2:
         # Fallback: return the raw statement — _resolve_import will try to match it
         return [stmt]
 
-    def _resolve_import(self, path_hint: str, current_file: str, all_files: dict) -> str | None:
+    def _resolve_import(
+        self, path_hint: str, current_file: str, all_files: dict
+    ) -> str | None:
         """Resolve a normalized module path hint to an actual file path in the repo.
 
         Receives a clean path (NOT a full statement) from _normalize_import_statement.
@@ -621,12 +711,50 @@ class PipelineV2:
 
         # Skip well-known stdlib / built-in identifiers
         STDLIB = {
-            "os", "sys", "json", "re", "io", "math", "time", "path", "fs", "http",
-            "https", "net", "crypto", "util", "stream", "events", "fmt", "log",
-            "strings", "strconv", "sort", "errors", "bytes", "context", "sync",
-            "reflect", "regexp", "testing", "collections", "typing", "abc", "enum",
-            "dataclasses", "functools", "itertools", "pathlib", "datetime", "copy",
-            "threading", "subprocess", "hashlib", "base64", "struct", "socket",
+            "os",
+            "sys",
+            "json",
+            "re",
+            "io",
+            "math",
+            "time",
+            "path",
+            "fs",
+            "http",
+            "https",
+            "net",
+            "crypto",
+            "util",
+            "stream",
+            "events",
+            "fmt",
+            "log",
+            "strings",
+            "strconv",
+            "sort",
+            "errors",
+            "bytes",
+            "context",
+            "sync",
+            "reflect",
+            "regexp",
+            "testing",
+            "collections",
+            "typing",
+            "abc",
+            "enum",
+            "dataclasses",
+            "functools",
+            "itertools",
+            "pathlib",
+            "datetime",
+            "copy",
+            "threading",
+            "subprocess",
+            "hashlib",
+            "base64",
+            "struct",
+            "socket",
         }
         base = imp.split("/")[0].lstrip(".")
         if base in STDLIB:
@@ -657,12 +785,20 @@ class PipelineV2:
             # Absolute module path (Go pkg, Python dotted, TS alias)
             # Take last 2 segments as a fuzzy hint
             segments = [s for s in imp.replace("\\", "/").split("/") if s]
-            rel_hint = "/".join(segments[-2:]) if len(segments) >= 2 else (segments[0] if segments else imp)
+            rel_hint = (
+                "/".join(segments[-2:])
+                if len(segments) >= 2
+                else (segments[0] if segments else imp)
+            )
 
         rel_hint_lower = rel_hint.lower().replace("-", "_")
 
         # Match against known files (without extension, case-insensitive)
-        hint_no_ext = rel_hint_lower.rsplit(".", 1)[0] if "." in rel_hint_lower else rel_hint_lower
+        hint_no_ext = (
+            rel_hint_lower.rsplit(".", 1)[0]
+            if "." in rel_hint_lower
+            else rel_hint_lower
+        )
 
         best: str | None = None
         best_score = 0
@@ -704,6 +840,7 @@ class PipelineV2:
     def _fix_mermaid_diagram(self, diagram: str) -> str:
         """Fix the most common Mermaid mistakes LLMs make."""
         import re
+
         lines = diagram.splitlines()
         fixed: list[str] = []
         diagram_type = ""
@@ -713,8 +850,16 @@ class PipelineV2:
 
             # Detect diagram type from first non-empty line
             if not diagram_type and stripped:
-                for dtype in ("flowchart", "graph", "sequencediagram", "classdiagram",
-                              "erdiagram", "gantt", "pie", "statediagram"):
+                for dtype in (
+                    "flowchart",
+                    "graph",
+                    "sequencediagram",
+                    "classdiagram",
+                    "erdiagram",
+                    "gantt",
+                    "pie",
+                    "statediagram",
+                ):
                     if stripped.startswith(dtype):
                         diagram_type = dtype
                         break
@@ -723,7 +868,7 @@ class PipelineV2:
             # Pattern: A(text with (nested parens)) → A["text with (nested parens)"]
             if diagram_type in ("flowchart", "graph", ""):
                 line = re.sub(
-                    r'\b(\w[\w-]*)\(([^()]*\([^()]*\)[^()]*)\)',
+                    r"\b(\w[\w-]*)\(([^()]*\([^()]*\)[^()]*)\)",
                     lambda m: f'{m.group(1)}["{m.group(2)}"]',
                     line,
                 )
@@ -732,7 +877,11 @@ class PipelineV2:
             # A[label: value] → A["label: value"]
             line = re.sub(
                 r'\[([^\]"]*:[^\]"]*)\]',
-                lambda m: f'["{m.group(1)}"]' if ":" in m.group(1) and not m.group(1).startswith('"') else f'[{m.group(1)}]',
+                lambda m: (
+                    f'["{m.group(1)}"]'
+                    if ":" in m.group(1) and not m.group(1).startswith('"')
+                    else f"[{m.group(1)}]"
+                ),
                 line,
             )
 
@@ -741,15 +890,23 @@ class PipelineV2:
 
             # Fix 4: classDiagram method arrows that use -> instead of --
             if diagram_type == "classdiagram":
-                line = re.sub(r'\s+->\s+', ' --> ', line)
+                line = re.sub(r"\s+->\s+", " --> ", line)
+
+            # Fix 5: sequenceDiagram participants emitted with flowchart node syntax
+            if diagram_type == "sequencediagram":
+                line = re.sub(
+                    r'^(\s*participant\s+)([A-Za-z][\w-]*)\["([^"]+)"\]\s*$',
+                    lambda m: f"{m.group(1)}{m.group(2)} as {m.group(3)}",
+                    line,
+                )
 
             fixed.append(line)
 
         result = "\n".join(fixed)
 
-        # Fix 5: Duplicate node IDs in flowcharts (just warn via comment, can't auto-fix safely)
+        # Fix 6: Duplicate node IDs in flowcharts (just warn via comment, can't auto-fix safely)
         if diagram_type in ("flowchart", "graph"):
-            node_ids = re.findall(r'\b([A-Za-z][\w-]*)\s*[\[({\|]', result)
+            node_ids = re.findall(r"\b([A-Za-z][\w-]*)\s*[\[({\|]", result)
             seen: set[str] = set()
             dupes: list[str] = []
             for nid in node_ids:
@@ -757,7 +914,10 @@ class PipelineV2:
                     dupes.append(nid)
                 seen.add(nid)
             if dupes:
-                result = f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n" + result
+                result = (
+                    f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n"
+                    + result
+                )
 
         return result
 
@@ -799,7 +959,9 @@ class PipelineV2:
         def get_line_count(path: str) -> int:
             if path not in file_line_counts:
                 try:
-                    text = (self.repo_root / path).read_text(encoding="utf-8", errors="replace")
+                    text = (self.repo_root / path).read_text(
+                        encoding="utf-8", errors="replace"
+                    )
                     file_line_counts[path] = len(text.splitlines())
                 except Exception:
                     file_line_counts[path] = 0
@@ -839,10 +1001,24 @@ class PipelineV2:
     @staticmethod
     def _is_retryable(err_str: str) -> bool:
         """Check if an error is transient and worth retrying."""
-        markers = ("rate", "429", "overloaded", "timeout", "timed out",
-                   "502", "503", "504", "bad gateway", "service unavailable",
-                   "connection", "temporary", "throttl", "capacity",
-                   "server_error", "internal_error")
+        markers = (
+            "rate",
+            "429",
+            "overloaded",
+            "timeout",
+            "timed out",
+            "502",
+            "503",
+            "504",
+            "bad gateway",
+            "service unavailable",
+            "connection",
+            "temporary",
+            "throttl",
+            "capacity",
+            "server_error",
+            "internal_error",
+        )
         lower = err_str.lower()
         return any(m in lower for m in markers)
 
@@ -859,16 +1035,24 @@ class PipelineV2:
 
                 if self._is_retryable(err):
                     if is_last:
-                        console.print(f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]")
+                        console.print(
+                            f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]"
+                        )
                         raise
-                    wait = RATE_LIMIT_BACKOFF * (2 ** attempt) + random.uniform(0, 1.5)
-                    console.print(f"    [yellow]⏳ Transient error — waiting {wait:.1f}s before retry {attempt + 1}/{MAX_RETRIES}...[/yellow]")
+                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
+                    console.print(
+                        f"    [yellow]⏳ Transient error — waiting {wait:.1f}s before retry {attempt + 1}/{MAX_RETRIES}...[/yellow]"
+                    )
                     time.sleep(wait)
                 elif is_last:
-                    console.print(f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]")
+                    console.print(
+                        f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]"
+                    )
                     raise
                 else:
-                    console.print(f"    [yellow]⚠ LLM error (attempt {attempt + 1}/{MAX_RETRIES}): {e} — retrying...[/yellow]")
+                    console.print(
+                        f"    [yellow]⚠ LLM error (attempt {attempt + 1}/{MAX_RETRIES}): {e} — retrying...[/yellow]"
+                    )
                     time.sleep(1 + random.uniform(0, 0.5))
         raise RuntimeError("Max retries exceeded")
 
@@ -891,34 +1075,77 @@ class PipelineV2:
     # ──────────────────────────────────────────────────────────────────────
 
     def _setup_playground(self, scan: RepoScan) -> None:
-        """Copy OpenAPI spec and create playground page with Swagger UI."""
+        """Generate native Mintlify API reference pages from the OpenAPI spec.
+
+        For each endpoint in the spec we generate a minimal MDX file:
+            ---
+            title: "Get Order"
+            openapi: "GET /api/v1/orders/{id}"
+            ---
+        Mintlify detects the `openapi:` frontmatter and renders the full
+        two-column interactive page (parameters + response on the left,
+        live "Try it" panel on the right) automatically — no Swagger UI needed.
+        """
         for spec_rel_path in scan.openapi_paths:
             spec_src = self.repo_root / spec_rel_path
-            spec_dest = self.output_dir / "api" / Path(spec_rel_path).name
-            spec_dest.parent.mkdir(parents=True, exist_ok=True)
+            spec_name = Path(spec_rel_path).name
 
-            # Copy spec file to docs
-            shutil.copy2(spec_src, spec_dest)
+            # Copy spec to repo root so mint.json can reference it
+            spec_root_dest = self.repo_root / spec_name
+            if spec_src != spec_root_dest:
+                shutil.copy2(spec_src, spec_root_dest)
 
-            # Generate playground page
-            spec_relative = Path(spec_rel_path).name
-            playground_html = generate_swagger_ui_html(spec_relative)
+            spec = parse_openapi_spec(spec_src)
+            if not spec:
+                console.print(
+                    f"[yellow]⚠[/yellow] Could not parse {spec_name} — skipping API pages"
+                )
+                break
 
-            playground_md = f"""\
-# API Playground
+            endpoints = extract_endpoints_from_spec(spec)
+            api_dir = self.output_dir / "api"
+            api_dir.mkdir(parents=True, exist_ok=True)
 
-Test API endpoints directly from the documentation.
+            generated = 0
+            for ep in endpoints:
+                if ep.get("deprecated"):
+                    continue
 
-<div class="swagger-ui-wrapper">
-{playground_html}
-</div>
+                method = ep["method"]
+                path = ep["path"]
+                summary = ep.get("summary") or f"{method} {path}"
+                operation_id = ep.get("operation_id", "")
 
-!!! tip "Try It Out"
-    Click any endpoint below, then click **"Try it out"** to send real API requests.
-    Make sure your API server is running locally or update the server URL.
+                # Derive a clean slug from operationId or method+path
+                if operation_id:
+                    slug = operation_id.lower().replace("_", "-")
+                else:
+                    clean_path = (
+                        path.strip("/")
+                        .replace("/", "-")
+                        .replace("{", "")
+                        .replace("}", "")
+                    )
+                    slug = f"{method.lower()}-{clean_path}"
+                # Trim very long slugs
+                if len(slug) > 60:
+                    slug = slug[:60].rstrip("-")
+
+                mdx_content = f"""\
+---
+title: "{summary}"
+openapi: "{method} {path}"
+---
 """
-            (self.output_dir / "api" / "playground.md").write_text(playground_md, encoding="utf-8")
-            console.print(f"[green]✓[/green] API playground created with Swagger UI")
+                (api_dir / f"{slug}.mdx").write_text(mdx_content, encoding="utf-8")
+                generated += 1
+
+            if generated:
+                console.print(
+                    f"[green]✓[/green] Generated {generated} native Mintlify API reference pages"
+                )
+            else:
+                console.print(f"[yellow]⚠[/yellow] No endpoints found in {spec_name}")
             break  # Use first spec found
 
     # ──────────────────────────────────────────────────────────────────────
@@ -926,10 +1153,13 @@ Test API endpoints directly from the documentation.
     # ──────────────────────────────────────────────────────────────────────
 
     def _build_site(self, plan: DocPlan, scan: RepoScan) -> None:
-        """Build mkdocs.yml from the AI's nav plan."""
-        from .site.mkdocs_builder_v2 import build_mkdocs_from_plan
-        build_mkdocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, scan.has_openapi)
-        console.print("[green]✓[/green] mkdocs.yml + site config built")
+        """Build Mintlify config from the AI's nav plan."""
+        from .site.mintlify_builder_v2 import build_mintlify_from_plan
+
+        build_mintlify_from_plan(
+            self.repo_root, self.output_dir, self.cfg, plan, scan.has_openapi
+        )
+        console.print("[green]✓[/green] Mintlify config built")
 
     # ──────────────────────────────────────────────────────────────────────
     # Persistence helpers
@@ -943,7 +1173,7 @@ Test API endpoints directly from the documentation.
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
         # Check if this is a bucket-based plan
-        if hasattr(plan, 'buckets'):
+        if hasattr(plan, "buckets"):
             plan_data = {
                 "version": "v2_buckets",
                 "buckets": [
@@ -966,7 +1196,7 @@ Test API endpoints directly from the documentation.
                 ],
                 "nav_structure": plan.nav_structure,
                 "skipped_files": plan.skipped_files,
-                "integration_candidates": getattr(plan, 'integration_candidates', []),
+                "integration_candidates": getattr(plan, "integration_candidates", []),
             }
         else:
             plan_data = {
@@ -1008,14 +1238,16 @@ Test API endpoints directly from the documentation.
             stale_line = f"  Stale removed:    [cyan]{stats.get('stale_pages_removed', 0)}[/cyan]\n"
 
         console.print()
-        console.print(Panel.fit(
-            f"[bold green]Documentation generated![/bold green]\n\n"
-            f"  Files scanned:    [cyan]{stats.get('files_scanned', 0)}[/cyan]\n"
-            f"  Pages planned:    [cyan]{stats.get('pages_planned', 0)}[/cyan]\n"
-            f"  Pages generated:  [cyan]{stats.get('pages_generated', 0)}[/cyan]\n"
-            f"{stale_line}"
-            f"  API playground:   [cyan]{'yes' if stats.get('playground') else 'no'}[/cyan]\n\n"
-            f"[dim]Preview: [bold]codewiki serve[/bold]  |  Deploy: [bold]codewiki deploy[/bold][/dim]",
-            title="CodeWiki",
-            border_style="green",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold green]Documentation generated![/bold green]\n\n"
+                f"  Files scanned:    [cyan]{stats.get('files_scanned', 0)}[/cyan]\n"
+                f"  Pages planned:    [cyan]{stats.get('pages_planned', 0)}[/cyan]\n"
+                f"  Pages generated:  [cyan]{stats.get('pages_generated', 0)}[/cyan]\n"
+                f"{stale_line}"
+                f"  API reference:    [cyan]{'yes' if stats.get('playground') else 'no'}[/cyan]\n\n"
+                f"[dim]Preview: [bold]codewiki serve[/bold]  |  Deploy: [bold]codewiki deploy[/bold][/dim]",
+                title="CodeWiki",
+                border_style="green",
+            )
+        )

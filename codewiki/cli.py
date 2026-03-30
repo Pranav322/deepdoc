@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import shutil
 import subprocess
 import sys
@@ -166,8 +167,8 @@ def generate(force, clean, yes, include, exclude, deploy, batch_size):
       1. Scan       Collect files, symbols, endpoints, and OpenAPI specs
       2. Plan       Build a bucket-based docs plan with the LLM
       3. Generate   Write pages batch-by-batch
-      4. Playground Add Swagger UI if an OpenAPI spec is found
-      5. Build      Write mkdocs.yml, navigation, and theme assets
+      4. API Ref     Generate native Mintlify API pages from OpenAPI spec
+      5. Build      Write mint.json and theme assets
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
@@ -221,15 +222,15 @@ def generate(force, clean, yes, include, exclude, deploy, batch_size):
 # ─────────────────────────────────────────────────────────────────────────────
 
 @main.command(short_help="Refresh docs after source code changes.")
-@click.option("--since", default="HEAD~1",
-              show_default=True,
-              help="Git ref to diff against. Examples: HEAD~3, main, origin/main.")
+@click.option("--since", default=None,
+              help="Git ref to diff against (e.g. HEAD~3, main). "
+                   "Defaults to the last synced commit, or HEAD~1 if none.")
 @click.option("--deploy", is_flag=True,
               help="Run `codewiki deploy` automatically after a successful update.")
 @click.option("--replan", is_flag=True,
               help="Force a full replan even if CodeWiki thinks an incremental update would be enough.")
 def update(since, deploy, replan):
-    """Incrementally update docs for files changed since last commit.
+    """Incrementally update docs for files changed since last sync.
 
     Run `codewiki generate` once before using this command.
 
@@ -240,9 +241,31 @@ def update(since, deploy, replan):
       full replan   Used for large structural changes or when --replan is set
 
     The strategy is chosen automatically based on what changed.
+    If no --since is provided, CodeWiki diffs from the commit where docs
+    were last fully synced (stored in .codewiki/state.json).
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
+
+    # Resolve --since: explicit override > saved baseline > HEAD~1 fallback
+    if since is not None:
+        console.print(f"[dim]Using explicit --since: {since}[/dim]")
+    else:
+        from .persistence_v2 import load_sync_state
+        sync_state = load_sync_state(repo_root)
+        if sync_state and sync_state.get("last_synced_commit"):
+            since = sync_state["last_synced_commit"]
+            synced_at = sync_state.get("synced_at", "unknown")[:19]
+            console.print(
+                f"[dim]Diffing from last sync: {since[:10]}... "
+                f"(synced at {synced_at})[/dim]"
+            )
+        else:
+            since = "HEAD~1"
+            console.print(
+                "[dim]No sync baseline found — using HEAD~1. "
+                "Run [bold]codewiki generate[/bold] to establish a baseline.[/dim]"
+            )
 
     mode = cfg.get("generation_mode", "feature_buckets")
     if mode == "feature_buckets":
@@ -302,7 +325,8 @@ def status():
         border_style="blue",
     ))
 
-    stale = find_stale_buckets(plan, repo_root)
+    output_dir = repo_root / cfg.get("output_dir", "docs")
+    stale = find_stale_buckets(plan, repo_root, output_dir=output_dir)
     if stale:
         console.print(f"\n[yellow]⚠ {len(stale)} stale bucket(s):[/yellow]")
         ledger = load_generation_ledger(repo_root)
@@ -331,34 +355,36 @@ def status():
 # ─────────────────────────────────────────────────────────────────────────────
 
 @main.command(short_help="Serve the generated docs locally with live reload.")
-@click.option("--port", default=8000, show_default=True,
-              help="Port to bind the local MkDocs development server to.")
+@click.option("--port", default=3000, show_default=True,
+              help="Port to bind the local Mintlify development server to.")
 def serve(port):
     """Preview the generated docs locally with live reload.
 
     \b
-    Run `codewiki generate` first so `mkdocs.yml` and the docs site exist.
+    Run `codewiki generate` first so the mint.json config and docs exist.
+    Requires Node.js >= 18 to be installed.
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
 
-    mkdocs_yml = repo_root / "mkdocs.yml"
-    if not mkdocs_yml.exists():
-        console.print("[red]mkdocs.yml not found. Run [bold]codewiki generate[/bold] first.[/red]")
+    mint_json = repo_root / "mint.json"
+    if not mint_json.exists():
+        console.print("[red]mint.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
         sys.exit(1)
 
-    console.print(f"[bold]Serving docs at [link=http://localhost:{port}]http://localhost:{port}[/link][/bold]")
+    preview_url = f"http://localhost:{port}"
+    console.print(f"[bold]Serving docs at [link={preview_url}]{preview_url}[/link][/bold]")
     console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
     try:
         subprocess.run(
-            ["mkdocs", "serve", "--config-file", str(mkdocs_yml), "--dev-addr", f"127.0.0.1:{port}"],
+            ["npx", "mintlify", "dev", "--port", str(port)],
             cwd=str(repo_root),
         )
     except KeyboardInterrupt:
         pass
     except FileNotFoundError:
-        console.print("[red]mkdocs not found. Run: pip install mkdocs-material[/red]")
+        console.print("[red]npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
         sys.exit(1)
 
 
@@ -366,45 +392,50 @@ def serve(port):
 # deploy
 # ─────────────────────────────────────────────────────────────────────────────
 
-@main.command("deploy", short_help="Publish the generated docs to GitHub Pages.")
+@main.command("deploy", short_help="Deploy the generated docs.")
 def _deploy():
-    """Deploy docs to GitHub Pages (gh-pages branch).
+    """Deploy the generated documentation.
 
     \b
-    This runs `mkdocs gh-deploy` using the branch and remote configured in `.codewiki.yaml`.
-    Run `codewiki generate` first if the site has not been built yet.
+    Mintlify supports two deployment models:
+      1. Mintlify Hosting — connect your GitHub repo at https://mintlify.com
+      2. Static build — run `npx mintlify build` and host anywhere
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
 
-    mkdocs_yml = repo_root / "mkdocs.yml"
-    if not mkdocs_yml.exists():
-        console.print("[red]mkdocs.yml not found. Run [bold]codewiki generate[/bold] first.[/red]")
+    mint_json = repo_root / "mint.json"
+    if not mint_json.exists():
+        console.print("[red]mint.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
         sys.exit(1)
 
-    branch = cfg.get("github_pages", {}).get("branch", "gh-pages")
-    remote = cfg.get("github_pages", {}).get("remote", "origin")
+    console.print(Panel.fit(
+        "[bold]Mintlify Deployment Options:[/bold]\n\n"
+        "1. [bold cyan]Mintlify Hosting (recommended):[/bold cyan]\n"
+        "   Sign up at [link=https://mintlify.com]https://mintlify.com[/link]\n"
+        "   Connect your GitHub repository\n"
+        "   Push your docs — auto-deploys on every commit\n\n"
+        "2. [bold cyan]Static build:[/bold cyan]\n"
+        "   Run: [bold]npx mintlify build[/bold]\n"
+        "   Deploy the output to any static host (Vercel, Netlify, GitHub Pages)",
+        title="Deploy",
+        border_style="green",
+    ))
 
-    console.print(f"[bold]Deploying to GitHub Pages[/bold] → [cyan]{remote}/{branch}[/cyan]")
-
+    # Offer to run a static build
+    console.print("\n[dim]Running static build...[/dim]")
     try:
-        result = subprocess.run(
-            ["mkdocs", "gh-deploy", "--config-file", str(mkdocs_yml),
-             "--remote-branch", branch, "--remote-name", remote, "--force"],
+        build_result = subprocess.run(
+            ["npx", "mintlify", "build"],
             cwd=str(repo_root),
             capture_output=False,
         )
-        if result.returncode == 0:
-            console.print("[bold green]✓ Deployed![/bold green]")
-            gh_pages_url = cfg.get("site", {}).get("repo_url", "")
-            if gh_pages_url:
-                pages_url = gh_pages_url.replace("github.com", "").strip("/")
-                org, repo = pages_url.split("/")[-2], pages_url.split("/")[-1]
-                console.print(f"[dim]Site live at: https://{org}.github.io/{repo}/[/dim]")
+        if build_result.returncode == 0:
+            console.print("[bold green]✓ Build complete![/bold green]")
         else:
-            console.print("[red]Deploy failed.[/red]")
+            console.print("[red]Build failed.[/red]")
     except FileNotFoundError:
-        console.print("[red]mkdocs not found. Run: pip install mkdocs-material[/red]")
+        console.print("[red]npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
         sys.exit(1)
 
 

@@ -35,6 +35,7 @@ PLAN_FILE = "plan.json"
 SCAN_CACHE_FILE = "scan_cache.json"
 LEDGER_FILE = "ledger.json"
 FILE_MAP_FILE = "file_map.json"
+STATE_FILE = "state.json"
 
 # Legacy top-level files (kept for backwards-compat)
 LEGACY_PLAN_FILE = ".codewiki_plan.json"
@@ -46,6 +47,62 @@ def _state_dir(repo_root: Path) -> Path:
     d = repo_root / CODEWIKI_DIR
     d.mkdir(exist_ok=True)
     return d
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Sync state persistence (commit baseline tracking)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def save_sync_state(
+    repo_root: Path,
+    *,
+    commit_sha: str,
+    status: str = "success",
+    generator_version: str = "v2_buckets",
+    advance_baseline: bool = True,
+) -> None:
+    """Write .codewiki/state.json to track the last synced commit.
+
+    Args:
+        repo_root: Repository root path.
+        commit_sha: The HEAD commit SHA at the time of this generate/update.
+        status: "success" | "partial" | "failed".
+        generator_version: Plan version used ("v2_buckets" | "v1_legacy").
+        advance_baseline: If True, update last_synced_commit. If False, only
+            update last_attempted_commit (used for partial/failed runs).
+    """
+    state = _state_dir(repo_root)
+    path = state / STATE_FILE
+
+    # Load existing state to preserve fields we're not updating
+    existing: dict[str, Any] = {}
+    if path.exists():
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+
+    data = dict(existing)
+    data["last_attempted_commit"] = commit_sha
+    data["status"] = status
+    data["generator_version"] = generator_version
+
+    if advance_baseline:
+        data["last_synced_commit"] = commit_sha
+        data["synced_at"] = _now_iso()
+
+    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+
+
+def load_sync_state(repo_root: Path) -> dict[str, Any] | None:
+    """Read .codewiki/state.json. Returns None if not present or corrupt."""
+    path = _state_dir(repo_root) / STATE_FILE
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -316,15 +373,32 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
     existing = load_generation_ledger(repo_root)
     ledger.update(existing)
 
+    import re as _re
+
     for result in results:
         bucket = result.bucket
+        is_success = result.content is not None and not result.error
+
+        # If this generation failed, preserve the last known good record
+        # and only annotate it with failure info. This prevents staleness
+        # checks from getting noisy after transient LLM failures.
+        if not is_success:
+            existing_record = ledger.get(bucket.slug)
+            if existing_record and existing_record.get("success"):
+                existing_record["last_failed_at"] = _now_iso()
+                existing_record["last_error"] = result.error
+                existing_record["last_failed_retries"] = getattr(result, "retries", 0)
+                ledger[bucket.slug] = existing_record
+                continue
+            # No previous good record — fall through and write the failure
+
         record: dict[str, Any] = {
             "slug": bucket.slug,
             "title": bucket.title,
             "bucket_type": bucket.bucket_type,
             "section": bucket.section,
-            "doc_path": "index.md" if bucket.bucket_type == "overview" else f"{bucket.slug}.md",
-            "success": result.content is not None and not result.error,
+            "doc_path": "introduction.mdx" if bucket.bucket_type == "overview" else f"{bucket.slug}.mdx",
+            "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),
             "elapsed_seconds": round(result.elapsed_seconds, 2),
@@ -334,8 +408,7 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
         # Word + diagram counts
         if result.content:
             record["word_count"] = len(result.content.split())
-            import re
-            record["mermaid_block_count"] = len(re.findall(r"```mermaid", result.content))
+            record["mermaid_block_count"] = len(_re.findall(r"```mermaid", result.content))
         else:
             record["word_count"] = 0
             record["mermaid_block_count"] = 0
@@ -361,6 +434,11 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
                 except Exception:
                     pass
         record["file_hashes"] = file_hashes
+
+        # Clear any stale failure annotations from previous runs
+        record.pop("last_failed_at", None)
+        record.pop("last_error", None)
+        record.pop("last_failed_retries", None)
 
         ledger[bucket.slug] = record
 
@@ -433,18 +511,24 @@ def cleanup_stale_generated_files(
 def find_stale_buckets(
     plan: DocPlan,
     repo_root: Path,
+    output_dir: Path | None = None,
 ) -> list[str]:
     """Compare current file hashes to ledger records. Returns list of stale bucket slugs.
 
     A bucket is stale if:
     - It has no ledger record (never generated)
     - Any of its owned_files has changed since the recorded hash
-    - Its doc output file doesn't exist on disk
+    - Any of its owned_files has been deleted
+    - Its generated doc output file doesn't exist on disk
+
+    Args:
+        plan: The current doc plan with buckets.
+        repo_root: Repository root path.
+        output_dir: Directory where generated docs live. If provided, missing
+            output files are treated as stale. No hardcoded fallback.
     """
     ledger = load_generation_ledger(repo_root)
     stale: list[str] = []
-
-    output_dir = repo_root / ".codewiki"  # used for doc path checks externally
 
     for bucket in plan.buckets:
         slug = bucket.slug
@@ -460,13 +544,24 @@ def find_stale_buckets(
             stale.append(slug)
             continue
 
-        # Check file hashes
+        # Check that the generated doc output file still exists on disk
+        if output_dir is not None:
+            doc_rel = record.get("doc_path") or _fallback_doc_path(record)
+            if doc_rel:
+                doc_path = output_dir / doc_rel
+                if not doc_path.exists():
+                    stale.append(slug)
+                    continue
+
+        # Check file hashes (and detect deleted owned files)
         recorded_hashes = record.get("file_hashes", {})
         changed = False
         for src_file in bucket.owned_files:
             src_path = repo_root / src_file
             if not src_path.exists():
-                continue
+                # File was deleted — bucket is stale
+                changed = True
+                break
             try:
                 content = src_path.read_text(encoding="utf-8", errors="replace")
                 current_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
@@ -539,8 +634,8 @@ def _fallback_doc_path(record: dict[str, Any]) -> str | None:
     if not slug:
         return None
     if record.get("bucket_type") == "overview":
-        return "index.md"
-    return f"{slug}.md"
+        return "introduction.mdx"
+    return f"{slug}.mdx"
 
 
 def _prune_empty_parents(path: Path, stop_at: Path) -> None:

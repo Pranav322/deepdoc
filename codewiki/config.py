@@ -13,29 +13,29 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "description": "",
     "output_dir": "docs",
     "site_dir": "site",
-    "max_pages": 0,                     # 0 = no cap, let LLM decide; set a number to limit
+    "max_pages": 0,  # 0 = no cap, let LLM decide; set a number to limit
     # ── Generation mode ──────────────────────────────────────────────────
     "generation_mode": "feature_buckets",  # "feature_buckets" (v2) | "file_centric" (v1 legacy)
     # ── Giant file thresholds ────────────────────────────────────────────
-    "large_file_lines": 500,            # files above this get tiered summarization
-    "giant_file_lines": 2000,           # files above this get LLM-based feature clustering
+    "large_file_lines": 500,  # files above this get tiered summarization
+    "giant_file_lines": 2000,  # files above this get LLM-based feature clustering
     # ── Integration detection ────────────────────────────────────────────
-    "integration_detection": "auto",    # "auto" | "off"
+    "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────
     "include_feature_pages": True,
     "include_endpoint_pages": True,
     "include_integration_pages": True,
     # ── LLM ──────────────────────────────────────────────────────────────
     "llm": {
-        "provider": "anthropic",        # anthropic | openai | ollama | any litellm alias
+        "provider": "anthropic",  # anthropic | openai | ollama | any litellm alias
         "model": "claude-3-5-sonnet-20241022",
-        "api_key_env": "ANTHROPIC_API_KEY",   # env var that holds the key
-        "base_url": None,               # for Ollama / custom endpoints
-        "max_tokens": None,             # None = let the model decide (recommended); set a number to cap output
+        "api_key_env": "ANTHROPIC_API_KEY",  # env var that holds the key
+        "base_url": None,  # for Ollama / custom endpoints
+        "max_tokens": None,  # None = let the model decide (recommended); set a number to cap output
         "temperature": 0.2,
     },
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
-    "include": [],          # glob patterns — empty = everything
+    "include": [],  # glob patterns — empty = everything
     "exclude": [
         # ── Git / VCS ──────────────────────────────────────────────────────
         ".git",
@@ -94,7 +94,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "static",
         "staticfiles",
         "media",
-        "migrations",
         # ── General build / output ─────────────────────────────────────────
         "dist",
         "build",
@@ -124,7 +123,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "remote": "origin",
     },
     "site": {
-        "repo_url": "",     # shown in top-right of MkDocs site
+        "repo_url": "",  # shown in top-bar of documentation site
         "favicon": "",
         "logo": "",
     },

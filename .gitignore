@@ -1,21 +1,27 @@
 
 # CodeWiki generated state
-.codewiki/
-.codewiki_manifest.json
-.codewiki_plan.json
-.codewiki_file_map.json
+/.codewiki/
+/.codewiki_manifest.json
+/.codewiki_plan.json
+/.codewiki_file_map.json
 
 # Generated docs/site output
-docs/
-mkdocs.yml
-site/
+/docs/
+/site/
+/build/
+
+# Mintlify
+/mint.json
+/.mintlify/
+/logo/
+/favicon.svg
 
 # Packaging/build artifacts
-codewiki.egg-info/
-build/
-dist/
+/codewiki.egg-info/
+/build/
+/dist/
 __pycache__/
-.venv/
-venv/
-env/
-.venv*
+/.venv/
+/venv/
+/env/
+/.venv*

@@ -21,7 +21,7 @@ CodeWiki scans your repo, builds a bucket-based documentation plan, generates ri
 - **Configurable LLM** — Works with Anthropic, OpenAI, Azure OpenAI, Ollama, and other LiteLLM-compatible providers.
 - **Mermaid Diagrams** — Generated pages can include architecture, flow, and request-sequence diagrams.
 - **API Playground** — Auto-detects OpenAPI/Swagger specs and builds a Swagger UI playground page.
-- **GitHub Pages Deploy** — Static site output works well with `mkdocs gh-deploy`.
+- **GitHub Pages Deploy** — Docusaurus-powered static site with built-in GitHub Pages deployment.
 
 ---
 
@@ -38,7 +38,7 @@ pip install -e .
 If the full install is slow due to tree-sitter compilation, install core deps first:
 
 ```bash
-pip install click litellm gitpython rich pyyaml jinja2 mkdocs-material
+pip install click litellm gitpython rich pyyaml jinja2
 pip install -e . --no-deps
 ```
 
@@ -142,7 +142,7 @@ codewiki generate --exclude "tests/**"
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
 3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; per-endpoint reference pages are derived from scan data and generated individually.
 4. **Phase 4: Playground** — Build Swagger UI playground docs if an OpenAPI/Swagger spec exists.
-5. **Phase 5: Build** — Write `mkdocs.yml`, assets, theme overrides, and nav from the generated plan.
+5. **Phase 5: Build** — Write `docusaurus.config.js`, `sidebars.js`, theme CSS, and static assets from the generated plan.
 
 **Options:**
 
@@ -201,14 +201,17 @@ This is useful after `generate` or `update` when you want a quick health check w
 
 ### `codewiki serve`
 
-Preview the generated docs locally with live reload.
+Preview the generated docs locally with live reload. CodeWiki uses polling-based file watching here because some machines hit file-watch limits with the default Docusaurus watcher setup.
 
 ```bash
 codewiki serve
 codewiki serve --port 3000
+codewiki serve --host 127.0.0.1 --port 3000
 ```
 
-Requires `mkdocs-material` to be installed (it is a project dependency).
+If the live dev server still cannot start cleanly, CodeWiki automatically falls back to a static preview server so you can still inspect the generated docs.
+
+Requires Node.js >= 18 to be installed. Docusaurus dependencies are auto-installed on first run.
 
 ### `codewiki deploy`
 
@@ -218,7 +221,7 @@ Deploy the built docs to GitHub Pages.
 codewiki deploy
 ```
 
-This runs `mkdocs gh-deploy` which pushes the built site to the `gh-pages` branch. Make sure GitHub Pages is enabled in your repo settings (Settings → Pages → Source: `gh-pages` branch).
+This builds the Docusaurus site and deploys to GitHub Pages. Make sure GitHub Pages is enabled in your repo settings (Settings → Pages → Source: `gh-pages` branch).
 
 ### `codewiki config`
 
@@ -446,10 +449,10 @@ site:
 | `include` | `[]` | Glob patterns to include (empty = everything) |
 | `exclude` | *(see config)* | Glob patterns to exclude (node_modules, .git, dist, etc.) |
 | **GitHub Pages** | | |
-| `github_pages.branch` | `gh-pages` | Branch for `mkdocs gh-deploy` |
+| `github_pages.branch` | `gh-pages` | Branch for GitHub Pages deploy |
 | `github_pages.remote` | `origin` | Git remote for deploy |
 | **Site** | | |
-| `site.repo_url` | `""` | Repo URL shown in MkDocs site header |
+| `site.repo_url` | `""` | Repo URL shown in Mintlify navigation |
 | `site.favicon` | `""` | Path to favicon |
 | `site.logo` | `""` | Path to logo |
 
@@ -462,24 +465,32 @@ site:
 | Language | Extensions | Extracts |
 |----------|-----------|----------|
 | Python | `.py` | Functions, classes, decorators, imports |
-| JavaScript | `.js`, `.jsx`, `.mjs` | Functions, classes, arrow functions, imports |
+| JavaScript | `.js`, `.jsx`, `.mjs`, `.cjs` | Functions, classes, arrow functions, imports |
 | TypeScript | `.ts`, `.tsx` | Same as JS + interfaces, type aliases |
 | Go | `.go` | Functions, methods, structs, interfaces |
 | PHP | `.php` | Functions, classes, methods, namespaces |
+| Vue | `.vue` | SFC script symbols, props/emits/slots, router/store usage |
 
-**API Endpoint Detection:**
+**High-confidence framework support (fixture-backed):**
 
-| Framework | Language | Detection Method |
+| Framework | Language | Proven patterns |
 |-----------|----------|-----------------|
-| Express / Koa / Hono | JS/TS | `app.get()`, `router.post()`, etc. |
-| Fastify | JS/TS | Method shorthand + `fastify.route()` + schema |
+| FastAPI | Python | `@app.get()`, `@router.post()`, docstrings, `response_model` |
+| Flask | Python | `@app.route()` with method expansion |
+| Laravel | PHP | `Route::get()`, grouped prefixes, middleware, resource expansion |
+| Django / DRF | Python | `path()`, `re_path()`, `@api_view`, `as_view()`, DRF routers, `@action` |
+| Express | JS/TS | Mounted routers via `app.use()`, nested prefixes, chained `route()` calls |
+| Fastify | JS/TS | Plugin `register(..., { prefix })`, shorthand methods, `route({ ... })`, schema hints |
+| Vue | Vue SFC | Component detection, `defineProps`, `defineEmits`, `defineModel`, `defineSlots`, router/store signals |
+
+**Supported but not headline-high-confidence yet:**
+
+| Framework | Language | Current coverage |
+|-----------|----------|------------------|
 | NestJS | TS | `@Controller` + `@Get/@Post` decorators |
-| FastAPI | Python | `@app.get()`, `@router.post()`, `response_model` |
-| Flask | Python | `@app.route()` with methods list |
 | Falcon | Python | `app.add_route()` + `on_get/on_post` responders |
-| Django | Python | `urlpatterns` with `path()` / `re_path()` |
-| Gin / Echo / Fiber | Go | `r.GET()`, `e.POST()`, `app.Get()` |
-| Laravel | PHP | `Route::get()`, `Route::apiResource()` (expands CRUD) |
+| Gin / Echo / Fiber | Go | Common route helpers (`GET`, `POST`, `HandleFunc`) |
+| Next.js / Nuxt | JS/TS | Repo-level framework detection and planning hints |
 
 ---
 
@@ -534,23 +545,23 @@ your-repo/
 │   ├── plan.json               # Bucket plan
 │   ├── scan_cache.json         # Lightweight scan snapshot
 │   ├── ledger.json             # Generated-page ledger
-│   └── file_map.json           # file → bucket/page mapping
+│   ├── file_map.json           # file → bucket/page mapping
+│   └── state.json              # last synced commit + update status
 ├── .codewiki_manifest.json     # Legacy source hash manifest
 ├── .codewiki_plan.json         # Legacy compatibility plan file
 ├── .codewiki_file_map.json     # Legacy compatibility file map
-├── mkdocs.yml                  # MkDocs config generated from the current plan
-├── docs/                       # Generated markdown pages
-│   ├── index.md
-│   ├── architecture.md
-│   ├── setup-and-configuration.md
-│   ├── orders-api.md
-│   ├── get-api-v1-orders.md
-│   ├── api/
-│   │   └── playground.md
-│   ├── assets/
-│   └── overrides/
+├── mint.json                   # Mintlify site config generated from the plan
+├── docs/                       # Generated MDX pages
+│   ├── introduction.mdx
+│   ├── architecture.mdx
+│   ├── setup-and-configuration.mdx
+│   ├── orders-api.mdx
+│   ├── get-api-v1-orders.mdx
+│   ├── openapi.mdx             # Mintlify API reference landing page (when OpenAPI exists)
 │   └── ...
-└── site/                       # Built static site (after mkdocs build)
+├── logo/                       # Optional generated/copied logo assets
+├── favicon.svg                 # Optional favicon asset
+└── site/                       # Built static output after `codewiki deploy`
 ```
 
 ---
@@ -582,9 +593,12 @@ jobs:
         with:
           python-version: "3.11"
 
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Install dependencies
         run: |
-          pip install mkdocs-material
           pip install ./codewiki   # or from PyPI if published
 
       - name: Update and deploy docs
@@ -593,7 +607,7 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          codewiki update --since HEAD~1 --deploy
+          codewiki update --deploy
 ```
 
 Add your API key to repo Settings → Secrets → Actions → `ANTHROPIC_API_KEY`.
@@ -608,7 +622,7 @@ cd your-repo
 codewiki init --provider anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 codewiki generate
-codewiki serve                      # Preview at localhost:8000
+codewiki serve                      # Preview at localhost:3000
 codewiki deploy                     # Push to GitHub Pages
 ```
 

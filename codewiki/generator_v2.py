@@ -22,7 +22,13 @@ from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import (
+    Progress,
+    SpinnerColumn,
+    TextColumn,
+    BarColumn,
+    TaskProgressColumn,
+)
 
 from .llm import LLMClient
 from .parser import parse_file, supported_extensions
@@ -40,15 +46,16 @@ console = Console()
 @dataclass
 class AssembledEvidence:
     """All evidence gathered for a single bucket, ready for prompt injection."""
+
     bucket: DocBucket
-    source_context: str              # tiered source code
-    endpoints_detail: str            # endpoint listing (for endpoint/feature buckets)
-    integration_context: str         # integration identity info
-    cluster_context: str             # giant-file cluster info
-    artifact_context: str            # setup/deploy/test file content
-    graph_context: str               # static edges for diagram seeds
-    cross_ref_context: str           # which other buckets reference this one's files
-    database_context: str = ""       # database/schema info for database-type buckets
+    source_context: str  # tiered source code
+    endpoints_detail: str  # endpoint listing (for endpoint/feature buckets)
+    integration_context: str  # integration identity info
+    cluster_context: str  # giant-file cluster info
+    artifact_context: str  # setup/deploy/test file content
+    graph_context: str  # static edges for diagram seeds
+    cross_ref_context: str  # which other buckets reference this one's files
+    database_context: str = ""  # database/schema info for database-type buckets
     total_evidence_chars: int = 0
     files_included: int = 0
     files_omitted: int = 0
@@ -66,7 +73,9 @@ class EvidenceAssembler:
     # How many chars to reserve for non-source evidence
     NON_SOURCE_BUDGET = 15_000
 
-    def __init__(self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any]):
+    def __init__(
+        self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any]
+    ):
         self.repo_root = repo_root
         self.scan = scan
         self.plan = plan
@@ -90,9 +99,19 @@ class EvidenceAssembler:
         cross_ref_ctx = self._build_cross_ref_context(bucket)
         database_ctx = self._build_database_context(bucket)
 
-        total = sum(len(s) for s in [source_ctx, endpoints_detail, integration_ctx,
-                                      cluster_ctx, artifact_ctx, graph_ctx, cross_ref_ctx,
-                                      database_ctx])
+        total = sum(
+            len(s)
+            for s in [
+                source_ctx,
+                endpoints_detail,
+                integration_ctx,
+                cluster_ctx,
+                artifact_ctx,
+                graph_ctx,
+                cross_ref_ctx,
+                database_ctx,
+            ]
+        )
 
         return AssembledEvidence(
             bucket=bucket,
@@ -163,7 +182,11 @@ class EvidenceAssembler:
                 header += "**Symbols:**\n"
                 for s in parsed.symbols:
                     # If we have owned_symbols, mark which ones are relevant
-                    marker = " ⭐" if owned_symbols_set and s.name in owned_symbols_set else ""
+                    marker = (
+                        " ⭐"
+                        if owned_symbols_set and s.name in owned_symbols_set
+                        else ""
+                    )
                     header += f"- {s.kind} `{s.name}` (line {s.start_line}){marker}"
                     if s.docstring:
                         header += f": {s.docstring[:150]}"
@@ -186,7 +209,9 @@ class EvidenceAssembler:
             remaining = max_chars - total_chars - len(header)
             if remaining <= 200:
                 omitted += 1
-                parts.append(header + "> *[Source omitted — context budget reached.]*\n")
+                parts.append(
+                    header + "> *[Source omitted — context budget reached.]*\n"
+                )
                 continue
 
             if len(code) > remaining:
@@ -203,7 +228,9 @@ class EvidenceAssembler:
         """Tier 2: signatures + up to 10 body lines each."""
         if not parsed or not parsed.symbols:
             lines = content.splitlines()
-            return "\n".join(lines[:100]) + ("\n... [truncated]" if len(lines) > 100 else "")
+            return "\n".join(lines[:100]) + (
+                "\n... [truncated]" if len(lines) > 100 else ""
+            )
 
         content_lines = content.splitlines()
         result: list[str] = []
@@ -242,7 +269,7 @@ class EvidenceAssembler:
             priority = [s for s in parsed.symbols if s.name in owned_symbols]
             others = [s for s in parsed.symbols if s.name not in owned_symbols]
             # Show priority symbols first, then fill with others up to 25
-            symbols_to_show = priority + others[:max(0, 25 - len(priority))]
+            symbols_to_show = priority + others[: max(0, 25 - len(priority))]
         else:
             symbols_to_show = parsed.symbols[:25]
 
@@ -292,7 +319,12 @@ class EvidenceAssembler:
                         break
                     # Match by method+path in bundle's methods_paths
                     for mp in bundle.methods_paths:
-                        if ref_method and ref_path and ref_method in mp and ref_path in mp:
+                        if (
+                            ref_method
+                            and ref_path
+                            and ref_method in mp
+                            and ref_path in mp
+                        ):
                             matched_bundle = bundle
                             break
                     if matched_bundle:
@@ -302,12 +334,20 @@ class EvidenceAssembler:
                 lines.append(f"**Endpoint: {bucket.title}**")
                 lines.append(f"  Handler file: `{matched_bundle.handler_file}`")
                 if matched_bundle.handler_symbols:
-                    lines.append(f"  Handler functions: {', '.join(matched_bundle.handler_symbols)}")
+                    lines.append(
+                        f"  Handler functions: {', '.join(matched_bundle.handler_symbols)}"
+                    )
                 lines.append(f"  Family: {matched_bundle.endpoint_family}")
                 if matched_bundle.evidence:
-                    lines.append("\n  **Evidence chain** (files involved in this endpoint's flow):")
+                    lines.append(
+                        "\n  **Evidence chain** (files involved in this endpoint's flow):"
+                    )
                     for eu in matched_bundle.evidence:
-                        syms = f" — symbols: {', '.join(eu.symbols[:5])}" if eu.symbols else ""
+                        syms = (
+                            f" — symbols: {', '.join(eu.symbols[:5])}"
+                            if eu.symbols
+                            else ""
+                        )
                         lines.append(f"    - `{eu.file_path}` ({eu.role}){syms}")
                     # Also add evidence files to source context by injecting them into owned_files
                     # (non-destructive: only for this assembly run)
@@ -315,15 +355,18 @@ class EvidenceAssembler:
                         if eu.file_path not in bucket.owned_files:
                             bucket.owned_files.append(eu.file_path)
                 if matched_bundle.integration_edges:
-                    lines.append(f"  Integrations touched: {', '.join(matched_bundle.integration_edges)}")
+                    lines.append(
+                        f"  Integrations touched: {', '.join(matched_bundle.integration_edges)}"
+                    )
             else:
                 # Fallback: raw endpoint data matching this handler
                 for ep in self.scan.api_endpoints:
                     ep_handler = ep.get("handler", "")
                     ep_method = ep.get("method", "").upper()
                     ep_path = ep.get("path", "")
-                    if ((ep_handler and ep_handler in page_symbols) or
-                            (ref_method == ep_method and ref_path == ep_path)):
+                    if (ep_handler and ep_handler in page_symbols) or (
+                        ref_method == ep_method and ref_path == ep_path
+                    ):
                         lines.append(
                             f"- {ep_method} {ep_path} → "
                             f"{ep_handler} (`{ep.get('file', '')}:{ep.get('line', 0)}`)"
@@ -335,26 +378,31 @@ class EvidenceAssembler:
         if self.scan.endpoint_bundles:
             for bundle in self.scan.endpoint_bundles:
                 # Match if handler is in our files or family matches slug
-                if (bundle.handler_file in page_files or
-                        bundle.endpoint_family.lower() in bucket.slug.lower()):
+                if (
+                    bundle.handler_file in page_files
+                    or bundle.endpoint_family.lower() in bucket.slug.lower()
+                ):
                     lines.append(f"\n**Endpoint Family: {bundle.endpoint_family}**")
                     for mp in bundle.methods_paths:
                         lines.append(f"- {mp}")
                     lines.append(f"  Handler: `{bundle.handler_file}`")
                     if bundle.handler_symbols:
-                        lines.append(f"  Symbols: {', '.join(bundle.handler_symbols[:10])}")
+                        lines.append(
+                            f"  Symbols: {', '.join(bundle.handler_symbols[:10])}"
+                        )
                     if bundle.evidence:
                         lines.append("  Evidence chain:")
                         for eu in bundle.evidence[:8]:
                             lines.append(f"    - `{eu.file_path}` ({eu.role})")
                     if bundle.integration_edges:
-                        lines.append(f"  Integrations: {', '.join(bundle.integration_edges)}")
+                        lines.append(
+                            f"  Integrations: {', '.join(bundle.integration_edges)}"
+                        )
 
         # Fallback: raw endpoint data from scan
         if not lines:
             relevant_eps = [
-                ep for ep in self.scan.api_endpoints
-                if ep.get("file", "") in page_files
+                ep for ep in self.scan.api_endpoints if ep.get("file", "") in page_files
             ]
             for ep in relevant_eps:
                 lines.append(
@@ -381,13 +429,17 @@ class EvidenceAssembler:
         for identity in self.scan.integration_identities:
             if bucket.bucket_type == "integration":
                 # Match if slug contains the identity name
-                if (identity.name.lower() in bucket.slug.lower() or
-                        identity.display_name.lower() in bucket.title.lower() or
-                        any(f in page_files for f in identity.files)):
+                if (
+                    identity.name.lower() in bucket.slug.lower()
+                    or identity.display_name.lower() in bucket.title.lower()
+                    or any(f in page_files for f in identity.files)
+                ):
                     lines.append(f"\n**Integration: {identity.display_name}**")
                     lines.append(f"Description: {identity.description}")
                     lines.append(f"Files involved: {', '.join(identity.files[:10])}")
-                    lines.append(f"Substantial: {'yes' if identity.is_substantial else 'no'}")
+                    lines.append(
+                        f"Substantial: {'yes' if identity.is_substantial else 'no'}"
+                    )
                     if identity.evidence:
                         lines.append("Evidence:")
                         for ev in identity.evidence[:8]:
@@ -395,7 +447,9 @@ class EvidenceAssembler:
                                 ev_type = ev.get("signal_type", "unknown")
                                 ev_file = ev.get("file_path", "?")
                                 ev_hint = ev.get("name_hint", "")
-                                lines.append(f"  - [{ev_type}] {ev_hint} in `{ev_file}`")
+                                lines.append(
+                                    f"  - [{ev_type}] {ev_hint} in `{ev_file}`"
+                                )
                             else:
                                 # Evidence stored as plain string
                                 lines.append(f"  - {ev}")
@@ -422,11 +476,17 @@ class EvidenceAssembler:
             analysis = self.scan.giant_file_clusters.get(fpath)
             if not analysis:
                 continue
-            lines.append(f"\n**Giant file: `{fpath}`** ({analysis.line_count} lines, "
-                         f"{analysis.total_symbols} symbols, {len(analysis.clusters)} clusters)")
+            lines.append(
+                f"\n**Giant file: `{fpath}`** ({analysis.line_count} lines, "
+                f"{analysis.total_symbols} symbols, {len(analysis.clusters)} clusters)"
+            )
             for cluster in analysis.clusters:
                 sym_list = ", ".join(cluster.symbols[:8])
-                more = f" +{len(cluster.symbols) - 8} more" if len(cluster.symbols) > 8 else ""
+                more = (
+                    f" +{len(cluster.symbols) - 8} more"
+                    if len(cluster.symbols) > 8
+                    else ""
+                )
                 lines.append(f"  - **{cluster.cluster_name}**: {cluster.description}")
                 lines.append(f"    Symbols: {sym_list}{more}")
 
@@ -451,7 +511,7 @@ class EvidenceAssembler:
                 content = ar_path.read_text(encoding="utf-8", errors="replace")
                 if used + len(content) > budget:
                     # Truncate
-                    content = content[:budget - used] + "\n... [truncated]"
+                    content = content[: budget - used] + "\n... [truncated]"
                 lines.append(f"\n### Artifact: `{ar}`\n```\n{content}\n```")
                 used += len(content)
                 if used >= budget:
@@ -530,7 +590,7 @@ class EvidenceAssembler:
             other = self._slug_to_bucket.get(slug)
             if other:
                 shared_list = ", ".join(f"`{f}`" for f in sorted(shared)[:4])
-                lines.append(f"- [{other.title}]({slug}.md) via {shared_list}")
+                lines.append(f"- [{other.title}](/{slug}) via {shared_list}")
 
         return "\n".join(lines)
 
@@ -547,7 +607,10 @@ class EvidenceAssembler:
         db_keywords = ("database", "data model", "schema", "model", "table", "orm")
         is_db_bucket = (
             bucket.bucket_type == "system"
-            and any(kw in bucket.title.lower() or kw in bucket.slug.lower() for kw in db_keywords)
+            and any(
+                kw in bucket.title.lower() or kw in bucket.slug.lower()
+                for kw in db_keywords
+            )
         ) or bucket.bucket_type == "database"
         if not is_db_bucket:
             return ""
@@ -572,7 +635,11 @@ class EvidenceAssembler:
         for mf in db_scan.model_files:
             if mf.is_migration:
                 continue
-            model_list = ", ".join(mf.model_names[:20]) if mf.model_names else "(no models extracted)"
+            model_list = (
+                ", ".join(mf.model_names[:20])
+                if mf.model_names
+                else "(no models extracted)"
+            )
             lines.append(f"- `{mf.file_path}` ({mf.orm_framework}): {model_list}")
 
             # Try to include actual model source for richer context
@@ -586,9 +653,13 @@ class EvidenceAssembler:
                         lines.append(f"\n```python\n# {mf.file_path}\n{content}\n```\n")
                     else:
                         # Extract class/model definitions only (first 50 lines of each class)
-                        model_snippets = self._extract_model_snippets(content, mf.model_names)
+                        model_snippets = self._extract_model_snippets(
+                            content, mf.model_names
+                        )
                         if model_snippets:
-                            lines.append(f"\n```python\n# {mf.file_path} (key models)\n{model_snippets}\n```\n")
+                            lines.append(
+                                f"\n```python\n# {mf.file_path} (key models)\n{model_snippets}\n```\n"
+                            )
                 except Exception:
                     pass
 
@@ -668,7 +739,10 @@ class PageGenerator:
         effective_type = bucket.bucket_type
         if bucket.bucket_type == "system":
             db_keywords = ("database", "data model", "schema", "model", "table", "orm")
-            if any(kw in bucket.title.lower() or kw in bucket.slug.lower() for kw in db_keywords):
+            if any(
+                kw in bucket.title.lower() or kw in bucket.slug.lower()
+                for kw in db_keywords
+            ):
                 effective_type = "database"
 
         prompt_template = get_prompt_for_page_type(effective_type)
@@ -690,10 +764,14 @@ class PageGenerator:
 
         # Format required sections/diagrams/coverage
         required_sections = (
-            ", ".join(bucket.required_sections) if bucket.required_sections else "default"
+            ", ".join(bucket.required_sections)
+            if bucket.required_sections
+            else "default"
         )
         required_diagrams = (
-            ", ".join(bucket.required_diagrams) if bucket.required_diagrams else "architecture_flow"
+            ", ".join(bucket.required_diagrams)
+            if bucket.required_diagrams
+            else "architecture_flow"
         )
         coverage_targets = (
             ", ".join(bucket.coverage_targets) if bucket.coverage_targets else ""
@@ -733,6 +811,7 @@ class PageGenerator:
 @dataclass
 class ValidationResult:
     """Result of validating a generated page against bucket requirements."""
+
     is_valid: bool
     missing_sections: list[str] = field(default_factory=list)
     missing_file_refs: list[str] = field(default_factory=list)
@@ -779,7 +858,9 @@ class PageValidator:
 
         return result
 
-    def _check_sections(self, content: str, bucket: DocBucket, result: ValidationResult):
+    def _check_sections(
+        self, content: str, bucket: DocBucket, result: ValidationResult
+    ):
         """Check that required sections appear as markdown headings."""
         if not bucket.required_sections:
             return
@@ -793,8 +874,7 @@ class PageValidator:
             section_lower = section.lower()
             # Fuzzy match: check if any heading contains the key words
             found = any(
-                section_lower in h or
-                all(word in h for word in section_lower.split())
+                section_lower in h or all(word in h for word in section_lower.split())
                 for h in headings
             )
             if not found:
@@ -805,7 +885,9 @@ class PageValidator:
                 f"Missing sections: {', '.join(result.missing_sections)}"
             )
 
-    def _check_file_refs(self, content: str, bucket: DocBucket, result: ValidationResult):
+    def _check_file_refs(
+        self, content: str, bucket: DocBucket, result: ValidationResult
+    ):
         """Check that at least some of the bucket's owned files are referenced."""
         if not bucket.owned_files:
             return
@@ -831,7 +913,9 @@ class PageValidator:
     def _check_hallucinated_paths(self, content: str, result: ValidationResult):
         """Find file paths in backticks that don't exist in the repo."""
         # Match `path/to/file.ext` or `path/to/file.ext:123`
-        refs = re.findall(r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8})(?::\d+)?`", content)
+        refs = re.findall(
+            r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8})(?::\d+)?`", content
+        )
         hallucinated = []
         for ref in refs:
             # Skip common non-path patterns
@@ -879,8 +963,16 @@ def _fix_mermaid_diagram(diagram: str) -> str:
         stripped = line.strip().lower()
 
         if not diagram_type and stripped:
-            for dtype in ("flowchart", "graph", "sequencediagram", "classdiagram",
-                          "erdiagram", "gantt", "pie", "statediagram"):
+            for dtype in (
+                "flowchart",
+                "graph",
+                "sequencediagram",
+                "classdiagram",
+                "erdiagram",
+                "gantt",
+                "pie",
+                "statediagram",
+            ):
                 if stripped.startswith(dtype):
                     diagram_type = dtype
                     break
@@ -888,7 +980,7 @@ def _fix_mermaid_diagram(diagram: str) -> str:
         # Fix: Unquoted labels with parentheses in flowchart
         if diagram_type in ("flowchart", "graph", ""):
             line = re.sub(
-                r'\b(\w[\w-]*)\(([^()]*\([^()]*\)[^()]*)\)',
+                r"\b(\w[\w-]*)\(([^()]*\([^()]*\)[^()]*)\)",
                 lambda m: f'{m.group(1)}["{m.group(2)}"]',
                 line,
             )
@@ -896,15 +988,25 @@ def _fix_mermaid_diagram(diagram: str) -> str:
         # Fix: Node labels with colons not in quotes
         line = re.sub(
             r'\[([^\]"]*:[^\]"]*)\]',
-            lambda m: (f'["{m.group(1)}"]'
-                       if ":" in m.group(1) and not m.group(1).startswith('"')
-                       else f'[{m.group(1)}]'),
+            lambda m: (
+                f'["{m.group(1)}"]'
+                if ":" in m.group(1) and not m.group(1).startswith('"')
+                else f"[{m.group(1)}]"
+            ),
             line,
         )
 
         # Fix: classDiagram -> instead of --
         if diagram_type == "classdiagram":
-            line = re.sub(r'\s+->\s+', ' --> ', line)
+            line = re.sub(r"\s+->\s+", " --> ", line)
+
+        # Fix: sequenceDiagram participants accidentally emitted with flowchart syntax
+        if diagram_type == "sequencediagram":
+            line = re.sub(
+                r'^(\s*participant\s+)([A-Za-z][\w-]*)\["([^"]+)"\]\s*$',
+                lambda m: f"{m.group(1)}{m.group(2)} as {m.group(3)}",
+                line,
+            )
 
         fixed.append(line)
 
@@ -912,7 +1014,7 @@ def _fix_mermaid_diagram(diagram: str) -> str:
 
     # Warn about duplicate node IDs
     if diagram_type in ("flowchart", "graph"):
-        node_ids = re.findall(r'\b([A-Za-z][\w-]*)\s*[\[({\|]', result)
+        node_ids = re.findall(r"\b([A-Za-z][\w-]*)\s*[\[({\|]", result)
         seen: set[str] = set()
         dupes: list[str] = []
         for nid in node_ids:
@@ -920,13 +1022,17 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 dupes.append(nid)
             seen.add(nid)
         if dupes:
-            result = f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n" + result
+            result = (
+                f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n"
+                + result
+            )
 
     return result
 
 
-def fix_file_references(content: str, repo_root: Path, known_files: set[str],
-                        page_files: list[str]) -> str:
+def fix_file_references(
+    content: str, repo_root: Path, known_files: set[str], page_files: list[str]
+) -> str:
     """Remove hallucinated file:line refs, fix out-of-range line numbers."""
     file_line_counts: dict[str, int] = {}
 
@@ -971,21 +1077,52 @@ def fix_file_references(content: str, repo_root: Path, known_files: set[str],
 # Rate limiting constants — tuned for provisioned providers (Azure PTU, etc.)
 # Override via .codewiki.yaml: batch_size, max_parallel_workers
 BATCH_SIZE = 10
-RATE_LIMIT_PAUSE = 0.5          # seconds between batches (Azure rarely 429s within quota)
-RATE_LIMIT_BACKOFF = 3.0        # initial backoff on 429; doubles each retry
+RATE_LIMIT_PAUSE = 0.5  # seconds between batches (Azure rarely 429s within quota)
+RATE_LIMIT_BACKOFF = 3.0  # initial backoff on 429; doubles each retry
 MAX_RETRIES = 5
-MAX_PARALLEL_WORKERS = 6        # LLM concurrency — safe for most Azure/OpenAI deployments
+MAX_PARALLEL_WORKERS = 6  # LLM concurrency — safe for most Azure/OpenAI deployments
 
 
 @dataclass
 class GenerationResult:
     """Result of generating a single page."""
+
     bucket: DocBucket
     content: str | None = None
     validation: ValidationResult | None = None
     error: str | None = None
     elapsed_seconds: float = 0.0
     retries: int = 0
+
+
+@dataclass
+class GenerationSummary:
+    """Aggregate summary for a generation run."""
+
+    attempted: int = 0
+    succeeded: int = 0
+    failed: int = 0
+    skipped: int = 0
+
+    @property
+    def status(self) -> str:
+        if self.failed == 0:
+            return "success"
+        return "partial" if self.succeeded > 0 else "failed"
+
+
+def summarize_generation_results(results: list[GenerationResult]) -> GenerationSummary:
+    """Summarize successful, failed, and skipped generation results."""
+
+    summary = GenerationSummary(attempted=len(results))
+    for result in results:
+        if result.error:
+            summary.failed += 1
+        elif result.content:
+            summary.succeeded += 1
+        else:
+            summary.skipped += 1
+    return summary
 
 
 class BucketGenerationEngine:
@@ -1044,17 +1181,23 @@ class BucketGenerationEngine:
 
             # Process in batches for rate limiting
             for batch_start in range(0, total, self.batch_size):
-                batch = buckets[batch_start:batch_start + self.batch_size]
+                batch = buckets[batch_start : batch_start + self.batch_size]
 
                 # Use thread pool for parallel LLM calls within batch
-                with ThreadPoolExecutor(max_workers=min(self.max_workers, len(batch))) as executor:
+                with ThreadPoolExecutor(
+                    max_workers=min(self.max_workers, len(batch))
+                ) as executor:
                     futures = {}
                     for bucket in batch:
-                        progress.update(task, description=f"[dim]Queuing {bucket.title}...[/dim]")
+                        progress.update(
+                            task, description=f"[dim]Queuing {bucket.title}...[/dim]"
+                        )
 
                         # Check staleness
                         if not force and not self._bucket_is_stale(bucket):
-                            results.append(GenerationResult(bucket=bucket, content=None))
+                            results.append(
+                                GenerationResult(bucket=bucket, content=None)
+                            )
                             progress.advance(task)
                             continue
 
@@ -1094,8 +1237,12 @@ class BucketGenerationEngine:
                                 )
                         except Exception as e:
                             failed_count += 1
-                            results.append(GenerationResult(bucket=bucket, error=str(e)))
-                            console.print(f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}")
+                            results.append(
+                                GenerationResult(bucket=bucket, error=str(e))
+                            )
+                            console.print(
+                                f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}"
+                            )
 
                         progress.advance(task)
 
@@ -1106,9 +1253,7 @@ class BucketGenerationEngine:
         if failed_count > 0:
             console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")
 
-        console.print(
-            f"[green]✓ Generated {generated_count}/{total} pages[/green]"
-        )
+        console.print(f"[green]✓ Generated {generated_count}/{total} pages[/green]")
 
         return results
 
@@ -1132,6 +1277,7 @@ class BucketGenerationEngine:
             openapi_context = ""
             if bucket.bucket_type == "endpoint" and self.scan.has_openapi:
                 from .openapi import parse_openapi_spec, spec_to_context_string
+
                 for spec_path in self.scan.openapi_paths:
                     spec = parse_openapi_spec(self.repo_root / spec_path)
                     if spec:
@@ -1142,13 +1288,15 @@ class BucketGenerationEngine:
                         break
 
             # Step 3: Generate with retry
-            content = self._call_with_retry(evidence, sitemap_context,
-                                            dependency_links, openapi_context)
+            content = self._call_with_retry(
+                evidence, sitemap_context, dependency_links, openapi_context
+            )
 
             # Step 4: Post-process
             content = fix_mermaid_diagrams(content)
             content = fix_file_references(
-                content, self.repo_root,
+                content,
+                self.repo_root,
                 set(self.scan.file_summaries.keys()),
                 bucket.owned_files,
             )
@@ -1165,7 +1313,11 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
 
             # Step 7: Write to disk
-            filename = "index.md" if bucket.bucket_type == "overview" else f"{bucket.slug}.md"
+            filename = (
+                "introduction.mdx"
+                if bucket.bucket_type == "overview"
+                else f"{bucket.slug}.mdx"
+            )
             doc_path = self.output_dir / filename
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(content, encoding="utf-8")
@@ -1181,7 +1333,7 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
             # Graceful degradation: generate a stub page
             stub = self._generate_stub_page(bucket)
-            filename = f"{bucket.slug}.md"
+            filename = f"{bucket.slug}.mdx"
             doc_path = self.output_dir / filename
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(stub, encoding="utf-8")
@@ -1196,10 +1348,24 @@ class BucketGenerationEngine:
     @staticmethod
     def _is_retryable(err_str: str) -> bool:
         """Check if an error is transient and worth retrying."""
-        markers = ("rate", "429", "overloaded", "timeout", "timed out",
-                   "502", "503", "504", "bad gateway", "service unavailable",
-                   "connection", "temporary", "throttl", "capacity",
-                   "server_error", "internal_error")
+        markers = (
+            "rate",
+            "429",
+            "overloaded",
+            "timeout",
+            "timed out",
+            "502",
+            "503",
+            "504",
+            "bad gateway",
+            "service unavailable",
+            "connection",
+            "temporary",
+            "throttl",
+            "capacity",
+            "server_error",
+            "internal_error",
+        )
         lower = err_str.lower()
         return any(m in lower for m in markers)
 
@@ -1226,7 +1392,7 @@ class BucketGenerationEngine:
                     if is_last:
                         raise
                     # Exponential backoff with jitter to avoid thundering herd
-                    wait = RATE_LIMIT_BACKOFF * (2 ** attempt) + random.uniform(0, 1.5)
+                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
                     console.print(
                         f"    [yellow]⏳ Transient error ({evidence.bucket.title}) — "
                         f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"
@@ -1273,9 +1439,10 @@ class BucketGenerationEngine:
         # Fix 3: Add a notice for very short pages
         if validation.word_count < 100:
             notice = (
-                "\n\n!!! warning \"Incomplete Documentation\"\n"
-                "    This page was auto-generated with limited evidence. "
+                "\n\n<Warning>\n"
+                "This page was auto-generated with limited evidence. "
                 "Some sections may be incomplete.\n"
+                "</Warning>\n"
             )
             content = notice + content
 
@@ -1284,19 +1451,24 @@ class BucketGenerationEngine:
     def _generate_stub_page(self, bucket: DocBucket) -> str:
         """Generate a minimal stub page when LLM generation completely fails."""
         files_list = "\n".join(f"- `{f}`" for f in bucket.owned_files[:20])
-        more = f"\n- ... and {len(bucket.owned_files) - 20} more" if len(bucket.owned_files) > 20 else ""
+        more = (
+            f"\n- ... and {len(bucket.owned_files) - 20} more"
+            if len(bucket.owned_files) > 20
+            else ""
+        )
 
         deps = ""
         if bucket.depends_on:
             deps = "\n## Related Pages\n" + "\n".join(
-                f"- [{slug}]({slug}.md)" for slug in bucket.depends_on
+                f"- [{slug}](/{slug})" for slug in bucket.depends_on
             )
 
         return f"""# {bucket.title}
 
-!!! warning "Auto-Generated Stub"
-    This page could not be fully generated. It contains a file listing only.
-    Re-run `codewiki generate` to retry.
+<Warning>
+This page could not be fully generated. It contains a file listing only.
+Re-run `codewiki generate` to retry.
+</Warning>
 
 ## Description
 
@@ -1333,11 +1505,11 @@ class BucketGenerationEngine:
         for section, buckets in by_section.items():
             lines.append(f"**{section}**")
             for b in buckets:
-                md_file = f"{b.slug}.md"
+                page_path = f"/{b.slug}"
                 key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
                 if len(b.owned_files) > 4:
                     key_files += f" +{len(b.owned_files) - 4} more"
-                lines.append(f"- [{b.title}]({md_file}) — {b.description}")
+                lines.append(f"- [{b.title}]({page_path}) — {b.description}")
                 if key_files:
                     lines.append(f"  *Covers: {key_files}*")
 
@@ -1366,7 +1538,11 @@ class BucketGenerationEngine:
             for imp in parsed.imports:
                 # Simple suffix match against known files
                 for known_file in self.scan.file_summaries:
-                    stem = known_file.rsplit(".", 1)[0].replace("/", ".").replace("\\", ".")
+                    stem = (
+                        known_file.rsplit(".", 1)[0]
+                        .replace("/", ".")
+                        .replace("\\", ".")
+                    )
                     if stem and stem in imp.replace("/", "."):
                         for linked_bucket in file_to_buckets.get(known_file, []):
                             if linked_bucket.slug != bucket.slug:
@@ -1376,15 +1552,18 @@ class BucketGenerationEngine:
         if not related:
             return ""
 
-        lines = ["**Dependency Links** (pages this module imports from — MUST link to these):"]
+        lines = [
+            "**Dependency Links** (pages this module imports from — MUST link to these):"
+        ]
         for b in related.values():
-            lines.append(f"- [{b.title}]({b.slug}.md) — {b.description}")
+            lines.append(f"- [{b.title}](/{b.slug}) — {b.description}")
 
         return "\n".join(lines)
 
     def _bucket_is_stale(self, bucket: DocBucket) -> bool:
         """Check if any source file for this bucket has changed since last generation."""
         from .manifest import Manifest, file_hash as compute_hash
+
         manifest = Manifest(self.output_dir)
 
         for src_file in bucket.owned_files:
@@ -1402,6 +1581,7 @@ class BucketGenerationEngine:
     def update_manifest(self, results: list[GenerationResult]):
         """Update the manifest with new file hashes for all successfully generated pages."""
         from .manifest import Manifest, file_hash as compute_hash
+
         manifest = Manifest(self.output_dir)
 
         for result in results:
@@ -1410,8 +1590,12 @@ class BucketGenerationEngine:
                     src_path = self.repo_root / src_file
                     if src_path.exists():
                         try:
-                            content = src_path.read_text(encoding="utf-8", errors="replace")
-                            manifest.update(src_file, compute_hash(content), result.bucket.slug)
+                            content = src_path.read_text(
+                                encoding="utf-8", errors="replace"
+                            )
+                            manifest.update(
+                                src_file, compute_hash(content), result.bucket.slug
+                            )
                         except Exception:
                             pass
         manifest.save()

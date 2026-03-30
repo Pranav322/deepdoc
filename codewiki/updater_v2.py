@@ -98,7 +98,7 @@ class UpdaterV2:
         for page in affected_pages:
             try:
                 doc_content = self._update_page(page, changed_rels)
-                doc_path = self.output_dir / f"{page.slug}.md"
+                doc_path = self.output_dir / f"{page.slug}.mdx"
                 doc_path.parent.mkdir(parents=True, exist_ok=True)
                 doc_path.write_text(doc_content, encoding="utf-8")
 
@@ -120,13 +120,13 @@ class UpdaterV2:
         self.manifest.save()
 
         # Step 6: Rebuild nav
-        from .site.mkdocs_builder_v2 import build_mkdocs_from_plan
+        from .site.mintlify_builder_v2 import build_mintlify_from_plan
         if plan:
             has_openapi = any(
                 (self.repo_root / p).exists()
                 for p in ["openapi.json", "openapi.yaml", "swagger.json", "swagger.yaml"]
             )
-            build_mkdocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
+            build_mintlify_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} page(s)[/bold green]")
         return updated
@@ -134,7 +134,7 @@ class UpdaterV2:
     def _update_page(self, page: DocPage, changed_files: set[str]) -> str:
         """Regenerate a page with context about what changed."""
         # Load previous doc
-        doc_path = self.output_dir / f"{page.slug}.md"
+        doc_path = self.output_dir / f"{page.slug}.mdx"
         previous_doc = ""
         if doc_path.exists():
             previous_doc = doc_path.read_text(encoding="utf-8")
@@ -252,7 +252,7 @@ class UpdaterV2:
         from .planner_v2 import scan_repo as bucket_scan_repo
 
         # Step 1: Determine stale buckets via ledger + current file hashes
-        stale_slugs = set(find_stale_buckets(plan, self.repo_root))
+        stale_slugs = set(find_stale_buckets(plan, self.repo_root, output_dir=self.output_dir))
 
         # Also check git diff for any additional changed files
         changed_files = self._get_changed_files(since)
@@ -310,12 +310,12 @@ class UpdaterV2:
         updated = sum(1 for r in gen_results if r.content and not r.error)
 
         # Step 5: Rebuild nav
-        from .site.mkdocs_builder_v2 import build_mkdocs_from_plan
+        from .site.mintlify_builder_v2 import build_mintlify_from_plan
         has_openapi = any(
             (self.repo_root / p).exists()
             for p in ["openapi.json", "openapi.yaml", "swagger.json", "swagger.yaml"]
         )
-        build_mkdocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
+        build_mintlify_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} bucket page(s)[/bold green]")
         return updated

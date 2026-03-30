@@ -22,8 +22,11 @@ HARD RULES (never skip any of these):
 1. **Mermaid diagrams**: Include at least one Mermaid diagram per page where it adds value. \
 Use the right type: flowchart for flows, classDiagram for class relationships, \
 sequenceDiagram for request/response flows, erDiagram for data models. \
-Wrap in ```mermaid code blocks. Always quote labels that contain special characters \
-(parentheses, brackets, colons, slashes) using double quotes: A["label (with parens)"].
+Wrap in ```mermaid code blocks. For flowchart/graph nodes, quote labels with special \
+characters using `A["label (with parens)"]`. For sequence diagrams, use \
+`participant A as Label`, not flowchart node syntax. For classDiagram and \
+stateDiagram-v2, use simple identifiers for class/state names and keep display \
+labels free of flowchart-only syntax.
 2. **File references**: EVERY time you mention a function, class, method, type, or constant, \
 include the file path in backticks like: `getUserById()` (`src/services/userService.ts:42`). \
 Never mention code without saying where it lives. Only reference file paths that exist in \
@@ -34,10 +37,85 @@ and detailed. No generic filler.
 5. **Edge cases**: Mention gotchas, error handling, and non-obvious behavior.
 6. **Cross-page links**: This is a LINKED documentation site. Whenever you mention a concept, \
 module, service, API, or feature that is documented in another page, you MUST link to it using \
-standard Markdown: `[Page Title](page-slug.md)`. \
+standard Markdown: `[Page Title](/page-slug)`. \
 Every prompt includes a sitemap of all available pages — use it. \
 If a page is listed in "Dependency Links", you MUST link to it at least once where it is \
 first mentioned. Think of each page as part of a wiki, not a standalone document.
+7. **Mintlify UI components**: This documentation site runs on Mintlify. Use its rich \
+JSX components to make pages beautiful and scannable. Never use `:::type` admonition syntax.
+
+**Callouts** — for tips, warnings, notes, gotchas:
+```
+<Note>This behaviour changed in v2.</Note>
+<Warning>Running this in production will drop all existing sessions.</Warning>
+<Tip>Use batch processing for large datasets — it's 10x faster.</Tip>
+<Info>This module is auto-generated. Do not edit manually.</Info>
+<Check>All three environment variables must be set before starting.</Check>
+```
+
+**Steps** — for setup guides, workflows, any ordered procedure (use instead of a numbered list):
+```
+<Steps>
+  <Step title="Install dependencies">
+    Run `npm install` from the project root.
+  </Step>
+  <Step title="Configure environment">
+    Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
+  </Step>
+  <Step title="Start the server">
+    Run `npm run dev`. The API will be available at `http://localhost:3000`.
+  </Step>
+</Steps>
+```
+
+**Tabs** — for showing the same concept in multiple languages or environments:
+```
+<Tabs>
+  <Tab title="Node.js">
+    ```javascript
+    const client = new ApiClient({ apiKey: process.env.API_KEY });
+    ```
+  </Tab>
+  <Tab title="Python">
+    ```python
+    client = ApiClient(api_key=os.environ["API_KEY"])
+    ```
+  </Tab>
+</Tabs>
+```
+
+**CardGroup** — for feature overviews, linking to related pages, listing capabilities. \
+Use at the end of overview/architecture pages to create a visual navigation grid:
+```
+<CardGroup cols={2}>
+  <Card title="Authentication" icon="lock" href="/auth">
+    JWT-based auth with refresh token rotation.
+  </Card>
+  <Card title="Database Layer" icon="database" href="/database">
+    PostgreSQL schema and migration strategy.
+  </Card>
+</CardGroup>
+```
+Card icons come from the Heroicons set. Good choices: `rocket`, `bolt`, `code`, `lock`, \
+`database`, `server`, `cloud`, `shield`, `chart-bar`, `cog`, `puzzle-piece`, \
+`arrow-path`, `squares-2x2`, `command-line`, `globe-alt`, `bell`, `key`.
+
+**Accordion** — for FAQ sections, detailed option references, or collapsible details:
+```
+<AccordionGroup>
+  <Accordion title="Why does the worker restart every 30 seconds?">
+    The heartbeat timeout is set in `config/worker.yaml`. Increase `heartbeat_interval`
+    to reduce restarts on slow jobs.
+  </Accordion>
+</AccordionGroup>
+```
+
+**When to use each**:
+- Use `<Steps>` for ANY setup, installation, or ordered workflow — never a numbered list.
+- Use `<CardGroup>` at the end of overview and architecture pages to link to sub-pages.
+- Use `<Tabs>` when showing the same thing in multiple languages, environments, or configs.
+- Use `<Accordion>` for reference material with many options or a FAQ section.
+- Use callouts (`<Note>`, `<Tip>`, etc.) liberally — they draw the eye to important info.
 """
 
 
@@ -50,7 +128,7 @@ CROSS_LINK_SECTION = """\
 ---
 
 ## Documentation Sitemap (for cross-linking)
-Use these to link to other pages wherever relevant. Syntax: `[Title](slug.md)`
+Use these to link to other pages wherever relevant. Syntax: `[Title](/slug)`
 
 {sitemap_context}
 
@@ -77,6 +155,8 @@ Write a comprehensive overview with these sections:
 
 # {project_name}
 
+Short tagline (1 sentence) describing what the project does.
+
 ## What This Does
 2-3 sentences on the project's purpose. Be specific, not vague.
 
@@ -102,8 +182,14 @@ The 3-5 most important things a new dev must understand. For each:
 - Link to the relevant documentation page from the sitemap
 
 ## Getting Started
-Practical steps to clone, install, configure, and run. Infer from config files. \
-Link to the Setup page from the sitemap if it exists.
+Use a `<Steps>` component (not a numbered list) for the installation and run steps. \
+Infer from config files. Link to the Setup page from the sitemap if it exists.
+
+## Explore the Docs
+End the page with a `<CardGroup cols={{2}}>` that links to the most important pages \
+from the sitemap. Each `<Card>` must have a `title`, a relevant Heroicon `icon` \
+(e.g. `"bolt"`, `"database"`, `"lock"`, `"server"`, `"cog"`, `"puzzle-piece"`), \
+an `href` (the `/slug`), and a 1-sentence description.
 
 Be detailed and specific. Reference actual file paths everywhere. \
 This overview is the entry point — make sure every major feature links to its deep-dive page.
@@ -570,7 +656,11 @@ Reference EVERY file path. Link to related pages throughout. Be deep and specifi
 
 
 ENDPOINT_BUCKET_V2 = """\
-Generate **endpoint documentation** for an API endpoint or endpoint family.
+Generate **API reference documentation** for a family of related endpoints.
+
+This page covers multiple endpoints in one group. Use Mintlify's API components \
+(`<ParamField>`, `<ResponseField>`, `<RequestExample>`, `<ResponseExample>`) \
+to make it beautiful and scannable. Do NOT use markdown tables for parameters or responses.
 
 Page: {title}
 Description: {page_description}
@@ -587,73 +677,104 @@ Handler source code and evidence:
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
 
-Write comprehensive endpoint documentation following this mandatory outline:
+Write comprehensive endpoint family documentation:
 
 # {title}
 
-## Route Overview
-Summary of what this endpoint family handles. Include a **Mermaid sequence diagram** \
-showing the typical request lifecycle (client → middleware → handler → service → DB → response).
+## Overview
+What this API resource handles and who uses it. \
+Include a **Mermaid sequence diagram** showing the typical request lifecycle \
+(client → middleware → handler → service → DB → response). \
+Link to the auth/middleware page from the sitemap.
 
-## Authentication & Validation
-What auth is required. What validation runs. \
-Link to the middleware/auth page from the sitemap.
+## Authentication
+What auth is required. Reference the exact middleware and link to the auth page in the sitemap.
 
-## Endpoints Detail
+---
 
-For EACH endpoint:
+## Endpoints
 
-### `METHOD /path`
+For EACH endpoint, use this structure (repeat for every endpoint in the family):
+
+### `METHOD /path/to/endpoint`
+
 **Handler**: `handlerFunction()` (`file/path.ts:line`)
 
-**Description**: What this endpoint does.
+One sentence on what this endpoint does.
 
-**Parameters**:
-| Param | In | Type | Required | Description |
-|-------|----|------|----------|-------------|
+#### Parameters
 
-**Request Body** (if applicable):
-```json
-{{
-  "field": "type — description"
-}}
+(Use `<ParamField>` for every parameter. Examples:)
+```
+<ParamField path="id" type="string" required>
+  The resource ID.
+</ParamField>
+
+<ParamField query="status" type="string">
+  Filter by status. One of: `active`, `cancelled`.
+</ParamField>
+
+<ParamField body="name" type="string" required>
+  Name of the resource to create.
+</ParamField>
 ```
 
-**Response** `200 OK`:
-```json
-{{
-  "example": "response"
-}}
+For nested body objects, wrap children in `<Expandable title="properties">`:
+```
+<ParamField body="address" type="object">
+  <Expandable title="properties">
+    <ParamField body="street" type="string">Street address.</ParamField>
+    <ParamField body="city" type="string">City name.</ParamField>
+  </Expandable>
+</ParamField>
 ```
 
-**Error Responses**:
-| Status | Condition | Description |
-|--------|-----------|-------------|
+#### Response
+
+Use `<ResponseField>` for every field in the success response:
+```
+<ResponseField name="id" type="string">Unique resource ID.</ResponseField>
+<ResponseField name="status" type="string">
+  Current status: `pending`, `active`, or `cancelled`.
+</ResponseField>
+```
+
+Then show a realistic request + response example:
+```
+<RequestExample>
+```bash
+curl https://api.example.com/v1/resource/123 \\
+  -H "Authorization: Bearer $TOKEN"
+```
+</RequestExample>
+
+<ResponseExample>
+```json {{ "id": "res_123", "status": "active" }}
+```
+</ResponseExample>
+```
+
+#### Errors
+| Status | Condition |
+|--------|-----------|
+| 400 | ... |
+| 401 | Unauthorized |
+| 404 | Resource not found |
+
+---
 
 ## Execution Flow
-Step-by-step what happens when the request is processed. Reference actual functions and files.
+Step-by-step walkthrough of what happens internally when a request is processed. \
+Reference exact function names and file paths throughout.
 
-## Downstream Calls
-What other services, models, or external systems are called. \
-Link to their documentation pages.
-
-## Integrations Touched
-External systems involved (payments, warehouses, delivery, etc.). \
-Link to integration pages from the sitemap.
-
-## State Changes
-What database records, caches, or queues are modified.
-
-## Async Side Effects
-Background jobs, queue tasks, notifications triggered by this endpoint.
-
-## Diagrams
-Include all required diagrams. Use Mermaid. Reference actual code.
+## State Changes & Side Effects
+What database records, cache keys, or queues are modified. \
+Background jobs or webhooks triggered. Reference exact functions.
 
 ## See Also
-Related endpoint, feature, and integration pages.
+Related endpoint, feature, and integration pages from the sitemap.
 
-Reference EVERY file path. Be specific about request/response shapes.
+Reference EVERY file path. Be specific and use real field names from the source code.
 """
 
 
@@ -859,6 +980,10 @@ Reference EVERY file path. Include actual column types and constraints from the 
 ENDPOINT_REF_V2 = """\
 Generate a **single-endpoint API reference page** for one specific API endpoint.
 
+This page will be rendered by Mintlify with the full two-column interactive layout:
+- Left column: description, parameters, response fields
+- Right column: live "Try it" panel + code examples
+
 Page: {title}
 Description: {page_description}
 Bucket type: endpoint_ref
@@ -874,71 +999,112 @@ Handler source code and evidence:
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
 
-Write a complete single-endpoint reference page following this mandatory outline:
+CRITICAL: Output MUST start with this YAML frontmatter block (fill in real values from source):
 
-# {title}
-
-## Summary
-One-sentence description of what this endpoint does. Include the HTTP method and full path.
-
-| Property | Value |
-|----------|-------|
-| Method | `GET/POST/PUT/DELETE` |
-| Path | `/api/v1/...` |
-| Auth | Required/Public |
-| Rate Limit | ... |
-
-## Request
-
-### Path Parameters
-| Param | Type | Required | Description |
-|-------|------|----------|-------------|
-
-### Query Parameters
-| Param | Type | Default | Description |
-|-------|------|---------|-------------|
-
-### Request Body
-```json
-{{
-  "field": "type — description"
-}}
+```
+---
+title: "{title}"
+api: "METHOD /actual/path/here"
+description: "One-sentence description of what this endpoint does."
+authMethod: "bearer"
+---
 ```
 
-### Headers
-| Header | Required | Description |
-|--------|----------|-------------|
+Replace `METHOD` with the real HTTP verb (GET, POST, PUT, DELETE, PATCH).
+Replace `/actual/path/here` with the real path from the source code (e.g. `/api/v1/orders/:id`).
+Set `authMethod` to `"bearer"` if JWT/token auth is required, or omit it if public.
+Do NOT wrap the frontmatter in a code block — it must be literal `---` at the start of the file.
+
+After the frontmatter, write the page body:
+
+## Overview
+One paragraph describing what this endpoint does, when to use it, and any important \
+behavioral notes. Reference the handler function and its file path. \
+Link to the auth/middleware page if auth is required.
 
 ## Handler Flow
-Include a **Mermaid sequence diagram** showing the full request lifecycle:
-client → middleware → handler → service layer → database → response.
-Reference the exact handler function and file path.
+Include a **Mermaid sequence diagram** showing the exact request lifecycle:
+client → middleware → validation → handler → service → DB → response.
+Reference the exact handler function name and file path (`handlerName()` in `path/to/file.ts:42`).
 
-## Validation
-What validations run on the request (schema validation, auth checks, business rules). \
-Reference exact validator functions and files.
+## Parameters
+
+For path parameters, use `<ParamField path="paramName" type="string" required>`:
+```
+<ParamField path="id" type="string" required>
+  The unique identifier for the resource.
+</ParamField>
+```
+
+For query parameters, use `<ParamField query="paramName" type="string">`:
+```
+<ParamField query="page" type="integer" default="1">
+  Page number for pagination. Starts at 1.
+</ParamField>
+```
+
+For request body fields, use `<ParamField body="fieldName" type="type" required>`.
+For nested objects, wrap child fields in `<Expandable title="properties">`.
+Do NOT use markdown tables for parameters — use ONLY `<ParamField>` components.
 
 ## Response
 
-### Success Response `200 OK`
+For each field in the success response, use `<ResponseField name="field" type="type">`:
+```
+<ResponseField name="id" type="string">
+  Unique identifier of the created resource.
+</ResponseField>
+<ResponseField name="status" type="string">
+  Current status. One of: `pending`, `active`, `cancelled`.
+</ResponseField>
+```
+For nested response objects, wrap child fields in `<Expandable title="properties">`.
+Do NOT use markdown tables for response fields — use ONLY `<ResponseField>` components.
+
+After the `<ResponseField>` blocks, include a `<RequestExample>` showing a realistic \
+request + a `<ResponseExample>` showing the actual response shape:
+```
+<RequestExample>
+```bash
+curl -X POST https://api.example.com/v1/orders \\
+  -H "Authorization: Bearer $TOKEN" \\
+  -H "Content-Type: application/json" \\
+  -d '{{"product_id": "prod_123", "quantity": 2}}'
+```
+</RequestExample>
+
+<ResponseExample>
 ```json
 {{
-  "example": "response structure"
+  "id": "ord_abc",
+  "status": "pending",
+  "total": 2999
 }}
 ```
+</ResponseExample>
+```
 
-### Error Responses
-| Status | Code | Condition | Description |
-|--------|------|-----------|-------------|
+## Validation
+What validations run (schema validation, auth checks, business rules). \
+Reference exact validator functions and files.
 
 ## Side Effects
-What happens beyond the response: database writes, cache updates, events emitted, \
-queue jobs dispatched, webhooks sent. Reference exact functions and files.
+Database writes, cache updates, events, queue jobs, or webhooks triggered by this endpoint. \
+Reference exact functions and files.
+
+## Error Responses
+Use a compact `<ResponseField>` for each error status code, or a clean table:
+| Status | Condition |
+|--------|-----------|
+| 400 | ... |
+| 401 | ... |
+| 404 | ... |
 
 ## Related Endpoints
 Link to other endpoint_ref pages for related endpoints (same resource family). \
 Link to the parent endpoint bucket page for the full family overview.
 
+REMEMBER: Start the file with the frontmatter `---` block, NOT with `# {title}`.
 Reference EVERY file path. Use the actual handler function names from the source code.
 """
 

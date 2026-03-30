@@ -1,0 +1,102 @@
+project_name: codewiki
+description: ''
+output_dir: docs
+site_dir: site
+max_pages: 0
+generation_mode: feature_buckets
+large_file_lines: 500
+giant_file_lines: 2000
+integration_detection: auto
+include_feature_pages: true
+include_endpoint_pages: true
+include_integration_pages: true
+llm:
+  provider: azure
+  model: azure/gpt-4.1
+  api_key_env: AZURE_API_KEY
+  base_url: null
+  max_tokens: null
+  temperature: 0.2
+languages:
+- python
+- javascript
+- typescript
+- go
+- php
+- vue
+include: []
+exclude:
+- .git
+- .svn
+- .hg
+- .idea
+- .vscode
+- '*.swp'
+- '*.swo'
+- .DS_Store
+- Thumbs.db
+- __pycache__
+- '*.pyc'
+- '*.pyo'
+- '*.pyd'
+- .venv
+- venv
+- '*venv*'
+- .mypy_cache
+- .pytest_cache
+- .ruff_cache
+- .tox
+- '*.egg-info'
+- .eggs
+- htmlcov
+- node_modules
+- '*.min.js'
+- '*.bundle.js'
+- '*.map'
+- .nyc_output
+- .eslintcache
+- .cache
+- .parcel-cache
+- .turbo
+- storybook-static
+- .nuxt
+- .output
+- .next
+- '*.sum'
+- '*.exe'
+- '*.test'
+- '*.out'
+- vendor
+- .phpunit.cache
+- .php-cs-fixer.cache
+- storage/framework
+- bootstrap/cache
+- static
+- staticfiles
+- media
+- migrations
+- dist
+- build
+- bin
+- out
+- target
+- coverage
+- tmp
+- .env
+- .env.*
+- '*.local'
+- logs
+- '*.log'
+- '*.sql'
+- '*.lock'
+- .docker
+- .terraform
+- backend-tss-api_v2/backend-tss-api_v2-docs/
+github_pages:
+  enabled: false
+  branch: gh-pages
+  remote: origin
+site:
+  repo_url: ''
+  favicon: ''
+  logo: ''

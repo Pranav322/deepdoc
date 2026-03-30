@@ -1,0 +1,6 @@
+{
+  "name": "fastify-app",
+  "dependencies": {
+    "fastify": "^4.28.0"
+  }
+}

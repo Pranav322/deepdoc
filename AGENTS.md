@@ -1,6 +1,7 @@
 # AGENTS.md
 
 Guidance for coding agents working in this repository.
+this is stale either update or dont read it 
 
 ## Scope
 - Applies to the repository root: `/Users/apple/tss/codegen/codewiki`.
@@ -30,12 +31,12 @@ Guidance for coding agents working in this repository.
 - `codewiki/updater_v2.py` - incremental refresh behavior.
 - `codewiki/parser/` - registry plus language-specific parsers.
 - `codewiki/llm/client.py` - LiteLLM wrapper.
-- `codewiki/site/mkdocs_builder_v2.py` - MkDocs config and theme asset generation.
+- `codewiki/site/docusaurus_builder_v2.py` - Docusaurus config, sidebar, and theme asset generation.
 
 ## Install And Verify Commands
 ```bash
 python -m pip install -e .
-python -m pip install click litellm gitpython rich pyyaml jinja2 mkdocs-material
+python -m pip install click litellm gitpython rich pyyaml jinja2
 python -m pip install -e . --no-deps
 codewiki --version
 codewiki --help
@@ -94,7 +95,7 @@ That command shape is conventional, but pytest is not currently preconfigured by
 Treat these as outputs or persisted state; do not hand-edit them unless the task is explicitly about generated artifacts or state format changes.
 - `.codewiki/`, `.codewiki/plan.json`, `.codewiki/scan_cache.json`, `.codewiki/ledger.json`, `.codewiki/file_map.json`
 - `.codewiki_plan.json`, `.codewiki_file_map.json`, `.codewiki_manifest.json`
-- `docs/`, `mkdocs.yml`, `site/`, `codewiki.egg-info/`, `__pycache__/`
+- `docs/`, `docusaurus.config.js`, `sidebars.js`, `package.json`, `node_modules/`, `build/`, `.docusaurus/`, `site/`, `codewiki.egg-info/`, `__pycache__/`
 Do not treat `codewiki/planner.py.bak` as an authoritative source file.
 
 ## Code Style

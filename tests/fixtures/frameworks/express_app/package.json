@@ -1,0 +1,6 @@
+{
+  "name": "express-app",
+  "dependencies": {
+    "express": "^4.19.0"
+  }
+}

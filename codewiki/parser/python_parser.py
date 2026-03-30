@@ -67,7 +67,7 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str], dep
         # Recurse into class body for methods
         for child in node.children:
             if child.type == "block":
-                for method_node in child.children:
+                for method_node in child.children: 
                     if method_node.type in ("function_definition", "async_function_definition"):
                         msym = _extract_function(method_node, lines, kind="method")
                         if msym:

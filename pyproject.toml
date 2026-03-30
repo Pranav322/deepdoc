@@ -20,8 +20,6 @@ dependencies = [
     "pyyaml>=6.0",
     "rich>=13.0",
     "jinja2>=3.1",
-    "mkdocs-material>=9.5",
-    "mkdocs>=1.5",
 ]
 
 [project.scripts]
@@ -30,3 +28,8 @@ codewiki = "codewiki.cli:main"
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["codewiki*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]

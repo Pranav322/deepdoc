@@ -51,6 +51,7 @@ from .generator_v2 import (
     BucketGenerationEngine,
     escape_mdx_text_hazards,
     escape_mdx_route_params,
+    normalize_code_fence_languages,
     summarize_generation_results,
 )
 from .persistence_v2 import (
@@ -489,6 +490,7 @@ class PipelineV2:
         # Post-process: validate Mermaid diagrams and file references
         raw = self._validate_and_fix_mermaid(raw)
         raw = self._validate_file_refs(raw, scan, page)
+        raw = normalize_code_fence_languages(raw)
         raw = escape_mdx_route_params(raw)
         raw = escape_mdx_text_hazards(raw)
 

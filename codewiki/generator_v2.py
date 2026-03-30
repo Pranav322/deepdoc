@@ -1147,6 +1147,25 @@ def escape_mdx_text_hazards(content: str) -> str:
     return "\n".join(lines)
 
 
+def normalize_code_fence_languages(content: str) -> str:
+    """Normalize unsupported or inconsistent fence labels to safe Shiki languages."""
+
+    alias_map = {
+        "env": "bash",
+        "dotenv": "bash",
+        "shell": "bash",
+        "sh": "bash",
+    }
+
+    def replace(match: re.Match) -> str:
+        lang = match.group(1)
+        rest = match.group(2) or ""
+        normalized = alias_map.get(lang.lower(), lang)
+        return f"```{normalized}{rest}"
+
+    return re.sub(r"^```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE)
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 3.5  Parallel Generation Orchestrator
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1378,6 +1397,7 @@ class BucketGenerationEngine:
                 set(self.scan.file_summaries.keys()),
                 bucket.owned_files,
             )
+            content = normalize_code_fence_languages(content)
             content = escape_mdx_route_params(content)
             content = escape_mdx_text_hazards(content)
 

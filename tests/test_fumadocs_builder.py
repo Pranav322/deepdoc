@@ -7,6 +7,7 @@ from codewiki.generator_v2 import (
     _fix_mermaid_diagram,
     escape_mdx_route_params,
     escape_mdx_text_hazards,
+    normalize_code_fence_languages,
 )
 from codewiki.pipeline_v2 import stage_openapi_assets
 from codewiki.prompts_v2 import ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2, SYSTEM_V2
@@ -190,6 +191,22 @@ Inline code: `ANY /get-prod-variants/<str:prod_slug>`
 
     assert "/get-prod-variants/&lt;str:prod_slug&gt;" in escaped
     assert "`ANY /get-prod-variants/<str:prod_slug>`" in escaped
+
+
+def test_normalize_code_fence_languages_rewrites_env_aliases() -> None:
+    content = """```env
+SECRET_KEY=test
+```
+
+```dotenv
+DEBUG=False
+```
+"""
+
+    normalized = normalize_code_fence_languages(content)
+
+    assert "```bash\nSECRET_KEY=test" in normalized
+    assert "```bash\nDEBUG=False" in normalized
 
 
 def test_fix_mermaid_diagram_rewrites_quoted_edge_targets() -> None:

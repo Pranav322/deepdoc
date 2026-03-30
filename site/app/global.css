@@ -1,0 +1,12 @@
+@import 'tailwindcss';
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+@import 'fumadocs-openapi/css/preset.css';
+
+:root {
+  --codewiki-accent: oklch(0.62 0.11 183);
+}
+
+body {
+  font-feature-settings: 'liga' 1, 'calt' 1;
+}

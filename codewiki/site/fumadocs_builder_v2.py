@@ -58,10 +58,11 @@ def _ensure_app_scaffold(
 
     files = {
         site_dir / "package.json": _package_json(project_name),
+        site_dir / "postcss.config.mjs": _postcss_config_mjs(),
         site_dir / "tsconfig.json": _tsconfig_json(),
         site_dir / "next-env.d.ts": _next_env_d_ts(),
         site_dir / "next.config.mjs": _next_config_mjs(),
-        site_dir / "source.config.ts": _source_config_ts(docs_dir_relative),
+        site_dir / "source.config.mjs": _source_config_mjs(docs_dir_relative),
         site_dir / "mdx-components.tsx": _mdx_components_tsx(),
         site_dir / "app" / "layout.tsx": _app_layout_tsx(project_name),
         site_dir / "app" / "global.css": _global_css(),
@@ -405,10 +406,10 @@ def _package_json(project_name: str) -> str:
             "dependencies": {
                 "@orama/orama": "^3.1.10",
                 "@types/mdx": "^2.0.13",
-                "fumadocs-core": "^15.6.1",
-                "fumadocs-mdx": "^11.5.0",
-                "fumadocs-openapi": "^6.4.2",
-                "fumadocs-ui": "^15.6.1",
+                "fumadocs-core": "^15.7.9",
+                "fumadocs-mdx": "^11.9.0",
+                "fumadocs-openapi": "^9.3.9",
+                "fumadocs-ui": "^15.7.11",
                 "mermaid": "^11.6.0",
                 "next": "^15.3.0",
                 "next-themes": "^0.4.6",
@@ -417,6 +418,7 @@ def _package_json(project_name: str) -> str:
                 "tailwindcss": "^4.1.3",
             },
             "devDependencies": {
+                "@tailwindcss/postcss": "^4.1.14",
                 "@types/node": "^22.13.9",
                 "@types/react": "^19.0.12",
                 "@types/react-dom": "^19.0.4",
@@ -464,6 +466,18 @@ def _tsconfig_json() -> str:
     ) + "\n"
 
 
+def _postcss_config_mjs() -> str:
+    return dedent(
+        """\
+        export default {
+          plugins: {
+            '@tailwindcss/postcss': {},
+          },
+        };
+        """
+    )
+
+
 def _next_env_d_ts() -> str:
     return dedent(
         """\
@@ -485,7 +499,7 @@ def _next_config_mjs() -> str:
         const __dirname = path.dirname(fileURLToPath(import.meta.url));
         const repoRoot = path.join(__dirname, '..');
         const withMDX = createMDX({
-          configPath: './source.config.ts',
+          configPath: './source.config.mjs',
         });
 
         /** @type {import('next').NextConfig} */
@@ -509,7 +523,7 @@ def _next_config_mjs() -> str:
     )
 
 
-def _source_config_ts(docs_dir_relative: str) -> str:
+def _source_config_mjs(docs_dir_relative: str) -> str:
     return dedent(
         f"""\
         import {{ defineDocs, defineConfig }} from 'fumadocs-mdx/config';
@@ -581,12 +595,12 @@ def _app_layout_tsx(project_name: str) -> str:
             <html lang="en" suppressHydrationWarning>
               <body className="min-h-screen bg-fd-background text-fd-foreground antialiased">
                 <RootProvider
-                  search={{
+                  search={{{{
                     options: {{
                       api: '/search',
                       type: 'static',
                     }},
-                  }}
+                  }}}}
                 >
                   {{children}}
                 </RootProvider>
@@ -652,7 +666,7 @@ def _docs_page_tsx() -> str:
     return dedent(
         """\
         import { notFound } from 'next/navigation';
-        import { DocsBody, DocsPage } from 'fumadocs-ui/layouts/docs/page';
+        import { DocsBody, DocsPage } from 'fumadocs-ui/page';
         import { docsSource } from '@/lib/source';
         import { getMDXComponents } from '@/mdx-components';
 
@@ -689,7 +703,7 @@ def _api_page_tsx() -> str:
     return dedent(
         """\
         import { notFound } from 'next/navigation';
-        import { DocsBody, DocsPage } from 'fumadocs-ui/layouts/docs/page';
+        import { DocsBody, DocsPage } from 'fumadocs-ui/page';
         import { APIPage } from '@/components/api-page';
         import { apiSource } from '@/lib/openapi';
 
@@ -793,7 +807,7 @@ def _mermaid_component_tsx() -> str:
 
           const { svg, bindFunctions } = use(
             cachePromise(`${chart}-${resolvedTheme}`, () => {
-              return mermaid.render(id, chart.replaceAll('\\n', '\n'));
+              return mermaid.render(id, chart.replaceAll('\\\\n', '\\n'));
             }),
           );
 
@@ -813,12 +827,15 @@ def _mermaid_component_tsx() -> str:
 def _source_ts() -> str:
     return dedent(
         """\
+        import { resolveFiles } from 'fumadocs-mdx';
         import { loader } from 'fumadocs-core/source';
-        import { docs } from 'fumadocs-mdx:collections/server';
+        import { docs, meta } from '@/.source';
 
         export const docsSource = loader({
           baseUrl: '/',
-          source: docs.toFumadocsSource(),
+          source: {
+            files: resolveFiles({ docs, meta }),
+          },
         });
         """
     )

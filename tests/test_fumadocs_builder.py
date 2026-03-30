@@ -3,6 +3,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from codewiki.generator_v2 import (
+    _fix_mermaid_diagram,
+    escape_mdx_route_params,
+    escape_mdx_text_hazards,
+)
 from codewiki.pipeline_v2 import stage_openapi_assets
 from codewiki.prompts_v2 import ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2, SYSTEM_V2
 from codewiki.site.fumadocs_builder_v2 import build_fumadocs_from_plan
@@ -49,7 +54,8 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
 
     assert (output_dir / "index.mdx").exists()
     assert (repo_root / "site" / "package.json").exists()
-    assert (repo_root / "site" / "source.config.ts").exists()
+    assert (repo_root / "site" / "postcss.config.mjs").exists()
+    assert (repo_root / "site" / "source.config.mjs").exists()
     assert (repo_root / "site" / "app" / "search" / "route.ts").exists()
     assert (repo_root / "site" / "public" / "favicon.svg").exists()
     assert not (repo_root / "mint.json").exists()
@@ -130,3 +136,78 @@ def test_stage_openapi_assets_uses_endpoint_ref_slug_shape(tmp_path: Path) -> No
             "path": "/orders/{id}",
         }
     ]
+
+
+def test_escape_mdx_route_params_avoids_runtime_expressions() -> None:
+    content = """# GET /reports/{slug}
+
+<Card title="GET /api/users/{id}" href="/get-api-users-id">
+  Open the user endpoint.
+</Card>
+
+Inline code: `GET /reports/{slug}`
+
+```mermaid
+flowchart TD
+    A["GET /reports/{slug}"]
+```
+"""
+
+    escaped = escape_mdx_route_params(content)
+
+    assert "/reports/&#123;slug&#125;" in escaped
+    assert 'title="GET /api/users/&#123;id&#125;"' in escaped
+    assert "`GET /reports/{slug}`" in escaped
+    assert 'A["GET /reports/{slug}"]' in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_bare_lt_in_prose_only() -> None:
+    content = """- **Timeouts**: Webhook handlers must respond quickly (<5s typical).
+
+Inline code: `<5s`
+
+```md
+<5s
+```
+"""
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "(&lt;5s typical)." in escaped
+    assert "Inline code: `<5s`" in escaped
+    assert "```md\n<5s\n```" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_django_route_converters() -> None:
+    content = """# ANY /get-prod-variants/<str:prod_slug>
+
+Description: API reference for ANY /get-prod-variants/<str:prod_slug>
+
+Inline code: `ANY /get-prod-variants/<str:prod_slug>`
+"""
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "/get-prod-variants/&lt;str:prod_slug&gt;" in escaped
+    assert "`ANY /get-prod-variants/<str:prod_slug>`" in escaped
+
+
+def test_fix_mermaid_diagram_rewrites_quoted_edge_targets() -> None:
+    diagram = """flowchart TD
+SiteBuilder --> "Fumadocs Site"
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert 'SiteBuilder --> FumadocsSite["Fumadocs Site"]' in fixed
+
+
+def test_fix_mermaid_diagram_strips_flowchart_labels_from_class_diagram_edges() -> None:
+    diagram = """classDiagram
+SiteBuilder --> FumadocsSite["Fumadocs Site"]
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert "SiteBuilder --> FumadocsSite" in fixed
+    assert 'FumadocsSite["Fumadocs Site"]' not in fixed

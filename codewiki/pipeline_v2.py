@@ -47,7 +47,12 @@ from .planner_v2 import (
     scan_repo as bucket_scan_repo,
 )
 from .prompts_v2 import SYSTEM_V2, get_prompt_for_page_type
-from .generator_v2 import BucketGenerationEngine, summarize_generation_results
+from .generator_v2 import (
+    BucketGenerationEngine,
+    escape_mdx_text_hazards,
+    escape_mdx_route_params,
+    summarize_generation_results,
+)
 from .persistence_v2 import (
     cleanup_stale_generated_files,
     load_generation_ledger,
@@ -484,6 +489,8 @@ class PipelineV2:
         # Post-process: validate Mermaid diagrams and file references
         raw = self._validate_and_fix_mermaid(raw)
         raw = self._validate_file_refs(raw, scan, page)
+        raw = escape_mdx_route_params(raw)
+        raw = escape_mdx_text_hazards(raw)
 
         return raw
 

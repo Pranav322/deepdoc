@@ -970,6 +970,14 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 lambda m: f'{m.group(1)}["{m.group(2)}"]',
                 line,
             )
+            line = re.sub(
+                r'(-->|---|-.->|==>)\s*"([^"]+)"',
+                lambda m: (
+                    f'{m.group(1)} '
+                    f'{re.sub(r"[^A-Za-z0-9]+", "", m.group(2)).strip() or "Node"}["{m.group(2)}"]'
+                ),
+                line,
+            )
 
         # Fix: Node labels with colons not in quotes
         line = re.sub(
@@ -985,6 +993,16 @@ def _fix_mermaid_diagram(diagram: str) -> str:
         # Fix: classDiagram -> instead of --
         if diagram_type == "classdiagram":
             line = re.sub(r"\s+->\s+", " --> ", line)
+            line = re.sub(
+                r'(-->\s+)([A-Za-z][\w-]*)\["[^"]+"\]',
+                r"\1\2",
+                line,
+            )
+            line = re.sub(
+                r'^(\s*)([A-Za-z][\w-]*)\["[^"]+"\]\s*$',
+                r"\1class \2",
+                line,
+            )
 
         # Fix: sequenceDiagram participants accidentally emitted with flowchart syntax
         if diagram_type == "sequencediagram":
@@ -1054,6 +1072,79 @@ def fix_file_references(
         fix_ref,
         content,
     )
+
+
+def escape_mdx_route_params(content: str) -> str:
+    """Escape route params like `/users/{id}` in MDX text without touching code fences.
+
+    MDX treats `{id}` as a JavaScript expression in normal text and JSX props, so
+    endpoint paths must be escaped to render as literal braces.
+    """
+
+    def escape_segment(segment: str) -> str:
+        return re.sub(
+            r"(?<=/)\{([A-Za-z_][A-Za-z0-9_]*)\}",
+            lambda match: f"&#123;{match.group(1)}&#125;",
+            segment,
+        )
+
+    lines: list[str] = []
+    in_fence = False
+    for line in content.splitlines():
+        if line.startswith("```"):
+            in_fence = not in_fence
+            lines.append(line)
+            continue
+
+        if in_fence:
+            lines.append(line)
+            continue
+
+        parts = re.split(r"(`[^`]*`)", line)
+        escaped = "".join(
+            part if part.startswith("`") and part.endswith("`") else escape_segment(part)
+            for part in parts
+        )
+        lines.append(escaped)
+
+    return "\n".join(lines)
+
+
+def escape_mdx_text_hazards(content: str) -> str:
+    """Escape plain-text MDX hazards like bare `<5s` outside fenced code.
+
+    A raw `<` followed by a digit is parsed as invalid JSX in MDX prose.
+    """
+
+    lines: list[str] = []
+    in_fence = False
+    for line in content.splitlines():
+        if line.startswith("```"):
+            in_fence = not in_fence
+            lines.append(line)
+            continue
+
+        if in_fence:
+            lines.append(line)
+            continue
+
+        parts = re.split(r"(`[^`]*`)", line)
+        def escape_segment(part: str) -> str:
+            part = re.sub(r"<(?=\d)", "&lt;", part)
+            part = re.sub(
+                r"<([A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*)>",
+                lambda match: f"&lt;{match.group(1)}&gt;",
+                part,
+            )
+            return part
+
+        escaped = "".join(
+            part if part.startswith("`") and part.endswith("`") else escape_segment(part)
+            for part in parts
+        )
+        lines.append(escaped)
+
+    return "\n".join(lines)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -1287,6 +1378,8 @@ class BucketGenerationEngine:
                 set(self.scan.file_summaries.keys()),
                 bucket.owned_files,
             )
+            content = escape_mdx_route_params(content)
+            content = escape_mdx_text_hazards(content)
 
             # Step 5: Validate
             validation = self.validator.validate(content, bucket)

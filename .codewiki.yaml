@@ -15,7 +15,7 @@ llm:
   model: azure/gpt-4.1
   api_key_env: AZURE_API_KEY
   base_url: null
-  max_tokens: null
+  max_tokens: 30000
   temperature: 0.2
 languages:
 - python
@@ -74,7 +74,6 @@ exclude:
 - static
 - staticfiles
 - media
-- migrations
 - dist
 - build
 - bin

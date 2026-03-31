@@ -246,6 +246,40 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# clean
+# ─────────────────────────────────────────────────────────────────────────────
+
+@main.command(short_help="Remove DeepDoc config, generated output, and saved state.")
+@click.option("--yes", is_flag=True,
+              help="Skip the confirmation prompt before deleting DeepDoc artifacts.")
+def clean(yes):
+    """Reset the current repository to a pre-DeepDoc state.
+
+    This removes `.deepdoc.yaml`, generated docs, the generated site scaffold,
+    chatbot backend scaffolding, and saved DeepDoc state files/directories.
+
+    \b
+    Examples:
+      deepdoc clean
+      deepdoc clean --yes
+    """
+    cfg_path = find_config()
+    repo_root = cfg_path.parent if cfg_path else Path.cwd()
+    cfg = load_config(cfg_path)
+    output_dir = repo_root / cfg.get("output_dir", "docs")
+    targets = _cleanup_targets(repo_root, output_dir, include_config=True)
+
+    if not targets:
+        console.print("[dim]No DeepDoc config, output, or saved state found to remove.[/dim]")
+        return
+
+    _confirm_clean(repo_root, output_dir, yes, include_config=True)
+    _wipe_deepdoc_output(repo_root, output_dir, include_config=True)
+
+    console.print("[green]✓ Removed DeepDoc config, generated output, and saved state.[/green]")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # update
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -658,20 +692,39 @@ def _inspect_output_state(repo_root: Path, output_dir: Path) -> dict[str, bool]:
     }
 
 
-def _confirm_clean(repo_root: Path, output_dir: Path, yes: bool) -> None:
+def _cleanup_targets(repo_root: Path, output_dir: Path, include_config: bool = False) -> list[Path]:
+    targets: list[Path] = []
+    if output_dir.exists():
+        targets.append(output_dir)
+
+    for path in (
+        repo_root / ".deepdoc",
+        repo_root / "site",
+        repo_root / "chatbot_backend",
+        repo_root / ".deepdoc_plan.json",
+        repo_root / ".deepdoc_file_map.json",
+    ):
+        if path.exists():
+            targets.append(path)
+
+    if include_config:
+        cfg_path = repo_root / CONFIG_FILE
+        if cfg_path.exists():
+            targets.append(cfg_path)
+
+    return targets
+
+
+def _confirm_clean(
+    repo_root: Path,
+    output_dir: Path,
+    yes: bool,
+    include_config: bool = False,
+) -> None:
     if yes:
         return
 
-    targets = []
-    if output_dir.exists():
-        targets.append(str(output_dir))
-    if (repo_root / ".deepdoc").exists():
-        targets.append(str(repo_root / ".deepdoc"))
-    if (repo_root / "site").exists():
-        targets.append(str(repo_root / "site"))
-    if (repo_root / "chatbot_backend").exists():
-        targets.append(str(repo_root / "chatbot_backend"))
-
+    targets = [str(path) for path in _cleanup_targets(repo_root, output_dir, include_config=include_config)]
     target_text = ", ".join(targets) if targets else str(output_dir)
     if not click.confirm(
         f"This will permanently delete DeepDoc output/state in {target_text}. Continue?",
@@ -680,27 +733,16 @@ def _confirm_clean(repo_root: Path, output_dir: Path, yes: bool) -> None:
         raise click.Abort()
 
 
-def _wipe_deepdoc_output(repo_root: Path, output_dir: Path) -> None:
-    if output_dir.exists():
-        shutil.rmtree(output_dir)
-
-    state_dir = repo_root / ".deepdoc"
-    if state_dir.exists():
-        shutil.rmtree(state_dir)
-
-    site_dir = repo_root / "site"
-    if site_dir.exists():
-        shutil.rmtree(site_dir)
-    backend_dir = repo_root / "chatbot_backend"
-    if backend_dir.exists():
-        shutil.rmtree(backend_dir)
-
-    for path in (
-        repo_root / ".deepdoc_plan.json",
-        repo_root / ".deepdoc_file_map.json",
-    ):
-        if path.exists():
-            path.unlink()
+def _wipe_deepdoc_output(
+    repo_root: Path,
+    output_dir: Path,
+    include_config: bool = False,
+) -> None:
+    for path in _cleanup_targets(repo_root, output_dir, include_config=include_config):
+        if path.is_dir():
+            shutil.rmtree(path)
+            continue
+        path.unlink()
 
 
 def _add_gitignore_entries(repo_root: Path, entries: list[str]) -> None:

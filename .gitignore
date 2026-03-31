@@ -27,3 +27,6 @@ __pycache__/
 .codewiki/chatbot/
 chatbot_backend/.venv/
 chatbot_backend/__pycache__/
+codewiki.egg-info/
+deepdoc.egg-info/
+pytest-cache-files-7ktahll

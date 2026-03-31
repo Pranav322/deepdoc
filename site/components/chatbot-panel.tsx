@@ -34,6 +34,10 @@ export function ChatbotPanel({ onClose }: { onClose: () => void }) {
 
   async function ask() {
     if (!question.trim()) return;
+    if (!chatbotConfig.apiBaseUrl) {
+      setError('Chatbot backend URL is not configured.');
+      return;
+    }
     setLoading(true);
     setError('');
     try {
@@ -55,7 +59,7 @@ export function ChatbotPanel({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <div className="codewiki-chatbot-panel mb-1 flex flex-col">
+    <div className="codewiki-chatbot-panel mb-1 flex max-h-[min(80vh,56rem)] flex-col">
       <div className="codewiki-chatbot-panel__header flex items-center justify-between border-b border-fd-border px-4 py-3">
         <h2 className="text-sm font-semibold">Ask the codebase</h2>
         <button className="text-sm text-fd-muted-foreground" onClick={onClose} type="button">

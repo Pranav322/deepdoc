@@ -3,6 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from codewiki.config import DEFAULT_CONFIG, load_config, save_config
+from codewiki.chatbot.settings import (
+    chatbot_allowed_origins,
+    chatbot_backend_base_url,
+    chatbot_backend_port,
+    chatbot_should_start_local_backend,
+    chatbot_site_api_base_url,
+)
 
 
 def test_chatbot_defaults_are_present() -> None:
@@ -41,3 +48,63 @@ def test_chatbot_config_merges_nested_values(tmp_path: Path) -> None:
     ]
     assert cfg["chatbot"]["embeddings"]["api_key_env"] == "ALT_EMBED_KEY"
     assert cfg["chatbot"]["answer"]["api_key_env"] == "CODEWIKI_CHAT_API_KEY"
+
+
+def test_chatbot_backend_defaults_are_repo_specific(tmp_path: Path) -> None:
+    repo_a = tmp_path / "repo-a"
+    repo_b = tmp_path / "repo-b"
+    repo_a.mkdir()
+    repo_b.mkdir()
+
+    cfg = {"chatbot": DEFAULT_CONFIG["chatbot"]}
+
+    url_a = chatbot_backend_base_url(cfg, repo_a)
+    url_b = chatbot_backend_base_url(cfg, repo_b)
+
+    assert url_a != url_b
+    assert chatbot_backend_port(cfg, repo_a) != chatbot_backend_port(cfg, repo_b)
+    assert url_a.startswith("http://127.0.0.1:")
+    assert chatbot_site_api_base_url(cfg) == ""
+
+
+def test_chatbot_backend_explicit_loopback_port_is_respected(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "backend": {"base_url": "http://127.0.0.1:8001"},
+        }
+    }
+
+    assert chatbot_backend_base_url(cfg, repo_root) == "http://127.0.0.1:8001"
+    assert chatbot_backend_port(cfg, repo_root) == 8001
+    assert chatbot_should_start_local_backend(cfg) is True
+    assert chatbot_site_api_base_url(cfg) == "http://127.0.0.1:8001"
+
+
+def test_chatbot_external_backend_is_not_reused_as_local_preview_port(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "backend": {"base_url": "http://internal-chat:9000"},
+        }
+    }
+
+    assert chatbot_backend_base_url(cfg, repo_root) == "http://internal-chat:9000"
+    assert chatbot_site_api_base_url(cfg) == "http://internal-chat:9000"
+    assert chatbot_should_start_local_backend(cfg) is False
+    assert chatbot_backend_port(cfg, repo_root) != 9000
+
+
+def test_chatbot_allowed_origins_include_preview_port(monkeypatch) -> None:
+    monkeypatch.setenv("CODEWIKI_CHATBOT_PREVIEW_PORT", "4123")
+
+    origins = chatbot_allowed_origins({"chatbot": {"enabled": True}})
+
+    assert "http://localhost:4123" in origins
+    assert "http://127.0.0.1:4123" in origins

@@ -17,6 +17,7 @@ from pathlib import Path
 from textwrap import dedent
 from typing import Any
 
+from ..chatbot.settings import chatbot_site_api_base_url
 from ..planner_v2 import DocPlan
 
 
@@ -77,7 +78,7 @@ def _ensure_app_scaffold(
         site_dir / "components" / "chatbot-panel.tsx": _chatbot_panel_tsx(),
         site_dir / "components" / "chatbot-toggle.tsx": _chatbot_toggle_tsx(),
         site_dir / "components" / "mdx" / "mermaid.tsx": _mermaid_component_tsx(),
-        site_dir / "lib" / "chatbot-config.ts": _chatbot_config_ts(cfg),
+        site_dir / "lib" / "chatbot-config.ts": _chatbot_config_ts(repo_root, cfg),
         site_dir / "lib" / "source.ts": _source_ts(),
         site_dir / "lib" / "layout-options.ts": _layout_options_ts(project_name, repo_url),
         site_dir / "lib" / "openapi.ts": _openapi_ts(),
@@ -132,10 +133,11 @@ def _build_page_tree_from_plan(
             }
         )
 
+    from collections import OrderedDict
+
     grouped_slugs: set[str] = set()
-    nested_sections: dict[str, dict[str, Any]] = {}
-    flat_sections: dict[str, list[Any]] = {}
-    section_order: list[tuple[str, str]] = []
+    nav_tree: OrderedDict[str, dict[str, Any]] = OrderedDict()
+    section_insert_order = 0
 
     for section_name, slugs in plan.nav_structure.items():
         pages = []
@@ -152,55 +154,40 @@ def _build_page_tree_from_plan(
         if not pages:
             continue
 
-        if " > " in section_name:
-            parent, child = section_name.split(" > ", 1)
-            if parent not in nested_sections:
-                section_order.append(("nested", parent))
-            parent_entry = nested_sections.setdefault(
-                parent, {"order": [], "children": {}}
-            )
-            if child not in parent_entry["children"]:
-                parent_entry["order"].append(child)
-            parent_entry["children"][child] = pages
-        else:
-            if section_name not in flat_sections:
-                section_order.append(("flat", section_name))
-            flat_sections[section_name] = pages
+        parts = [p.strip() for p in section_name.split(" > ")]
 
-    for section_kind, section_name in section_order:
-        if section_kind == "flat":
-            pages = flat_sections[section_name]
-            root_children.append(
-                {
-                    "type": "folder",
-                    "name": section_name,
-                    "children": [_page_tree_node(page_url(page), page.title) for page in pages],
+        node = nav_tree
+        for i, part in enumerate(parts):
+            if part not in node:
+                node[part] = {
+                    "_pages": [],
+                    "_children": OrderedDict(),
+                    "_order": section_insert_order,
                 }
-            )
-            continue
-
-        section_data = nested_sections[section_name]
-        child_nodes: list[dict[str, Any]] = []
-        for child_name in section_data["order"]:
-            child_pages = section_data["children"][child_name]
-            if len(child_pages) == 1:
-                page = child_pages[0]
-                child_nodes.append(_page_tree_node(page_url(page), page.title))
+                section_insert_order += 1
+            if i == len(parts) - 1:
+                node[part]["_pages"].extend(pages)
             else:
-                child_nodes.append(
+                node = node[part]["_children"]
+
+    def _tree_to_fumadocs(tree: OrderedDict[str, dict[str, Any]]) -> list[dict[str, Any]]:
+        result = []
+        for name, data in sorted(tree.items(), key=lambda item: item[1]["_order"]):
+            sub_children: list[dict[str, Any]] = []
+            for page in data["_pages"]:
+                sub_children.append(_page_tree_node(page_url(page), page.title))
+            sub_children.extend(_tree_to_fumadocs(data["_children"]))
+            if sub_children:
+                result.append(
                     {
                         "type": "folder",
-                        "name": child_name,
-                        "children": [
-                            _page_tree_node(page_url(page), page.title)
-                            for page in child_pages
-                        ],
+                        "name": name,
+                        "children": sub_children,
                     }
                 )
-        if child_nodes:
-            root_children.append(
-                {"type": "folder", "name": section_name, "children": child_nodes}
-            )
+        return result
+
+    root_children.extend(_tree_to_fumadocs(nav_tree))
 
     orphan_pages = [
         page
@@ -1146,14 +1133,15 @@ def _openapi_ts() -> str:
     )
 
 
-def _chatbot_config_ts(cfg: dict[str, Any]) -> str:
+def _chatbot_config_ts(repo_root: Path, cfg: dict[str, Any]) -> str:
     chatbot_cfg = cfg.get("chatbot", {})
-    backend = chatbot_cfg.get("backend", {})
     return dedent(
         f"""\
+        const envApiBaseUrl = process.env.NEXT_PUBLIC_CODEWIKI_CHATBOT_BASE_URL?.trim() ?? '';
+
         export const chatbotConfig = {{
           enabled: {str(bool(chatbot_cfg.get("enabled", False))).lower()},
-          apiBaseUrl: {backend.get("base_url", "http://127.0.0.1:8001")!r},
+          apiBaseUrl: envApiBaseUrl || {chatbot_site_api_base_url(cfg)!r},
         }};
         """
     )
@@ -1234,6 +1222,10 @@ def _chatbot_panel_tsx() -> str:
 
           async function ask() {
             if (!question.trim()) return;
+            if (!chatbotConfig.apiBaseUrl) {
+              setError('Chatbot backend URL is not configured.');
+              return;
+            }
             setLoading(true);
             setError('');
             try {
@@ -1255,7 +1247,7 @@ def _chatbot_panel_tsx() -> str:
           }
 
           return (
-            <div className="codewiki-chatbot-panel mb-1 flex flex-col">
+            <div className="codewiki-chatbot-panel mb-1 flex max-h-[min(80vh,56rem)] flex-col">
               <div className="codewiki-chatbot-panel__header flex items-center justify-between border-b border-fd-border px-4 py-3">
                 <h2 className="text-sm font-semibold">Ask the codebase</h2>
                 <button className="text-sm text-fd-muted-foreground" onClick={onClose} type="button">

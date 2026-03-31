@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 from textwrap import dedent
 
-from .settings import chatbot_backend_base_url, chatbot_enabled
+from .settings import chatbot_enabled, chatbot_site_api_base_url
 
 
 def scaffold_chatbot_backend(repo_root: Path, cfg: dict) -> None:
@@ -18,7 +18,7 @@ def scaffold_chatbot_backend(repo_root: Path, cfg: dict) -> None:
     files = {
         backend_dir / "app.py": _app_py(),
         backend_dir / "schemas.py": _schemas_py(),
-        backend_dir / "settings.py": _settings_py(cfg),
+        backend_dir / "settings.py": _settings_py(repo_root, cfg),
         backend_dir / "requirements.txt": _requirements_txt(),
         backend_dir / ".env.example": _env_example(),
     }
@@ -88,10 +88,10 @@ def _schemas_py() -> str:
     )
 
 
-def _settings_py(cfg: dict) -> str:
+def _settings_py(repo_root: Path, cfg: dict) -> str:
     return dedent(
         f"""\
-        CHATBOT_BASE_URL = {chatbot_backend_base_url(cfg)!r}
+        CHATBOT_BASE_URL = {chatbot_site_api_base_url(cfg)!r}
         """
     )
 

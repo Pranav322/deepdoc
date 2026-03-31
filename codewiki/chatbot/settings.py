@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import zlib
 from copy import deepcopy
 from pathlib import Path
 from typing import Any
@@ -13,7 +14,7 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
     "enabled": False,
     "index_dir": ".codewiki/chatbot",
     "backend": {
-        "base_url": "http://127.0.0.1:8001",
+        "base_url": "",
         "allowed_origins": [
             "http://localhost:3000",
             "http://127.0.0.1:3000",
@@ -86,21 +87,54 @@ def chatbot_index_dir(repo_root: Path, cfg: dict[str, Any]) -> Path:
     return repo_root / chatbot_cfg.get("index_dir", DEFAULT_CHATBOT_CONFIG["index_dir"])
 
 
-def chatbot_backend_base_url(cfg: dict[str, Any]) -> str:
+def configured_chatbot_backend_base_url(cfg: dict[str, Any]) -> str:
     chatbot_cfg = get_chatbot_cfg(cfg)
-    return chatbot_cfg.get("backend", {}).get("base_url", "http://127.0.0.1:8001")
+    backend_cfg = chatbot_cfg.get("backend", {})
+    configured = backend_cfg.get("base_url", "")
+    return configured.strip() if isinstance(configured, str) else ""
 
 
-def chatbot_backend_port(cfg: dict[str, Any]) -> int:
-    parsed = urlparse(chatbot_backend_base_url(cfg))
-    return parsed.port or 8001
+def chatbot_site_api_base_url(cfg: dict[str, Any]) -> str:
+    """Return only explicitly configured backend URLs for generated frontend files."""
+    return configured_chatbot_backend_base_url(cfg)
+
+
+def chatbot_backend_base_url(cfg: dict[str, Any], repo_root: Path | None = None) -> str:
+    configured = configured_chatbot_backend_base_url(cfg)
+    if configured:
+        return configured
+    if repo_root is None:
+        return f"http://127.0.0.1:{chatbot_backend_port(cfg, repo_root)}"
+    return f"http://127.0.0.1:{chatbot_backend_port(cfg, repo_root)}"
+
+
+def chatbot_should_start_local_backend(cfg: dict[str, Any]) -> bool:
+    configured = configured_chatbot_backend_base_url(cfg)
+    return not configured or _is_loopback_url(configured)
+
+
+def chatbot_backend_port(cfg: dict[str, Any], repo_root: Path | None = None) -> int:
+    configured = configured_chatbot_backend_base_url(cfg)
+    if configured and _is_loopback_url(configured):
+        parsed = urlparse(configured)
+        return parsed.port or 8001
+    if repo_root is None:
+        return 8001
+    return _default_chatbot_port(repo_root)
 
 
 def chatbot_allowed_origins(cfg: dict[str, Any]) -> list[str]:
     chatbot_cfg = get_chatbot_cfg(cfg)
     backend_cfg = chatbot_cfg.get("backend", {})
     origins = backend_cfg.get("allowed_origins", [])
-    return origins if isinstance(origins, list) else []
+    resolved = list(origins) if isinstance(origins, list) else []
+    preview_port = os.environ.get("CODEWIKI_CHATBOT_PREVIEW_PORT", "").strip()
+    if preview_port:
+        for host in ("localhost", "127.0.0.1"):
+            origin = f"http://{host}:{preview_port}"
+            if origin not in resolved:
+                resolved.append(origin)
+    return resolved
 
 
 def resolve_service_api_key(service_cfg: dict[str, Any]) -> str | None:
@@ -117,3 +151,14 @@ def service_model_identity(service_cfg: dict[str, Any]) -> str:
             service_cfg.get("api_version", ""),
         ]
     )
+
+
+def _default_chatbot_port(repo_root: Path) -> int:
+    checksum = zlib.crc32(str(repo_root.resolve()).encode("utf-8"))
+    return 8100 + (checksum % 700)
+
+
+def _is_loopback_url(url: str) -> bool:
+    parsed = urlparse(url)
+    hostname = (parsed.hostname or "").lower()
+    return hostname in {"localhost", "127.0.0.1", "::1"}

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from ..llm.litellm_compat import prepare_litellm
 from .settings import get_chatbot_cfg, resolve_service_api_key
 
 
@@ -15,9 +16,7 @@ class LiteLLMChatClient:
 
     def complete(self, system: str, user: str) -> str:
         try:
-            import litellm
-
-            litellm.suppress_debug_info = True
+            litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
                 "model": self.service_cfg.get("model"),
@@ -60,9 +59,7 @@ class LiteLLMEmbeddingClient:
             return []
 
         try:
-            import litellm
-
-            litellm.suppress_debug_info = True
+            litellm = prepare_litellm()
             vectors: list[list[float]] = []
             for i in range(0, len(texts), self.batch_size):
                 batch = texts[i : i + self.batch_size]

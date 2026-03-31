@@ -6,6 +6,7 @@ import os
 from typing import Any
 
 from ..config import resolve_api_key
+from .litellm_compat import prepare_litellm
 
 
 class LLMClient:
@@ -29,10 +30,7 @@ class LLMClient:
     def complete(self, system: str, user: str) -> str:
         """Send a chat completion request and return the response text."""
         try:
-            import litellm
-
-            # Silence LiteLLM's verbose logging
-            litellm.suppress_debug_info = True
+            litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
                 "model": self.model,
@@ -61,9 +59,7 @@ class LLMClient:
     def complete_stream(self, system: str, user: str):
         """Stream a completion response, yielding text chunks."""
         try:
-            import litellm
-
-            litellm.suppress_debug_info = True
+            litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
                 "model": self.model,

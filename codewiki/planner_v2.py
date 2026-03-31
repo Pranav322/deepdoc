@@ -20,6 +20,7 @@ from __future__ import annotations
 import json
 import os
 import fnmatch
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -40,6 +41,7 @@ from .llm import LLMClient
 from .parser import parse_file, supported_extensions
 from .parser.base import ParsedFile
 from .parser.api_detector import detect_endpoints, APIEndpoint
+from .parser.routes import resolve_repo_endpoints
 
 console = Console()
 
@@ -70,6 +72,7 @@ class DocBucket:
     coverage_targets: list[str] = field(default_factory=list)  # what must be covered
     generation_hints: dict[str, Any] = field(default_factory=dict)  # metadata flags for generator
     priority: int = 0
+    parent_slug: str | None = None
 
 
 @dataclass
@@ -167,6 +170,24 @@ class RepoScan:
         default_factory=list
     )  # IntegrationIdentity list
     artifact_scan: Any = None  # ArtifactScan
+    doc_contexts: dict[str, str] = field(default_factory=dict)  # markdown/doc summaries
+    research_contexts: list[dict[str, Any]] = field(default_factory=list)  # design/glossary/experiment context
+    topic_candidates: list[dict[str, Any]] = field(default_factory=list)  # ranked topic hints
+
+
+def tracked_bucket_files(bucket: DocBucket) -> list[str]:
+    """Return all repo files whose changes should invalidate this bucket."""
+    return sorted({f for f in [*bucket.owned_files, *bucket.artifact_refs] if f})
+
+
+def endpoint_owned_files(endpoint: dict[str, Any]) -> list[str]:
+    """Return route + handler ownership for an endpoint record."""
+    files = [
+        endpoint.get("route_file", ""),
+        endpoint.get("handler_file", ""),
+        endpoint.get("file", ""),
+    ]
+    return sorted({f for f in files if f})
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -237,6 +258,114 @@ FRAMEWORK_INDICATORS = {
 }
 
 
+def _normalize_repo_rel_path(repo_root: Path, file_path: str) -> str:
+    if not file_path:
+        return ""
+    path = Path(file_path)
+    if not path.is_absolute():
+        return path.as_posix()
+    try:
+        return path.relative_to(repo_root).as_posix()
+    except ValueError:
+        return path.as_posix()
+
+
+DOC_CONTEXT_FILENAMES = {
+    "readme.md",
+    "readme.mdx",
+    "changelog.md",
+    "history.md",
+    "design.md",
+    "architecture.md",
+    "glossary.md",
+    "notes.md",
+    "experiments.md",
+}
+
+
+def _is_doc_context_candidate(rel_path: str, file_name: str) -> bool:
+    lower_rel = rel_path.lower()
+    lower_name = file_name.lower()
+    if lower_name in DOC_CONTEXT_FILENAMES:
+        return True
+    if lower_rel.startswith("docs/") and lower_name.endswith((".md", ".mdx", ".txt")):
+        return True
+    if any(token in lower_name for token in ("readme", "changelog", "glossary", "design", "experiment", "notes", "history")):
+        return lower_name.endswith((".md", ".mdx", ".txt"))
+    return lower_name.endswith(".ipynb")
+
+
+def _summarize_doc_context(rel_path: str, content: str) -> tuple[str, dict[str, Any] | None]:
+    lines = content.splitlines()
+    headings = [line.strip().lstrip("# ").strip() for line in lines if line.strip().startswith("#")]
+    nonempty = [line.strip() for line in lines if line.strip() and not line.strip().startswith("#")]
+    summary_lines: list[str] = []
+    if headings:
+        summary_lines.append(f"Headings: {', '.join(headings[:8])}")
+    if nonempty:
+        summary_lines.append(f"Summary: {' '.join(nonempty[:3])[:300]}")
+    summary = " | ".join(summary_lines)[:800]
+
+    lower_rel = rel_path.lower()
+    headings_blob = " ".join(headings).lower()
+    kind = ""
+    title = Path(rel_path).stem.replace("_", " ").replace("-", " ").title()
+    if "glossary" in lower_rel:
+        kind = "glossary"
+    elif any(token in lower_rel for token in ("experiment", "ablation", "results")) or any(
+        token in headings_blob for token in ("experiment", "ablation", "results")
+    ):
+        kind = "experiment_log"
+    elif any(token in lower_rel for token in ("design", "architecture", "history")) or any(
+        token in headings_blob for token in ("design", "architecture history", "history")
+    ):
+        kind = "design_history"
+    elif any(token in lower_rel for token in ("note", "notes", "devlog", "development")) or any(
+        token in headings_blob for token in ("development", "notes", "devlog")
+    ):
+        kind = "development_notes"
+    if kind:
+        return summary, {
+            "kind": kind,
+            "title": title,
+            "file_path": rel_path,
+            "summary": summary,
+            "headings": headings[:12],
+        }
+    return summary, None
+
+
+def _summarize_notebook_context(rel_path: str, content: str) -> tuple[str, dict[str, Any] | None]:
+    try:
+        notebook = json.loads(content)
+    except Exception:
+        return "", None
+    markdown_cells: list[str] = []
+    for cell in notebook.get("cells", []):
+        if cell.get("cell_type") != "markdown":
+            continue
+        source = cell.get("source", [])
+        if isinstance(source, list):
+            markdown_cells.append("".join(source))
+        elif isinstance(source, str):
+            markdown_cells.append(source)
+    if not markdown_cells:
+        return "", None
+    combined = "\n".join(markdown_cells[:8])
+    summary, context = _summarize_doc_context(rel_path, combined)
+    if context is None:
+        lower_rel = rel_path.lower()
+        if any(token in lower_rel for token in ("experiment", "ablation", "analysis", "notebook")):
+            context = {
+                "kind": "experiment_log",
+                "title": Path(rel_path).stem.replace("_", " ").replace("-", " ").title(),
+                "file_path": rel_path,
+                "summary": summary,
+                "headings": [],
+            }
+    return summary, context
+
+
 def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     """Scan the entire repo without making any LLM calls.
 
@@ -249,6 +378,7 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
 
     file_tree: dict[str, list[str]] = defaultdict(list)
     file_summaries: dict[str, str] = {}
+    raw_api_endpoints: list[APIEndpoint] = []
     api_endpoints: list[dict] = []
     lang_counts: dict[str, int] = defaultdict(int)
     frameworks: set[str] = set()
@@ -258,6 +388,8 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     file_line_counts: dict[str, int] = {}
     parsed_files: dict[str, ParsedFile] = {}
     file_contents: dict[str, str] = {}
+    doc_contexts: dict[str, str] = {}
+    research_contexts: list[dict[str, Any]] = []
 
     ext_to_lang = {
         ".py": "python",
@@ -324,6 +456,20 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                 openapi_paths.append(rel)
 
             # Only parse supported source files
+            if _is_doc_context_candidate(rel, fname):
+                try:
+                    doc_content = fpath.read_text(encoding="utf-8", errors="replace")
+                    if fname.lower().endswith(".ipynb"):
+                        summary, context = _summarize_notebook_context(rel, doc_content)
+                    else:
+                        summary, context = _summarize_doc_context(rel, doc_content)
+                    if summary:
+                        doc_contexts[rel] = summary
+                    if context:
+                        research_contexts.append(context)
+                except Exception:
+                    pass
+
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
                 progress.advance(task)
@@ -380,18 +526,33 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
             # Detect API endpoints
             if lang:
                 eps = detect_endpoints(fpath, content, lang)
-                for ep in eps:
-                    api_endpoints.append(
-                        {
-                            "method": ep.method,
-                            "path": ep.path,
-                            "handler": ep.handler,
-                            "file": rel,
-                            "line": ep.line,
-                        }
-                    )
+                raw_api_endpoints.extend(eps)
 
             progress.advance(task)
+
+    if raw_api_endpoints:
+        resolved_endpoints = resolve_repo_endpoints(repo_root, raw_api_endpoints, file_contents)
+        for ep in resolved_endpoints:
+            if ep.path and ep.path.startswith("(see add_route for "):
+                continue
+            route_file = _normalize_repo_rel_path(repo_root, ep.route_file or ep.file)
+            handler_file = _normalize_repo_rel_path(
+                repo_root, ep.handler_file or ep.file or route_file
+            )
+            api_endpoints.append(
+                {
+                    "method": ep.method,
+                    "path": ep.path,
+                    "handler": ep.handler,
+                    "file": handler_file or route_file,
+                    "route_file": route_file,
+                    "handler_file": handler_file or route_file,
+                    "line": ep.line,
+                    "raw_path": ep.raw_path,
+                    "framework": ep.framework,
+                    "provenance": ep.provenance,
+                }
+            )
 
     return RepoScan(
         file_tree=dict(file_tree),
@@ -407,6 +568,8 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
         file_line_counts=file_line_counts,
         parsed_files=parsed_files,
         file_contents=file_contents,
+        doc_contexts=doc_contexts,
+        research_contexts=research_contexts,
     )
 
 
@@ -568,7 +731,13 @@ Return JSON:
       "files": ["path/to/middleware/auth.py", ...]
     }}
   ],
-  "giant_files": ["path/to/huge_controller.py"]
+  "giant_files": ["path/to/huge_controller.py"],
+  "repo_profile": {{
+    "primary_type": "backend_api|research_training|monorepo_product|other",
+    "secondary_traits": ["has_frontend", "has_cli", "has_training_scripts", "has_evaluation", "has_ci_release", "has_docker", "has_database", "has_public_api", "has_pipeline_stages"],
+    "confidence": "high|medium|low",
+    "evidence": "brief justification"
+  }}
 }}
 
 Rules:
@@ -580,6 +749,13 @@ Rules:
   error handlers, logging setup, database connection, caching layer, etc.
 - domain_hint: your best guess at which business domain this file belongs to (orders, \
   users, products, payments, inventory, shipping, etc.). Use "shared" for utilities.
+- repo_profile: Infer the repo's primary type from frameworks, entry points, and file patterns.
+  backend_api: route handlers, middleware, request/response cycles, REST/GraphQL endpoints.
+  research_training: training loops, model definitions, optimizers, dataloaders, evaluation scripts.
+  monorepo_product: multiple packages, build orchestration, shared infrastructure.
+  other: none of the above clearly dominates.
+  secondary_traits captures hybrid aspects — e.g. an ML repo with a web UI gets
+  primary_type "research_training" with secondary_traits ["has_frontend", "has_cli"].
 """
 
 
@@ -605,13 +781,29 @@ Each bucket MUST also include a "generation_hints" object with these boolean fla
 - include_integration_detail: full external-system integration context
 - is_introduction_page: this is the landing/overview page (becomes index.mdx)
 - prompt_style: selects writing-guidance template — one of "system", "feature", \
-  "endpoint", "endpoint_ref", "integration", "database", or "general"
+  "endpoint", "endpoint_ref", "integration", "database", "training", \
+  "architecture_component", "data_pipeline", or "general"
 - icon: Heroicon name for nav (e.g. "server", "bolt", "globe-alt", "database", \
   "puzzle-piece", "book-open", "command-line", "cube", "cog")
 
 Rules:
 - BE COMPREHENSIVE: create as many buckets as the codebase warrants. Every important \
   area deserves its own bucket. Do NOT artificially compress or merge areas.
+- TARGET GRANULARITY: Each bucket should document ONE specific concept, algorithm,
+  component, or workflow — NOT a broad area. A bucket titled "Shared Logic & Utilities"
+  or "Common Helpers" is almost always too broad. Split it by concept instead.
+- BUCKET COUNT SANITY CHECK (not a quota — never create filler to hit a number):
+  Small repos (<20 files): ~15-25 buckets is typical
+  Medium repos (20-80 files): ~25-50 buckets is typical
+  Large repos (80+ files): ~40-80 buckets is typical
+  These are sanity ranges. Some repos genuinely deserve fewer pages. Never invent
+  pages just to hit a number.
+- USE NESTED NAV SECTIONS freely via "Parent > Child" format.
+  Example: "Model Architecture > Attention Mechanisms", "Training > Optimization".
+  You may use up to 3 levels: "Parent > Child > Grandchild".
+- AVOID catch-all buckets: Do NOT create buckets named "Utilities", "Helpers",
+  "Common Logic", "Shared Code", or "Miscellaneous". Every file belongs to a
+  concept — find the concept.
 - Group by BUSINESS WORKFLOW or LOGICAL CONCERN, not by file path.
 - Endpoint family buckets cover a resource family (all /orders/* endpoints, not one per route).
 - If an integration is trivial (used in one place, no setup complexity), embed it in the \
@@ -620,6 +812,13 @@ Rules:
   its specific content — do NOT use generic sections for everything.
 - The nav_structure section names should fit this repo — do NOT force standard names \
   like "Features" or "API Reference" if they don't fit. Use whatever makes sense.
+- DEMOTION RULES:
+  - Do NOT create single-file utility/helper buckets unless the file contains a substantial \
+    algorithm, protocol, or subsystem worth a standalone page.
+  - If primary_type is not backend_api, treat health/stats/service wrappers and incidental \
+    HTTP usage as secondary details unless they are central runtime surfaces.
+  - For non-backend_api repos, fold incidental HTTP/integration behavior into the relevant \
+    training, data, evaluation, or inference buckets instead of creating standalone pages.
 """
 
 PROPOSE_PROMPT = """\
@@ -642,6 +841,15 @@ Based on this repository classification, propose documentation buckets.
 
 ## Database / Schema Info
 {database_info}
+
+## Ranked Topic Candidates
+{topic_candidates}
+
+## Research / Markdown Context
+{research_context}
+
+## Repo Profile
+{repo_profile}
 
 ## Constraints
 {max_pages_instruction}
@@ -674,7 +882,7 @@ Return JSON:
       "required_sections": ["overview", "main_workflows", "state_transitions", ...],
       "required_diagrams": ["architecture_flow", "sequence_diagram", "er_diagram", ...],
       "coverage_targets": ["OrderController checkout flow", "Juspay payment auth", ...],
-      "generation_hints": {{
+        "generation_hints": {{
         "include_endpoint_detail": false,
         "is_endpoint_ref": false,
         "is_endpoint_family": false,
@@ -682,7 +890,7 @@ Return JSON:
         "include_database_context": false,
         "include_integration_detail": false,
         "is_introduction_page": false,
-        "prompt_style": "system|feature|endpoint|endpoint_ref|integration|database|general",
+        "prompt_style": "system|feature|endpoint|endpoint_ref|integration|database|training|architecture_component|data_pipeline|general",
         "icon": "heroicon-name"
       }}
     }}
@@ -693,13 +901,13 @@ Return JSON:
   }}
 }}
 
-Examples of good nav structures for different repo types:
-- API service: "Overview" > "Getting Started" > "Core Features" > "API Families" > "Integrations" > "Operations"
-- CLI tool: "Overview" > "Installation" > "Commands" > "Configuration" > "Plugins"
-- Library/SDK: "Overview" > "Getting Started" > "Core API" > "Modules" > "Advanced"
-- Data pipeline: "Overview" > "Architecture" > "Pipeline Stages" > "Data Models" > "Monitoring"
+Examples of good nav structures (varies by repo type):
+- API service: "Overview" > "Core Features > Orders" > "Core Features > Payments" > "API Families" > "Integrations" > "Operations"
+- ML/AI training: "Overview" > "Model Architecture > Transformer" > "Model Architecture > Attention" > "Training > Base Training" > "Training > SFT" > "Optimization > Optimizer" > "Optimization > LR Schedules" > "Data Pipeline > Tokenizer" > "Data Pipeline > DataLoader" > "Evaluation" > "Inference"
+- Monorepo product: "Overview" > "Package: Core > Execution Engine" > "Package: Core > Node System" > "Package: CLI" > "Package: Frontend > Canvas" > "Shared Infrastructure" > "Build & Release"
 
-Choose what fits THIS repo — these are just examples.
+Repo profile: {repo_profile}
+Use the profile to guide your nav structure and bucket types. These examples are guidance, not templates.
 """
 
 
@@ -767,6 +975,234 @@ Important:
 - owned_symbols is optional but encouraged for large shared files — it tells the \
   generator which parts of a file are relevant to this specific bucket.
 - priority: 0 = generate first (overview/architecture), higher = later.
+"""
+
+
+STOPWORD_TOKENS = {
+    "the", "and", "for", "with", "from", "into", "file", "files", "module", "modules",
+    "page", "pages", "core", "system", "logic", "utils", "utility", "common",
+    "service", "services", "workflow", "workflows", "overview", "architecture",
+}
+
+
+PROFILE_TOPIC_TEMPLATES: dict[str, list[tuple[str, list[str], str]]] = {
+    "research_training": [
+        ("Model Architecture", ["model", "transformer", "attention", "flash", "layer", "embedding", "kv", "float8", "fp8", "quant"], "model"),
+        ("Optimization", ["optim", "optimizer", "adam", "muon", "schedule", "scheduler", "lr", "weight_decay"], "optimization"),
+        ("Training", ["train", "trainer", "checkpoint", "loss", "dist", "ddp", "backward", "gradient"], "training"),
+        ("Data Pipeline", ["data", "dataset", "dataloader", "tokenizer", "parquet", "preprocess", "conversation", "shard", "pack"], "data_pipeline"),
+        ("Evaluation", ["eval", "metric", "benchmark", "score", "report", "validate"], "evaluation"),
+        ("Inference & Runtime", ["infer", "generate", "sampling", "chat", "serve", "cache", "runtime", "stats"], "inference"),
+        ("Interfaces", ["cli", "command", "api", "web", "ui"], "interfaces"),
+        ("Research Context", ["experiment", "ablation", "glossary", "history", "design", "notes"], "research_context"),
+    ],
+    "backend_api": [
+        ("Architecture", ["middleware", "auth", "handler", "service", "route", "controller"], "architecture"),
+        ("Domain Flows", ["order", "payment", "user", "inventory", "shipping", "checkout"], "domain"),
+        ("API", ["api", "endpoint", "request", "response", "schema"], "api"),
+        ("Integrations", ["client", "provider", "gateway", "webhook", "sync"], "integration"),
+        ("Data Layer", ["model", "schema", "migration", "repository", "orm"], "data_layer"),
+        ("Operations", ["logging", "metric", "health", "deploy", "config", "queue"], "operations"),
+    ],
+    "monorepo_product": [
+        ("Monorepo Structure", ["package", "workspace", "repo", "shared"], "structure"),
+        ("Runtime", ["runtime", "worker", "execution", "engine", "process"], "runtime"),
+        ("API & Services", ["api", "server", "service", "handler", "controller"], "api_services"),
+        ("Frontend", ["component", "ui", "canvas", "editor", "state"], "frontend"),
+        ("Configuration", ["config", "env", "docker", "build"], "configuration"),
+        ("Release", ["release", "ci", "workflow", "version"], "release"),
+    ],
+}
+
+
+def _normalize_tokens(*values: str) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        for token in re.findall(r"[A-Za-z][A-Za-z0-9_+-]+", value or ""):
+            normalized = token.lower().strip("_-+")
+            if len(normalized) < 3 or normalized in STOPWORD_TOKENS:
+                continue
+            tokens.add(normalized)
+    return tokens
+
+
+def _derive_topic_candidates(scan: RepoScan, classification: dict[str, Any]) -> list[dict[str, Any]]:
+    """Derive ranked concept candidates from code, artifacts, and markdown context."""
+    repo_profile = classification.get("repo_profile", {})
+    primary = repo_profile.get("primary_type", "other")
+    templates = PROFILE_TOPIC_TEMPLATES.get(primary, PROFILE_TOPIC_TEMPLATES["backend_api"])
+
+    candidate_map: dict[str, dict[str, Any]] = {}
+
+    def _ensure_candidate(title: str, category: str) -> dict[str, Any]:
+        key = f"{category}:{title}"
+        if key not in candidate_map:
+            candidate_map[key] = {
+                "title": title,
+                "category": category,
+                "score": 0,
+                "evidence_files": set(),
+                "evidence_docs": set(),
+                "signals": set(),
+            }
+        return candidate_map[key]
+
+    for title, keywords, category in templates:
+        _ensure_candidate(title, category)
+        for file_path, parsed in scan.parsed_files.items():
+            file_tokens = _normalize_tokens(
+                file_path,
+                " ".join(symbol.name for symbol in parsed.symbols[:20]),
+                " ".join(parsed.imports[:12]),
+            )
+            matched = sorted({kw for kw in keywords if any(kw in token for token in file_tokens)})
+            if not matched:
+                continue
+            candidate = _ensure_candidate(title, category)
+            candidate["score"] += len(matched) * 3
+            candidate["evidence_files"].add(file_path)
+            candidate["signals"].update(matched)
+
+        for context in scan.research_contexts:
+            context_tokens = _normalize_tokens(
+                context.get("title", ""),
+                context.get("summary", ""),
+                " ".join(context.get("headings", [])),
+            )
+            matched = sorted({kw for kw in keywords if any(kw in token for token in context_tokens)})
+            if not matched:
+                continue
+            candidate = _ensure_candidate(title, category)
+            candidate["score"] += len(matched) * 4
+            candidate["evidence_docs"].add(context.get("file_path", ""))
+            candidate["signals"].update(matched)
+
+    # Force-add explicit research context categories when docs exist.
+    for context in scan.research_contexts:
+        kind = context.get("kind", "")
+        if kind == "experiment_log":
+            title = "Experiment Log and Findings"
+        elif kind == "design_history":
+            title = "Design History and Architecture Notes"
+        elif kind == "development_notes":
+            title = "Development Notes"
+        elif kind == "glossary":
+            title = "Glossary"
+        else:
+            continue
+        candidate = _ensure_candidate(title, "research_context")
+        candidate["score"] += 8
+        candidate["evidence_docs"].add(context.get("file_path", ""))
+        candidate["signals"].add(kind)
+
+    ranked: list[dict[str, Any]] = []
+    for candidate in candidate_map.values():
+        if candidate["score"] <= 0:
+            continue
+        ranked.append(
+            {
+                "title": candidate["title"],
+                "category": candidate["category"],
+                "score": candidate["score"],
+                "evidence_files": sorted(f for f in candidate["evidence_files"] if f)[:8],
+                "evidence_docs": sorted(f for f in candidate["evidence_docs"] if f)[:6],
+                "signals": sorted(candidate["signals"])[:10],
+            }
+        )
+    ranked.sort(key=lambda item: (-item["score"], item["title"]))
+    scan.topic_candidates = ranked
+    return ranked[:20]
+
+
+def _format_topic_candidates(candidates: list[dict[str, Any]]) -> str:
+    if not candidates:
+        return "(none)"
+    lines = []
+    for item in candidates[:20]:
+        files = ", ".join(item.get("evidence_files", [])[:4]) or "none"
+        docs = ", ".join(item.get("evidence_docs", [])[:3]) or "none"
+        signals = ", ".join(item.get("signals", [])[:6]) or "none"
+        lines.append(
+            f"- {item['title']} [{item['category']}] score={item['score']} | files: {files} | docs: {docs} | signals: {signals}"
+        )
+    return "\n".join(lines)
+
+
+def _format_research_context(scan: RepoScan) -> str:
+    if not scan.research_contexts and not scan.doc_contexts:
+        return "(none)"
+    lines = []
+    for item in scan.research_contexts[:12]:
+        lines.append(
+            f"- {item.get('kind', 'doc')}: {item.get('title', Path(item.get('file_path', '')).name)} "
+            f"({item.get('file_path', '')}) | {item.get('summary', '')[:180]}"
+        )
+    if not lines:
+        for path, summary in list(scan.doc_contexts.items())[:12]:
+            lines.append(f"- {path}: {summary[:200]}")
+    return "\n".join(lines)
+
+
+DECOMPOSE_SYSTEM = """\
+You are a documentation architect. Given a broad documentation bucket covering \
+multiple concepts, decompose it into focused sub-topics. Each sub-topic becomes \
+its own documentation page. Respond with valid JSON only.
+
+Rules:
+- Each sub-topic should cover ONE specific concept, class, algorithm, or workflow.
+- Produce 2-6 sub-topics per bucket.
+- Sub-topic titles must be specific and descriptive: \
+  "Attention Mechanisms and Flash Attention" not "Attention Stuff".
+- Each file should have ONE primary sub-topic owner. Shared files (configs, base \
+  classes, common utilities) MAY appear in multiple sub-topics.
+- Do NOT create single-file sub-topics unless that file contains a substantial, \
+  distinct concept worth its own page.
+- Slugs must be unique and URL-safe (lowercase, hyphens, no special chars).
+"""
+
+DECOMPOSE_PROMPT = """\
+Decompose this broad bucket into focused sub-topics.
+
+## Bucket to Decompose
+- Title: {title}
+- Section: {section}
+- Type: {bucket_type}
+- Description: {description}
+
+## Files ({file_count} total)
+{file_list}
+
+## File Details
+{file_summaries}
+
+## Repo Profile: {repo_profile}
+
+Return JSON:
+{{
+  "sub_topics": [
+    {{
+      "title": "Specific Concept Name",
+      "slug": "concept-slug",
+      "description": "What this sub-topic covers — one sentence",
+      "owned_files": ["file1.py", "file2.py"],
+      "owned_symbols": ["ClassName", "function_name"],
+      "required_sections": ["overview", "implementation_details", "usage_patterns"],
+      "required_diagrams": ["relevant_diagram_type"],
+      "prompt_style": "system|feature|training|architecture_component|data_pipeline|general"
+    }}
+  ],
+  "nav_section": "{section} > Suggested Parent Label",
+  "keep_parent_overview": true
+}}
+
+Important:
+- Shared files (configs, base classes) may appear in multiple sub-topics.
+- Every file from the bucket must appear in at least one sub-topic's owned_files.
+- nav_section uses ">" for nested navigation. Use 2 levels by default; use 3 if
+  the concept hierarchy is clearly that deep.
+- keep_parent_overview: set true if the parent topic deserves a summary/overview
+  page in addition to the sub-topic pages. Set false if the parent title is too
+  generic to be a useful page on its own.
 """
 
 
@@ -842,6 +1278,11 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
 
     # Build classification summary for the proposal step
     classification_summary = _build_classification_summary(classification)
+    repo_profile = classification.get("repo_profile", {})
+    repo_profile_str = json.dumps(repo_profile, indent=2) if repo_profile else "unknown"
+    topic_candidates = _derive_topic_candidates(scan, classification)
+    topic_candidates_str = _format_topic_candidates(topic_candidates)
+    research_context_str = _format_research_context(scan)
 
     # Enrich with Phase 2 results if available
     if scan.integration_identities:
@@ -916,6 +1357,9 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         cross_cutting=cross_cutting,
         giant_files=giant_files_str,
         database_info=database_info,
+        topic_candidates=topic_candidates_str,
+        research_context=research_context_str,
+        repo_profile=repo_profile_str,
         max_pages_instruction=max_pages_instruction,
     )
 
@@ -926,6 +1370,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         )
         return _fallback_plan(scan, cfg)
 
+    proposal = _refine_proposal(proposal, scan, classification)
     _print_proposal_summary(proposal)
 
     # ── Step 3: Assign Files ─────────────────────────────────────────────
@@ -957,9 +1402,25 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
 
     # ── Merge proposal + assignment into final plan ──────────────────────
     plan = _merge_plan(proposal, assignment, classification, scan)
+    plan = _refine_bucket_ownership(plan, scan, classification)
+
+    # ── Step 3.5: Decompose broad buckets into focused sub-topics ────────
+    repo_profile = classification.get("repo_profile", {})
+    console.print("[dim]Decomposing broad buckets...[/dim]")
+    plan = _decompose_buckets(plan, scan, cfg, llm, repo_profile)
+    plan = _inject_research_context_buckets(plan, scan, classification)
 
     # ── Step 4: Auto-generate per-endpoint reference pages from scan data ─
-    plan = _auto_generate_endpoint_refs(plan, scan)
+    plan = _auto_generate_endpoint_refs(
+        plan,
+        scan,
+        include_endpoint_pages=cfg.get("include_endpoint_pages", True),
+    )
+
+    plan = _shape_plan_nav(plan, classification)
+    plan = _apply_page_contracts(plan, scan, classification)
+
+    plan = _attach_orphans_semantically(plan, scan, classification)
 
     # Validate coverage
     console.print("[dim]Validating file coverage...[/dim]")
@@ -1086,7 +1547,581 @@ def _merge_plan(
     )
 
 
-def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
+def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
+    return _normalize_tokens(
+        bucket.get("title", ""),
+        bucket.get("slug", ""),
+        bucket.get("section", ""),
+        bucket.get("description", ""),
+        " ".join(bucket.get("coverage_targets", [])),
+        bucket.get("bucket_type", ""),
+    )
+
+
+def _is_low_value_utility_bucket(bucket: dict[str, Any]) -> bool:
+    tokens = _proposal_bucket_tokens(bucket)
+    return (
+        "utility" in bucket.get("bucket_type", "")
+        or "utilities" in bucket.get("title", "").lower()
+        or any(token in tokens for token in {"random", "string", "date", "config", "helper"})
+    )
+
+
+def _is_incidental_http_bucket(bucket: dict[str, Any]) -> bool:
+    tokens = _proposal_bucket_tokens(bucket)
+    return (
+        "integration" in bucket.get("bucket_type", "")
+        and any(token in tokens for token in {"http", "client", "download", "fetch"})
+    )
+
+
+def _best_proposal_merge_target(
+    bucket: dict[str, Any],
+    candidates: list[dict[str, Any]],
+    preferred_tokens: set[str],
+) -> dict[str, Any] | None:
+    bucket_tokens = _proposal_bucket_tokens(bucket)
+    best_target = None
+    best_score = 0
+    for candidate in candidates:
+        if candidate is bucket:
+            continue
+        candidate_tokens = _proposal_bucket_tokens(candidate)
+        overlap = len(bucket_tokens & candidate_tokens)
+        overlap += len(preferred_tokens & candidate_tokens) * 2
+        if overlap > best_score:
+            best_score = overlap
+            best_target = candidate
+    return best_target if best_score >= 2 else None
+
+
+def _remove_slug_from_nav(nav_structure: dict[str, list[str]], slug: str) -> None:
+    for section_name, slugs in list(nav_structure.items()):
+        if slug in slugs:
+            nav_structure[section_name] = [s for s in slugs if s != slug]
+            if not nav_structure[section_name]:
+                del nav_structure[section_name]
+
+
+def _refine_proposal(
+    proposal: dict[str, Any],
+    scan: RepoScan,
+    classification: dict[str, Any],
+) -> dict[str, Any]:
+    """Clean proposal noise before assignment."""
+    repo_profile = classification.get("repo_profile", {})
+    primary = repo_profile.get("primary_type", "other")
+    buckets = list(proposal.get("buckets", []))
+    nav_structure = dict(proposal.get("nav_structure", {}))
+
+    utility_buckets = [
+        b
+        for b in buckets
+        if _is_low_value_utility_bucket(b) and len(b.get("candidate_files", [])) <= 2
+    ]
+    if len(utility_buckets) >= 2:
+        merged_files: list[str] = []
+        merged_targets: list[str] = []
+        merged_diagrams: list[str] = []
+        merged_sections: list[str] = []
+        for bucket in utility_buckets:
+            merged_files.extend(bucket.get("candidate_files", []))
+            merged_targets.extend(bucket.get("coverage_targets", []))
+            merged_diagrams.extend(bucket.get("required_diagrams", []))
+            merged_sections.extend(bucket.get("required_sections", []))
+            _remove_slug_from_nav(nav_structure, bucket.get("slug", ""))
+        buckets = [b for b in buckets if b not in utility_buckets]
+        utilities_slug = "common-utilities-configuration"
+        merged_bucket = {
+            "bucket_type": "utility-group",
+            "title": "Common Utilities & Configuration",
+            "slug": utilities_slug,
+            "section": "Operations",
+            "description": "Shared helpers and configuration utilities used across the repository",
+            "rationale": "Merge low-value single-file utility pages into one stronger page.",
+            "candidate_files": sorted(set(merged_files)),
+            "candidate_domains": ["shared"],
+            "depends_on": ["system-overview"] if primary == "research_training" else [],
+            "required_sections": ["overview", "shared_helpers", "configuration", "usage_patterns"],
+            "required_diagrams": sorted(set(merged_diagrams))[:2] or ["architecture_flow"],
+            "coverage_targets": sorted(set(merged_targets))[:10],
+            "generation_hints": {
+                "include_endpoint_detail": False,
+                "is_endpoint_ref": False,
+                "is_endpoint_family": False,
+                "include_openapi": False,
+                "include_database_context": False,
+                "include_integration_detail": False,
+                "is_introduction_page": False,
+                "prompt_style": "general",
+                "icon": "cube",
+            },
+        }
+        buckets.append(merged_bucket)
+        nav_structure.setdefault("Operations", []).append(utilities_slug)
+
+    if primary != "backend_api":
+        for bucket in list(buckets):
+            if not _is_incidental_http_bucket(bucket):
+                continue
+            target = _best_proposal_merge_target(
+                bucket,
+                buckets,
+                {"data", "dataset", "pipeline", "evaluation", "infer", "runtime", "train"},
+            )
+            if not target:
+                continue
+            target.setdefault("candidate_files", []).extend(bucket.get("candidate_files", []))
+            target.setdefault("coverage_targets", []).extend(bucket.get("coverage_targets", []))
+            target.setdefault("required_sections", []).extend(bucket.get("required_sections", []))
+            _remove_slug_from_nav(nav_structure, bucket.get("slug", ""))
+            buckets.remove(bucket)
+
+    proposal["buckets"] = buckets
+    proposal["nav_structure"] = nav_structure
+    return proposal
+
+
+def _file_semantic_tokens(file_path: str, scan: RepoScan) -> set[str]:
+    parsed = scan.parsed_files.get(file_path)
+    imports = parsed.imports[:12] if parsed else []
+    symbols = [symbol.name for symbol in parsed.symbols[:12]] if parsed else []
+    return _normalize_tokens(file_path, " ".join(imports), " ".join(symbols))
+
+
+def _bucket_semantic_tokens(bucket: DocBucket) -> set[str]:
+    return _normalize_tokens(
+        bucket.title,
+        bucket.slug,
+        bucket.section,
+        bucket.description,
+        " ".join(bucket.coverage_targets),
+        bucket.bucket_type,
+        " ".join(bucket.generation_hints.get("page_contract", {}).get("must_cover_concepts", []))
+        if bucket.generation_hints
+        else "",
+    )
+
+
+def _attach_file_to_best_bucket(
+    file_path: str,
+    plan: DocPlan,
+    scan: RepoScan,
+    *,
+    include_overview: bool = False,
+) -> bool:
+    file_tokens = _file_semantic_tokens(file_path, scan)
+    best_bucket = None
+    best_score = 0
+    for bucket in plan.buckets:
+        hints = bucket.generation_hints or {}
+        if not include_overview and hints.get("is_introduction_page"):
+            continue
+        bucket_tokens = _bucket_semantic_tokens(bucket)
+        score = len(file_tokens & bucket_tokens)
+        if file_path in bucket.owned_files:
+            score += 2
+        if score > best_score:
+            best_score = score
+            best_bucket = bucket
+    if best_bucket and best_score >= 2:
+        if file_path not in best_bucket.owned_files:
+            best_bucket.owned_files.append(file_path)
+        return True
+    return False
+
+
+def _summary_file_score(file_path: str, scan: RepoScan) -> int:
+    score = 0
+    if file_path in scan.entry_points:
+        score += 5
+    if file_path in scan.config_files:
+        score += 4
+    lower = file_path.lower()
+    if any(token in lower for token in ("app", "main", "server", "config", "settings", "routes")):
+        score += 3
+    if file_path in scan.giant_file_clusters:
+        score += 2
+    return score
+
+
+def _refine_bucket_ownership(
+    plan: DocPlan,
+    scan: RepoScan,
+    classification: dict[str, Any],
+) -> DocPlan:
+    """Trim umbrella ownership and attach semantically related files before fallback."""
+    assigned = {f for bucket in plan.buckets for f in bucket.owned_files}
+    for file_path in sorted(set(scan.file_summaries) - assigned):
+        _attach_file_to_best_bucket(file_path, plan, scan, include_overview=False)
+
+    for bucket in plan.buckets:
+        hints = bucket.generation_hints or {}
+        if not hints.get("is_introduction_page"):
+            continue
+        ranked = sorted(
+            set(bucket.owned_files),
+            key=lambda path: (-_summary_file_score(path, scan), path),
+        )
+        keep_count = 8 if classification.get("repo_profile", {}).get("primary_type") == "research_training" else 10
+        bucket.owned_files = ranked[:keep_count]
+    return plan
+
+
+def _inject_research_context_buckets(
+    plan: DocPlan,
+    scan: RepoScan,
+    classification: dict[str, Any],
+) -> DocPlan:
+    """Add research-context pages when markdown/docs contain strong signals."""
+    if not scan.research_contexts:
+        return plan
+    existing_titles = {bucket.title.lower() for bucket in plan.buckets}
+    for context in scan.research_contexts:
+        kind = context.get("kind", "")
+        if kind == "experiment_log":
+            title = "Experiment Log and Findings"
+            slug = "experiment-log-findings"
+        elif kind == "design_history":
+            title = "Design History and Architecture Notes"
+            slug = "design-history-architecture-notes"
+        elif kind == "development_notes":
+            title = "Development Notes"
+            slug = "development-notes"
+        elif kind == "glossary":
+            title = "Glossary"
+            slug = "glossary"
+        else:
+            continue
+        if title.lower() in existing_titles:
+            continue
+        bucket = DocBucket(
+            bucket_type="research-context",
+            title=title,
+            slug=slug,
+            section="Research Context",
+            description=context.get("summary", title),
+            artifact_refs=[context.get("file_path", "")],
+            required_sections=["overview", "key_findings", "references"],
+            required_diagrams=[],
+            generation_hints={"prompt_style": "research_context", "icon": "book-open"},
+            priority=40,
+        )
+        plan.buckets.append(bucket)
+        plan.nav_structure.setdefault("Research Context", []).append(slug)
+        existing_titles.add(title.lower())
+    return plan
+
+
+def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
+    title_tokens = _bucket_semantic_tokens(bucket)
+    if primary_type == "research_training":
+        if bucket.generation_hints.get("is_introduction_page"):
+            return "Overview"
+        if bucket.bucket_type == "research-context" or "glossary" in title_tokens or "experiment" in title_tokens or "history" in title_tokens:
+            return "Research Context"
+        if any(token in title_tokens for token in {"model", "attention", "transformer", "fp8", "quant"}):
+            return "Model Architecture"
+        if any(token in title_tokens for token in {"optim", "optimizer", "schedule", "scheduler", "muon", "lr"}):
+            return "Optimization"
+        if any(token in title_tokens for token in {"train", "checkpoint", "loss"}):
+            return "Training"
+        if any(token in title_tokens for token in {"data", "dataset", "tokenizer", "parquet", "pipeline"}):
+            return "Data Pipeline"
+        if any(token in title_tokens for token in {"eval", "metric", "score", "benchmark", "report"}):
+            return "Evaluation"
+        if any(token in title_tokens for token in {"infer", "runtime", "sampling", "cache", "stats"}):
+            return "Inference & Runtime"
+        if bucket.generation_hints.get("is_endpoint_family") or bucket.generation_hints.get("is_endpoint_ref") or any(token in title_tokens for token in {"api", "cli", "interface", "chat"}):
+            return "Interfaces"
+        return "Operations"
+    if primary_type == "monorepo_product":
+        if any(token in title_tokens for token in {"package", "workspace", "shared"}):
+            return "Monorepo Structure"
+        if any(token in title_tokens for token in {"release", "ci", "workflow", "build"}):
+            return "Release"
+        if any(token in title_tokens for token in {"ui", "frontend", "canvas", "component"}):
+            return "Frontend"
+        if any(token in title_tokens for token in {"runtime", "worker", "execution"}):
+            return "Runtime"
+        if any(token in title_tokens for token in {"api", "service", "server"}):
+            return "API & Services"
+        return "Configuration"
+    if bucket.generation_hints.get("is_introduction_page"):
+        return "Overview"
+    if bucket.generation_hints.get("is_endpoint_family") or bucket.generation_hints.get("is_endpoint_ref"):
+        return "API"
+    if any(token in title_tokens for token in {"integration", "provider", "gateway"}):
+        return "Integrations"
+    if any(token in title_tokens for token in {"model", "schema", "migration", "database"}):
+        return "Data Layer"
+    if any(token in title_tokens for token in {"logging", "deploy", "metric", "health", "config"}):
+        return "Operations"
+    return "Architecture"
+
+
+def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
+    """Normalize sections and merge low-value standalone helper pages."""
+    primary = classification.get("repo_profile", {}).get("primary_type", "other")
+    merged_utilities: list[DocBucket] = []
+    new_buckets: list[DocBucket] = []
+    for bucket in plan.buckets:
+        title_lower = bucket.title.lower()
+        if (
+            primary == "research_training"
+            and len(bucket.owned_files) <= 2
+            and any(token in title_lower for token in ("utilities", "utility"))
+        ):
+            merged_utilities.append(bucket)
+            continue
+        bucket.section = _canonical_section_for_bucket(bucket, primary)
+        if bucket.section in {"Training", "Data Pipeline", "Evaluation", "Optimization", "Model Architecture"} and bucket.title.lower().endswith(" overview"):
+            bucket.section = bucket.section
+        new_buckets.append(bucket)
+
+    if merged_utilities:
+        merged = DocBucket(
+            bucket_type="utility-group",
+            title="Common Utilities & Configuration",
+            slug="common-utilities-configuration",
+            section="Operations",
+            description="Shared low-level helpers and configuration utilities referenced across the repository",
+            owned_files=sorted({f for bucket in merged_utilities for f in bucket.owned_files}),
+            required_sections=["overview", "shared_helpers", "configuration", "usage_patterns"],
+            generation_hints={"prompt_style": "general", "icon": "cube"},
+            priority=min(bucket.priority for bucket in merged_utilities),
+        )
+        new_buckets.append(merged)
+
+    plan.buckets = sorted(new_buckets, key=lambda bucket: bucket.priority)
+    nav: dict[str, list[str]] = defaultdict(list)
+    for bucket in plan.buckets:
+        nav[bucket.section].append(bucket.slug)
+    plan.nav_structure = dict(nav)
+    return plan
+
+
+def _attach_orphans_semantically(
+    plan: DocPlan,
+    scan: RepoScan,
+    classification: dict[str, Any],
+) -> DocPlan:
+    assigned = {f for bucket in plan.buckets for f in bucket.owned_files}
+    for file_path in sorted(set(scan.file_summaries) - assigned):
+        attached = _attach_file_to_best_bucket(file_path, plan, scan, include_overview=False)
+        if not attached:
+            _attach_file_to_best_bucket(file_path, plan, scan, include_overview=True)
+    return plan
+
+
+def _apply_page_contracts(
+    plan: DocPlan,
+    scan: RepoScan,
+    classification: dict[str, Any],
+) -> DocPlan:
+    primary = classification.get("repo_profile", {}).get("primary_type", "other")
+    for bucket in plan.buckets:
+        section = bucket.section
+        sibling_slugs = [b.slug for b in plan.buckets if b.section == section and b.slug != bucket.slug][:5]
+        must_cover: list[str] = []
+        title_tokens = _bucket_semantic_tokens(bucket)
+        if primary == "research_training":
+            if section == "Model Architecture":
+                must_cover = ["interfaces", "internal mechanics", "configuration", "performance"]
+            elif section == "Training":
+                must_cover = ["training loop", "state transitions", "checkpointing"]
+            elif section == "Optimization":
+                must_cover = ["optimizer behavior", "schedules", "parameter groups"]
+            elif section == "Evaluation":
+                must_cover = ["metrics", "evaluation flow", "outputs"]
+            elif section == "Inference & Runtime":
+                must_cover = ["runtime behavior", "request flow", "sampling or caching"]
+            elif section == "Research Context":
+                must_cover = ["source context", "timeline or findings", "references"]
+        elif section == "Operations":
+            must_cover = ["configuration", "operational concerns"]
+        bucket.generation_hints = bucket.generation_hints or {}
+        bucket.generation_hints["page_contract"] = {
+            "intent": bucket.description or bucket.title,
+            "must_cover_concepts": must_cover,
+            "required_sibling_links": sibling_slugs,
+            "forbidden_filler": ["miscellaneous", "various helpers", "other stuff"],
+            "title_tokens": sorted(title_tokens)[:12],
+        }
+    return plan
+
+
+def _build_file_summaries_for_bucket(bucket: DocBucket, scan: RepoScan) -> str:
+    """Build condensed file summaries for decomposition context."""
+    lines = []
+    for fpath in bucket.owned_files:
+        pf = scan.parsed_files.get(fpath)
+        line_count = scan.file_line_counts.get(fpath, 0)
+        if not pf:
+            lines.append(f"### {fpath} ({line_count} lines)\n(no parse data)\n")
+            continue
+        symbol_names = [f"{s.kind}:{s.name}" for s in pf.symbols[:12]]
+        lines.append(f"### {fpath} ({line_count} lines)")
+        if symbol_names:
+            lines.append(f"Symbols: {', '.join(symbol_names)}")
+        if pf.imports:
+            lines.append(f"Key imports: {', '.join(pf.imports[:8])}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _should_decompose(bucket: DocBucket, scan: RepoScan, threshold: int) -> bool:
+    """Decide whether a bucket is broad enough to warrant decomposition.
+
+    Uses multiple signals, not just file count.
+    """
+    hints = bucket.generation_hints or {}
+    if hints.get("is_endpoint_ref") or hints.get("is_endpoint_family"):
+        return False
+    if hints.get("is_introduction_page"):
+        return False
+
+    file_count = len(bucket.owned_files)
+    if file_count >= threshold:
+        return True
+
+    total_symbols = 0
+    for fpath in bucket.owned_files:
+        pf = scan.parsed_files.get(fpath)
+        if pf:
+            total_symbols += len(pf.symbols)
+    if total_symbols >= 25 and file_count >= 3:
+        return True
+
+    giant_count = sum(1 for f in bucket.owned_files if f in scan.giant_file_clusters)
+    if giant_count >= 1:
+        return True
+
+    return False
+
+
+def _decompose_buckets(
+    plan: DocPlan,
+    scan: RepoScan,
+    cfg: dict,
+    llm: LLMClient,
+    repo_profile: dict,
+) -> DocPlan:
+    """Decompose broad buckets into focused sub-topics."""
+    threshold = cfg.get("decompose_threshold", 5)
+    new_buckets: list[DocBucket] = []
+    new_nav = dict(plan.nav_structure)
+    repo_profile_str = json.dumps(repo_profile, indent=2) if repo_profile else "unknown"
+    existing_slugs = {b.slug for b in plan.buckets}
+
+    for bucket in plan.buckets:
+        if not _should_decompose(bucket, scan, threshold):
+            new_buckets.append(bucket)
+            continue
+
+        file_summaries = _build_file_summaries_for_bucket(bucket, scan)
+        prompt = DECOMPOSE_PROMPT.format(
+            title=bucket.title,
+            section=bucket.section,
+            bucket_type=bucket.bucket_type,
+            description=bucket.description,
+            file_count=len(bucket.owned_files),
+            file_list="\n".join(
+                f"  - {f} ({scan.file_line_counts.get(f, 0)} lines)"
+                for f in bucket.owned_files
+            ),
+            file_summaries=file_summaries[:15000],
+            repo_profile=repo_profile_str,
+        )
+        result = _llm_step(llm, DECOMPOSE_SYSTEM, prompt, f"decompose-{bucket.slug}")
+
+        if not result or not result.get("sub_topics") or len(result["sub_topics"]) < 2:
+            new_buckets.append(bucket)
+            continue
+
+        nav_section = result.get("nav_section", f"{bucket.section} > {bucket.title}")
+        keep_parent = result.get("keep_parent_overview", False)
+        sub_slugs: list[str] = []
+        hints = bucket.generation_hints or {}
+
+        if keep_parent:
+            overview_bucket = DocBucket(
+                bucket_type=bucket.bucket_type,
+                title=f"{bucket.title} Overview",
+                slug=bucket.slug,
+                section=nav_section,
+                description=f"Overview of {bucket.title} — how the sub-components fit together",
+                depends_on=bucket.depends_on,
+                owned_files=bucket.owned_files[:3],
+                owned_symbols=[],
+                artifact_refs=bucket.artifact_refs,
+                required_sections=["overview", "architecture", "component_summary"],
+                required_diagrams=bucket.required_diagrams or ["architecture_flow"],
+                coverage_targets=[],
+                generation_hints={
+                    **{k: v for k, v in hints.items() if k != "is_introduction_page"},
+                    "prompt_style": "system",
+                },
+                priority=bucket.priority,
+            )
+            new_buckets.append(overview_bucket)
+            sub_slugs.append(bucket.slug)
+
+        for i, sub in enumerate(result["sub_topics"]):
+            sub_slug = sub["slug"]
+            if sub_slug in existing_slugs:
+                sub_slug = f"{sub_slug}-{bucket.slug[:8]}"
+            if sub_slug in existing_slugs:
+                sub_slug = f"{sub_slug}-{i}"
+            existing_slugs.add(sub_slug)
+
+            sub_bucket = DocBucket(
+                bucket_type=bucket.bucket_type,
+                title=sub["title"],
+                slug=sub_slug,
+                section=nav_section,
+                description=sub.get("description", ""),
+                depends_on=bucket.depends_on,
+                owned_files=sub.get("owned_files", []),
+                owned_symbols=sub.get("owned_symbols", []),
+                artifact_refs=[],
+                required_sections=sub.get("required_sections", ["overview", "details"]),
+                required_diagrams=sub.get("required_diagrams", []),
+                coverage_targets=[],
+                generation_hints={
+                    **{k: v for k, v in hints.items() if k != "is_introduction_page"},
+                    "prompt_style": sub.get(
+                        "prompt_style", hints.get("prompt_style", "general")
+                    ),
+                },
+                priority=bucket.priority + i + 1,
+                parent_slug=bucket.slug,
+            )
+            new_buckets.append(sub_bucket)
+            sub_slugs.append(sub_slug)
+
+        for section_name, slugs in list(new_nav.items()):
+            if bucket.slug in slugs:
+                slugs.remove(bucket.slug)
+                if not slugs:
+                    del new_nav[section_name]
+        new_nav.setdefault(nav_section, []).extend(sub_slugs)
+
+        console.print(
+            f"[cyan]  ↳ Decomposed '{bucket.title}' into {len(result['sub_topics'])} sub-topics"
+            f"{' + overview' if keep_parent else ''}[/cyan]"
+        )
+
+    plan.buckets = new_buckets
+    plan.nav_structure = new_nav
+    return plan
+
+
+def _auto_generate_endpoint_refs(
+    plan: DocPlan,
+    scan: RepoScan,
+    include_endpoint_pages: bool = True,
+) -> DocPlan:
     """Auto-generate individual endpoint_ref buckets from scan API endpoints.
 
     This creates one page per API endpoint (e.g. GET /api/v1/orders) and nests
@@ -1095,8 +2130,29 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
     """
     import re as _re
 
-    if not scan.api_endpoints:
+    NOISE_PATHS = {
+        "/health",
+        "/healthz",
+        "/ready",
+        "/readyz",
+        "/alive",
+        "/ping",
+        "/status",
+        "/metrics",
+        "/version",
+        "/info",
+        "/favicon.ico",
+        "/robots.txt",
+        "/sitemap.xml",
+    }
+    NOISE_SUFFIXES = (".svg", ".png", ".jpg", ".ico", ".css", ".js", ".map")
+
+    if not include_endpoint_pages or not scan.api_endpoints:
         return plan
+
+    repo_profile = plan.classification.get("repo_profile", {})
+    primary_type = repo_profile.get("primary_type", "other")
+    restrict_endpoints = primary_type not in ("backend_api",)
 
     # Map endpoints to their family bucket by matching resource group
     family_buckets = [b for b in plan.buckets if b.generation_hints.get("is_endpoint_family")]
@@ -1126,10 +2182,20 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
         method = ep.get("method", "GET").upper()
         path = ep.get("path", "/unknown")
         handler = ep.get("handler", "")
-        ep_file = ep.get("file", "")
+        ep_files = endpoint_owned_files(ep)
+        path_lower = path.lower()
+
+        if path_lower in NOISE_PATHS:
+            continue
+        if any(path_lower.endswith(s) for s in NOISE_SUFFIXES):
+            continue
+        if path == "/" and method == "GET" and handler in ("root", "index", "home"):
+            continue
+        if restrict_endpoints and not family_buckets:
+            continue
 
         # Build slug
-        path_slug = _re.sub(r"[/:{}]+", "-", path).strip("-").lower()
+        path_slug = _re.sub(r"[/:{}<>]+", "-", path).strip("-").lower()
         ref_slug = f"{method.lower()}-{path_slug}"
 
         # Avoid duplicates
@@ -1150,7 +2216,7 @@ def _auto_generate_endpoint_refs(plan: DocPlan, scan: RepoScan) -> DocPlan:
                 slug=ref_slug,
                 section="API Endpoints",
                 description=f"API reference for {method} {path} — handler: {handler}",
-                owned_files=[ep_file] if ep_file else [],
+                owned_files=ep_files,
                 owned_symbols=[handler] if handler else [],
                 required_sections=[
                     "endpoint_summary", "handler", "parameters", "request_body",
@@ -1237,23 +2303,65 @@ def _validate_coverage(plan: DocPlan, scan: RepoScan) -> DocPlan:
                     break
 
             if not matched:
-                # Create a catch-all module bucket
-                plan.buckets.append(
-                    DocBucket(
-                        bucket_type="module",
-                        title=f"{group_name.replace('_', ' ').replace('-', ' ').title()} Module",
-                        slug=f"{group_name.lower().replace(' ', '-').replace('_', '-')}-module",
-                        section="Modules",
-                        description=f"Documentation for the {group_name} module",
-                        owned_files=files,
-                        required_sections=["overview", "details", "diagrams"],
-                        generation_hints={"prompt_style": "general", "icon": "cube"},
-                        priority=50,
+                best_bucket = None
+                best_overlap = 0
+                orphan_imports: set[str] = set()
+                for f in files:
+                    pf = scan.parsed_files.get(f)
+                    if pf:
+                        orphan_imports.update(pf.imports)
+
+                if orphan_imports:
+                    for bucket in plan.buckets:
+                        bucket_imports: set[str] = set()
+                        for bf in bucket.owned_files[:10]:
+                            bpf = scan.parsed_files.get(bf)
+                            if bpf:
+                                bucket_imports.update(bpf.imports)
+                        overlap = len(orphan_imports & bucket_imports)
+                        if overlap > best_overlap:
+                            best_overlap = overlap
+                            best_bucket = bucket
+
+                if best_bucket and best_overlap >= 2:
+                    best_bucket.owned_files.extend(files)
+                    matched = True
+                else:
+                    representative_symbols: list[str] = []
+                    for f in files[:3]:
+                        pf = scan.parsed_files.get(f)
+                        if pf:
+                            representative_symbols.extend(
+                                s.name
+                                for s in pf.symbols[:3]
+                                if s.kind in ("class", "function")
+                            )
+                    if representative_symbols:
+                        title = f"{', '.join(representative_symbols[:3])} and Related"
+                    else:
+                        title = (
+                            f"{group_name.replace('_', ' ').replace('-', ' ').title()} Module"
+                        )
+
+                    slug = (
+                        f"{group_name.lower().replace(' ', '-').replace('_', '-')}-module"
                     )
-                )
-                if "Modules" not in plan.nav_structure:
-                    plan.nav_structure["Modules"] = []
-                plan.nav_structure["Modules"].append(plan.buckets[-1].slug)
+                    plan.buckets.append(
+                        DocBucket(
+                            bucket_type="module",
+                            title=title,
+                            slug=slug,
+                            section="Modules",
+                            description=f"Documentation covering {title.lower()}",
+                            owned_files=files,
+                            required_sections=["overview", "details", "diagrams"],
+                            generation_hints={"prompt_style": "general", "icon": "cube"},
+                            priority=50,
+                        )
+                    )
+                    if "Modules" not in plan.nav_structure:
+                        plan.nav_structure["Modules"] = []
+                    plan.nav_structure["Modules"].append(slug)
 
         plan.orphaned_files = sorted(orphaned)
 
@@ -1491,7 +2599,7 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
             resource_groups[resource].append(ep)
 
         for resource, eps in sorted(resource_groups.items()):
-            ep_files = sorted(set(ep["file"] for ep in eps))
+            ep_files = sorted({f for ep in eps for f in endpoint_owned_files(ep)})
             slug = f"{resource}-api"
             buckets.append(
                 DocBucket(
@@ -1523,8 +2631,8 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
                 method = ep.get("method", "GET").upper()
                 path = ep.get("path", "/unknown")
                 handler = ep.get("handler", "")
-                ep_file = ep.get("file", "")
-                path_slug = re.sub(r"[/:{}]+", "-", path).strip("-").lower()
+                ep_files = endpoint_owned_files(ep)
+                path_slug = re.sub(r"[/:{}<>]+", "-", path).strip("-").lower()
                 ref_slug = f"{method.lower()}-{path_slug}"
                 ref_title = f"{method} {path}"
                 buckets.append(
@@ -1534,7 +2642,7 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
                         slug=ref_slug,
                         section="API Endpoints",
                         description=f"API reference for {method} {path} — handler: {handler}",
-                        owned_files=[ep_file] if ep_file else [],
+                        owned_files=ep_files,
                         owned_symbols=[handler] if handler else [],
                         required_sections=[
                             "endpoint_summary", "handler", "parameters", "request_body",
@@ -1693,6 +2801,14 @@ def _build_classification_summary(classification: dict) -> str:
         f"### Cross-cutting concerns: {len(classification.get('cross_cutting', []))}"
     )
     lines.append(f"### Giant files: {len(classification.get('giant_files', []))}")
+    repo_profile = classification.get("repo_profile", {})
+    if repo_profile:
+        primary_type = repo_profile.get("primary_type", "other")
+        traits = ", ".join(repo_profile.get("secondary_traits", [])) or "none"
+        confidence = repo_profile.get("confidence", "unknown")
+        lines.append(
+            f"### Repo profile: {primary_type} (traits: {traits}; confidence: {confidence})"
+        )
 
     return "\n".join(lines)
 
@@ -1708,8 +2824,16 @@ def _print_classification_summary(classification: dict) -> None:
     integrations = classification.get("integration_signals", [])
     cross_cutting = classification.get("cross_cutting", [])
     giant_files = classification.get("giant_files", [])
+    repo_profile = classification.get("repo_profile", {})
 
     console.print(f"  [green]✓[/green] Classified {len(source_files)} source files")
+    if repo_profile:
+        primary = repo_profile.get("primary_type", "other")
+        traits = ", ".join(repo_profile.get("secondary_traits", [])) or "none"
+        confidence = repo_profile.get("confidence", "unknown")
+        console.print(
+            f"  [green]✓[/green] Repo profile: {primary} (traits: {traits}; confidence: {confidence})"
+        )
     if integrations:
         names = [i.get("name", "?") for i in integrations]
         console.print(

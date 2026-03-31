@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
+import socket
 import subprocess
 import sys
 import time
@@ -171,11 +173,13 @@ def init(name, description, provider, model, output_dir, with_chatbot):
               help="Restrict scanning to these glob patterns. Repeat the flag to include multiple roots.")
 @click.option("--exclude", multiple=True,
               help="Add extra glob patterns to exclude for this run. Repeat the flag as needed.")
+@click.option("--api/--skip-api", "include_api", default=None,
+              help="Include detected API endpoint pages for this run. Use --skip-api to omit API buckets and per-endpoint docs.")
 @click.option("--deploy", is_flag=True,
               help="Run `codewiki deploy` automatically after a successful generation.")
 @click.option("--batch-size", default=10, show_default=True,
               help="How many pages to generate per batch before pausing briefly for rate limits.")
-def generate(force, clean, yes, include, exclude, deploy, batch_size):
+def generate(force, clean, yes, include, exclude, include_api, deploy, batch_size):
     """Generate documentation for the entire codebase.
 
     \b
@@ -222,6 +226,8 @@ def generate(force, clean, yes, include, exclude, deploy, batch_size):
         cfg["include"] = list(include)
     if exclude:
         cfg["exclude"] = cfg.get("exclude", []) + list(exclude)
+    if include_api is not None:
+        cfg["include_endpoint_pages"] = include_api
     cfg["batch_size"] = batch_size
 
     console.print(Panel.fit(
@@ -373,6 +379,63 @@ def status():
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# benchmark
+# ─────────────────────────────────────────────────────────────────────────────
+
+@main.command(short_help="Benchmark planner quality against a gold manifest catalog.")
+@click.option("--catalog", type=click.Path(path_type=Path), default=None,
+              help="JSON catalog containing benchmark cases with repo paths and gold expectations.")
+@click.option("--repo", "repo_path", type=click.Path(path_type=Path), default=None,
+              help="Run a single benchmark case against this local repository path.")
+@click.option("--gold", type=click.Path(path_type=Path), default=None,
+              help="Gold expectation JSON for --repo mode.")
+def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -> None:
+    """Run benchmark scoring for planner/nav quality."""
+    cfg = _load_or_exit()
+    from rich.table import Table
+
+    from .benchmark_v2 import load_catalog, run_case
+
+    if repo_path:
+        if gold is None:
+            raise click.ClickException("--gold is required when using --repo.")
+        cases = [{
+            "name": repo_path.name,
+            "family": "ad_hoc",
+            "repo_path": str(repo_path),
+            "holdout": False,
+            "gold": json.loads(gold.read_text(encoding="utf-8")),
+        }]
+    else:
+        if catalog is None:
+            raise click.ClickException("Provide --catalog or use --repo with --gold.")
+        cases = load_catalog(catalog)
+
+    table = Table(title="CodeWiki Benchmarks", show_header=True, header_style="bold")
+    table.add_column("Case", style="cyan")
+    table.add_column("Family")
+    table.add_column("Holdout")
+    table.add_column("Score", justify="right")
+    table.add_column("Notes")
+
+    for case in cases:
+        repo = Path(case["repo_path"]).expanduser()
+        if not repo.exists():
+            table.add_row(case["name"], case.get("family", "other"), "yes" if case.get("holdout") else "no", "SKIP", "repo missing")
+            continue
+        result = run_case(case, cfg)
+        table.add_row(
+            result.name,
+            result.family,
+            "yes" if result.holdout else "no",
+            f"{result.score:.1f}",
+            "; ".join(result.notes[:3]) or "ok",
+        )
+
+    console.print(table)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # serve
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -402,8 +465,11 @@ def serve(port):
 
     try:
         backend_proc = None
+        next_env = os.environ.copy()
         if cfg.get("chatbot", {}).get("enabled"):
-            backend_proc = _start_chatbot_backend(repo_root, cfg)
+            backend_proc, backend_url = _start_chatbot_backend(repo_root, cfg, port)
+            if backend_url:
+                next_env["NEXT_PUBLIC_CODEWIKI_CHATBOT_BASE_URL"] = backend_url
         if not (site_dir / "node_modules").exists():
             console.print("[dim]Installing site dependencies...[/dim]")
             install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
@@ -414,6 +480,7 @@ def serve(port):
         subprocess.run(
             ["npx", "next", "dev", "--port", str(port)],
             cwd=str(site_dir),
+            env=next_env,
         )
     except KeyboardInterrupt:
         pass
@@ -650,21 +717,43 @@ def _add_gitignore_entries(repo_root: Path, entries: list[str]) -> None:
                 f.write(f"{e}\n")
 
 
-def _start_chatbot_backend(repo_root: Path, cfg: dict) -> subprocess.Popen | None:
+def _start_chatbot_backend(
+    repo_root: Path,
+    cfg: dict,
+    frontend_port: int,
+) -> tuple[subprocess.Popen | None, str]:
     import threading
 
     from .chatbot.scaffold import scaffold_chatbot_backend
-    from .chatbot.settings import chatbot_backend_port
+    from .chatbot.settings import (
+        chatbot_backend_port,
+        chatbot_should_start_local_backend,
+        configured_chatbot_backend_base_url,
+    )
+
+    configured_url = configured_chatbot_backend_base_url(cfg)
+    if configured_url and not chatbot_should_start_local_backend(cfg):
+        console.print(f"[dim]Using configured chatbot backend at {configured_url}[/dim]")
+        return None, configured_url
 
     scaffold_chatbot_backend(repo_root, cfg)
 
     backend_dir = repo_root / "chatbot_backend"
     if not (backend_dir / "app.py").exists():
         console.print("[yellow]⚠ Chatbot backend scaffold missing; continuing without chat.[/yellow]")
-        return None
+        return None, configured_url
 
-    port = chatbot_backend_port(cfg)
+    preferred_port = chatbot_backend_port(cfg, repo_root)
+    port = _find_available_loopback_port(preferred_port)
+    if port != preferred_port:
+        console.print(
+            f"[yellow]⚠ Chatbot backend port {preferred_port} is busy; using {port} instead.[/yellow]"
+        )
+
+    backend_url = f"http://127.0.0.1:{port}"
     console.print(f"[dim]Starting chatbot backend on http://127.0.0.1:{port}[/dim]")
+    backend_env = os.environ.copy()
+    backend_env["CODEWIKI_CHATBOT_PREVIEW_PORT"] = str(frontend_port)
     proc = subprocess.Popen(
         [
             sys.executable,
@@ -677,6 +766,7 @@ def _start_chatbot_backend(repo_root: Path, cfg: dict) -> subprocess.Popen | Non
             str(port),
         ],
         cwd=str(repo_root),
+        env=backend_env,
         stdout=subprocess.DEVNULL,
         stderr=subprocess.PIPE,
         text=True,
@@ -701,8 +791,28 @@ def _start_chatbot_backend(repo_root: Path, cfg: dict) -> subprocess.Popen | Non
     time.sleep(2)
     if proc.poll() is not None:
         console.print("[yellow]⚠ Chatbot backend failed to start; docs will still serve.[/yellow]")
-        return None
-    return proc
+        return None, configured_url
+    return proc, backend_url
+
+
+def _find_available_loopback_port(preferred_port: int) -> int:
+    for candidate in range(preferred_port, preferred_port + 20):
+        if _is_loopback_port_available(candidate):
+            return candidate
+
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.bind(("127.0.0.1", 0))
+        return int(sock.getsockname()[1])
+
+
+def _is_loopback_port_available(port: int) -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            sock.bind(("127.0.0.1", port))
+        except OSError:
+            return False
+    return True
 
 
 def _flatten_config(cfg: dict, prefix: str, table) -> None:

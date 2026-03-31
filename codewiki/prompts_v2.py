@@ -57,15 +57,15 @@ JSX components to make pages beautiful and scannable. Never use `:::type` admoni
 ```
 <Steps>
   <Step>
-    ### Install dependencies
+    <h3>Install dependencies</h3>
     Run `npm install` from the project root.
   </Step>
   <Step>
-    ### Configure environment
+    <h3>Configure environment</h3>
     Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
   </Step>
   <Step>
-    ### Start the server
+    <h3>Start the server</h3>
     Run `npm run dev`. The API will be available at `http://localhost:3000`.
   </Step>
 </Steps>
@@ -112,6 +112,7 @@ Use at the end of overview/architecture pages to create a visual navigation grid
 
 **When to use each**:
 - Use `<Steps>` for ANY setup, installation, or ordered workflow — never a numbered list.
+- Inside `<Step>`, use HTML headings like `<h3>Install dependencies</h3>`, not markdown headings like `### Install dependencies`.
 - Use `<Cards>` at the end of overview and architecture pages to link to sub-pages.
 - Use `<Tabs>` when showing the same thing in multiple languages, environments, or configs.
 - Use `<Accordions>` and `<Accordion>` for reference material with many options or a FAQ section.
@@ -1054,6 +1055,192 @@ Reference EVERY file path. Use the actual handler function names from the source
 """
 
 
+TRAINING_BUCKET_V2 = """\
+Generate **training pipeline documentation** for a specific training component.
+
+Page: {title}
+Description: {page_description}
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+Source files and evidence:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+Write comprehensive training documentation following this mandatory outline:
+
+# {title}
+
+## Overview
+What this training component does, its role in the training pipeline, and when it runs.
+
+## Training Loop
+Include a **Mermaid flowchart** showing the training flow. Cover forward pass, \
+loss computation, backward pass, optimizer step, and any hooks.
+
+## Hyperparameters & Configuration
+All configurable parameters with defaults, ranges, and effects. Use a markdown table.
+
+## Data Flow
+Include a **Mermaid diagram** showing data movement: dataset → dataloader → \
+model → loss → optimizer. Reference exact file paths.
+
+## Implementation Details
+For each key function/class: what it does, file path, signature, and important \
+internal mechanics. Include code examples from the actual source.
+
+## Distributed Training
+If applicable: how this component works in multi-GPU/multi-node settings. \
+Communication patterns, gradient synchronization, data parallelism.
+
+## Checkpointing & Recovery
+How state is saved and restored. Checkpoint format, resume logic.
+
+## Performance Notes
+Known bottlenecks, optimization tips, memory usage patterns.
+
+## See Also
+Related training, model, and evaluation pages.
+
+Reference EVERY file path. Include all required diagrams: {required_diagrams}.
+"""
+
+
+ARCHITECTURE_COMPONENT_V2 = """\
+Generate **component deep-dive documentation** for a specific architectural component.
+
+Page: {title}
+Description: {page_description}
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+Source files and evidence:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+Write comprehensive component documentation following this mandatory outline:
+
+# {title}
+
+## Overview
+What this component is, why it exists, and its role in the system. \
+One paragraph, precise.
+
+## Design & Purpose
+Include a **Mermaid diagram** (class, flowchart, or sequence — whichever fits best) \
+showing this component's structure or data flow. Explain key design decisions.
+
+## Implementation Details
+For each important class/function:
+- Exact file path and line number
+- Signature and parameters
+- Internal mechanics — how it actually works, not just what it does
+- Code examples from the real source
+
+## Public Interface
+The API surface that other components use. Parameters, return types, exceptions.
+
+## Internal Mechanics
+Algorithms, data structures, state management. The details someone would need \
+to modify this component.
+
+## How It's Used
+Which other components depend on this one. Link to their pages. \
+Show call patterns with brief code snippets.
+
+## Configuration
+Settings that affect this component's behavior.
+
+## Performance Considerations
+Complexity, memory usage, known hotspots, optimization opportunities.
+
+## See Also
+Related component, feature, and system pages.
+
+Reference EVERY file path. Include all required diagrams: {required_diagrams}.
+"""
+
+
+DATA_PIPELINE_V2 = """\
+Generate **data pipeline documentation** for a specific pipeline stage or data component.
+
+Page: {title}
+Description: {page_description}
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+Source files and evidence:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+Write comprehensive pipeline documentation following this mandatory outline:
+
+# {title}
+
+## Overview
+What this pipeline stage does, its inputs and outputs, and where it fits in the \
+overall data flow.
+
+## Input / Output Schema
+Describe the data format entering and leaving this stage. Use tables or code \
+blocks for schema definitions.
+
+## Processing Logic
+Include a **Mermaid flowchart** showing the transform steps. For each step: \
+what it does, which function handles it (with file path), and error conditions.
+
+## Error Handling & Recovery
+What happens when input is malformed, when external sources fail, retry logic, \
+dead letter handling.
+
+## Configuration
+Tunable parameters: batch sizes, parallelism, timeouts, feature flags.
+
+## Monitoring & Observability
+Metrics emitted, log patterns, how to debug pipeline failures.
+
+## See Also
+Related pipeline stages, data model pages, and integration pages.
+
+Reference EVERY file path. Include all required diagrams: {required_diagrams}.
+"""
+
+
+RESEARCH_CONTEXT_V2 = """\
+Generate **research context documentation** from repository notes, READMEs, glossaries, and experiment documents.
+
+Page: {title}
+Description: {page_description}
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+Source files and evidence:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+Write a grounded documentation page using only the supplied repository context.
+
+# {title}
+
+## Overview
+What this context page covers and why it matters to understanding the repository.
+
+## Key Findings or Terms
+Summarize the main ideas, experiments, glossary entries, or design decisions from the source material.
+
+## Timeline / References
+List the relevant notes, markdown files, notebooks, or changelog entries with exact file paths.
+
+## Relevance to the Codebase
+Explain which model, training, evaluation, runtime, or architecture pages this context informs.
+
+## See Also
+Link to related architecture, training, evaluation, or glossary pages.
+
+Reference EVERY file path. Do not invent history or experiments that are not present in the source material.
+"""
+
+
 # Prompt style templates — keyed by prompt_style hint, NOT by bucket_type
 PROMPT_STYLE_TEMPLATES = {
     "system": SYSTEM_BUCKET_V2,
@@ -1062,6 +1249,10 @@ PROMPT_STYLE_TEMPLATES = {
     "endpoint_ref": ENDPOINT_REF_V2,
     "integration": INTEGRATION_BUCKET_V2,
     "database": DATABASE_SYSTEM_V2,
+    "training": TRAINING_BUCKET_V2,
+    "architecture_component": ARCHITECTURE_COMPONENT_V2,
+    "data_pipeline": DATA_PIPELINE_V2,
+    "research_context": RESEARCH_CONTEXT_V2,
     "general": GUIDE_V2,
 }
 

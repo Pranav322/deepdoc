@@ -19,6 +19,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # ── Giant file thresholds ────────────────────────────────────────────
     "large_file_lines": 500,  # files above this get tiered summarization
     "giant_file_lines": 2000,  # files above this get LLM-based feature clustering
+    "source_context_budget": 200000,  # raw-source char budget before compressed evidence cards kick in
+    "decompose_threshold": 5,  # buckets with 5+ files trigger decomposition consideration
     # ── Integration detection ────────────────────────────────────────────
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────
@@ -136,7 +138,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "enabled": False,
         "index_dir": ".codewiki/chatbot",
         "backend": {
-            "base_url": "http://127.0.0.1:8001",
+            "base_url": "",
             "allowed_origins": [
                 "http://localhost:3000",
                 "http://127.0.0.1:3000",

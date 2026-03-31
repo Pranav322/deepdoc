@@ -7,9 +7,11 @@ from codewiki.generator_v2 import (
     _fix_mermaid_diagram,
     escape_mdx_route_params,
     escape_mdx_text_hazards,
+    normalize_mdx_steps,
     normalize_code_fence_languages,
 )
 from codewiki.pipeline_v2 import stage_openapi_assets
+from codewiki.pipeline_v2 import _endpoint_ref_slug
 from codewiki.prompts_v2 import ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2, SYSTEM_V2
 from codewiki.site.fumadocs_builder_v2 import build_fumadocs_from_plan
 from tests.conftest import make_bucket, make_plan
@@ -216,6 +218,28 @@ Inline code: `ANY /get-prod-variants/<str:prod_slug>`
     assert "`ANY /get-prod-variants/<str:prod_slug>`" in escaped
 
 
+def test_escape_mdx_text_hazards_escapes_plain_placeholder_tags() -> None:
+    content = """| Location | Name |
+|----------|------|
+| path     | <model>/ |
+
+Inline code: `<model>/`
+"""
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "| path     | &lt;model&gt;/ |" in escaped
+    assert "Inline code: `<model>/`" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_hyphenated_placeholder_tags() -> None:
+    content = "[ANY /get-prod-variants-<str-prod_slug>](/any-get-prod-variants-<str-prod_slug>)"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "&lt;str-prod_slug&gt;" in escaped
+
+
 def test_escape_mdx_text_hazards_escapes_generic_types_in_tables_only() -> None:
     content = """| Field | Type | Description |
 |-------|------|-------------|
@@ -233,6 +257,22 @@ Inline code: `array<object>`
     assert "| products | array&lt;object&gt; | Product list |" in escaped
     assert "Inline code: `array<object>`" in escaped
     assert "```md\n| products | array<object> | Product list |\n```" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_union_generic_types() -> None:
+    content = "- `productIds` (Array<string|number>): List of product IDs to sync."
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "Array&lt;string|number&gt;" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_nested_generic_types() -> None:
+    content = "- **writerQuery(sql, params):** Promise<Array&lt;Row&gt;>"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "Promise&lt;Array&lt;Row&gt;&gt;" in escaped
 
 
 def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
@@ -261,6 +301,48 @@ DEBUG=False
 
     assert "```bash\nSECRET_KEY=test" in normalized
     assert "```bash\nDEBUG=False" in normalized
+
+
+def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> None:
+    content = """<Steps>
+  <Step>
+    ### 1. Clone the repository
+
+    ```bash
+    git clone https://example.com/repo.git
+    ```
+  </Step>
+</Steps>
+"""
+
+    normalized = normalize_mdx_steps(content)
+
+    assert "<h3>1. Clone the repository</h3>" in normalized
+    assert "### 1. Clone the repository" not in normalized
+    assert "```bash" in normalized
+
+
+def test_normalize_mdx_steps_leaves_code_fence_contents_and_external_headings_unchanged() -> None:
+    content = """## Setup
+
+<Steps>
+  <Step>
+    ```md
+    ### not-a-real-heading
+    ```
+  </Step>
+</Steps>
+"""
+
+    normalized = normalize_mdx_steps(content)
+
+    assert normalized.startswith("## Setup")
+    assert "### not-a-real-heading" in normalized
+    assert "<h3>not-a-real-heading</h3>" not in normalized
+
+
+def test_endpoint_ref_slug_strips_angle_bracket_path_converters() -> None:
+    assert _endpoint_ref_slug("GET", "/get-prod-variants/<str:prod_slug>") == "get-get-prod-variants-str-prod_slug"
 
 
 def test_fix_mermaid_diagram_rewrites_quoted_edge_targets() -> None:

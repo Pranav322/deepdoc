@@ -7,7 +7,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from codewiki.smart_update_v2 import SmartUpdater, UpdateRunResult
-from codewiki.persistence_v2 import load_sync_state, save_generation_ledger
+from codewiki.persistence_v2 import (
+    ENGINE_FINGERPRINT,
+    load_sync_state,
+    save_generation_ledger,
+    save_sync_state,
+)
 
 from .conftest import _run_git, FakeBucket, FakeResult
 
@@ -161,6 +166,7 @@ def test_full_replan_update_uses_reconcile_cleanup(tmp_repo_with_plan):
 def test_artifact_only_change_is_not_noop(tmp_repo_with_plan):
     """Artifact-only updates should still trigger incremental chatbot refreshes."""
     root, plan = tmp_repo_with_plan
+    plan.buckets[2].artifact_refs = ["package.json"]
 
     (root / "package.json").write_text('{"name":"demo"}\n')
     _run_git(root, "add", ".")
@@ -170,4 +176,39 @@ def test_artifact_only_change_is_not_noop(tmp_repo_with_plan):
     cs = updater._classify_changes(plan, "HEAD~1")
 
     assert "package.json" in cs.new_artifact_files
+    assert "core" in cs.stale_bucket_slugs
     assert cs.strategy == "incremental"
+
+
+def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
+    """Outdated sync state should trigger a one-time full replan."""
+    root, plan = tmp_repo_with_plan
+    state = load_sync_state(root)
+    save_sync_state(
+        root,
+        commit_sha=state["last_synced_commit"],
+        status="success",
+        generator_version="v2_buckets",
+        engine_fingerprint="outdated-engine",
+        advance_baseline=True,
+    )
+
+    updater = _make_updater(root)
+    with (
+        patch.object(
+            SmartUpdater,
+            "_full_replan_and_generate",
+            return_value=UpdateRunResult(
+                strategy="full_replan",
+                pages_updated=1,
+                pages_failed=0,
+                replanned=True,
+            ),
+        ) as replan_mock,
+        patch.object(SmartUpdater, "_rebuild_nav", return_value=None),
+    ):
+        stats = updater.update(since=state["last_synced_commit"])
+
+    assert ENGINE_FINGERPRINT != "outdated-engine"
+    assert stats["strategy"] == "full_replan"
+    assert replan_mock.called

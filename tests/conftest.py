@@ -50,6 +50,7 @@ def make_bucket(
     bucket_type: str = "system",
     section: str = "core",
     generation_hints: dict | None = None,
+    artifact_refs: list[str] | None = None,
 ) -> DocBucket:
     """Create a DocBucket with sensible defaults for testing."""
     return DocBucket(
@@ -59,6 +60,7 @@ def make_bucket(
         section=section,
         description=f"Test bucket: {title}",
         owned_files=owned_files,
+        artifact_refs=artifact_refs or [],
         generation_hints=generation_hints or {},
     )
 
@@ -89,6 +91,7 @@ class FakeBucket:
     bucket_type: str = "system"
     section: str = "core"
     owned_files: list[str] = field(default_factory=list)
+    artifact_refs: list[str] = field(default_factory=list)
     generation_hints: dict = field(default_factory=dict)
 
 

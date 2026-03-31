@@ -86,3 +86,33 @@ def test_previously_failed_bucket_is_stale(tmp_repo):
 
     stale = find_stale_buckets(plan, root, output_dir=output_dir)
     assert "auth" in stale
+
+
+def test_modified_artifact_marks_bucket_stale(tmp_repo):
+    """Changing an artifact_ref should invalidate the owning bucket."""
+    root = tmp_repo
+    output_dir = root / "docs"
+    output_dir.mkdir(exist_ok=True)
+    (output_dir / "setup.mdx").write_text("# Setup\n", encoding="utf-8")
+    (root / "package.json").write_text('{"name":"demo"}\n', encoding="utf-8")
+
+    plan = make_plan([make_bucket("Setup", "setup", ["auth.py"], artifact_refs=["package.json"])])
+    write_ledger(
+        root,
+        {
+            "setup": {
+                "slug": "setup",
+                "success": True,
+                "doc_path": "setup.mdx",
+                "file_hashes": {
+                    "auth.py": _sha256_short((root / "auth.py").read_text()),
+                    "package.json": _sha256_short('{"name":"demo"}\n'),
+                },
+            }
+        },
+    )
+
+    (root / "package.json").write_text('{"name":"demo","private":true}\n', encoding="utf-8")
+
+    stale = find_stale_buckets(plan, root, output_dir=output_dir)
+    assert "setup" in stale

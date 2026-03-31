@@ -35,6 +35,7 @@ from .llm import LLMClient
 from .manifest import Manifest, file_hash
 from .parser import parse_file, supported_extensions
 from .persistence_v2 import (
+    ENGINE_FINGERPRINT,
     load_plan,
     load_file_map,
     load_scan_cache,
@@ -44,7 +45,7 @@ from .persistence_v2 import (
     save_sync_state,
     load_sync_state,
 )
-from .planner_v2 import DocPlan, DocBucket
+from .planner_v2 import DocPlan, DocBucket, tracked_bucket_files
 from .chatbot.chunker import is_artifact_file_path
 from .chatbot.settings import chatbot_enabled
 
@@ -161,6 +162,8 @@ class SmartUpdater:
             return {"status": "no_plan"}
 
         prev_summary = ledger_summary(self.repo_root)
+        sync_state = load_sync_state(self.repo_root) or {}
+        engine_mismatch = sync_state.get("engine_fingerprint") != ENGINE_FINGERPRINT
         console.print(
             Panel(
                 f"[bold]Smart Update[/bold]\n\n"
@@ -178,7 +181,13 @@ class SmartUpdater:
         stats["changes"] = change_set.total_changes
         stats["strategy"] = change_set.strategy
 
-        if force_replan:
+        if engine_mismatch:
+            console.print(
+                "[yellow]Engine fingerprint changed since the last sync; forcing a full replan.[/yellow]"
+            )
+            change_set_strategy = "full_replan"
+            stats["strategy"] = "full_replan"
+        elif force_replan:
             change_set_strategy = "full_replan"
         else:
             change_set_strategy = change_set.strategy
@@ -482,8 +491,11 @@ class SmartUpdater:
 
         # Known files from the saved plan
         plan_files: set[str] = set()
+        source_plan_files: set[str] = set()
         for b in plan.buckets:
-            plan_files.update(b.owned_files)
+            tracked = set(tracked_bucket_files(b))
+            plan_files.update(tracked)
+            source_plan_files.update(b.owned_files)
         cs.total_plan_files = len(plan_files)
 
         # Get changed files
@@ -493,9 +505,11 @@ class SmartUpdater:
         deleted_git = {r for r, t in git_changes if t == "D"}
 
         # Modified: files in the plan that changed
-        cs.changed_files = sorted(modified_git & plan_files)
-        cs.deleted_files = sorted(deleted_git & plan_files)
-        cs.changed_artifact_files = sorted(f for f in modified_git if is_artifact_file_path(f))
+        cs.changed_files = sorted(modified_git & source_plan_files)
+        cs.deleted_files = sorted(deleted_git & source_plan_files)
+        cs.changed_artifact_files = sorted(
+            f for f in modified_git if is_artifact_file_path(f) and f in plan_files
+        )
         cs.new_artifact_files = sorted(f for f in added_git if is_artifact_file_path(f))
         cs.deleted_artifact_files = sorted(f for f in deleted_git if is_artifact_file_path(f))
 
@@ -520,7 +534,13 @@ class SmartUpdater:
             cs.new_files = self._discover_new_source_files(plan_files)
         else:
             cs.stale_bucket_slugs = self._map_files_to_stale_slugs(
-                plan, set(cs.changed_files + cs.deleted_files)
+                plan,
+                set(
+                    cs.changed_files
+                    + cs.deleted_files
+                    + cs.changed_artifact_files
+                    + cs.deleted_artifact_files
+                ),
             )
 
         # Check for new integration signals in changed/new files
@@ -655,7 +675,7 @@ class SmartUpdater:
         """Find bucket slugs that own any of the changed files."""
         stale: set[str] = set()
         for b in plan.buckets:
-            if set(b.owned_files) & changed_files:
+            if set(tracked_bucket_files(b)) & changed_files:
                 stale.add(b.slug)
         # Also include buckets whose ledger is missing/failed
         stale.update(

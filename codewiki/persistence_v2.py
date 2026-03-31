@@ -22,7 +22,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from .planner_v2 import DocBucket, DocPlan
+from .planner_v2 import DocBucket, DocPlan, tracked_bucket_files
 from ._legacy_types import DocPage, DocPlan as LegacyDocPlan
 
 
@@ -36,6 +36,7 @@ SCAN_CACHE_FILE = "scan_cache.json"
 LEDGER_FILE = "ledger.json"
 FILE_MAP_FILE = "file_map.json"
 STATE_FILE = "state.json"
+ENGINE_FINGERPRINT = "routes_repo_resolution_v1"
 
 # Legacy top-level files (kept for backwards-compat)
 LEGACY_PLAN_FILE = ".codewiki_plan.json"
@@ -59,6 +60,7 @@ def save_sync_state(
     commit_sha: str,
     status: str = "success",
     generator_version: str = "v2_buckets",
+    engine_fingerprint: str = ENGINE_FINGERPRINT,
     advance_baseline: bool = True,
 ) -> None:
     """Write .codewiki/state.json to track the last synced commit.
@@ -86,6 +88,7 @@ def save_sync_state(
     data["last_attempted_commit"] = commit_sha
     data["status"] = status
     data["generator_version"] = generator_version
+    data["engine_fingerprint"] = engine_fingerprint
 
     if advance_baseline:
         data["last_synced_commit"] = commit_sha
@@ -127,6 +130,7 @@ def save_plan(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
             "skipped_files": plan.skipped_files,
             "orphaned_files": plan.orphaned_files,
             "integration_candidates": plan.integration_candidates,
+            "classification": plan.classification,
         }
     else:
         # legacy plan
@@ -188,6 +192,7 @@ def _load_bucket_plan(data: dict) -> DocPlan:
         nav_structure=data.get("nav_structure", {}),
         skipped_files=data.get("skipped_files", []),
         orphaned_files=data.get("orphaned_files", []),
+        classification=data.get("classification", {}),
         integration_candidates=data.get("integration_candidates", []),
     )
 
@@ -230,6 +235,7 @@ def _bucket_to_dict(b: DocBucket) -> dict:
         "coverage_targets": b.coverage_targets,
         "generation_hints": b.generation_hints,
         "priority": b.priority,
+        "parent_slug": b.parent_slug,
     }
 
 
@@ -277,6 +283,7 @@ def _dict_to_bucket(d: dict) -> DocBucket:
         coverage_targets=d.get("coverage_targets", []),
         generation_hints=hints,
         priority=d.get("priority", 0),
+        parent_slug=d.get("parent_slug"),
     )
 
 
@@ -288,7 +295,12 @@ def save_file_map(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
     """Save file → [slug, ...] mapping for the updater."""
     mapping: dict[str, list[str]] = {}
     for page in plan.pages:
-        for src_file in page.source_files:
+        tracked_files = (
+            tracked_bucket_files(page._b)
+            if hasattr(page, "_b")
+            else list(page.source_files)
+        )
+        for src_file in tracked_files:
             mapping.setdefault(src_file, []).append(page.slug)
 
     json_str = json.dumps(mapping, indent=2)
@@ -453,7 +465,7 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
 
         # File hashes at generation time (for smart invalidation)
         file_hashes: dict[str, str] = {}
-        for src_file in bucket.owned_files:
+        for src_file in tracked_bucket_files(bucket):
             src_path = output_dir.parent / src_file  # output_dir is docs/, repo is parent
             if src_path.exists():
                 try:
@@ -547,8 +559,8 @@ def find_stale_buckets(
 
     A bucket is stale if:
     - It has no ledger record (never generated)
-    - Any of its owned_files has changed since the recorded hash
-    - Any of its owned_files has been deleted
+    - Any of its tracked source/artifact files has changed since the recorded hash
+    - Any of its tracked source/artifact files has been deleted
     - Its generated doc output file doesn't exist on disk
 
     Args:
@@ -583,10 +595,10 @@ def find_stale_buckets(
                     stale.append(slug)
                     continue
 
-        # Check file hashes (and detect deleted owned files)
+        # Check file hashes (and detect deleted tracked files)
         recorded_hashes = record.get("file_hashes", {})
         changed = False
-        for src_file in bucket.owned_files:
+        for src_file in tracked_bucket_files(bucket):
             src_path = repo_root / src_file
             if not src_path.exists():
                 # File was deleted — bucket is stale

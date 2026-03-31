@@ -100,7 +100,7 @@ def _endpoint_ref_slug(method: str, path: str) -> str:
     """Build the canonical endpoint_ref slug used by the planner."""
     import re
 
-    path_slug = re.sub(r"[/:{}]+", "-", path).strip("-").lower()
+    path_slug = re.sub(r"[/:{}<>]+", "-", path).strip("-").lower()
     return f"{method.lower()}-{path_slug}"
 
 

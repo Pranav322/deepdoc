@@ -1,5 +1,9 @@
 # DeepDoc
 
+[![PyPI version](https://img.shields.io/pypi/v/deepdoc)](https://pypi.org/project/deepdoc/)
+[![Python versions](https://img.shields.io/pypi/pyversions/deepdoc)](https://pypi.org/project/deepdoc/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+
 Auto-generate deep engineering documentation from real codebases using AI.
 
 DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich MDX pages with Mermaid diagrams, and builds a local-first Fumadocs site with Orama search.
@@ -28,12 +32,32 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 
 ## Installation
 
+### From PyPI (recommended)
+
+```bash
+pip install deepdoc
+```
+
+If you want DeepDoc's chatbot features, install the `chatbot` extra:
+
+```bash
+pip install "deepdoc[chatbot]"
+```
+
+The base install does not include chatbot dependencies.
+
 ### From source (recommended during development)
 
 ```bash
 git clone <your-repo-url>
 cd deepdoc
 pip install -e .
+```
+
+If you want chatbot features during development:
+
+```bash
+pip install -e ".[chatbot]"
 ```
 
 If the full install is slow due to tree-sitter compilation, install core deps first:
@@ -49,6 +73,12 @@ pip install -e . --no-deps
 deepdoc --version
 deepdoc --help
 python -m deepdoc --help
+```
+
+If you installed the chatbot extra, you can verify those dependencies with:
+
+```bash
+pip show faiss-cpu fastapi uvicorn
 ```
 
 ---
@@ -601,7 +631,7 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install ./deepdoc   # or from PyPI if published
+          pip install deepdoc   # or: pip install "deepdoc[chatbot]" if you use chatbot features
 
       - name: Update and deploy docs
         env:

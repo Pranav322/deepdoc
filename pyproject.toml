@@ -4,9 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepdoc"
-version = "0.1.0"
+version = "0.1.1"
 description = "Auto-generate beautiful docs from any codebase"
+readme = "README.md"
+authors = [
+    { name = "Pranav Kumar" },
+]
+license = { text = "MIT" }
 requires-python = ">=3.10"
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "click>=8.1",
     "litellm>=1.40",
@@ -33,6 +46,11 @@ chatbot = [
 
 [project.scripts]
 deepdoc = "deepdoc.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/tss-pranavkumar/deepdoc"
+Repository = "https://github.com/tss-pranavkumar/deepdoc"
+Issues = "https://github.com/tss-pranavkumar/deepdoc/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

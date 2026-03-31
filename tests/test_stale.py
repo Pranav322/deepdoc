@@ -1,7 +1,7 @@
 """Tests for find_stale_buckets() (Phase 2 fixes)."""
 from __future__ import annotations
 
-from codewiki.persistence_v2 import find_stale_buckets
+from deepdoc.persistence_v2 import find_stale_buckets
 
 from .conftest import _sha256_short, make_bucket, make_plan, write_ledger
 

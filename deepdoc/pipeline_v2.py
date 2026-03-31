@@ -8,7 +8,7 @@ Flow:
     5. BUILD — write the generated Fumadocs site scaffold + page tree
 
 The manifest tracks: source_file → content_hash → [page_slugs]
-So `codewiki update` can diff changed files → find affected pages → regenerate only those.
+So `deepdoc update` can diff changed files → find affected pages → regenerate only those.
 """
 
 from __future__ import annotations
@@ -307,7 +307,7 @@ class PipelineV2:
             stats["stale_pages_removed"] = len(deleted)
             if deleted:
                 console.print(
-                    f"[dim]Removed {len(deleted)} stale CodeWiki page(s) no longer in the plan.[/dim]"
+                    f"[dim]Removed {len(deleted)} stale DeepDoc page(s) no longer in the plan.[/dim]"
                 )
 
         if not chatbot_sync_ok:
@@ -1309,7 +1309,7 @@ class PipelineV2:
                 "skipped_files": plan.skipped_files,
             }
 
-        (self.repo_root / ".codewiki_plan.json").write_text(
+        (self.repo_root / ".deepdoc_plan.json").write_text(
             json.dumps(plan_data, indent=2), encoding="utf-8"
         )
 
@@ -1320,7 +1320,7 @@ class PipelineV2:
             for src_file in page.source_files:
                 mapping.setdefault(src_file, []).append(page.slug)
 
-        (self.repo_root / ".codewiki_file_map.json").write_text(
+        (self.repo_root / ".deepdoc_file_map.json").write_text(
             json.dumps(mapping, indent=2), encoding="utf-8"
         )
 
@@ -1338,8 +1338,8 @@ class PipelineV2:
                 f"  Pages generated:  [cyan]{stats.get('pages_generated', 0)}[/cyan]\n"
                 f"{stale_line}"
                 f"  API reference:    [cyan]{'yes' if stats.get('playground') else 'no'}[/cyan]\n\n"
-                f"[dim]Preview: [bold]codewiki serve[/bold]  |  Deploy: [bold]codewiki deploy[/bold][/dim]",
-                title="CodeWiki",
+                f"[dim]Preview: [bold]deepdoc serve[/bold]  |  Deploy: [bold]deepdoc deploy[/bold][/dim]",
+                title="DeepDoc",
                 border_style="green",
             )
         )

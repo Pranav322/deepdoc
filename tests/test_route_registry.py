@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codewiki.config import DEFAULT_CONFIG
-from codewiki.parser.api_detector import detect_endpoints as facade_detect_endpoints
-from codewiki.parser.routes import ROUTE_DETECTOR_REGISTRY, detect_endpoints
-from codewiki.planner_v2 import scan_repo
+from deepdoc.config import DEFAULT_CONFIG
+from deepdoc.parser.api_detector import detect_endpoints as facade_detect_endpoints
+from deepdoc.parser.routes import ROUTE_DETECTOR_REGISTRY, detect_endpoints
+from deepdoc.planner_v2 import scan_repo
 
 
 def test_route_registry_is_the_single_dispatch_entrypoint() -> None:

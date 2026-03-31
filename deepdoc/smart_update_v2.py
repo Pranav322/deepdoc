@@ -157,7 +157,7 @@ class SmartUpdater:
         plan = load_plan(self.repo_root)
         if plan is None or not hasattr(plan, "buckets"):
             console.print(
-                "[yellow]No v2 bucket plan found. Run [bold]codewiki generate[/bold] first.[/yellow]"
+                "[yellow]No v2 bucket plan found. Run [bold]deepdoc generate[/bold] first.[/yellow]"
             )
             return {"status": "no_plan"}
 
@@ -566,7 +566,7 @@ class SmartUpdater:
         Renames are decomposed into D (old path) + A (new path).
 
         Also includes staged + unstaged working-tree changes so that
-        ``codewiki update`` syncs docs to the repo as it exists right now,
+        ``deepdoc update`` syncs docs to the repo as it exists right now,
         not just as of the last commit.
         """
         try:
@@ -640,7 +640,7 @@ class SmartUpdater:
 
         ignored_dirs = {
             ".git",
-            ".codewiki",
+            ".deepdoc",
             ".pytest_cache",
             ".venv",
             ".venv-help",

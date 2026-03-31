@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codewiki import cli
+from deepdoc import cli
 
 
 def test_find_available_loopback_port_skips_busy_port(monkeypatch) -> None:

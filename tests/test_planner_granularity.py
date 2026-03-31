@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codewiki.benchmark_v2 import score_plan
-from codewiki.generator_v2 import PageValidator
-from codewiki.persistence_v2 import load_plan, save_plan
-from codewiki.planner_v2 import (
+from deepdoc.benchmark_v2 import score_plan
+from deepdoc.generator_v2 import PageValidator
+from deepdoc.persistence_v2 import load_plan, save_plan
+from deepdoc.planner_v2 import (
     CLASSIFY_PROMPT,
     PROPOSE_PROMPT,
     DocBucket,
@@ -22,9 +22,9 @@ from codewiki.planner_v2 import (
     _validate_coverage,
     scan_repo,
 )
-from codewiki.parser.base import ParsedFile, Symbol
-from codewiki.prompts_v2 import PROMPT_STYLE_TEMPLATES
-from codewiki.site.fumadocs_builder_v2 import build_fumadocs_from_plan
+from deepdoc.parser.base import ParsedFile, Symbol
+from deepdoc.prompts_v2 import PROMPT_STYLE_TEMPLATES
+from deepdoc.site.fumadocs_builder_v2 import build_fumadocs_from_plan
 
 
 def _make_scan(
@@ -172,7 +172,7 @@ def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(monkeypat
             "keep_parent_overview": True,
         }
 
-    monkeypatch.setattr("codewiki.planner_v2._llm_step", _fake_llm_step)
+    monkeypatch.setattr("deepdoc.planner_v2._llm_step", _fake_llm_step)
 
     result = _decompose_buckets(
         plan,

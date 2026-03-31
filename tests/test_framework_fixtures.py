@@ -5,8 +5,8 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
-from codewiki.config import DEFAULT_CONFIG
-from codewiki.planner_v2 import scan_repo
+from deepdoc.config import DEFAULT_CONFIG
+from deepdoc.planner_v2 import scan_repo
 
 
 FIXTURES_ROOT = Path(__file__).parent / "fixtures" / "frameworks"

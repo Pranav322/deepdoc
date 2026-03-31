@@ -1,5 +1,5 @@
 # AGENTS.md
-Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
+Guidance for coding agents working in this repository.
 
 ## Scope
 - Applies to the repository root only.
@@ -10,10 +10,10 @@ Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 
 ## Repo Summary
 - Python package with a Click CLI and a pytest suite.
-- Package name: `codewiki`.
+- Package name: `deepdoc`.
 - Python requirement: `>=3.10`.
 - Packaging backend: setuptools via `pyproject.toml`.
-- Console entrypoint: `codewiki = codewiki.cli:main`.
+- Console entrypoint: `deepdoc = deepdoc.cli:main`.
 - Main implementation path is the v2 bucket-based pipeline.
 - Legacy v1 modules still exist for compatibility; do not remove them unless the task explicitly calls for migration or cleanup.
 - Generated docs target `docs/` by default and the generated site lives under `site/`.
@@ -21,32 +21,32 @@ Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 ## Important Paths
 - `pyproject.toml`: packaging, dependencies, pytest discovery.
 - `README.md`: user-facing CLI behavior and workflows.
-- `codewiki/cli.py`: commands, serve/deploy flow, Rich UX.
-- `codewiki/config.py`: defaults and `.codewiki.yaml` helpers.
-- `codewiki/pipeline_v2.py`: end-to-end scan/plan/generate/build orchestration.
-- `codewiki/planner_v2.py`: scan model, bucket plan, endpoint ownership helpers.
-- `codewiki/generator_v2.py`: page generation, validation, manifest updates.
-- `codewiki/persistence_v2.py`: `.codewiki/` state, plan, ledger, sync baseline.
-- `codewiki/smart_update_v2.py`: incremental update and replan logic.
-- `codewiki/parser/routes/`: route detection and repo-aware route resolution.
-- `codewiki/chatbot/`: chatbot config, indexing, scaffold generation.
-- `codewiki/site/fumadocs_builder_v2.py`: generated Fumadocs scaffold.
+- `deepdoc/cli.py`: commands, serve/deploy flow, Rich UX.
+- `deepdoc/config.py`: defaults and `.deepdoc.yaml` helpers.
+- `deepdoc/pipeline_v2.py`: end-to-end scan/plan/generate/build orchestration.
+- `deepdoc/planner_v2.py`: scan model, bucket plan, endpoint ownership helpers.
+- `deepdoc/generator_v2.py`: page generation, validation, manifest updates.
+- `deepdoc/persistence_v2.py`: `.deepdoc/` state, plan, ledger, sync baseline.
+- `deepdoc/smart_update_v2.py`: incremental update and replan logic.
+- `deepdoc/parser/routes/`: route detection and repo-aware route resolution.
+- `deepdoc/chatbot/`: chatbot config, indexing, scaffold generation.
+- `deepdoc/site/fumadocs_builder_v2.py`: generated Fumadocs scaffold.
 - `tests/`: pytest suite and fixtures.
 
 ## Architecture Notes
 - Prefer extending `_v2` modules over adding parallel flows.
-- Keep `codewiki/parser/api_detector.py` as a compatibility facade.
-- Repo-aware route fixes belong in `codewiki/parser/routes/repo_resolver.py`, not in planner code.
-- Generated outputs should be fixed through generators/builders, not by hand-editing `docs/`, `site/`, or `.codewiki/` state.
+- Keep `deepdoc/parser/api_detector.py` as a compatibility facade.
+- Repo-aware route fixes belong in `deepdoc/parser/routes/repo_resolver.py`, not in planner code.
+- Generated outputs should be fixed through generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - If freshness semantics change, audit `planner_v2.py`, `generator_v2.py`, `persistence_v2.py`, and `smart_update_v2.py` together.
 - If persisted state changes, maintain save/load parity for both current and legacy compatibility files.
-- If route behavior changes materially, update the engine fingerprint in `codewiki/persistence_v2.py`.
+- If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 
 ## Generated And Derived Files
 Treat these as generated or persisted outputs unless the task is specifically about their format:
-- `.codewiki/` contents and legacy compatibility files like `.codewiki_plan.json` and `.codewiki_file_map.json`
+- `.deepdoc/` contents and legacy compatibility files like `.deepdoc_plan.json` and `.deepdoc_file_map.json`
 - `docs/`, `site/`, `site/public/`, and `site/out/`
-- `build/`, `dist/`, `codewiki.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
+- `build/`, `dist/`, `deepdoc.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
 - Test fixture apps under `tests/fixtures/` should only be edited when the scenario requires it
 
 ## Install And Build Commands
@@ -59,9 +59,9 @@ python3 -m pip install -e . pytest
 python3 -m pip install -e ".[chatbot]"
 python3 -m pip install build
 python3 -m build
-python3 -m codewiki --help
-python3 -m codewiki.cli --help
-codewiki --help
+python3 -m deepdoc --help
+python3 -m deepdoc.cli --help
+deepdoc --help
 ```
 
 If a full install is slow because of tree-sitter compilation, the lighter fallback documented in `README.md` is:
@@ -75,16 +75,16 @@ python3 -m pip install pytest
 Useful runtime commands:
 
 ```bash
-codewiki init
-codewiki generate
-codewiki update
-codewiki status
-codewiki serve --port 8001
-codewiki deploy
+deepdoc init
+deepdoc generate
+deepdoc update
+deepdoc status
+deepdoc serve --port 8001
+deepdoc deploy
 ```
 
 Notes:
-- `codewiki deploy` runs the generated Next/Fumadocs build and export.
+- `deepdoc deploy` runs the generated Next/Fumadocs build and export.
 - `npx next build` only makes sense after generated site files exist under `site/`.
 - Avoid destructive generation modes like `generate --clean --yes` unless the task explicitly requires a clean rebuild.
 
@@ -95,7 +95,7 @@ Notes:
 - Practical verification here is `compileall`, CLI/import smoke checks, and pytest.
 
 ```bash
-python3 -m compileall codewiki
+python3 -m compileall deepdoc
 python3 -m pytest
 python3 -m pytest -q
 python3 -m pytest tests/test_state.py -q
@@ -164,10 +164,10 @@ Single-test guidance:
 - Read the relevant v2 modules before changing behavior; the same concept often spans planner, generator, persistence, and smart update.
 - If a change touches persisted data or freshness semantics, audit plan save/load, ledger save/load, sync state save/load, manifest updates, and stale detection.
 - If a change touches routing, audit the per-framework detector, route registry, repo resolver, `scan_repo(...)`, and endpoint bucket ownership.
-- If a change touches chatbot behavior, audit `codewiki/chatbot/settings.py`, `codewiki/chatbot/scaffold.py`, `codewiki/site/fumadocs_builder_v2.py`, and `codewiki/cli.py`.
+- If a change touches chatbot behavior, audit `deepdoc/chatbot/settings.py`, `deepdoc/chatbot/scaffold.py`, `deepdoc/site/fumadocs_builder_v2.py`, and `deepdoc/cli.py`.
 - If you change CLI behavior or documented commands, update `README.md` in the same task.
 - This repo may be in a dirty worktree; inspect carefully and never revert unrelated user changes.
 
 ## Verification Defaults
-- Good default checks are `python3 -m compileall codewiki`, `python3 -m codewiki.cli --help`, and targeted `python3 -m pytest ...` runs.
+- Good default checks are `python3 -m compileall deepdoc`, `python3 -m deepdoc.cli --help`, and targeted `python3 -m pytest ...` runs.
 - Prefer the smallest command that exercises the edited area first.

@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codewiki.chatbot.chunker import build_artifact_chunks, build_code_chunks
-from codewiki.chatbot.docs_summary import build_doc_summary_chunks
-from codewiki.parser.base import ParsedFile, Symbol
-from codewiki.planner_v2 import RepoScan
+from deepdoc.chatbot.chunker import build_artifact_chunks, build_code_chunks
+from deepdoc.chatbot.docs_summary import build_doc_summary_chunks
+from deepdoc.parser.base import ParsedFile, Symbol
+from deepdoc.planner_v2 import RepoScan
 from tests.conftest import make_bucket, make_plan
 
 

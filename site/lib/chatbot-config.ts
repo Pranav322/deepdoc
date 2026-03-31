@@ -1,4 +1,4 @@
-const envApiBaseUrl = process.env.NEXT_PUBLIC_CODEWIKI_CHATBOT_BASE_URL?.trim() ?? '';
+const envApiBaseUrl = process.env.NEXT_PUBLIC_DEEPDOC_CHATBOT_BASE_URL?.trim() ?? '';
 
 export const chatbotConfig = {
   enabled: true,

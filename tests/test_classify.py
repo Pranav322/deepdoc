@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from codewiki.smart_update_v2 import SmartUpdater, ChangeSet, REPLAN_THRESHOLD
+from deepdoc.smart_update_v2 import SmartUpdater, ChangeSet, REPLAN_THRESHOLD
 
 from .conftest import _run_git, make_bucket, make_plan
 

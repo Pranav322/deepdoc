@@ -313,7 +313,7 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
     from fastapi.responses import JSONResponse
 
     service = ChatbotQueryService(repo_root, cfg)
-    app = FastAPI(title="CodeWiki Chatbot")
+    app = FastAPI(title="DeepDoc Chatbot")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=chatbot_allowed_origins(cfg),

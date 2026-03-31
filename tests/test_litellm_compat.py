@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from codewiki.llm.litellm_compat import patch_litellm_logging
+from deepdoc.llm.litellm_compat import patch_litellm_logging
 
 
 def test_patch_litellm_logging_handles_none_api_base() -> None:

@@ -5,10 +5,10 @@ from unittest.mock import patch
 
 import pytest
 
-from codewiki.chatbot.persistence import save_corpus
-from codewiki.chatbot.service import ChatbotQueryService, create_fastapi_app
-from codewiki.chatbot.types import ChunkRecord
-from codewiki.persistence_v2 import save_plan
+from deepdoc.chatbot.persistence import save_corpus
+from deepdoc.chatbot.service import ChatbotQueryService, create_fastapi_app
+from deepdoc.chatbot.types import ChunkRecord
+from deepdoc.persistence_v2 import save_plan
 from tests.conftest import make_bucket, make_plan
 
 
@@ -38,12 +38,12 @@ class _FailingEmbedClient:
 def test_query_service_returns_code_and_artifact_citations(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(
         index_dir,
         "code",
@@ -91,8 +91,8 @@ def test_query_service_returns_code_and_artifact_citations(tmp_path: Path) -> No
     }
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
     ):
         service = ChatbotQueryService(repo_root, cfg)
         result = service.query("Where is auth handled?")
@@ -109,12 +109,12 @@ def test_fastapi_query_endpoint_accepts_json_body(tmp_path: Path) -> None:
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(index_dir, "code", [], [])
     save_corpus(index_dir, "artifact", [], [])
     save_corpus(index_dir, "doc_summary", [], [])
@@ -127,8 +127,8 @@ def test_fastapi_query_endpoint_accepts_json_body(tmp_path: Path) -> None:
     }
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
     ):
         app = create_fastapi_app(repo_root, cfg)
         client = TestClient(app)
@@ -144,12 +144,12 @@ def test_fastapi_query_endpoint_returns_json_error_payload(tmp_path: Path) -> No
 
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(index_dir, "code", [], [])
     save_corpus(index_dir, "artifact", [], [])
     save_corpus(index_dir, "doc_summary", [], [])
@@ -162,8 +162,8 @@ def test_fastapi_query_endpoint_returns_json_error_payload(tmp_path: Path) -> No
     }
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=_FailingEmbedClient()),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FailingEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
     ):
         app = create_fastapi_app(repo_root, cfg)
         client = TestClient(app)
@@ -178,12 +178,12 @@ def test_query_expansion_generates_multiple_queries(tmp_path: Path) -> None:
     """When query_expansion is enabled, the service embeds multiple queries."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(
         index_dir, "code",
         [ChunkRecord(chunk_id="c1", kind="code", source_key="src/auth.py",
@@ -208,8 +208,8 @@ def test_query_expansion_generates_multiple_queries(tmp_path: Path) -> None:
     embed_client.embed = tracking_embed
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=embed_client),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=embed_client),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
     ):
         service = ChatbotQueryService(repo_root, cfg)
         result = service.query("Where is auth handled?")
@@ -224,12 +224,12 @@ def test_query_expansion_disabled_uses_single_query(tmp_path: Path) -> None:
     """When query_expansion is False, only the original query is embedded."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(index_dir, "code", [], [])
     save_corpus(index_dir, "artifact", [], [])
     save_corpus(index_dir, "doc_summary", [], [])
@@ -247,8 +247,8 @@ def test_query_expansion_disabled_uses_single_query(tmp_path: Path) -> None:
     embed_client.embed = tracking_embed
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=embed_client),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=embed_client),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
     ):
         service = ChatbotQueryService(repo_root, cfg)
         service.query("Where is auth handled?")
@@ -261,12 +261,12 @@ def test_rerank_reorders_chunks_by_llm_score(tmp_path: Path) -> None:
     """Reranking should reorder chunks based on LLM relevance scores."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     records = [
         ChunkRecord(chunk_id=f"c{i}", kind="code", source_key=f"src/f{i}.py",
                      text=f"def func{i}(): ...", chunk_hash=f"h{i}",
@@ -290,8 +290,8 @@ def test_rerank_reorders_chunks_by_llm_score(tmp_path: Path) -> None:
     cfg = {"chatbot": {"enabled": True, "retrieval": {"rerank": True, "query_expansion": False}}}
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_RerankingChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_RerankingChatClient()),
     ):
         service = ChatbotQueryService(repo_root, cfg)
         result = service.query("Which function?")
@@ -304,12 +304,12 @@ def test_system_prompt_contains_project_name(tmp_path: Path) -> None:
     """System prompt should include the project name."""
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
-    (repo_root / ".codewiki.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
 
     plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
     save_plan(plan, repo_root)
 
-    index_dir = repo_root / ".codewiki" / "chatbot"
+    index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(index_dir, "code", [], [])
     save_corpus(index_dir, "artifact", [], [])
     save_corpus(index_dir, "doc_summary", [], [])
@@ -317,8 +317,8 @@ def test_system_prompt_contains_project_name(tmp_path: Path) -> None:
     cfg = {"project_name": "MyProject", "chatbot": {"enabled": True}}
 
     with (
-        patch("codewiki.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
-        patch("codewiki.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
     ):
         service = ChatbotQueryService(repo_root, cfg)
         prompt = service._system_prompt()

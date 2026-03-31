@@ -6,8 +6,8 @@ from unittest.mock import patch, MagicMock
 from dataclasses import dataclass, field
 from typing import Any
 
-from codewiki.smart_update_v2 import SmartUpdater, UpdateRunResult
-from codewiki.persistence_v2 import (
+from deepdoc.smart_update_v2 import SmartUpdater, UpdateRunResult
+from deepdoc.persistence_v2 import (
     ENGINE_FINGERPRINT,
     load_sync_state,
     save_generation_ledger,
@@ -68,7 +68,7 @@ def test_ledger_preserves_good_record_on_failure(tmp_repo_with_plan):
     output_dir = root / "docs"
 
     # First verify the good record exists
-    from codewiki.persistence_v2 import load_generation_ledger
+    from deepdoc.persistence_v2 import load_generation_ledger
 
     ledger = load_generation_ledger(root)
     assert ledger["auth"]["success"] is True
@@ -145,9 +145,9 @@ def test_full_replan_update_uses_reconcile_cleanup(tmp_repo_with_plan):
     _run_git(root, "commit", "-m", "remove payment")
 
     with (
-        patch("codewiki.pipeline_v2.LLMClient", return_value=MagicMock()),
+        patch("deepdoc.pipeline_v2.LLMClient", return_value=MagicMock()),
         patch(
-            "codewiki.pipeline_v2.PipelineV2.run",
+            "deepdoc.pipeline_v2.PipelineV2.run",
             return_value={
                 "pages_generated": 2,
                 "pages_failed": 0,

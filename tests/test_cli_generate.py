@@ -4,7 +4,7 @@ from pathlib import Path
 
 from click.testing import CliRunner
 
-from codewiki import cli
+from deepdoc import cli
 
 
 def test_generate_skip_api_overrides_config(monkeypatch, tmp_path: Path) -> None:
@@ -31,10 +31,10 @@ def test_generate_skip_api_overrides_config(monkeypatch, tmp_path: Path) -> None
     monkeypatch.setattr(
         cli,
         "_inspect_output_state",
-        lambda repo_root, output_dir: {"codewiki_managed": False, "has_files": False},
+        lambda repo_root, output_dir: {"deepdoc_managed": False, "has_files": False},
     )
 
-    import codewiki.pipeline_v2 as pipeline_v2
+    import deepdoc.pipeline_v2 as pipeline_v2
 
     monkeypatch.setattr(pipeline_v2, "PipelineV2", FakePipeline)
 
@@ -67,10 +67,10 @@ def test_generate_api_flag_can_reenable_endpoint_pages(monkeypatch, tmp_path: Pa
     monkeypatch.setattr(
         cli,
         "_inspect_output_state",
-        lambda repo_root, output_dir: {"codewiki_managed": False, "has_files": False},
+        lambda repo_root, output_dir: {"deepdoc_managed": False, "has_files": False},
     )
 
-    import codewiki.pipeline_v2 as pipeline_v2
+    import deepdoc.pipeline_v2 as pipeline_v2
 
     monkeypatch.setattr(pipeline_v2, "PipelineV2", FakePipeline)
 

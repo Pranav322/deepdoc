@@ -2,10 +2,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codewiki.config import DEFAULT_CONFIG
-from codewiki.generator_v2 import EvidenceAssembler
-from codewiki.parser.base import ParsedFile, Symbol
-from codewiki.planner_v2 import RepoScan
+from deepdoc.config import DEFAULT_CONFIG
+from deepdoc.generator_v2 import EvidenceAssembler
+from deepdoc.parser.base import ParsedFile, Symbol
+from deepdoc.planner_v2 import RepoScan
 
 from tests.conftest import make_bucket, make_plan
 

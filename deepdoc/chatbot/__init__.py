@@ -1,4 +1,4 @@
-"""Chatbot support for CodeWiki."""
+"""Chatbot support for DeepDoc."""
 
 from .indexer import ChatbotIndexer
 from .service import ChatbotQueryService, create_fastapi_app

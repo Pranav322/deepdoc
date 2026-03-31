@@ -1,4 +1,4 @@
-"""Shared fixtures for codewiki update-hardening tests.
+"""Shared fixtures for deepdoc update-hardening tests.
 
 All fixtures use real git repos (not mocked git) for accurate diff testing.
 LLM calls are never made — tests mock at the boundary where needed.
@@ -14,13 +14,13 @@ from typing import Any
 
 import pytest
 
-from codewiki.persistence_v2 import (
+from deepdoc.persistence_v2 import (
     _state_dir,
     save_sync_state,
     save_plan,
     LEDGER_FILE,
 )
-from codewiki.planner_v2 import DocBucket, DocPlan
+from deepdoc.planner_v2 import DocBucket, DocPlan
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -118,7 +118,7 @@ def tmp_repo(tmp_path: Path) -> Path:
 
     Repo layout after fixture:
         auth.py, payment.py, utils.py, models.py, routes.py, config.py
-        .gitignore — ignores .codewiki/ and docs/
+        .gitignore — ignores .deepdoc/ and docs/
 
     Returns the repo root path.
     """
@@ -126,10 +126,10 @@ def tmp_repo(tmp_path: Path) -> Path:
     root.mkdir()
 
     _run_git(root, "init")
-    _run_git(root, "config", "user.email", "test@codewiki.dev")
-    _run_git(root, "config", "user.name", "CodeWiki Test")
+    _run_git(root, "config", "user.email", "test@deepdoc.dev")
+    _run_git(root, "config", "user.name", "DeepDoc Test")
 
-    (root / ".gitignore").write_text(".codewiki/\ndocs/\n")
+    (root / ".gitignore").write_text(".deepdoc/\ndocs/\n")
     (root / "auth.py").write_text("# auth module\n")
     (root / "payment.py").write_text("# payment module\n")
     (root / "utils.py").write_text("# utils module\n")

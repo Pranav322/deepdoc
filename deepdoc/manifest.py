@@ -1,6 +1,6 @@
 """Manifest — tracks which files have been documented and at what content hash.
 
-The manifest is stored at {output_dir}/.codewiki_manifest.json
+The manifest is stored at {output_dir}/.deepdoc_manifest.json
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-MANIFEST_FILE = ".codewiki_manifest.json"
+MANIFEST_FILE = ".deepdoc_manifest.json"
 
 
 class Manifest:

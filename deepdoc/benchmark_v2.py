@@ -1,4 +1,4 @@
-"""Benchmark harness for CodeWiki planner quality."""
+"""Benchmark harness for DeepDoc planner quality."""
 
 from __future__ import annotations
 

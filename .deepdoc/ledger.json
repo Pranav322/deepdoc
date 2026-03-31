@@ -1,0 +1,2513 @@
+{
+  "integration-codewiki-embed": {
+    "slug": "integration-codewiki-embed",
+    "title": "CodeWiki Embed Integration Overview",
+    "bucket_type": "integration:codewiki-embed",
+    "section": "Integrations",
+    "doc_path": "integration-codewiki-embed.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.443809+00:00",
+    "elapsed_seconds": 15.24,
+    "retries": 0,
+    "word_count": 1052,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/scaffold.py": "2a8040586dae3fca",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/cli.py": "7c0d5b5bf241b4eb"
+    }
+  },
+  "setup": {
+    "slug": "setup",
+    "title": "Setup & Getting Started",
+    "bucket_type": "setup",
+    "section": "Architecture",
+    "doc_path": "setup.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.444342+00:00",
+    "elapsed_seconds": 16.78,
+    "retries": 0,
+    "word_count": 1061,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: installation, environment_variables, quick_start",
+        "Missing sibling links: testing, deployment, framework-endpoint-detection-test-strategies"
+      ],
+      "missing_sections": [
+        "installation",
+        "environment_variables",
+        "quick_start"
+      ]
+    },
+    "file_hashes": {
+      ".github/workflows/tests.yml": "8896f02f4d609eb9",
+      "README.md": "cddc27388ad07080",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "pyproject.toml": "e755440f0fdf716e",
+      "tests/fixtures/frameworks/django_app/requirements.txt": "630500f3b156644e",
+      "tests/fixtures/frameworks/express_app/package.json": "cbf1b35f00342b6a",
+      "tests/fixtures/frameworks/fastify_app/package.json": "bc11383fd5a7eadb",
+      "tests/fixtures/frameworks/vue_app/package.json": "b1d41d495d097460"
+    }
+  },
+  "overview": {
+    "slug": "overview",
+    "title": "CodeWiki System Overview",
+    "bucket_type": "overview",
+    "section": "Overview",
+    "doc_path": "index.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.444741+00:00",
+    "elapsed_seconds": 16.78,
+    "retries": 0,
+    "word_count": 1076,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: system_architecture, key_components, main_workflows"
+      ],
+      "missing_sections": [
+        "system_architecture",
+        "key_components",
+        "main_workflows"
+      ]
+    },
+    "file_hashes": {
+      "README.md": "cddc27388ad07080",
+      "codewiki/__init__.py": "6afccb37d8cf294c",
+      "codewiki/__main__.py": "57af2e7b128fca97",
+      "codewiki/chatbot/__init__.py": "7d1107f77d58ff8e",
+      "codewiki/parser/api_detector.py": "234f7e1a2d12d0eb",
+      "codewiki/parser/registry.py": "348ba4936dfb551f",
+      "codewiki/parser/routes/__init__.py": "20bbb1daf179a87a",
+      "codewiki/parser/routes/base.py": "944f7ff650d770c9",
+      "codewiki/parser/routes/common.py": "9fb728779c62e86b",
+      "codewiki/parser/routes/detector.py": "4aba989308ffa378",
+      "codewiki/parser/routes/django.py": "9a53abd68ca7a71a",
+      "codewiki/parser/routes/express.py": "6a6e24a549a4c409",
+      "codewiki/parser/routes/falcon.py": "48bf9fdb83ea0325",
+      "codewiki/parser/routes/fastapi.py": "3ed1a25ad35db81d",
+      "codewiki/parser/routes/fastify.py": "5104bb8c35cd2003",
+      "codewiki/parser/routes/flask.py": "fd3ded6008105242",
+      "codewiki/parser/routes/go.py": "5e0ab1f4975e6231",
+      "codewiki/parser/routes/js_shared.py": "c4b49b6415979999",
+      "codewiki/parser/routes/laravel.py": "401b8f9f8ef48ae6",
+      "codewiki/parser/routes/nestjs.py": "e03259cdb2d1d72d",
+      "codewiki/parser/routes/python_shared.py": "aab0a644e736476f",
+      "codewiki/prompts_v2.py": "beec9a3211900191"
+    }
+  },
+  "integration-codewiki-chat": {
+    "slug": "integration-codewiki-chat",
+    "title": "CodeWiki Chat Integration Overview",
+    "bucket_type": "integration:codewiki-chat",
+    "section": "Integrations",
+    "doc_path": "integration-codewiki-chat.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.445586+00:00",
+    "elapsed_seconds": 17.08,
+    "retries": 0,
+    "word_count": 1090,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: integration-vinculum"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/scaffold.py": "2a8040586dae3fca",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/cli.py": "7c0d5b5bf241b4eb"
+    }
+  },
+  "system-architecture": {
+    "slug": "system-architecture",
+    "title": "System Architecture Overview",
+    "bucket_type": "architecture",
+    "section": "Architecture",
+    "doc_path": "system-architecture.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.445778+00:00",
+    "elapsed_seconds": 18.37,
+    "retries": 0,
+    "word_count": 1227,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/indexer.py": "cc3941bfd2952cc4",
+      "codewiki/chatbot/providers.py": "fd7d930b802e87d9",
+      "codewiki/chatbot/service.py": "629afe850808fe40"
+    }
+  },
+  "integration-anthropic": {
+    "slug": "integration-anthropic",
+    "title": "Anthropic Integration Overview",
+    "bucket_type": "integration:anthropic",
+    "section": "Integrations",
+    "doc_path": "integration-anthropic.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.446026+00:00",
+    "elapsed_seconds": 22.18,
+    "retries": 0,
+    "word_count": 1206,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: integration-vinculum"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/cli.py": "7c0d5b5bf241b4eb",
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "codewiki/llm/client.py": "0544e7b5e2e15411"
+    }
+  },
+  "integration-webhook": {
+    "slug": "integration-webhook",
+    "title": "Webhook Integrations Overview",
+    "bucket_type": "integration:webhook",
+    "section": "Integrations",
+    "doc_path": "integration-webhook.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.446277+00:00",
+    "elapsed_seconds": 14.94,
+    "retries": 0,
+    "word_count": 1013,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: integration-anthropic"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/indexer.py": "cc3941bfd2952cc4",
+      "codewiki/chatbot/providers.py": "fd7d930b802e87d9",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038"
+    }
+  },
+  "cli": {
+    "slug": "cli",
+    "title": "Command Line Interface (CLI)",
+    "bucket_type": "cli-commands",
+    "section": "Architecture",
+    "doc_path": "cli.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.446449+00:00",
+    "elapsed_seconds": 20.3,
+    "retries": 0,
+    "word_count": 1406,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: command_list, usage_examples",
+        "Missing sibling links: framework-endpoint-detection-test-strategies"
+      ],
+      "missing_sections": [
+        "command_list",
+        "usage_examples"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/cli.py": "7c0d5b5bf241b4eb"
+    }
+  },
+  "integration-vinculum": {
+    "slug": "integration-vinculum",
+    "title": "Vinculum Warehouse Management Integration Overview",
+    "bucket_type": "integration:vinculum",
+    "section": "Integrations",
+    "doc_path": "integration-vinculum.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.446606+00:00",
+    "elapsed_seconds": 40.11,
+    "retries": 0,
+    "word_count": 1260,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b",
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "configuration": {
+    "slug": "configuration",
+    "title": "Configuration Reference",
+    "bucket_type": "config",
+    "section": "Operations",
+    "doc_path": "configuration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447007+00:00",
+    "elapsed_seconds": 40.25,
+    "retries": 0,
+    "word_count": 1368,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": false,
+      "warnings": [
+        "Missing contract concepts: operational concerns"
+      ],
+      "missing_sections": []
+    },
+    "file_hashes": {
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/config.py": "1bded9d4facc5c55"
+    }
+  },
+  "deployment": {
+    "slug": "deployment",
+    "title": "Deployment & Release",
+    "bucket_type": "deployment",
+    "section": "Architecture",
+    "doc_path": "deployment.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447144+00:00",
+    "elapsed_seconds": 14.07,
+    "retries": 0,
+    "word_count": 898,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: deployment_steps, ci_cd_pipeline, release_management"
+      ],
+      "missing_sections": [
+        "deployment_steps",
+        "ci_cd_pipeline",
+        "release_management"
+      ]
+    },
+    "file_hashes": {}
+  },
+  "anthropic-llm-api-client-integration": {
+    "slug": "anthropic-llm-api-client-integration",
+    "title": "Anthropic LLM API Client Integration",
+    "bucket_type": "integration:anthropic",
+    "section": "Integrations",
+    "doc_path": "anthropic-llm-api-client-integration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447190+00:00",
+    "elapsed_seconds": 22.78,
+    "retries": 0,
+    "word_count": 1227,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/benchmark_v2.py": "dace51414cb40525",
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "codewiki/llm/__init__.py": "d2c4064bad6455a3",
+      "codewiki/llm/client.py": "0544e7b5e2e15411"
+    }
+  },
+  "chatbot-backend-scaffold-api-integration": {
+    "slug": "chatbot-backend-scaffold-api-integration",
+    "title": "Chatbot Backend Scaffold and API Integration",
+    "bucket_type": "integration:codewiki-chat",
+    "section": "Integrations",
+    "doc_path": "chatbot-backend-scaffold-api-integration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447384+00:00",
+    "elapsed_seconds": 22.94,
+    "retries": 0,
+    "word_count": 1192,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-anthropic, integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/scaffold.py": "2a8040586dae3fca",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/chatbot/types.py": "d0560c123c12cf73",
+      "tests/test_chatbot_index.py": "7c099ecb23f22e04"
+    }
+  },
+  "cli-workflows": {
+    "slug": "cli-workflows",
+    "title": "CodeWiki Embed CLI Workflows",
+    "bucket_type": "integration:codewiki-embed",
+    "section": "Integrations",
+    "doc_path": "cli-workflows.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447566+00:00",
+    "elapsed_seconds": 23.29,
+    "retries": 0,
+    "word_count": 1388,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-vinculum, integration-webhook"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/cli.py": "7c0d5b5bf241b4eb",
+      "codewiki/config.py": "1bded9d4facc5c55"
+    }
+  },
+  "testing": {
+    "slug": "testing",
+    "title": "Testing & Quality Assurance Overview",
+    "bucket_type": "testing",
+    "section": "Architecture",
+    "doc_path": "testing.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447752+00:00",
+    "elapsed_seconds": 24.58,
+    "retries": 0,
+    "word_count": 1176,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: deployment"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "tests/test_chatbot_query.py": "e19716e64ba20382",
+      "tests/test_framework_support.py": "4312546b1f22417e",
+      "tests/test_state.py": "0f8fd0468cdadf3a"
+    }
+  },
+  "chatbot-service-query-processing": {
+    "slug": "chatbot-service-query-processing",
+    "title": "Chatbot Service Layer and Query Processing",
+    "bucket_type": "architecture",
+    "section": "Integrations",
+    "doc_path": "chatbot-service-query-processing.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.447934+00:00",
+    "elapsed_seconds": 27.23,
+    "retries": 0,
+    "word_count": 1508,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-anthropic"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/providers.py": "fd7d930b802e87d9",
+      "codewiki/chatbot/service.py": "629afe850808fe40"
+    }
+  },
+  "warehouse-api-endpoint-discovery-planning": {
+    "slug": "warehouse-api-endpoint-discovery-planning",
+    "title": "Warehouse API Endpoint Discovery and Planning",
+    "bucket_type": "integration:vinculum",
+    "section": "Integrations",
+    "doc_path": "warehouse-api-endpoint-discovery-planning.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.448084+00:00",
+    "elapsed_seconds": 25.18,
+    "retries": 0,
+    "word_count": 1345,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_discovery_process, planning_workflow, usage_patterns",
+        "Missing sibling links: integration-anthropic, integration-codewiki-chat, integration-codewiki-embed"
+      ],
+      "missing_sections": [
+        "endpoint_discovery_process",
+        "planning_workflow",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "webhook-event-processing-workflow": {
+    "slug": "webhook-event-processing-workflow",
+    "title": "Webhook Event Processing Workflow",
+    "bucket_type": "integration:webhook",
+    "section": "Integrations",
+    "doc_path": "webhook-event-processing-workflow.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.448358+00:00",
+    "elapsed_seconds": 21.0,
+    "retries": 0,
+    "word_count": 1141,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-anthropic, integration-codewiki-chat, integration-codewiki-embed, integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/indexer.py": "cc3941bfd2952cc4",
+      "codewiki/persistence_v2.py": "c78d0b268d831e3e"
+    }
+  },
+  "framework-endpoint-detection-test-strategies": {
+    "slug": "framework-endpoint-detection-test-strategies",
+    "title": "Framework Endpoint Detection Test Strategies",
+    "bucket_type": "testing",
+    "section": "Architecture",
+    "doc_path": "framework-endpoint-detection-test-strategies.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.448513+00:00",
+    "elapsed_seconds": 23.74,
+    "retries": 0,
+    "word_count": 1301,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: test_coverage_matrix, implementation_details, fixture_structure, usage_patterns",
+        "Missing sibling links: setup, deployment"
+      ],
+      "missing_sections": [
+        "test_coverage_matrix",
+        "implementation_details",
+        "fixture_structure",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/parser/routes/registry.py": "fddb89236019b8c0",
+      "codewiki/parser/routes/repo_resolver.py": "ee652fef766440fe",
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4",
+      "tests/fixtures/frameworks/vue_app/src/components/UserList.vue": "e30c94b5fcb65353",
+      "tests/test_framework_support.py": "4312546b1f22417e"
+    }
+  },
+  "database": {
+    "slug": "database",
+    "title": "Database Models & Persistence Overview",
+    "bucket_type": "database",
+    "section": "Data Layer",
+    "doc_path": "database.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.448813+00:00",
+    "elapsed_seconds": 32.71,
+    "retries": 0,
+    "word_count": 1393,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/persistence.py": "ca88c52cb4b1242b",
+      "codewiki/persistence_v2.py": "c78d0b268d831e3e",
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "api-family-auth": {
+    "slug": "api-family-auth",
+    "title": "Authentication API Family",
+    "bucket_type": "api-family:auth",
+    "section": "API",
+    "doc_path": "api-family-auth.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449055+00:00",
+    "elapsed_seconds": 19.54,
+    "retries": 0,
+    "word_count": 1284,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_list, request_response_examples, security_considerations"
+      ],
+      "missing_sections": [
+        "endpoint_list",
+        "request_response_examples",
+        "security_considerations"
+      ]
+    },
+    "file_hashes": {
+      "tests/test_framework_support.py": "4312546b1f22417e"
+    }
+  },
+  "anthropic-integration-configuration-management": {
+    "slug": "anthropic-integration-configuration-management",
+    "title": "Anthropic Integration Configuration Management",
+    "bucket_type": "integration:anthropic",
+    "section": "Integrations",
+    "doc_path": "anthropic-integration-configuration-management.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449155+00:00",
+    "elapsed_seconds": 22.52,
+    "retries": 0,
+    "word_count": 1289,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/config.py": "1bded9d4facc5c55"
+    }
+  },
+  "chatbot-indexing-corpus-management": {
+    "slug": "chatbot-indexing-corpus-management",
+    "title": "Chatbot Indexing and Corpus Management",
+    "bucket_type": "architecture",
+    "section": "Architecture",
+    "doc_path": "chatbot-indexing-corpus-management.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449275+00:00",
+    "elapsed_seconds": 23.84,
+    "retries": 0,
+    "word_count": 1243,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/indexer.py": "cc3941bfd2952cc4"
+    }
+  },
+  "api-family-users": {
+    "slug": "api-family-users",
+    "title": "User Management API Family",
+    "bucket_type": "api-family:users",
+    "section": "API",
+    "doc_path": "api-family-users.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449369+00:00",
+    "elapsed_seconds": 23.85,
+    "retries": 0,
+    "word_count": 1608,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_list, request_response_examples, authorization, error_handling",
+        "Missing sibling links: post-query, get-login"
+      ],
+      "missing_sections": [
+        "endpoint_list",
+        "request_response_examples",
+        "authorization",
+        "error_handling"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "api-family-health-query": {
+    "slug": "api-family-health-query",
+    "title": "Health & Query API Family",
+    "bucket_type": "api-family:health-query",
+    "section": "API",
+    "doc_path": "api-family-health-query.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449530+00:00",
+    "elapsed_seconds": 24.16,
+    "retries": 0,
+    "word_count": 1265,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_list, request_response_examples, error_handling"
+      ],
+      "missing_sections": [
+        "endpoint_list",
+        "request_response_examples",
+        "error_handling"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/scaffold.py": "2a8040586dae3fca",
+      "codewiki/chatbot/service.py": "629afe850808fe40",
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22"
+    }
+  },
+  "api-family-admin-stats": {
+    "slug": "api-family-admin-stats",
+    "title": "Admin & Reporting API Family",
+    "bucket_type": "api-family:admin-stats",
+    "section": "API",
+    "doc_path": "api-family-admin-stats.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449698+00:00",
+    "elapsed_seconds": 27.33,
+    "retries": 0,
+    "word_count": 1618,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_list, request_response_examples",
+        "Missing sibling links: post-query, get-login"
+      ],
+      "missing_sections": [
+        "endpoint_list",
+        "request_response_examples"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2"
+    }
+  },
+  "chatbot-backend-scaffolding-configuration": {
+    "slug": "chatbot-backend-scaffolding-configuration",
+    "title": "Chatbot Backend Scaffolding and Configuration",
+    "bucket_type": "integration:codewiki-embed",
+    "section": "Integrations",
+    "doc_path": "chatbot-backend-scaffolding-configuration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.449828+00:00",
+    "elapsed_seconds": 15.93,
+    "retries": 0,
+    "word_count": 1119,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, configuration_examples",
+        "Missing sibling links: integration-anthropic, integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "configuration_examples"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/scaffold.py": "2a8040586dae3fca",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "tests/test_chatbot_scaffold.py": "acb0db510573fad3"
+    }
+  },
+  "webhook-integration-configuration-security": {
+    "slug": "webhook-integration-configuration-security",
+    "title": "Webhook Integration Configuration and Security",
+    "bucket_type": "integration:webhook",
+    "section": "Integrations",
+    "doc_path": "webhook-integration-configuration-security.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.450014+00:00",
+    "elapsed_seconds": 16.68,
+    "retries": 0,
+    "word_count": 1107,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-anthropic, integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/providers.py": "fd7d930b802e87d9",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038"
+    }
+  },
+  "symbol-clustering-analysis-vinculum-integration": {
+    "slug": "symbol-clustering-analysis-vinculum-integration",
+    "title": "Symbol Clustering and Analysis for Vinculum Integration",
+    "bucket_type": "integration:vinculum",
+    "section": "Integrations",
+    "doc_path": "symbol-clustering-analysis-vinculum-integration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.450118+00:00",
+    "elapsed_seconds": 17.31,
+    "retries": 0,
+    "word_count": 1292,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: symbol_clustering_methods, analysis_workflow, usage_patterns"
+      ],
+      "missing_sections": [
+        "symbol_clustering_methods",
+        "analysis_workflow",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "chatbot-configuration-management-settings": {
+    "slug": "chatbot-configuration-management-settings",
+    "title": "Chatbot Configuration Management and Settings",
+    "bucket_type": "integration:codewiki-chat",
+    "section": "Integrations",
+    "doc_path": "chatbot-configuration-management-settings.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.450256+00:00",
+    "elapsed_seconds": 22.55,
+    "retries": 0,
+    "word_count": 1283,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/chunker.py": "025ae631b30b91e6",
+      "codewiki/chatbot/docs_summary.py": "6fc7a9ac1257e9dd",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "codewiki/site/fumadocs_builder_v2.py": "d988c33cab2636a4",
+      "tests/test_chatbot_config.py": "d59e6f1501d6a4a2"
+    }
+  },
+  "pipeline-architecture-doc-generation": {
+    "slug": "pipeline-architecture-doc-generation",
+    "title": "Pipeline Architecture and Documentation Generation",
+    "bucket_type": "architecture",
+    "section": "Integrations",
+    "doc_path": "pipeline-architecture-doc-generation.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.450580+00:00",
+    "elapsed_seconds": 15.79,
+    "retries": 0,
+    "word_count": 1001,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/openapi.py": "01490f8c0a2f1d2d",
+      "codewiki/pipeline_v2.py": "58faba8ebd518fdb"
+    }
+  },
+  "database-persistence-strategies-state-management": {
+    "slug": "database-persistence-strategies-state-management",
+    "title": "Database Persistence Strategies and State Management",
+    "bucket_type": "database",
+    "section": "Data Layer",
+    "doc_path": "database-persistence-strategies-state-management.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.450776+00:00",
+    "elapsed_seconds": 19.94,
+    "retries": 0,
+    "word_count": 1353,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/persistence_v2.py": "c78d0b268d831e3e"
+    }
+  },
+  "page-generation": {
+    "slug": "page-generation",
+    "title": "Page Generation Pipeline Overview",
+    "bucket_type": "feature:page-generation",
+    "section": "Architecture",
+    "doc_path": "page-generation.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.450893+00:00",
+    "elapsed_seconds": 20.71,
+    "retries": 0,
+    "word_count": 1266,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "repository-analysis": {
+    "slug": "repository-analysis",
+    "title": "Repository Scanning & Analysis Overview",
+    "bucket_type": "feature:repository-analysis",
+    "section": "Architecture",
+    "doc_path": "repository-analysis.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.451135+00:00",
+    "elapsed_seconds": 22.82,
+    "retries": 0,
+    "word_count": 1242,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "chatbot-query-service-testing-and-coverage": {
+    "slug": "chatbot-query-service-testing-and-coverage",
+    "title": "Chatbot Query Service Testing and Coverage",
+    "bucket_type": "testing",
+    "section": "Architecture",
+    "doc_path": "chatbot-query-service-testing-and-coverage.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.451397+00:00",
+    "elapsed_seconds": 23.74,
+    "retries": 0,
+    "word_count": 1357,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: mocking_strategies, test_cases, coverage_analysis, usage_patterns",
+        "Missing sibling links: deployment"
+      ],
+      "missing_sections": [
+        "mocking_strategies",
+        "test_cases",
+        "coverage_analysis",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "tests/test_chatbot_query.py": "e19716e64ba20382"
+    }
+  },
+  "cli-commands-for-anthropic-integration": {
+    "slug": "cli-commands-for-anthropic-integration",
+    "title": "CLI Commands for Anthropic Integration",
+    "bucket_type": "integration:anthropic",
+    "section": "Integrations",
+    "doc_path": "cli-commands-for-anthropic-integration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.451495+00:00",
+    "elapsed_seconds": 25.01,
+    "retries": 0,
+    "word_count": 1526,
+    "mermaid_block_count": 4,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: usage_patterns, implementation_details"
+      ],
+      "missing_sections": [
+        "usage_patterns",
+        "implementation_details"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/cli.py": "7c0d5b5bf241b4eb",
+      "codewiki/config.py": "1bded9d4facc5c55"
+    }
+  },
+  "codewiki-chat-cli-commands-workflow": {
+    "slug": "codewiki-chat-cli-commands-workflow",
+    "title": "CodeWiki Chat CLI Commands and Workflow",
+    "bucket_type": "integration:codewiki-chat",
+    "section": "Integrations",
+    "doc_path": "codewiki-chat-cli-commands-workflow.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.451681+00:00",
+    "elapsed_seconds": 26.19,
+    "retries": 0,
+    "word_count": 1485,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/cli.py": "7c0d5b5bf241b4eb",
+      "codewiki/config.py": "1bded9d4facc5c55"
+    }
+  },
+  "endpoint-bundling-evidence-management": {
+    "slug": "endpoint-bundling-evidence-management",
+    "title": "Endpoint Bundling and Evidence Management",
+    "bucket_type": "integration:vinculum",
+    "section": "Integrations",
+    "doc_path": "endpoint-bundling-evidence-management.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.451867+00:00",
+    "elapsed_seconds": 25.96,
+    "retries": 0,
+    "word_count": 1172,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_bundling_process, evidence_management, implementation_details"
+      ],
+      "missing_sections": [
+        "endpoint_bundling_process",
+        "evidence_management",
+        "implementation_details"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "llm-client-embedding-api": {
+    "slug": "llm-client-embedding-api",
+    "title": "LLM Client Integration for Embedding APIs",
+    "bucket_type": "integration:codewiki-embed",
+    "section": "Integrations",
+    "doc_path": "llm-client-embedding-api.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.452010+00:00",
+    "elapsed_seconds": 27.25,
+    "retries": 0,
+    "word_count": 1425,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "codewiki/llm/client.py": "0544e7b5e2e15411"
+    }
+  },
+  "embedding-llm-client-integration-webhooks": {
+    "slug": "embedding-llm-client-integration-webhooks",
+    "title": "Embedding and LLM Client Integration for Webhooks",
+    "bucket_type": "integration:webhook",
+    "section": "Integrations",
+    "doc_path": "embedding-llm-client-integration-webhooks.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.452147+00:00",
+    "elapsed_seconds": 35.73,
+    "retries": 0,
+    "word_count": 1306,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: integration-codewiki-chat, integration-vinculum"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/providers.py": "fd7d930b802e87d9",
+      "codewiki/llm/client.py": "0544e7b5e2e15411"
+    }
+  },
+  "pipeline-state-management-testing": {
+    "slug": "pipeline-state-management-testing",
+    "title": "Pipeline State Management Testing",
+    "bucket_type": "testing",
+    "section": "Architecture",
+    "doc_path": "pipeline-state-management-testing.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.452283+00:00",
+    "elapsed_seconds": 18.65,
+    "retries": 0,
+    "word_count": 1220,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: state_management_scenarios, test_cases, failure_modes, usage_patterns",
+        "Missing sibling links: system-architecture, deployment"
+      ],
+      "missing_sections": [
+        "state_management_scenarios",
+        "test_cases",
+        "failure_modes",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "tests/test_state.py": "0f8fd0468cdadf3a"
+    }
+  },
+  "llm-prompt-templates": {
+    "slug": "llm-prompt-templates",
+    "title": "LLM Prompt Templates Overview",
+    "bucket_type": "feature:prompt-templates",
+    "section": "Architecture",
+    "doc_path": "llm-prompt-templates.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.452371+00:00",
+    "elapsed_seconds": 21.66,
+    "retries": 0,
+    "word_count": 1192,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: setup, testing, deployment"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "topic-classification": {
+    "slug": "topic-classification",
+    "title": "Topic & Context Classification Overview",
+    "bucket_type": "feature:topic-classification",
+    "section": "Architecture",
+    "doc_path": "topic-classification.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.452635+00:00",
+    "elapsed_seconds": 21.7,
+    "retries": 0,
+    "word_count": 1236,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: cli"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "evidence-assembly-workflow": {
+    "slug": "evidence-assembly-workflow",
+    "title": "Evidence Assembly Workflow in Page Generation",
+    "bucket_type": "feature:page-generation",
+    "section": "Architecture",
+    "doc_path": "evidence-assembly-workflow.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.452906+00:00",
+    "elapsed_seconds": 22.43,
+    "retries": 0,
+    "word_count": 1132,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "chatbot-corpus-vector-index-persistence": {
+    "slug": "chatbot-corpus-vector-index-persistence",
+    "title": "Corpus and Vector Index Persistence for Chatbot",
+    "bucket_type": "database",
+    "section": "Data Layer",
+    "doc_path": "chatbot-corpus-vector-index-persistence.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.453119+00:00",
+    "elapsed_seconds": 25.73,
+    "retries": 0,
+    "word_count": 1463,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: usage_patterns, implementation_details"
+      ],
+      "missing_sections": [
+        "usage_patterns",
+        "implementation_details"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/persistence.py": "ca88c52cb4b1242b"
+    }
+  },
+  "repository-scanning-workflow-reposcan-class": {
+    "slug": "repository-scanning-workflow-reposcan-class",
+    "title": "Repository Scanning Workflow and the RepoScan Class",
+    "bucket_type": "feature:repository-analysis",
+    "section": "Architecture",
+    "doc_path": "repository-scanning-workflow-reposcan-class.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.453221+00:00",
+    "elapsed_seconds": 27.25,
+    "retries": 0,
+    "word_count": 1455,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: setup, testing, deployment"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/_legacy_types.py": "831d4abff1733fb0",
+      "codewiki/planner_v2.py": "3dd69b413c35408b",
+      "tests/test_generation_evidence.py": "e3a8ec1eb4da4c1c"
+    }
+  },
+  "smart-update-incremental-refresh": {
+    "slug": "smart-update-incremental-refresh",
+    "title": "Smart Update and Incremental Documentation Refresh",
+    "bucket_type": "architecture",
+    "section": "Architecture",
+    "doc_path": "smart-update-incremental-refresh.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.453569+00:00",
+    "elapsed_seconds": 20.62,
+    "retries": 0,
+    "word_count": 1233,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/smart_update_v2.py": "43a56d8a29049e75",
+      "codewiki/updater_v2.py": "d8d78af763a22f68"
+    }
+  },
+  "persistence-state-management-webhook-workflows": {
+    "slug": "persistence-state-management-webhook-workflows",
+    "title": "Persistence and State Management for Webhook Workflows",
+    "bucket_type": "integration:webhook",
+    "section": "Integrations",
+    "doc_path": "persistence-state-management-webhook-workflows.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.453753+00:00",
+    "elapsed_seconds": 22.54,
+    "retries": 0,
+    "word_count": 1171,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/persistence_v2.py": "c78d0b268d831e3e"
+    }
+  },
+  "symbol-clustering-endpoint-analysis-chat-integration": {
+    "slug": "symbol-clustering-endpoint-analysis-chat-integration",
+    "title": "Symbol Clustering and Endpoint Analysis for Chat Integration",
+    "bucket_type": "integration:codewiki-chat",
+    "section": "Integrations",
+    "doc_path": "symbol-clustering-endpoint-analysis-chat-integration.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.453892+00:00",
+    "elapsed_seconds": 23.77,
+    "retries": 0,
+    "word_count": 1240,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Low file coverage: 2/8 files referenced (25%)"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/parser/__init__.py": "e7b1fca8ef9a4e3a",
+      "codewiki/parser/base.py": "a7789e450b6c72f8",
+      "codewiki/parser/go_parser.py": "94e43b539c1fb357",
+      "codewiki/parser/js_ts_parser.py": "d6258ca52a02950e",
+      "codewiki/parser/php_parser.py": "2d5aa7a0f22e69af",
+      "codewiki/parser/python_parser.py": "a97757344b60880c",
+      "codewiki/parser/vue_parser.py": "6be210a3a2dc0603",
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "llm-driven-symbol-clustering-analysis-workflow": {
+    "slug": "llm-driven-symbol-clustering-analysis-workflow",
+    "title": "LLM-Driven Symbol Clustering and Analysis Workflow",
+    "bucket_type": "integration:anthropic",
+    "section": "Integrations",
+    "doc_path": "llm-driven-symbol-clustering-analysis-workflow.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.454407+00:00",
+    "elapsed_seconds": 24.74,
+    "retries": 0,
+    "word_count": 1270,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/llm/client.py": "0544e7b5e2e15411",
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "manifest-management-file-tracking": {
+    "slug": "manifest-management-file-tracking",
+    "title": "Manifest Management and File Tracking",
+    "bucket_type": "database",
+    "section": "Data Layer",
+    "doc_path": "manifest-management-file-tracking.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.454575+00:00",
+    "elapsed_seconds": 21.88,
+    "retries": 0,
+    "word_count": 1110,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/manifest.py": "671691d37135bf31"
+    }
+  },
+  "repository-file-classification-context-summarization": {
+    "slug": "repository-file-classification-context-summarization",
+    "title": "Repository File Classification and Context Summarization",
+    "bucket_type": "feature:repository-analysis",
+    "section": "Architecture",
+    "doc_path": "repository-file-classification-context-summarization.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.454666+00:00",
+    "elapsed_seconds": 23.47,
+    "retries": 0,
+    "word_count": 1386,
+    "mermaid_block_count": 4,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: setup, cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "file-evidence-card-construction": {
+    "slug": "file-evidence-card-construction",
+    "title": "File Evidence Card Construction and Summarization",
+    "bucket_type": "feature:page-generation",
+    "section": "Architecture",
+    "doc_path": "file-evidence-card-construction.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.454939+00:00",
+    "elapsed_seconds": 23.58,
+    "retries": 0,
+    "word_count": 1356,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: setup, cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "docbucket-docplan-organization": {
+    "slug": "docbucket-docplan-organization",
+    "title": "DocBucket and DocPlan: Organizing and Representing Documentation Topics",
+    "bucket_type": "feature:topic-classification",
+    "section": "Architecture",
+    "doc_path": "docbucket-docplan-organization.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.455170+00:00",
+    "elapsed_seconds": 26.54,
+    "retries": 0,
+    "word_count": 1454,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: class_structure, usage_patterns",
+        "Missing sibling links: setup, system-architecture, cli, testing"
+      ],
+      "missing_sections": [
+        "class_structure",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b",
+      "tests/conftest.py": "8a607215982ab581",
+      "tests/test_planner_granularity.py": "b32c14be3ba2b3ee"
+    }
+  },
+  "prompt-template-planning-generation-workflow": {
+    "slug": "prompt-template-planning-generation-workflow",
+    "title": "Prompt Template Planning and Generation Workflow",
+    "bucket_type": "feature:prompt-templates",
+    "section": "Architecture",
+    "doc_path": "prompt-template-planning-generation-workflow.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.455551+00:00",
+    "elapsed_seconds": 28.68,
+    "retries": 0,
+    "word_count": 1459,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: workflow_steps, integration_points, usage_patterns"
+      ],
+      "missing_sections": [
+        "workflow_steps",
+        "integration_points",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "bucketization": {
+    "slug": "bucketization",
+    "title": "Documentation Bucketization Overview",
+    "bucket_type": "feature:bucketization",
+    "section": "Architecture",
+    "doc_path": "bucketization.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.455828+00:00",
+    "elapsed_seconds": 28.81,
+    "retries": 0,
+    "word_count": 1244,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: component_summary",
+        "Missing sibling links: cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "component_summary"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82",
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "source-context-priority": {
+    "slug": "source-context-priority",
+    "title": "Source Context and Priority Determination",
+    "bucket_type": "feature:page-generation",
+    "section": "Architecture",
+    "doc_path": "source-context-priority.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.456257+00:00",
+    "elapsed_seconds": 16.17,
+    "retries": 0,
+    "word_count": 1251,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "schema-analysis-symbol-clustering": {
+    "slug": "schema-analysis-symbol-clustering",
+    "title": "Schema Analysis and Symbol Clustering",
+    "bucket_type": "database",
+    "section": "Data Layer",
+    "doc_path": "schema-analysis-symbol-clustering.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.456471+00:00",
+    "elapsed_seconds": 18.07,
+    "retries": 0,
+    "word_count": 1217,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/scan_v2.py": "19dcd7be2190b982"
+    }
+  },
+  "cli-system-operations": {
+    "slug": "cli-system-operations",
+    "title": "Command-Line Interface and System Operations",
+    "bucket_type": "architecture",
+    "section": "Architecture",
+    "doc_path": "cli-system-operations.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.456603+00:00",
+    "elapsed_seconds": 19.72,
+    "retries": 0,
+    "word_count": 1437,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/cli.py": "7c0d5b5bf241b4eb"
+    }
+  },
+  "documentation-planning-docbucket-docplan": {
+    "slug": "documentation-planning-docbucket-docplan",
+    "title": "Documentation Planning with DocBucket and DocPlan",
+    "bucket_type": "feature:repository-analysis",
+    "section": "Architecture",
+    "doc_path": "documentation-planning-docbucket-docplan.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.456732+00:00",
+    "elapsed_seconds": 24.43,
+    "retries": 0,
+    "word_count": 1402,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "docbucket-planning-workflow": {
+    "slug": "docbucket-planning-workflow",
+    "title": "DocBucket and Documentation Planning Workflow",
+    "bucket_type": "feature:bucketization",
+    "section": "Architecture",
+    "doc_path": "docbucket-planning-workflow.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.456993+00:00",
+    "elapsed_seconds": 23.88,
+    "retries": 0,
+    "word_count": 1313,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "context-summarization": {
+    "slug": "context-summarization",
+    "title": "Context Summarization: Identifying and Summarizing Documentation and Notebook Contexts",
+    "bucket_type": "feature:topic-classification",
+    "section": "Architecture",
+    "doc_path": "context-summarization.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.457258+00:00",
+    "elapsed_seconds": 21.0,
+    "retries": 0,
+    "word_count": 1289,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: algorithm_details, examples"
+      ],
+      "missing_sections": [
+        "algorithm_details",
+        "examples"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "evidence-assembly-file-cards": {
+    "slug": "evidence-assembly-file-cards",
+    "title": "Evidence Assembly and File Evidence Cards",
+    "bucket_type": "feature:bucketization",
+    "section": "Architecture",
+    "doc_path": "evidence-assembly-file-cards.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.457526+00:00",
+    "elapsed_seconds": 19.35,
+    "retries": 0,
+    "word_count": 1110,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: system-architecture, cli, deployment"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "bucket-endpoint-file-tracking": {
+    "slug": "bucket-endpoint-file-tracking",
+    "title": "Bucket and Endpoint File Tracking Utilities",
+    "bucket_type": "feature:topic-classification",
+    "section": "Architecture",
+    "doc_path": "bucket-endpoint-file-tracking.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.457743+00:00",
+    "elapsed_seconds": 20.97,
+    "retries": 0,
+    "word_count": 1205,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: function_reference, usage_examples",
+        "Missing sibling links: system-architecture, cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "function_reference",
+        "usage_examples"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "source-context-signal-generation": {
+    "slug": "source-context-signal-generation",
+    "title": "Source Context and Signal Generation",
+    "bucket_type": "feature:bucketization",
+    "section": "Data Layer",
+    "doc_path": "source-context-signal-generation.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.457993+00:00",
+    "elapsed_seconds": 25.77,
+    "retries": 0,
+    "word_count": 1423,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "config-database-signal-extraction": {
+    "slug": "config-database-signal-extraction",
+    "title": "Config and Database Signal Extraction for Documentation",
+    "bucket_type": "feature:page-generation",
+    "section": "Data Layer",
+    "doc_path": "config-database-signal-extraction.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.458221+00:00",
+    "elapsed_seconds": 616.26,
+    "retries": 0,
+    "word_count": 1086,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/generator_v2.py": "8350bfbc086e5c82"
+    }
+  },
+  "reposcan-context-extraction": {
+    "slug": "reposcan-context-extraction",
+    "title": "RepoScan: Scanning and Extracting Context from Code Repositories",
+    "bucket_type": "feature:topic-classification",
+    "section": "Architecture",
+    "doc_path": "reposcan-context-extraction.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.458434+00:00",
+    "elapsed_seconds": 618.4,
+    "retries": 0,
+    "word_count": 1190,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details"
+      ],
+      "missing_sections": [
+        "implementation_details"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "docplan-docbucket-template-structure-organization": {
+    "slug": "docplan-docbucket-template-structure-organization",
+    "title": "DocPlan and DocBucket: Template Structure and Organization",
+    "bucket_type": "feature:prompt-templates",
+    "section": "Architecture",
+    "doc_path": "docplan-docbucket-template-structure-organization.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.458695+00:00",
+    "elapsed_seconds": 618.7,
+    "retries": 0,
+    "word_count": 1232,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: class_design, data_model, usage_examples",
+        "Missing sibling links: testing, deployment"
+      ],
+      "missing_sections": [
+        "class_design",
+        "data_model",
+        "usage_examples"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "tracking-ownership-repository-files": {
+    "slug": "tracking-ownership-repository-files",
+    "title": "Tracking and Ownership of Repository Files",
+    "bucket_type": "feature:repository-analysis",
+    "section": "Architecture",
+    "doc_path": "tracking-ownership-repository-files.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.458959+00:00",
+    "elapsed_seconds": 619.98,
+    "retries": 0,
+    "word_count": 1387,
+    "mermaid_block_count": 3,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "repository-scanning-context-summarization-prompt-templates": {
+    "slug": "repository-scanning-context-summarization-prompt-templates",
+    "title": "Repository Scanning and Context Summarization for Prompt Templates",
+    "bucket_type": "feature:prompt-templates",
+    "section": "Architecture",
+    "doc_path": "repository-scanning-context-summarization-prompt-templates.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.459233+00:00",
+    "elapsed_seconds": 622.14,
+    "retries": 0,
+    "word_count": 1174,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: scanning_algorithm, context_extraction, usage_patterns",
+        "Missing sibling links: setup, system-architecture, cli, testing"
+      ],
+      "missing_sections": [
+        "scanning_algorithm",
+        "context_extraction",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "get-api-v1-users": {
+    "slug": "get-api-v1-users",
+    "title": "GET /api/v1/users",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-api-v1-users.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.459498+00:00",
+    "elapsed_seconds": 16.02,
+    "retries": 0,
+    "word_count": 878,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "get-login": {
+    "slug": "get-login",
+    "title": "GET /login",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-login.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.459633+00:00",
+    "elapsed_seconds": 16.33,
+    "retries": 0,
+    "word_count": 849,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "codewiki/llm/__init__.py": "d2c4064bad6455a3",
+      "codewiki/parser/api_detector.py": "234f7e1a2d12d0eb",
+      "codewiki/planner_v2.py": "3dd69b413c35408b",
+      "tests/test_framework_support.py": "4312546b1f22417e"
+    }
+  },
+  "post-login": {
+    "slug": "post-login",
+    "title": "POST /login",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "post-login.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.460016+00:00",
+    "elapsed_seconds": 18.95,
+    "retries": 0,
+    "word_count": 932,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: api-family-users, api-family-admin-stats"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/config.py": "1bded9d4facc5c55",
+      "codewiki/llm/__init__.py": "d2c4064bad6455a3",
+      "codewiki/parser/api_detector.py": "234f7e1a2d12d0eb",
+      "codewiki/planner_v2.py": "3dd69b413c35408b",
+      "tests/test_framework_support.py": "4312546b1f22417e"
+    }
+  },
+  "post-query": {
+    "slug": "post-query",
+    "title": "POST /query",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "post-query.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.460513+00:00",
+    "elapsed_seconds": 19.94,
+    "retries": 0,
+    "word_count": 1107,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: api-family-users, api-family-auth, api-family-admin-stats"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/chatbot/persistence.py": "ca88c52cb4b1242b",
+      "codewiki/chatbot/providers.py": "fd7d930b802e87d9",
+      "codewiki/chatbot/scaffold.py": "2a8040586dae3fca",
+      "codewiki/chatbot/service.py": "629afe850808fe40",
+      "codewiki/chatbot/settings.py": "f3f016a8821d0038",
+      "codewiki/chatbot/types.py": "d0560c123c12cf73"
+    }
+  },
+  "context-summarization-doc-notebooks": {
+    "slug": "context-summarization-doc-notebooks",
+    "title": "Context Summarization for Documentation and Notebooks",
+    "bucket_type": "feature:bucketization",
+    "section": "Architecture",
+    "doc_path": "context-summarization-doc-notebooks.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.460775+00:00",
+    "elapsed_seconds": 23.28,
+    "retries": 0,
+    "word_count": 1332,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "repo-scan-bucket-file-tracking": {
+    "slug": "repo-scan-bucket-file-tracking",
+    "title": "Repository Scanning and Bucket File Tracking",
+    "bucket_type": "feature:bucketization",
+    "section": "Architecture",
+    "doc_path": "repo-scan-bucket-file-tracking.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461039+00:00",
+    "elapsed_seconds": 26.05,
+    "retries": 0,
+    "word_count": 1308,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: implementation_details, usage_patterns",
+        "Missing sibling links: cli, testing, deployment"
+      ],
+      "missing_sections": [
+        "implementation_details",
+        "usage_patterns"
+      ]
+    },
+    "file_hashes": {
+      "codewiki/planner_v2.py": "3dd69b413c35408b"
+    }
+  },
+  "get-api-v1-admin-stats": {
+    "slug": "get-api-v1-admin-stats",
+    "title": "GET /api/v1/admin/stats",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-api-v1-admin-stats.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461309+00:00",
+    "elapsed_seconds": 10.33,
+    "retries": 0,
+    "word_count": 833,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2"
+    }
+  },
+  "post-api-v1-users": {
+    "slug": "post-api-v1-users",
+    "title": "POST /api/v1/users",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "post-api-v1-users.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461379+00:00",
+    "elapsed_seconds": 11.23,
+    "retries": 0,
+    "word_count": 771,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "get-reports-slug": {
+    "slug": "get-reports-slug",
+    "title": "GET /reports/{slug}",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-reports-slug.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461522+00:00",
+    "elapsed_seconds": 15.49,
+    "retries": 0,
+    "word_count": 829,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: api-family-health-query, post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22"
+    }
+  },
+  "get-api-users": {
+    "slug": "get-api-users",
+    "title": "GET /api/users",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-api-users.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461600+00:00",
+    "elapsed_seconds": 16.46,
+    "retries": 0,
+    "word_count": 886,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: api-family-health-query, post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "get-api-users-id": {
+    "slug": "get-api-users-id",
+    "title": "GET /api/users/{id}",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-api-users-id.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461720+00:00",
+    "elapsed_seconds": 12.49,
+    "retries": 0,
+    "word_count": 726,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "development-notes": {
+    "slug": "development-notes",
+    "title": "Development Notes",
+    "bucket_type": "research-context",
+    "section": "Architecture",
+    "doc_path": "development-notes.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.461831+00:00",
+    "elapsed_seconds": 12.95,
+    "retries": 0,
+    "word_count": 946,
+    "mermaid_block_count": 1,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: key_findings"
+      ],
+      "missing_sections": [
+        "key_findings"
+      ]
+    },
+    "file_hashes": {
+      "README.md": "cddc27388ad07080",
+      "codewiki/site/__init__.py": "e45a2b4b54d00424",
+      "tests/test_fumadocs_builder.py": "55b17562c7e92b0e"
+    }
+  },
+  "delete-api-users-id": {
+    "slug": "delete-api-users-id",
+    "title": "DELETE /api/users/{id}",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "delete-api-users-id.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.462000+00:00",
+    "elapsed_seconds": 13.17,
+    "retries": 0,
+    "word_count": 710,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "post-api-users": {
+    "slug": "post-api-users",
+    "title": "POST /api/users",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "post-api-users.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.462109+00:00",
+    "elapsed_seconds": 13.61,
+    "retries": 0,
+    "word_count": 858,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  },
+  "get-api-users-id-stats": {
+    "slug": "get-api-users-id-stats",
+    "title": "GET /api/users/{id}/stats",
+    "bucket_type": "endpoint-ref",
+    "section": "API",
+    "doc_path": "get-api-users-id-stats.mdx",
+    "success": true,
+    "error": null,
+    "generated_at": "2026-03-31T17:17:11.462243+00:00",
+    "elapsed_seconds": 15.25,
+    "retries": 0,
+    "word_count": 801,
+    "mermaid_block_count": 2,
+    "validation": {
+      "is_valid": true,
+      "warnings": [
+        "Missing sections: endpoint_summary, request_body, response_format, error_responses, auth, sequence_diagram",
+        "Missing sibling links: post-query"
+      ],
+      "missing_sections": [
+        "endpoint_summary",
+        "request_body",
+        "response_format",
+        "error_responses",
+        "auth",
+        "sequence_diagram"
+      ]
+    },
+    "file_hashes": {
+      "tests/fixtures/frameworks/django_app/urls.py": "98162cb7644d9c22",
+      "tests/fixtures/frameworks/express_app/server.js": "d7ff2c459410c6e2",
+      "tests/fixtures/frameworks/fastify_app/server.js": "8b3735b2edb30fd4"
+    }
+  }
+}

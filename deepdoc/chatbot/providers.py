@@ -39,7 +39,7 @@ class LiteLLMChatClient:
             response = litellm.completion(**kwargs)
             return response.choices[0].message.content or ""
         except ImportError as exc:
-            raise RuntimeError("litellm not installed. Install codewiki[chatbot].") from exc
+            raise RuntimeError("litellm not installed. Install deepdoc[chatbot].") from exc
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")
@@ -81,7 +81,7 @@ class LiteLLMEmbeddingClient:
                 vectors.extend(item["embedding"] for item in response.data)
             return vectors
         except ImportError as exc:
-            raise RuntimeError("litellm not installed. Install codewiki[chatbot].") from exc
+            raise RuntimeError("litellm not installed. Install deepdoc[chatbot].") from exc
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")

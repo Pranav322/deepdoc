@@ -1,4 +1,4 @@
-"""CodeWiki CLI — codewiki init | generate | update | serve | deploy"""
+"""DeepDoc CLI — deepdoc init | generate | update | serve | deploy"""
 
 from __future__ import annotations
 
@@ -31,7 +31,7 @@ CONTEXT_SETTINGS = {
 # ─────────────────────────────────────────────────────────────────────────────
 
 @click.group(context_settings=CONTEXT_SETTINGS, invoke_without_command=True)
-@click.version_option(__version__, prog_name="codewiki")
+@click.version_option(__version__, prog_name="deepdoc")
 @click.pass_context
 def main(ctx: click.Context) -> None:
     """
@@ -39,12 +39,12 @@ def main(ctx: click.Context) -> None:
 
     \b
     Typical workflow:
-      1. codewiki init
-      2. codewiki generate
-      3. codewiki serve
-      4. codewiki update
+      1. deepdoc init
+      2. deepdoc generate
+      3. deepdoc serve
+      4. deepdoc update
 
-    Use `codewiki <command> --help` for examples and next-step guidance.
+    Use `deepdoc <command> --help` for examples and next-step guidance.
     """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -54,7 +54,7 @@ def main(ctx: click.Context) -> None:
 # init
 # ─────────────────────────────────────────────────────────────────────────────
 
-@main.command(short_help="Create .codewiki.yaml for the current repository.")
+@main.command(short_help="Create .deepdoc.yaml for the current repository.")
 @click.option("--name", default="", show_default=False,
               help="Project name shown in the generated docs. Defaults to the current directory name.")
 @click.option("--description", default="", show_default=False,
@@ -63,22 +63,22 @@ def main(ctx: click.Context) -> None:
               type=click.Choice(["anthropic", "openai", "ollama", "azure"], case_sensitive=False),
               help="LLM provider to configure for the first run.")
 @click.option("--model", default="", show_default=False,
-              help="Model name to store in config. If omitted, CodeWiki picks a provider-specific default.")
+              help="Model name to store in config. If omitted, DeepDoc picks a provider-specific default.")
 @click.option("--output-dir", default="docs", show_default=True,
               help="Directory where generated Markdown docs will be written.")
 @click.option("--with-chatbot", is_flag=True,
               help="Enable code-and-artifact chatbot scaffolding and indexing in generated repos.")
 def init(name, description, provider, model, output_dir, with_chatbot):
-    """Initialize CodeWiki in the current repository.
+    """Initialize DeepDoc in the current repository.
 
-    This command creates `.codewiki.yaml` and fills in sensible defaults for the chosen provider.
+    This command creates `.deepdoc.yaml` and fills in sensible defaults for the chosen provider.
 
     \b
     Examples:
-      codewiki init
-      codewiki init --provider openai --model gpt-4o
-      codewiki init --provider ollama --model ollama/llama3.2
-      codewiki init --output-dir documentation
+      deepdoc init
+      deepdoc init --provider openai --model gpt-4o
+      deepdoc init --provider ollama --model ollama/llama3.2
+      deepdoc init --output-dir documentation
     """
     cwd = Path.cwd()
 
@@ -123,37 +123,37 @@ def init(name, description, provider, model, output_dir, with_chatbot):
             "site/.next/",
             "site/.source/",
             "site/out/",
-            ".codewiki/chatbot/",
+            ".deepdoc/chatbot/",
             "chatbot_backend/.venv/",
             "chatbot_backend/__pycache__/",
-            ".codewiki_manifest.json",
+            ".deepdoc_manifest.json",
         ],
     )
 
     next_steps = [
-        f"  1. Review config:     [bold]codewiki config show[/bold]",
+        f"  1. Review config:     [bold]deepdoc config show[/bold]",
     ]
     if cfg["llm"]["api_key_env"]:
         next_steps.append(
             f"  2. Set your API key:  [bold]export {cfg['llm']['api_key_env']}=...[/bold]"
         )
-        next_steps.append("  3. Generate docs:     [bold]codewiki generate[/bold]")
-        next_steps.append("  4. Preview locally:   [bold]codewiki serve[/bold]")
+        next_steps.append("  3. Generate docs:     [bold]deepdoc generate[/bold]")
+        next_steps.append("  4. Preview locally:   [bold]deepdoc serve[/bold]")
     else:
         next_steps.append("  2. Make sure Ollama is running locally")
-        next_steps.append("  3. Generate docs:     [bold]codewiki generate[/bold]")
-        next_steps.append("  4. Preview locally:   [bold]codewiki serve[/bold]")
+        next_steps.append("  3. Generate docs:     [bold]deepdoc generate[/bold]")
+        next_steps.append("  4. Preview locally:   [bold]deepdoc serve[/bold]")
     if with_chatbot:
         next_steps.append(
-            "  5. Set chatbot keys:  [bold]export CODEWIKI_CHAT_API_KEY=... CODEWIKI_EMBED_API_KEY=...[/bold]"
+            "  5. Set chatbot keys:  [bold]export DEEPDOC_CHAT_API_KEY=... DEEPDOC_EMBED_API_KEY=...[/bold]"
         )
 
     console.print(Panel.fit(
-        f"[bold green]✓ CodeWiki initialized![/bold green]\n\n"
+        f"[bold green]✓ DeepDoc initialized![/bold green]\n\n"
         f"Config saved to [cyan]{CONFIG_FILE}[/cyan]\n"
         f"Docs will be generated to [cyan]{output_dir}/[/cyan]\n\n"
         f"[dim]Next steps:[/dim]\n" + "\n".join(next_steps),
-        title="CodeWiki",
+        title="DeepDoc",
         border_style="green",
     ))
 
@@ -164,9 +164,9 @@ def init(name, description, provider, model, output_dir, with_chatbot):
 
 @main.command(short_help="Create docs for the current repository.")
 @click.option("--force", is_flag=True,
-              help="Fully refresh existing CodeWiki-managed docs instead of refusing to overwrite them.")
+              help="Fully refresh existing DeepDoc-managed docs instead of refusing to overwrite them.")
 @click.option("--clean", is_flag=True,
-              help="Delete generated docs and saved CodeWiki state, then rebuild from scratch.")
+              help="Delete generated docs and saved DeepDoc state, then rebuild from scratch.")
 @click.option("--yes", is_flag=True,
               help="Skip the confirmation prompt used by destructive actions such as --clean.")
 @click.option("--include", multiple=True,
@@ -176,7 +176,7 @@ def init(name, description, provider, model, output_dir, with_chatbot):
 @click.option("--api/--skip-api", "include_api", default=None,
               help="Include detected API endpoint pages for this run. Use --skip-api to omit API buckets and per-endpoint docs.")
 @click.option("--deploy", is_flag=True,
-              help="Run `codewiki deploy` automatically after a successful generation.")
+              help="Run `deepdoc deploy` automatically after a successful generation.")
 @click.option("--batch-size", default=10, show_default=True,
               help="How many pages to generate per batch before pausing briefly for rate limits.")
 def generate(force, clean, yes, include, exclude, include_api, deploy, batch_size):
@@ -184,9 +184,9 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
 
     \b
     When to use which mode:
-      codewiki generate              First run in a repo
-      codewiki generate --force      Full refresh of existing CodeWiki docs
-      codewiki generate --clean      Wipe docs + saved state, then rebuild
+      deepdoc generate              First run in a repo
+      deepdoc generate --force      Full refresh of existing DeepDoc docs
+      deepdoc generate --clean      Wipe docs + saved state, then rebuild
 
     \b
     Pipeline overview:
@@ -204,21 +204,21 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
 
     if clean:
         _confirm_clean(repo_root, output_dir, yes)
-        _wipe_codewiki_output(repo_root, output_dir)
+        _wipe_deepdoc_output(repo_root, output_dir)
         output_state = _inspect_output_state(repo_root, output_dir)
 
-    if output_state["codewiki_managed"] and not effective_force:
+    if output_state["deepdoc_managed"] and not effective_force:
         raise click.ClickException(
-            f"CodeWiki docs already exist in {output_dir}. "
-            "Use `codewiki update` for incremental refresh, "
-            "`codewiki generate --force` for a full refresh, "
-            "or `codewiki generate --clean --yes` to rebuild from scratch."
+            f"DeepDoc docs already exist in {output_dir}. "
+            "Use `deepdoc update` for incremental refresh, "
+            "`deepdoc generate --force` for a full refresh, "
+            "or `deepdoc generate --clean --yes` to rebuild from scratch."
         )
 
-    if output_state["has_files"] and not output_state["codewiki_managed"] and not clean:
+    if output_state["has_files"] and not output_state["deepdoc_managed"] and not clean:
         raise click.ClickException(
-            f"{output_dir} already exists and does not look CodeWiki-managed. "
-            "Use a different output directory or run `codewiki generate --clean --yes` "
+            f"{output_dir} already exists and does not look DeepDoc-managed. "
+            "Use a different output directory or run `deepdoc generate --clean --yes` "
             "to replace it explicitly."
         )
 
@@ -254,13 +254,13 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
               help="Git ref to diff against (e.g. HEAD~3, main). "
                    "Defaults to the last synced commit, or HEAD~1 if none.")
 @click.option("--deploy", is_flag=True,
-              help="Run `codewiki deploy` automatically after a successful update.")
+              help="Run `deepdoc deploy` automatically after a successful update.")
 @click.option("--replan", is_flag=True,
-              help="Force a full replan even if CodeWiki thinks an incremental update would be enough.")
+              help="Force a full replan even if DeepDoc thinks an incremental update would be enough.")
 def update(since, deploy, replan):
     """Incrementally update docs for files changed since last sync.
 
-    Run `codewiki generate` once before using this command.
+    Run `deepdoc generate` once before using this command.
 
     \b
     Smart update strategy:
@@ -269,8 +269,8 @@ def update(since, deploy, replan):
       full replan   Used for large structural changes or when --replan is set
 
     The strategy is chosen automatically based on what changed.
-    If no --since is provided, CodeWiki diffs from the commit where docs
-    were last fully synced (stored in .codewiki/state.json).
+    If no --since is provided, DeepDoc diffs from the commit where docs
+    were last fully synced (stored in .deepdoc/state.json).
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
@@ -292,7 +292,7 @@ def update(since, deploy, replan):
             since = "HEAD~1"
             console.print(
                 "[dim]No sync baseline found — using HEAD~1. "
-                "Run [bold]codewiki generate[/bold] to establish a baseline.[/dim]"
+                "Run [bold]deepdoc generate[/bold] to establish a baseline.[/dim]"
             )
 
     mode = cfg.get("generation_mode", "feature_buckets")
@@ -323,7 +323,7 @@ def update(since, deploy, replan):
 # status
 # ─────────────────────────────────────────────────────────────────────────────
 
-@main.command(short_help="Show what CodeWiki has generated and what is stale.")
+@main.command(short_help="Show what DeepDoc has generated and what is stale.")
 def status():
     """Show documentation generation status and stale buckets.
 
@@ -338,7 +338,7 @@ def status():
     from .persistence_v2 import load_plan, ledger_summary, find_stale_buckets, load_generation_ledger
     plan = load_plan(repo_root)
     if plan is None or not hasattr(plan, "buckets"):
-        console.print("[yellow]No v2 bucket plan found. Run [bold]codewiki generate[/bold] first.[/yellow]")
+        console.print("[yellow]No v2 bucket plan found. Run [bold]deepdoc generate[/bold] first.[/yellow]")
         return
 
     summary = ledger_summary(repo_root)
@@ -373,7 +373,7 @@ def status():
                 str(rec.get("word_count", 0)) if rec else "0",
             )
         console.print(t)
-        console.print("\n[dim]Run [bold]codewiki update[/bold] to refresh stale pages.[/dim]")
+        console.print("\n[dim]Run [bold]deepdoc update[/bold] to refresh stale pages.[/dim]")
     else:
         console.print("[green]✓ All pages are up-to-date.[/green]")
 
@@ -411,7 +411,7 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
             raise click.ClickException("Provide --catalog or use --repo with --gold.")
         cases = load_catalog(catalog)
 
-    table = Table(title="CodeWiki Benchmarks", show_header=True, header_style="bold")
+    table = Table(title="DeepDoc Benchmarks", show_header=True, header_style="bold")
     table.add_column("Case", style="cyan")
     table.add_column("Family")
     table.add_column("Holdout")
@@ -446,7 +446,7 @@ def serve(port):
     """Preview the generated docs locally with live reload.
 
     \b
-    Run `codewiki generate` first so the generated Fumadocs app and docs exist.
+    Run `deepdoc generate` first so the generated Fumadocs app and docs exist.
     Requires Node.js >= 18 to be installed.
     """
     _load_or_exit()
@@ -456,7 +456,7 @@ def serve(port):
 
     package_json = site_dir / "package.json"
     if not package_json.exists():
-        console.print("[red]site/package.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
+        console.print("[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]")
         sys.exit(1)
 
     preview_url = f"http://localhost:{port}"
@@ -469,7 +469,7 @@ def serve(port):
         if cfg.get("chatbot", {}).get("enabled"):
             backend_proc, backend_url = _start_chatbot_backend(repo_root, cfg, port)
             if backend_url:
-                next_env["NEXT_PUBLIC_CODEWIKI_CHATBOT_BASE_URL"] = backend_url
+                next_env["NEXT_PUBLIC_DEEPDOC_CHATBOT_BASE_URL"] = backend_url
         if not (site_dir / "node_modules").exists():
             console.print("[dim]Installing site dependencies...[/dim]")
             install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
@@ -506,7 +506,7 @@ def _deploy():
 
     \b
     Fumadocs builds a static Next.js export:
-      1. Run `codewiki deploy`
+      1. Run `deepdoc deploy`
       2. Publish `site/out/` to any static host
     """
     _load_or_exit()
@@ -515,13 +515,13 @@ def _deploy():
 
     package_json = site_dir / "package.json"
     if not package_json.exists():
-        console.print("[red]site/package.json not found. Run [bold]codewiki generate[/bold] first.[/red]")
+        console.print("[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]")
         sys.exit(1)
 
     console.print(Panel.fit(
         "[bold]Fumadocs Deployment:[/bold]\n\n"
         "1. [bold cyan]Static export:[/bold cyan]\n"
-        "   Run: [bold]codewiki deploy[/bold]\n"
+        "   Run: [bold]deepdoc deploy[/bold]\n"
         "   Publish [bold]site/out/[/bold] to any static host\n\n"
         "2. [bold cyan]Suggested hosts:[/bold cyan]\n"
         "   Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any CDN/static server",
@@ -563,17 +563,17 @@ def _deploy():
 # config show
 # ─────────────────────────────────────────────────────────────────────────────
 
-@main.group("config", context_settings=CONTEXT_SETTINGS, invoke_without_command=True, short_help="Show or edit `.codewiki.yaml` values.")
+@main.group("config", context_settings=CONTEXT_SETTINGS, invoke_without_command=True, short_help="Show or edit `.deepdoc.yaml` values.")
 @click.pass_context
 def config_cmd(ctx: click.Context) -> None:
-    """Inspect or update `.codewiki.yaml` without opening the file manually.
+    """Inspect or update `.deepdoc.yaml` without opening the file manually.
 
     \b
     Examples:
-      codewiki config show
-      codewiki config set llm.model claude-3-5-sonnet-20241022
-      codewiki config set llm.provider openai
-      codewiki config set output_dir documentation
+      deepdoc config show
+      deepdoc config set llm.model claude-3-5-sonnet-20241022
+      deepdoc config set llm.provider openai
+      deepdoc config set output_dir documentation
     """
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
@@ -581,14 +581,14 @@ def config_cmd(ctx: click.Context) -> None:
 
 @config_cmd.command("show", short_help="Print the current merged config.")
 def config_show() -> None:
-    """Print the current CodeWiki config in a readable table."""
+    """Print the current DeepDoc config in a readable table."""
     cfg_path = find_config()
     if cfg_path is None:
-        console.print("[red]No .codewiki.yaml found. Run [bold]codewiki init[/bold] first.[/red]")
+        console.print("[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]")
         sys.exit(1)
 
     cfg = load_config(cfg_path)
-    table = Table(title="CodeWiki Config", show_header=True, header_style="bold")
+    table = Table(title="DeepDoc Config", show_header=True, header_style="bold")
     table.add_column("Key", style="cyan")
     table.add_column("Value")
     _flatten_config(cfg, "", table)
@@ -603,19 +603,19 @@ def config_set(key_path: str, value: tuple[str, ...]) -> None:
 
     \b
     Examples:
-      codewiki config set llm.provider openai
-      codewiki config set llm.model gpt-4o
-      codewiki config set output_dir documentation
-      codewiki config set exclude tests/**,dist/**,build/**
+      deepdoc config set llm.provider openai
+      deepdoc config set llm.model gpt-4o
+      deepdoc config set output_dir documentation
+      deepdoc config set exclude tests/**,dist/**,build/**
     """
     if not value:
         raise click.UsageError(
-            "Please provide a value. Example: codewiki config set llm.model gpt-4o"
+            "Please provide a value. Example: deepdoc config set llm.model gpt-4o"
         )
 
     cfg_path = find_config()
     if cfg_path is None:
-        console.print("[red]No .codewiki.yaml found. Run [bold]codewiki init[/bold] first.[/red]")
+        console.print("[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]")
         sys.exit(1)
 
     cfg = load_config(cfg_path)
@@ -632,13 +632,13 @@ def config_set(key_path: str, value: tuple[str, ...]) -> None:
 def _load_or_exit() -> dict:
     cfg_path = find_config()
     if cfg_path is None:
-        console.print("[red]No .codewiki.yaml found. Run [bold]codewiki init[/bold] first.[/red]")
+        console.print("[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]")
         sys.exit(1)
     return load_config(cfg_path)
 
 
 def _find_repo_root() -> Path:
-    """Find the directory containing .codewiki.yaml."""
+    """Find the directory containing .deepdoc.yaml."""
     cfg_path = find_config()
     return cfg_path.parent if cfg_path else Path.cwd()
 
@@ -646,15 +646,15 @@ def _find_repo_root() -> Path:
 def _inspect_output_state(repo_root: Path, output_dir: Path) -> dict[str, bool]:
     has_files = output_dir.exists() and any(output_dir.iterdir())
     markers = [
-        output_dir / ".codewiki_manifest.json",
-        repo_root / ".codewiki" / "plan.json",
-        repo_root / ".codewiki" / "ledger.json",
-        repo_root / ".codewiki_plan.json",
-        repo_root / ".codewiki_file_map.json",
+        output_dir / ".deepdoc_manifest.json",
+        repo_root / ".deepdoc" / "plan.json",
+        repo_root / ".deepdoc" / "ledger.json",
+        repo_root / ".deepdoc_plan.json",
+        repo_root / ".deepdoc_file_map.json",
     ]
     return {
         "has_files": has_files,
-        "codewiki_managed": any(marker.exists() for marker in markers),
+        "deepdoc_managed": any(marker.exists() for marker in markers),
     }
 
 
@@ -665,8 +665,8 @@ def _confirm_clean(repo_root: Path, output_dir: Path, yes: bool) -> None:
     targets = []
     if output_dir.exists():
         targets.append(str(output_dir))
-    if (repo_root / ".codewiki").exists():
-        targets.append(str(repo_root / ".codewiki"))
+    if (repo_root / ".deepdoc").exists():
+        targets.append(str(repo_root / ".deepdoc"))
     if (repo_root / "site").exists():
         targets.append(str(repo_root / "site"))
     if (repo_root / "chatbot_backend").exists():
@@ -674,17 +674,17 @@ def _confirm_clean(repo_root: Path, output_dir: Path, yes: bool) -> None:
 
     target_text = ", ".join(targets) if targets else str(output_dir)
     if not click.confirm(
-        f"This will permanently delete CodeWiki output/state in {target_text}. Continue?",
+        f"This will permanently delete DeepDoc output/state in {target_text}. Continue?",
         default=False,
     ):
         raise click.Abort()
 
 
-def _wipe_codewiki_output(repo_root: Path, output_dir: Path) -> None:
+def _wipe_deepdoc_output(repo_root: Path, output_dir: Path) -> None:
     if output_dir.exists():
         shutil.rmtree(output_dir)
 
-    state_dir = repo_root / ".codewiki"
+    state_dir = repo_root / ".deepdoc"
     if state_dir.exists():
         shutil.rmtree(state_dir)
 
@@ -696,8 +696,8 @@ def _wipe_codewiki_output(repo_root: Path, output_dir: Path) -> None:
         shutil.rmtree(backend_dir)
 
     for path in (
-        repo_root / ".codewiki_plan.json",
-        repo_root / ".codewiki_file_map.json",
+        repo_root / ".deepdoc_plan.json",
+        repo_root / ".deepdoc_file_map.json",
     ):
         if path.exists():
             path.unlink()
@@ -712,7 +712,7 @@ def _add_gitignore_entries(repo_root: Path, entries: list[str]) -> None:
     new_entries = [e for e in entries if e not in existing]
     if new_entries:
         with open(gitignore, "a") as f:
-            f.write("\n# CodeWiki\n")
+            f.write("\n# DeepDoc\n")
             for e in new_entries:
                 f.write(f"{e}\n")
 
@@ -753,7 +753,7 @@ def _start_chatbot_backend(
     backend_url = f"http://127.0.0.1:{port}"
     console.print(f"[dim]Starting chatbot backend on http://127.0.0.1:{port}[/dim]")
     backend_env = os.environ.copy()
-    backend_env["CODEWIKI_CHATBOT_PREVIEW_PORT"] = str(frontend_port)
+    backend_env["DEEPDOC_CHATBOT_PREVIEW_PORT"] = str(frontend_port)
     proc = subprocess.Popen(
         [
             sys.executable,

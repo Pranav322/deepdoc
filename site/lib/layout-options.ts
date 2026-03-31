@@ -1,6 +1,6 @@
 export const layoutOptions = {
   nav: {
-    title: 'codewiki',
+    title: 'deepdoc',
     url: '/',
   },
   links: [],

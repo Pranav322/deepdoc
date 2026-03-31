@@ -3,7 +3,7 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "codewiki"
+name = "deepdoc"
 version = "0.1.0"
 description = "Auto-generate beautiful docs from any codebase"
 requires-python = ">=3.10"
@@ -32,11 +32,11 @@ chatbot = [
 ]
 
 [project.scripts]
-codewiki = "codewiki.cli:main"
+deepdoc = "deepdoc.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["codewiki*"]
+include = ["deepdoc*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

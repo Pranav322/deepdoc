@@ -10,7 +10,7 @@ from .litellm_compat import prepare_litellm
 
 
 class LLMClient:
-    """Thin wrapper around LiteLLM completion for codewiki."""
+    """Thin wrapper around LiteLLM completion for deepdoc."""
 
     def __init__(self, cfg: dict[str, Any]) -> None:
         self.cfg = cfg

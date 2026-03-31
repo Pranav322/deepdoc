@@ -35,10 +35,10 @@ def _app_py() -> str:
         REPO_ROOT = Path(__file__).resolve().parent.parent
 
         try:
-            from codewiki.config import load_config
-            from codewiki.chatbot.service import create_fastapi_app
+            from deepdoc.config import load_config
+            from deepdoc.chatbot.service import create_fastapi_app
 
-            app = create_fastapi_app(REPO_ROOT, load_config(REPO_ROOT / ".codewiki.yaml"))
+            app = create_fastapi_app(REPO_ROOT, load_config(REPO_ROOT / ".deepdoc.yaml"))
         except Exception as _init_err:
             # Fallback app so the frontend gets a clear error instead of connection refused
             from fastapi import FastAPI
@@ -46,7 +46,7 @@ def _app_py() -> str:
             from fastapi.responses import JSONResponse
 
             _detail = str(_init_err)
-            app = FastAPI(title="CodeWiki Chatbot (startup error)")
+            app = FastAPI(title="DeepDoc Chatbot (startup error)")
             app.add_middleware(
                 CORSMiddleware,
                 allow_origins=["*"],
@@ -99,7 +99,7 @@ def _settings_py(repo_root: Path, cfg: dict) -> str:
 def _requirements_txt() -> str:
     return "\n".join(
         [
-            "codewiki",
+            "deepdoc",
             "fastapi>=0.115",
             "uvicorn>=0.30",
             "httpx>=0.27",
@@ -114,8 +114,8 @@ def _requirements_txt() -> str:
 def _env_example() -> str:
     return "\n".join(
         [
-            "CODEWIKI_CHAT_API_KEY=",
-            "CODEWIKI_EMBED_API_KEY=",
+            "DEEPDOC_CHAT_API_KEY=",
+            "DEEPDOC_EMBED_API_KEY=",
             "",
         ]
     )

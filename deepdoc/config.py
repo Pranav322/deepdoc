@@ -1,4 +1,4 @@
-"""Config management — reads/writes .codewiki.yaml in the repo root."""
+"""Config management — reads/writes .deepdoc.yaml in the repo root."""
 
 from __future__ import annotations
 
@@ -136,7 +136,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "chatbot": {
         "enabled": False,
-        "index_dir": ".codewiki/chatbot",
+        "index_dir": ".deepdoc/chatbot",
         "backend": {
             "base_url": "",
             "allowed_origins": [
@@ -147,7 +147,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "answer": {
             "provider": "azure",
             "model": "azure/gpt-4o-mini",
-            "api_key_env": "CODEWIKI_CHAT_API_KEY",
+            "api_key_env": "DEEPDOC_CHAT_API_KEY",
             "base_url": "",
             "api_version": "",
             "temperature": 0.1,
@@ -156,7 +156,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "embeddings": {
             "provider": "azure",
             "model": "azure/text-embedding-3-large",
-            "api_key_env": "CODEWIKI_EMBED_API_KEY",
+            "api_key_env": "DEEPDOC_EMBED_API_KEY",
             "base_url": "",
             "api_version": "",
             "batch_size": 24,
@@ -183,11 +183,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
 }
 
-CONFIG_FILE = ".codewiki.yaml"
+CONFIG_FILE = ".deepdoc.yaml"
 
 
 def find_config(start: Path | None = None) -> Path | None:
-    """Walk up directory tree to find .codewiki.yaml."""
+    """Walk up directory tree to find .deepdoc.yaml."""
     cwd = start or Path.cwd()
     for directory in [cwd, *cwd.parents]:
         candidate = directory / CONFIG_FILE

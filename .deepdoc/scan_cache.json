@@ -1,0 +1,678 @@
+{
+  "version": "v2",
+  "generated_at": "2026-03-31T17:17:11.443301+00:00",
+  "total_files": 87,
+  "languages": {
+    "python": 73,
+    "javascript": 2,
+    "vue": 1
+  },
+  "frameworks_detected": [
+    "django",
+    "echo",
+    "express",
+    "falcon",
+    "fastapi",
+    "fastify",
+    "fiber",
+    "flask",
+    "gin",
+    "laravel",
+    "nestjs",
+    "nextjs",
+    "nuxt",
+    "vue"
+  ],
+  "entry_points": [
+    "tests/fixtures/frameworks/fastify_app/server.js",
+    "tests/fixtures/frameworks/express_app/server.js"
+  ],
+  "config_files": [
+    "pyproject.toml",
+    "tests/fixtures/frameworks/django_app/requirements.txt",
+    "tests/fixtures/frameworks/fastify_app/package.json",
+    "tests/fixtures/frameworks/vue_app/package.json",
+    "tests/fixtures/frameworks/express_app/package.json",
+    ".github/workflows/tests.yml"
+  ],
+  "has_openapi": false,
+  "openapi_paths": [],
+  "file_line_counts": {
+    "codewiki/__init__.py": 3,
+    "codewiki/__main__.py": 9,
+    "codewiki/_legacy_types.py": 48,
+    "codewiki/benchmark_v2.py": 124,
+    "codewiki/cli.py": 794,
+    "codewiki/config.py": 228,
+    "codewiki/generator_v2.py": 2175,
+    "codewiki/manifest.py": 63,
+    "codewiki/openapi.py": 211,
+    "codewiki/persistence_v2.py": 698,
+    "codewiki/pipeline_v2.py": 1345,
+    "codewiki/planner_v2.py": 2907,
+    "codewiki/prompts_v2.py": 1279,
+    "codewiki/scan_v2.py": 1121,
+    "codewiki/smart_update_v2.py": 901,
+    "codewiki/updater_v2.py": 330,
+    "codewiki/llm/__init__.py": 5,
+    "codewiki/llm/client.py": 88,
+    "codewiki/chatbot/__init__.py": 12,
+    "codewiki/chatbot/chunker.py": 508,
+    "codewiki/chatbot/docs_summary.py": 114,
+    "codewiki/chatbot/indexer.py": 142,
+    "codewiki/chatbot/persistence.py": 148,
+    "codewiki/chatbot/providers.py": 100,
+    "codewiki/chatbot/scaffold.py": 121,
+    "codewiki/chatbot/service.py": 342,
+    "codewiki/chatbot/settings.py": 137,
+    "codewiki/chatbot/types.py": 50,
+    "codewiki/parser/__init__.py": 6,
+    "codewiki/parser/api_detector.py": 21,
+    "codewiki/parser/base.py": 73,
+    "codewiki/parser/go_parser.py": 481,
+    "codewiki/parser/js_ts_parser.py": 649,
+    "codewiki/parser/php_parser.py": 555,
+    "codewiki/parser/python_parser.py": 382,
+    "codewiki/parser/registry.py": 48,
+    "codewiki/parser/vue_parser.py": 491,
+    "codewiki/parser/routes/__init__.py": 16,
+    "codewiki/parser/routes/base.py": 57,
+    "codewiki/parser/routes/common.py": 129,
+    "codewiki/parser/routes/detector.py": 30,
+    "codewiki/parser/routes/django.py": 441,
+    "codewiki/parser/routes/express.py": 121,
+    "codewiki/parser/routes/falcon.py": 127,
+    "codewiki/parser/routes/fastapi.py": 65,
+    "codewiki/parser/routes/fastify.py": 122,
+    "codewiki/parser/routes/flask.py": 55,
+    "codewiki/parser/routes/go.py": 91,
+    "codewiki/parser/routes/js_shared.py": 180,
+    "codewiki/parser/routes/laravel.py": 139,
+    "codewiki/parser/routes/nestjs.py": 58,
+    "codewiki/parser/routes/python_shared.py": 29,
+    "codewiki/parser/routes/registry.py": 44,
+    "codewiki/parser/routes/repo_resolver.py": 984,
+    "codewiki/site/__init__.py": 1,
+    "codewiki/site/fumadocs_builder_v2.py": 1320,
+    "tests/__init__.py": 0,
+    "tests/conftest.py": 247,
+    "tests/test_chatbot_config.py": 75,
+    "tests/test_chatbot_index.py": 106,
+    "tests/test_chatbot_query.py": 328,
+    "tests/test_chatbot_scaffold.py": 66,
+    "tests/test_classify.py": 140,
+    "tests/test_framework_fixtures.py": 64,
+    "tests/test_framework_support.py": 629,
+    "tests/test_fumadocs_builder.py": 332,
+    "tests/test_generation_evidence.py": 202,
+    "tests/test_planner_granularity.py": 625,
+    "tests/test_route_registry.py": 69,
+    "tests/test_smart_update.py": 214,
+    "tests/test_stale.py": 118,
+    "tests/test_state.py": 180,
+    "tests/fixtures/frameworks/django_app/urls.py": 43,
+    "tests/fixtures/frameworks/fastify_app/server.js": 22,
+    "tests/fixtures/frameworks/vue_app/src/components/UserList.vue": 24,
+    "tests/fixtures/frameworks/express_app/server.js": 9
+  },
+  "api_endpoints": [
+    {
+      "method": "GET",
+      "path": "/health",
+      "handler": "_health",
+      "file": "codewiki/chatbot/scaffold.py",
+      "route_file": "codewiki/chatbot/scaffold.py",
+      "handler_file": "codewiki/chatbot/scaffold.py",
+      "line": 57,
+      "raw_path": "/health",
+      "framework": "fastapi",
+      "provenance": {}
+    },
+    {
+      "method": "POST",
+      "path": "/query",
+      "handler": "_query",
+      "file": "codewiki/chatbot/scaffold.py",
+      "route_file": "codewiki/chatbot/scaffold.py",
+      "handler_file": "codewiki/chatbot/scaffold.py",
+      "line": 61,
+      "raw_path": "/query",
+      "framework": "fastapi",
+      "provenance": {}
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "handler": "health",
+      "file": "codewiki/chatbot/service.py",
+      "route_file": "codewiki/chatbot/service.py",
+      "handler_file": "codewiki/chatbot/service.py",
+      "line": 325,
+      "raw_path": "/health",
+      "framework": "fastapi",
+      "provenance": {}
+    },
+    {
+      "method": "POST",
+      "path": "/query",
+      "handler": "query",
+      "file": "codewiki/chatbot/service.py",
+      "route_file": "codewiki/chatbot/service.py",
+      "handler_file": "codewiki/chatbot/service.py",
+      "line": 329,
+      "raw_path": "/query",
+      "framework": "fastapi",
+      "provenance": {}
+    },
+    {
+      "method": "GET",
+      "path": "/login",
+      "handler": "AuthController.Login.on_get",
+      "file": "tests/test_framework_support.py",
+      "route_file": "tests/test_framework_support.py",
+      "handler_file": "tests/test_framework_support.py",
+      "line": 324,
+      "raw_path": "settings.API_PREFIX + '/login'",
+      "framework": "falcon",
+      "provenance": {
+        "resource_ref": "AuthController.Login"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/login",
+      "handler": "AuthController.Login.on_post",
+      "file": "tests/test_framework_support.py",
+      "route_file": "tests/test_framework_support.py",
+      "handler_file": "tests/test_framework_support.py",
+      "line": 324,
+      "raw_path": "settings.API_PREFIX + '/login'",
+      "framework": "falcon",
+      "provenance": {
+        "resource_ref": "AuthController.Login"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/login",
+      "handler": "AuthController.RecaptchaLogin.on_post",
+      "file": "tests/test_framework_support.py",
+      "route_file": "tests/test_framework_support.py",
+      "handler_file": "tests/test_framework_support.py",
+      "line": 325,
+      "raw_path": "settings.NEW_API_PREFIX + '/login'",
+      "framework": "falcon",
+      "provenance": {
+        "resource_ref": "AuthController.RecaptchaLogin"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "handler": "listUsers",
+      "file": "tests/fixtures/frameworks/fastify_app/server.js",
+      "route_file": "tests/fixtures/frameworks/fastify_app/server.js",
+      "handler_file": "tests/fixtures/frameworks/fastify_app/server.js",
+      "line": 4,
+      "raw_path": "/api/v1/users",
+      "framework": "fastify",
+      "provenance": {}
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "handler": "createUser",
+      "file": "tests/fixtures/frameworks/fastify_app/server.js",
+      "route_file": "tests/fixtures/frameworks/fastify_app/server.js",
+      "handler_file": "tests/fixtures/frameworks/fastify_app/server.js",
+      "line": 11,
+      "raw_path": "/api/v1/users",
+      "framework": "fastify",
+      "provenance": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/admin/stats",
+      "handler": "statsHandler",
+      "file": "tests/fixtures/frameworks/express_app/server.js",
+      "route_file": "tests/fixtures/frameworks/express_app/server.js",
+      "handler_file": "tests/fixtures/frameworks/express_app/server.js",
+      "line": 7,
+      "raw_path": "/stats",
+      "framework": "express",
+      "provenance": {
+        "router_object": "adminRouter"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/v1/users",
+      "handler": "listUsers",
+      "file": "tests/fixtures/frameworks/express_app/server.js",
+      "route_file": "tests/fixtures/frameworks/express_app/server.js",
+      "handler_file": "tests/fixtures/frameworks/express_app/server.js",
+      "line": 6,
+      "raw_path": "/users",
+      "framework": "express",
+      "provenance": {
+        "router_object": "router"
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/api/v1/users",
+      "handler": "createUser",
+      "file": "tests/fixtures/frameworks/express_app/server.js",
+      "route_file": "tests/fixtures/frameworks/express_app/server.js",
+      "handler_file": "tests/fixtures/frameworks/express_app/server.js",
+      "line": 6,
+      "raw_path": "/users",
+      "framework": "express",
+      "provenance": {
+        "router_object": "router"
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/health",
+      "handler": "health",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 40,
+      "raw_path": "health/",
+      "framework": "django",
+      "provenance": {
+        "mount_prefix": ""
+      }
+    },
+    {
+      "method": "POST",
+      "path": "/health",
+      "handler": "health",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 40,
+      "raw_path": "health/",
+      "framework": "django",
+      "provenance": {
+        "mount_prefix": ""
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/reports/{slug}",
+      "handler": "ReportView",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 41,
+      "raw_path": "^reports/(?P<slug>[-\\\\w]+)/$",
+      "framework": "django",
+      "provenance": {
+        "mount_prefix": ""
+      }
+    },
+    {
+      "method": "GET",
+      "path": "/api/users",
+      "handler": "UserViewSet.list",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 42,
+      "raw_path": "api/",
+      "framework": "django",
+      "provenance": {}
+    },
+    {
+      "method": "POST",
+      "path": "/api/users",
+      "handler": "UserViewSet.create",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 42,
+      "raw_path": "api/",
+      "framework": "django",
+      "provenance": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/{id}",
+      "handler": "UserViewSet.retrieve",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 42,
+      "raw_path": "api/",
+      "framework": "django",
+      "provenance": {}
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/users/{id}",
+      "handler": "UserViewSet.destroy",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 42,
+      "raw_path": "api/",
+      "framework": "django",
+      "provenance": {}
+    },
+    {
+      "method": "GET",
+      "path": "/api/users/{id}/stats",
+      "handler": "UserViewSet.stats",
+      "file": "tests/fixtures/frameworks/django_app/urls.py",
+      "route_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "line": 42,
+      "raw_path": "api/",
+      "framework": "django",
+      "provenance": {}
+    }
+  ],
+  "integration_summary": [
+    {
+      "name": "anthropic",
+      "display_name": "Anthropic",
+      "description": "Anthropic LLM API integration for chat and embedding models.",
+      "files": [
+        "codewiki/cli.py",
+        "codewiki/config.py",
+        "codewiki/llm/client.py",
+        "codewiki/scan_v2.py"
+      ],
+      "is_substantial": true
+    },
+    {
+      "name": "openai",
+      "display_name": "OpenAI",
+      "description": "OpenAI API integration for LLM and embedding models.",
+      "files": [
+        "codewiki/cli.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "azure",
+      "display_name": "Azure",
+      "description": "Azure API integration for cloud services.",
+      "files": [
+        "codewiki/cli.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "codewiki_chat",
+      "display_name": "CodeWiki Chat",
+      "description": "Internal chat API for CodeWiki chatbot features.",
+      "files": [
+        "codewiki/chatbot/scaffold.py",
+        "codewiki/chatbot/settings.py",
+        "codewiki/cli.py",
+        "codewiki/config.py",
+        "codewiki/scan_v2.py",
+        "tests/test_chatbot_config.py"
+      ],
+      "is_substantial": true
+    },
+    {
+      "name": "codewiki_embed",
+      "display_name": "CodeWiki Embed",
+      "description": "Internal embedding API for CodeWiki chatbot features.",
+      "files": [
+        "codewiki/chatbot/scaffold.py",
+        "codewiki/chatbot/settings.py",
+        "codewiki/cli.py",
+        "codewiki/config.py",
+        "codewiki/llm/client.py",
+        "codewiki/scan_v2.py",
+        "tests/test_chatbot_config.py"
+      ],
+      "is_substantial": true
+    },
+    {
+      "name": "vinculum",
+      "display_name": "Vinculum Warehouse Management",
+      "description": "Warehouse management system for inventory sync and order fulfillment.",
+      "files": [
+        "codewiki/planner_v2.py",
+        "codewiki/scan_v2.py"
+      ],
+      "is_substantial": true
+    },
+    {
+      "name": "webhook",
+      "display_name": "Webhook Integrations",
+      "description": "Generic webhook handler and routing for external system integrations.",
+      "files": [
+        "codewiki/chatbot/indexer.py",
+        "codewiki/chatbot/providers.py",
+        "codewiki/chatbot/settings.py",
+        "codewiki/llm/client.py",
+        "codewiki/persistence_v2.py",
+        "codewiki/planner_v2.py",
+        "codewiki/prompts_v2.py",
+        "codewiki/scan_v2.py",
+        "codewiki/smart_update_v2.py",
+        "tests/test_chatbot_config.py",
+        "tests/test_framework_support.py",
+        "tests/test_fumadocs_builder.py"
+      ],
+      "is_substantial": true
+    },
+    {
+      "name": "api",
+      "display_name": "Generic API Key",
+      "description": "Generic API key integration for external services.",
+      "files": [
+        "codewiki/prompts_v2.py",
+        "codewiki/site/fumadocs_builder_v2.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "sync_state",
+      "display_name": "Sync State Persistence",
+      "description": "Internal persistence for sync state, used for incremental/full sync operations.",
+      "files": [
+        "codewiki/site/fumadocs_builder_v2.py",
+        "tests/test_chatbot_query.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "llm",
+      "display_name": "LLM Client",
+      "description": "Internal LLM client for language model operations.",
+      "files": [
+        "codewiki/chatbot/providers.py",
+        "codewiki/llm/client.py",
+        "tests/test_framework_support.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "chatbot_indexer",
+      "display_name": "Chatbot Indexer",
+      "description": "Internal indexer for chatbot, supporting full and incremental sync.",
+      "files": [
+        "tests/test_framework_support.py",
+        "tests/test_state.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "litellm",
+      "display_name": "LiteLLM Providers",
+      "description": "LiteLLM-based chat and embedding clients.",
+      "files": [
+        "codewiki/chatbot/providers.py",
+        "codewiki/llm/client.py"
+      ],
+      "is_substantial": false
+    },
+    {
+      "name": "fumadocs_builder",
+      "display_name": "Fumadocs Builder",
+      "description": "API page builder for documentation generation.",
+      "files": [],
+      "is_substantial": false
+    },
+    {
+      "name": "test_clients",
+      "display_name": "Test Clients",
+      "description": "Fake and failing clients for testing chatbot integrations.",
+      "files": [],
+      "is_substantial": false
+    },
+    {
+      "name": "test_framework_support",
+      "display_name": "Test Framework Support",
+      "description": "Test functions for Django and framework integration detection.",
+      "files": [],
+      "is_substantial": false
+    }
+  ],
+  "endpoint_bundle_summary": [
+    {
+      "endpoint_family": "health",
+      "methods_paths": [
+        "GET /health",
+        "GET /health",
+        "GET /health",
+        "POST /health"
+      ],
+      "handler_file": "codewiki/chatbot/scaffold.py",
+      "handler_symbols": [
+        "_health",
+        "health",
+        "health",
+        "health"
+      ],
+      "integration_edges": [
+        "action",
+        "api_view",
+        "build_chat_client",
+        "build_embedding_client",
+        "decorators",
+        "get_chatbot_cfg",
+        "providers",
+        "resolve_service_api_key",
+        "rest_framework",
+        "settings"
+      ]
+    },
+    {
+      "endpoint_family": "query",
+      "methods_paths": [
+        "POST /query",
+        "POST /query"
+      ],
+      "handler_file": "codewiki/chatbot/scaffold.py",
+      "handler_symbols": [
+        "_query",
+        "query"
+      ],
+      "integration_edges": [
+        "build_chat_client",
+        "build_embedding_client",
+        "get_chatbot_cfg",
+        "providers",
+        "resolve_service_api_key",
+        "settings"
+      ]
+    },
+    {
+      "endpoint_family": "login",
+      "methods_paths": [
+        "GET /login",
+        "POST /login",
+        "POST /login"
+      ],
+      "handler_file": "tests/test_framework_support.py",
+      "handler_symbols": [
+        "AuthController.Login.on_get",
+        "AuthController.Login.on_post",
+        "AuthController.RecaptchaLogin.on_post"
+      ],
+      "integration_edges": [
+        "api_detector",
+        "apiendpoint",
+        "codewiki",
+        "detect_endpoints",
+        "get_detectors",
+        "llm",
+        "llmclient",
+        "parser",
+        "registeredroutedetector",
+        "route_detector_registry",
+        "routeresolvercontext",
+        "routes"
+      ]
+    },
+    {
+      "endpoint_family": "users",
+      "methods_paths": [
+        "GET /api/v1/users",
+        "POST /api/v1/users",
+        "GET /api/v1/users",
+        "POST /api/v1/users",
+        "GET /api/users",
+        "POST /api/users",
+        "GET /api/users/{id}",
+        "DELETE /api/users/{id}",
+        "GET /api/users/{id}/stats"
+      ],
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_symbols": [
+        "listUsers",
+        "createUser",
+        "listUsers",
+        "createUser",
+        "UserViewSet.list",
+        "UserViewSet.create",
+        "UserViewSet.retrieve",
+        "UserViewSet.destroy",
+        "UserViewSet.stats"
+      ],
+      "integration_edges": [
+        "action",
+        "api_view",
+        "decorators",
+        "rest_framework"
+      ]
+    },
+    {
+      "endpoint_family": "admin",
+      "methods_paths": [
+        "GET /api/v1/admin/stats"
+      ],
+      "handler_file": "tests/fixtures/frameworks/express_app/server.js",
+      "handler_symbols": [
+        "statsHandler"
+      ],
+      "integration_edges": []
+    },
+    {
+      "endpoint_family": "reports",
+      "methods_paths": [
+        "GET /reports/{slug}"
+      ],
+      "handler_file": "tests/fixtures/frameworks/django_app/urls.py",
+      "handler_symbols": [
+        "ReportView"
+      ],
+      "integration_edges": [
+        "action",
+        "api_view",
+        "decorators",
+        "rest_framework"
+      ]
+    }
+  ]
+}

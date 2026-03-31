@@ -1,4 +1,4 @@
-"""Tests for commit-baseline tracking via .codewiki/state.json (Phase 1)."""
+"""Tests for commit-baseline tracking via .deepdoc/state.json (Phase 1)."""
 
 from __future__ import annotations
 
@@ -6,8 +6,8 @@ import git as _git
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from codewiki.persistence_v2 import save_sync_state, load_sync_state
-from codewiki.pipeline_v2 import PipelineV2
+from deepdoc.persistence_v2 import save_sync_state, load_sync_state
+from deepdoc.pipeline_v2 import PipelineV2
 
 from .conftest import FakeResult, _run_git, make_bucket, make_plan
 
@@ -156,15 +156,15 @@ def test_partial_generate_does_not_advance_baseline(tmp_repo):
         def update_manifest(self, results):
             return None
 
-    with patch("codewiki.pipeline_v2.LLMClient", return_value=MagicMock()):
+    with patch("deepdoc.pipeline_v2.LLMClient", return_value=MagicMock()):
         pipeline = PipelineV2(
             root,
             {"output_dir": "docs", "llm": {"provider": "anthropic", "model": "test"}},
         )
     with (
-        patch("codewiki.pipeline_v2.bucket_scan_repo", return_value=fake_scan),
-        patch("codewiki.pipeline_v2.bucket_plan_docs", return_value=plan),
-        patch("codewiki.pipeline_v2.BucketGenerationEngine", FakeEngine),
+        patch("deepdoc.pipeline_v2.bucket_scan_repo", return_value=fake_scan),
+        patch("deepdoc.pipeline_v2.bucket_plan_docs", return_value=plan),
+        patch("deepdoc.pipeline_v2.BucketGenerationEngine", FakeEngine),
         patch.object(PipelineV2, "_print_scan", return_value=None),
         patch.object(PipelineV2, "_build_site", return_value=None),
         patch.object(PipelineV2, "_print_summary", return_value=None),

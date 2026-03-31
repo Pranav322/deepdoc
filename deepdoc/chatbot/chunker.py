@@ -39,7 +39,7 @@ ARTIFACT_GLOBS = [
 ]
 IGNORED_PARTS = {
     ".git",
-    ".codewiki",
+    ".deepdoc",
     "site",
     "docs",
     "node_modules",

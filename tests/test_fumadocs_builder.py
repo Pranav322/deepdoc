@@ -3,17 +3,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from codewiki.generator_v2 import (
+from deepdoc.generator_v2 import (
     _fix_mermaid_diagram,
     escape_mdx_route_params,
     escape_mdx_text_hazards,
     normalize_mdx_steps,
     normalize_code_fence_languages,
 )
-from codewiki.pipeline_v2 import stage_openapi_assets
-from codewiki.pipeline_v2 import _endpoint_ref_slug
-from codewiki.prompts_v2 import ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2, SYSTEM_V2
-from codewiki.site.fumadocs_builder_v2 import build_fumadocs_from_plan
+from deepdoc.pipeline_v2 import stage_openapi_assets
+from deepdoc.pipeline_v2 import _endpoint_ref_slug
+from deepdoc.prompts_v2 import ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2, SYSTEM_V2
+from deepdoc.site.fumadocs_builder_v2 import build_fumadocs_from_plan
 from tests.conftest import make_bucket, make_plan
 
 
@@ -84,8 +84,8 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert '"url": "/auth"' in page_tree
     assert '"name": "API Reference"' in page_tree
     assert '"url": "/api/get-order"' in page_tree
-    assert "--codewiki-brand-primary: #EB3E25;" in global_css
-    assert ".codewiki-chatbot-toggle" in global_css
+    assert "--deepdoc-brand-primary: #EB3E25;" in global_css
+    assert ".deepdoc-chatbot-toggle" in global_css
 
     build_fumadocs_from_plan(
         repo_root,

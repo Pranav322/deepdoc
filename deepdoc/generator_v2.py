@@ -1644,7 +1644,7 @@ def normalize_mdx_steps(content: str) -> str:
 # ═════════════════════════════════════════════════════════════════════════════
 
 # Rate limiting constants — tuned for provisioned providers (Azure PTU, etc.)
-# Override via .codewiki.yaml: batch_size, max_parallel_workers
+# Override via .deepdoc.yaml: batch_size, max_parallel_workers
 BATCH_SIZE = 10
 RATE_LIMIT_PAUSE = 0.5  # seconds between batches (Azure rarely 429s within quota)
 RATE_LIMIT_BACKOFF = 3.0  # initial backoff on 429; doubles each retry
@@ -2086,7 +2086,7 @@ class BucketGenerationEngine:
 
 <Callout type="warn">
 This page could not be fully generated. It contains a file listing only.
-Re-run `codewiki generate` to retry.
+Re-run `deepdoc generate` to retry.
 </Callout>
 
 ## Description

@@ -12,7 +12,7 @@ from urllib.parse import urlparse
 
 DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
     "enabled": False,
-    "index_dir": ".codewiki/chatbot",
+    "index_dir": ".deepdoc/chatbot",
     "backend": {
         "base_url": "",
         "allowed_origins": [
@@ -23,7 +23,7 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
     "answer": {
         "provider": "azure",
         "model": "azure/gpt-4o-mini",
-        "api_key_env": "CODEWIKI_CHAT_API_KEY",
+        "api_key_env": "DEEPDOC_CHAT_API_KEY",
         "base_url": "",
         "api_version": "",
         "temperature": 0.1,
@@ -32,7 +32,7 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
     "embeddings": {
         "provider": "azure",
         "model": "azure/text-embedding-3-large",
-        "api_key_env": "CODEWIKI_EMBED_API_KEY",
+        "api_key_env": "DEEPDOC_EMBED_API_KEY",
         "base_url": "",
         "api_version": "",
         "batch_size": 24,
@@ -128,7 +128,7 @@ def chatbot_allowed_origins(cfg: dict[str, Any]) -> list[str]:
     backend_cfg = chatbot_cfg.get("backend", {})
     origins = backend_cfg.get("allowed_origins", [])
     resolved = list(origins) if isinstance(origins, list) else []
-    preview_port = os.environ.get("CODEWIKI_CHATBOT_PREVIEW_PORT", "").strip()
+    preview_port = os.environ.get("DEEPDOC_CHATBOT_PREVIEW_PORT", "").strip()
     if preview_port:
         for host in ("localhost", "127.0.0.1"):
             origin = f"http://{host}:{preview_port}"

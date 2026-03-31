@@ -5,9 +5,9 @@ from __future__ import annotations
 from copy import deepcopy
 from pathlib import Path
 
-from codewiki.config import DEFAULT_CONFIG
-from codewiki.parser.api_detector import detect_endpoints
-from codewiki.planner_v2 import scan_repo
+from deepdoc.config import DEFAULT_CONFIG
+from deepdoc.parser.api_detector import detect_endpoints
+from deepdoc.planner_v2 import scan_repo
 
 
 def test_django_detects_class_views_and_drf_router_actions():

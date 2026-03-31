@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from codewiki.config import DEFAULT_CONFIG, load_config, save_config
-from codewiki.chatbot.settings import (
+from deepdoc.config import DEFAULT_CONFIG, load_config, save_config
+from deepdoc.chatbot.settings import (
     chatbot_allowed_origins,
     chatbot_backend_base_url,
     chatbot_backend_port,
@@ -18,14 +18,14 @@ def test_chatbot_defaults_are_present() -> None:
     assert chatbot["enabled"] is False
     assert chatbot["vector_store"]["kind"] == "faiss"
     assert chatbot["retrieval"]["top_k_code"] == 8
-    assert chatbot["answer"]["api_key_env"] == "CODEWIKI_CHAT_API_KEY"
-    assert chatbot["embeddings"]["api_key_env"] == "CODEWIKI_EMBED_API_KEY"
+    assert chatbot["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
+    assert chatbot["embeddings"]["api_key_env"] == "DEEPDOC_EMBED_API_KEY"
     assert "http://localhost:3000" in chatbot["backend"]["allowed_origins"]
     assert "http://127.0.0.1:3000" in chatbot["backend"]["allowed_origins"]
 
 
 def test_chatbot_config_merges_nested_values(tmp_path: Path) -> None:
-    cfg_path = tmp_path / ".codewiki.yaml"
+    cfg_path = tmp_path / ".deepdoc.yaml"
     save_config(
         {
             "project_name": "Demo",
@@ -47,7 +47,7 @@ def test_chatbot_config_merges_nested_values(tmp_path: Path) -> None:
         "http://127.0.0.1:3000",
     ]
     assert cfg["chatbot"]["embeddings"]["api_key_env"] == "ALT_EMBED_KEY"
-    assert cfg["chatbot"]["answer"]["api_key_env"] == "CODEWIKI_CHAT_API_KEY"
+    assert cfg["chatbot"]["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
 
 
 def test_chatbot_backend_defaults_are_repo_specific(tmp_path: Path) -> None:
@@ -102,7 +102,7 @@ def test_chatbot_external_backend_is_not_reused_as_local_preview_port(tmp_path: 
 
 
 def test_chatbot_allowed_origins_include_preview_port(monkeypatch) -> None:
-    monkeypatch.setenv("CODEWIKI_CHATBOT_PREVIEW_PORT", "4123")
+    monkeypatch.setenv("DEEPDOC_CHATBOT_PREVIEW_PORT", "4123")
 
     origins = chatbot_allowed_origins({"chatbot": {"enabled": True}})
 

@@ -1,4 +1,4 @@
-"""Module entrypoint for `python -m codewiki`."""
+"""Module entrypoint for `python -m deepdoc`."""
 
 from __future__ import annotations
 

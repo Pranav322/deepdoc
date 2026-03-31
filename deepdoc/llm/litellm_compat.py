@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-_PATCH_ATTR = "_codewiki_none_safe_api_base_patch"
+_PATCH_ATTR = "_deepdoc_none_safe_api_base_patch"
 
 
 def patch_litellm_logging(litellm_logging: Any) -> None:

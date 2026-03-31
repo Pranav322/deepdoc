@@ -3,10 +3,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
 try:
-    from codewiki.config import load_config
-    from codewiki.chatbot.service import create_fastapi_app
+    from deepdoc.config import load_config
+    from deepdoc.chatbot.service import create_fastapi_app
 
-    app = create_fastapi_app(REPO_ROOT, load_config(REPO_ROOT / ".codewiki.yaml"))
+    app = create_fastapi_app(REPO_ROOT, load_config(REPO_ROOT / ".deepdoc.yaml"))
 except Exception as _init_err:
     # Fallback app so the frontend gets a clear error instead of connection refused
     from fastapi import FastAPI
@@ -14,7 +14,7 @@ except Exception as _init_err:
     from fastapi.responses import JSONResponse
 
     _detail = str(_init_err)
-    app = FastAPI(title="CodeWiki Chatbot (startup error)")
+    app = FastAPI(title="DeepDoc Chatbot (startup error)")
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["*"],

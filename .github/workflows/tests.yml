@@ -22,7 +22,7 @@ jobs:
           python -m pip install -e . pytest
 
       - name: Run compile smoke check
-        run: python -m compileall codewiki
+        run: python -m compileall deepdoc
 
       - name: Run pytest
         run: python -m pytest

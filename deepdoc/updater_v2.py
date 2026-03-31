@@ -2,7 +2,7 @@
 
 Flow:
     1. git diff → find changed files
-    2. Load .codewiki_file_map.json → find which doc pages those files affect
+    2. Load .deepdoc_file_map.json → find which doc pages those files affect
     3. Regenerate only those pages (using saved plan for context)
     4. Rebuild nav if needed
 """
@@ -74,7 +74,7 @@ class UpdaterV2:
         # Step 3: Load file→page map
         file_map = load_file_map(self.repo_root)
         if not file_map:
-            console.print("[yellow]No file-page map found. Run [bold]codewiki generate[/bold] first.[/yellow]")
+            console.print("[yellow]No file-page map found. Run [bold]deepdoc generate[/bold] first.[/yellow]")
             console.print("[dim]Falling back to full regeneration of affected pages...[/dim]")
             return self._fallback_update(changed_files)
 
@@ -86,7 +86,7 @@ class UpdaterV2:
                 affected_slugs.update(file_map[rel])
 
         if not affected_slugs:
-            console.print("[yellow]Changed files don't belong to any doc page. Consider running [bold]codewiki generate[/bold] to replan.[/yellow]")
+            console.print("[yellow]Changed files don't belong to any doc page. Consider running [bold]deepdoc generate[/bold] to replan.[/yellow]")
             return 0
 
         affected_pages = [p for p in (plan.pages if plan else []) if p.slug in affected_slugs]

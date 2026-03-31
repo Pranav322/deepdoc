@@ -10,16 +10,16 @@ export function ChatbotToggle() {
   if (!chatbotConfig.enabled) return null;
 
   return (
-    <div className="codewiki-chatbot-shell">
+    <div className="deepdoc-chatbot-shell">
       {open ? <ChatbotPanel onClose={() => setOpen(false)} /> : null}
       <button
         aria-expanded={open}
-        className="codewiki-chatbot-toggle"
+        className="deepdoc-chatbot-toggle"
         onClick={() => setOpen((value) => !value)}
         type="button"
       >
-        <span aria-hidden="true" className="codewiki-chatbot-toggle__icon" />
-        <span className="codewiki-chatbot-toggle__label">
+        <span aria-hidden="true" className="deepdoc-chatbot-toggle__icon" />
+        <span className="deepdoc-chatbot-toggle__label">
           <strong>Ask the codebase</strong>
           <span>Grounded answers with code citations</span>
         </span>

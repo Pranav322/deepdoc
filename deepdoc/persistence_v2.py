@@ -7,10 +7,10 @@ Phase 4 of the bucket-based doc pipeline. Three stores:
   ledger.json       — per-page generation record (word count, mermaid count, warnings,
                       file hashes, timestamp) used by Phase 5 for smart invalidation
 
-All files live in {repo_root}/.codewiki/
-The legacy .codewiki_plan.json / .codewiki_file_map.json in repo root are kept for
+All files live in {repo_root}/.deepdoc/
+The legacy .deepdoc_plan.json / .deepdoc_file_map.json in repo root are kept for
 backwards-compatibility with the legacy updater, but the canonical source of truth is
-the new .codewiki/ directory.
+the new .deepdoc/ directory.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ from ._legacy_types import DocPage, DocPlan as LegacyDocPlan
 # File locations
 # ─────────────────────────────────────────────────────────────────────────────
 
-CODEWIKI_DIR = ".codewiki"
+DEEPDOC_DIR = ".deepdoc"
 PLAN_FILE = "plan.json"
 SCAN_CACHE_FILE = "scan_cache.json"
 LEDGER_FILE = "ledger.json"
@@ -39,13 +39,13 @@ STATE_FILE = "state.json"
 ENGINE_FINGERPRINT = "routes_repo_resolution_v1"
 
 # Legacy top-level files (kept for backwards-compat)
-LEGACY_PLAN_FILE = ".codewiki_plan.json"
-LEGACY_FILE_MAP_FILE = ".codewiki_file_map.json"
+LEGACY_PLAN_FILE = ".deepdoc_plan.json"
+LEGACY_FILE_MAP_FILE = ".deepdoc_file_map.json"
 
 
 def _state_dir(repo_root: Path) -> Path:
-    """Return the .codewiki state directory, creating it if necessary."""
-    d = repo_root / CODEWIKI_DIR
+    """Return the .deepdoc state directory, creating it if necessary."""
+    d = repo_root / DEEPDOC_DIR
     d.mkdir(exist_ok=True)
     return d
 
@@ -63,7 +63,7 @@ def save_sync_state(
     engine_fingerprint: str = ENGINE_FINGERPRINT,
     advance_baseline: bool = True,
 ) -> None:
-    """Write .codewiki/state.json to track the last synced commit.
+    """Write .deepdoc/state.json to track the last synced commit.
 
     Args:
         repo_root: Repository root path.
@@ -98,7 +98,7 @@ def save_sync_state(
 
 
 def load_sync_state(repo_root: Path) -> dict[str, Any] | None:
-    """Read .codewiki/state.json. Returns None if not present or corrupt."""
+    """Read .deepdoc/state.json. Returns None if not present or corrupt."""
     path = _state_dir(repo_root) / STATE_FILE
     if not path.exists():
         return None
@@ -113,10 +113,10 @@ def load_sync_state(repo_root: Path) -> dict[str, Any] | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_plan(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
-    """Serialise the doc plan to .codewiki/plan.json.
+    """Serialise the doc plan to .deepdoc/plan.json.
 
     Handles both bucket-based DocPlan and legacy DocPlan.
-    Also writes the legacy .codewiki_plan.json for updater_v2 compatibility.
+    Also writes the legacy .deepdoc_plan.json for updater_v2 compatibility.
     """
     state = _state_dir(repo_root)
 
@@ -326,7 +326,7 @@ def load_file_map(repo_root: Path) -> dict[str, list[str]]:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_scan_cache(scan: Any, repo_root: Path) -> None:
-    """Save a lightweight scan snapshot to .codewiki/scan_cache.json.
+    """Save a lightweight scan snapshot to .deepdoc/scan_cache.json.
 
     We deliberately omit: parsed_files (AST objects), file_contents (raw strings),
     and giant_file_clusters (large nested objects). Those are rebuilt cheaply on demand.
@@ -399,7 +399,7 @@ def scan_cache_age_seconds(repo_root: Path) -> float | None:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path) -> None:
-    """Save a per-page generation record to .codewiki/ledger.json.
+    """Save a per-page generation record to .deepdoc/ledger.json.
 
     Each record contains:
     - slug, title, bucket_type

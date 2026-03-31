@@ -646,6 +646,44 @@ Add your API key to repo Settings → Secrets → Actions → `ANTHROPIC_API_KEY
 
 ---
 
+## Releasing
+
+DeepDoc now supports automated releases through GitHub Actions.
+
+### What happens automatically
+
+When you push to `main`, the release workflow checks the version in `pyproject.toml`.
+If that version does not already have a matching Git tag like `v0.1.1`, GitHub Actions will:
+
+- build the package
+- publish it to PyPI
+- create the Git tag
+- create a GitHub Release and attach the built files
+
+### Your release flow
+
+1. Update `version = "..."` in `pyproject.toml`
+2. Commit your changes
+3. Push to `main`
+
+That is it. You do not need to manually create tags or GitHub Releases anymore.
+
+### One-time setup
+
+1. On PyPI, open the `deepdoc` project
+2. Go to `Publishing`
+3. Add a Trusted Publisher for GitHub Actions with:
+   - owner: `tss-pranavkumar`
+   - repository: `deepdoc`
+   - workflow filename: `release.yml`
+   - environment name: `pypi`
+4. In GitHub, open Settings → Actions → General
+5. Set Workflow permissions to `Read and write permissions`
+
+After that, every new version pushed to `main` can publish without a PyPI token.
+
+---
+
 ## Typical Workflow
 
 **First time:**

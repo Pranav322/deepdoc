@@ -206,7 +206,7 @@ Preview the generated docs locally with live reload using the generated Fumadocs
 
 ```bash
 codewiki serve
-codewiki serve --port 3000
+codewiki serve --port 8001
 ```
 
 Requires Node.js >= 18 to be installed. Site dependencies are auto-installed into `site/node_modules/` on first run.
@@ -396,6 +396,7 @@ generation_mode: feature_buckets
 # Generation tuning
 max_pages: 0                        # 0 = no cap; set a number to limit total pages
 giant_file_lines: 2000              # Files above this get LLM-based feature clustering
+source_context_budget: 200000       # Raw-source char budget before CodeWiki switches overflow files to compressed evidence cards
 integration_detection: auto         # "auto" | "off"
 
 # Page type toggles
@@ -436,6 +437,7 @@ site:
 | `generation_mode` | `feature_buckets` | Documentation generation mode |
 | `max_pages` | `0` | Max pages to generate. `0` = no cap |
 | `giant_file_lines` | `2000` | Files above this line count get LLM-based feature clustering |
+| `source_context_budget` | `200000` | Raw-source char budget per page before overflow files are represented as compressed evidence cards |
 | `integration_detection` | `auto` | Detect third-party integrations: `auto` or `off` |
 | `include_endpoint_pages` | `true` | Generate endpoint documentation pages |
 | `include_integration_pages` | `true` | Generate integration documentation pages |

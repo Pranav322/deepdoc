@@ -1,12 +1,12 @@
 # AGENTS.md
-
 Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 
 ## Scope
 - Applies to the repository root only.
 - This is the primary repo-specific instruction file for agents.
-- No Cursor rules were found in `.cursor/rules/` or `.cursorrules`.
-- No Copilot rules were found in `.github/copilot-instructions.md`.
+- Checked for Cursor rules in `.cursor/rules/` and `.cursorrules`: none found.
+- Checked for Copilot rules in `.github/copilot-instructions.md`: none found.
+- If you change architecture, CLI flow, persistence semantics, or generated-site behavior, update this file in the same task.
 
 ## Repo Summary
 - Python package with a Click CLI and a pytest suite.
@@ -14,143 +14,160 @@ Guidance for coding agents working in `/Users/apple/tss/codegen/codewiki`.
 - Python requirement: `>=3.10`.
 - Packaging backend: setuptools via `pyproject.toml`.
 - Console entrypoint: `codewiki = codewiki.cli:main`.
-- Primary implementation path is the v2 bucket-based planner/generator pipeline.
-- Legacy v1 modules still exist; preserve compatibility unless cleanup is the explicit task.
-- Docs site generation targets a generated Fumadocs app under `site/`.
+- Main implementation path is the v2 bucket-based pipeline.
+- Legacy v1 modules still exist for compatibility; do not remove them unless the task explicitly calls for migration or cleanup.
+- Generated docs target `docs/` by default and the generated site lives under `site/`.
 
 ## Important Paths
-- `pyproject.toml` - package metadata and pytest discovery settings.
-- `README.md` - user-facing install, CLI, and workflow documentation.
-- `codewiki/cli.py` - Click commands and CLI UX.
-- `codewiki/config.py` - defaults and YAML config load/save helpers.
-- `codewiki/pipeline_v2.py` - main scan/plan/generate/build orchestration.
-- `codewiki/planner_v2.py` - repo scan and bucket planning logic.
-- `codewiki/generator_v2.py` - page generation and manifest updates.
-- `codewiki/persistence_v2.py` - `.codewiki/` persistence and ledger/state handling.
-- `codewiki/parser/` - parser registry and language-specific parsers.
-- `codewiki/site/fumadocs_builder_v2.py` - generated Fumadocs scaffold/page-tree generation.
-- `tests/` - pytest suite and fixtures.
+- `pyproject.toml`: packaging, dependencies, pytest discovery.
+- `README.md`: user-facing CLI behavior and workflows.
+- `codewiki/cli.py`: commands, serve/deploy flow, Rich UX.
+- `codewiki/config.py`: defaults and `.codewiki.yaml` helpers.
+- `codewiki/pipeline_v2.py`: end-to-end scan/plan/generate/build orchestration.
+- `codewiki/planner_v2.py`: scan model, bucket plan, endpoint ownership helpers.
+- `codewiki/generator_v2.py`: page generation, validation, manifest updates.
+- `codewiki/persistence_v2.py`: `.codewiki/` state, plan, ledger, sync baseline.
+- `codewiki/smart_update_v2.py`: incremental update and replan logic.
+- `codewiki/parser/routes/`: route detection and repo-aware route resolution.
+- `codewiki/chatbot/`: chatbot config, indexing, scaffold generation.
+- `codewiki/site/fumadocs_builder_v2.py`: generated Fumadocs scaffold.
+- `tests/`: pytest suite and fixtures.
+
+## Architecture Notes
+- Prefer extending `_v2` modules over adding parallel flows.
+- Keep `codewiki/parser/api_detector.py` as a compatibility facade.
+- Repo-aware route fixes belong in `codewiki/parser/routes/repo_resolver.py`, not in planner code.
+- Generated outputs should be fixed through generators/builders, not by hand-editing `docs/`, `site/`, or `.codewiki/` state.
+- If freshness semantics change, audit `planner_v2.py`, `generator_v2.py`, `persistence_v2.py`, and `smart_update_v2.py` together.
+- If persisted state changes, maintain save/load parity for both current and legacy compatibility files.
+- If route behavior changes materially, update the engine fingerprint in `codewiki/persistence_v2.py`.
+
+## Generated And Derived Files
+Treat these as generated or persisted outputs unless the task is specifically about their format:
+- `.codewiki/` contents and legacy compatibility files like `.codewiki_plan.json` and `.codewiki_file_map.json`
+- `docs/`, `site/`, `site/public/`, and `site/out/`
+- `build/`, `dist/`, `codewiki.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
+- Test fixture apps under `tests/fixtures/` should only be edited when the scenario requires it
 
 ## Install And Build Commands
-Use `python -m ...` forms when possible so the active interpreter is explicit.
+Prefer `python3` over `python` in this repo.
+
 ```bash
-python -m pip install --upgrade pip
-python -m pip install -e .
-python -m pip install -e . pytest
-python -m pip install build
-python -m build
+python3 -m pip install --upgrade pip
+python3 -m pip install -e .
+python3 -m pip install -e . pytest
+python3 -m pip install -e ".[chatbot]"
+python3 -m pip install build
+python3 -m build
+python3 -m codewiki --help
+python3 -m codewiki.cli --help
 codewiki --help
-python -m codewiki --help
-python -m codewiki.cli --help
 ```
-If tree-sitter compilation is slow locally, the README-supported fallback is:
+
+If a full install is slow because of tree-sitter compilation, the lighter fallback documented in `README.md` is:
+
 ```bash
-python -m pip install click litellm gitpython rich pyyaml jinja2
-python -m pip install -e . --no-deps
-python -m pip install pytest
+python3 -m pip install click litellm gitpython rich pyyaml jinja2
+python3 -m pip install -e . --no-deps
+python3 -m pip install pytest
 ```
-Useful runtime commands after install:
+
+Useful runtime commands:
+
 ```bash
 codewiki init
 codewiki generate
 codewiki update
-codewiki serve --port 3000
-npx next build
+codewiki status
+codewiki serve --port 8001
+codewiki deploy
 ```
-- `python -m build` is the packaging build.
-- `npx next build` only makes sense after generated site files exist.
-- Avoid `codewiki deploy` unless deployment/export is part of the task.
+
+Notes:
+- `codewiki deploy` runs the generated Next/Fumadocs build and export.
+- `npx next build` only makes sense after generated site files exist under `site/`.
+- Avoid destructive generation modes like `generate --clean --yes` unless the task explicitly requires a clean rebuild.
 
 ## Lint, Type Check, And Test Commands
-- There is no repo-configured formatter, linter, or type checker in `pyproject.toml`.
-- There is no checked-in config for `ruff`, `black`, `isort`, `flake8`, `mypy`, `pyright`, `tox`, or `nox`.
-- Do not invent new lint or type-check commands unless the user explicitly asks for them.
-- The practical verification stack here is `compileall`, CLI/import smoke checks, and pytest.
+- No formatter, linter, or type checker is configured in `pyproject.toml`.
+- No checked-in config was found for `ruff`, `black`, `isort`, `flake8`, `mypy`, `pyright`, `tox`, or `nox`.
+- Do not invent repo-standard lint/type commands unless the user explicitly asks for them.
+- Practical verification here is `compileall`, CLI/import smoke checks, and pytest.
+
 ```bash
-python -m compileall codewiki
-python -m pytest
-python -m pytest tests/test_state.py
-python -m pytest tests/test_state.py::test_save_and_load_sync_state_roundtrip -q
-python -m pytest -k baseline -q
-```
-- Run one file: `python -m pytest tests/test_state.py`
-- Run one test node: `python -m pytest tests/test_state.py::test_name -q`
-- Run by keyword: `python -m pytest -k "search_term" -q`
-```bash
-python -m pip install -e . pytest
-python -m compileall codewiki
-python -m pytest
+python3 -m compileall codewiki
+python3 -m pytest
+python3 -m pytest -q
+python3 -m pytest tests/test_state.py -q
+python3 -m pytest tests/test_state.py::test_save_and_load_sync_state_roundtrip -q
+python3 -m pytest tests/test_smart_update.py -q
+python3 -m pytest tests/test_framework_support.py -q
+python3 -m pytest tests/test_chatbot_scaffold.py -q
+python3 -m pytest -k "route or stale or chatbot" -q
 ```
 
-## Architecture Priorities
-- Prefer the v2 flow in `codewiki/pipeline_v2.py`, `codewiki/planner_v2.py`, and related `_v2` modules.
-- Treat `planner.py` and other v1-era modules as compatibility paths, not the default extension point.
-- Keep bucket terminology consistent: `system`, `feature`, `endpoint`, `endpoint_ref`, `integration`, `database`.
-- Keep parser responsibilities layered: registry -> language parser -> parsed symbols/imports -> endpoint detection.
-- Preserve incremental-update and persisted-state behavior when changing planning or generation logic.
-- If you change CLI behavior or documented commands, update `README.md` in the same task.
+Single-test guidance:
+- Run one file: `python3 -m pytest tests/test_state.py -q`
+- Run one test: `python3 -m pytest tests/test_state.py::test_save_and_load_sync_state_roundtrip -q`
+- Filter by expression: `python3 -m pytest -k "baseline and not partial" -q`
+- Use `-q` by default for focused runs.
 
-## Generated And Derived Files
-Treat these as generated outputs or persisted state; do not hand-edit them unless the task is specifically about their format or generation logic.
-- `.codewiki/` contents, sync state, and legacy compatibility outputs like `.codewiki_plan.json` and `.codewiki_file_map.json`.
-- Generated docs/site artifacts such as `docs/`, `site/`, and `site/public/`.
-- Build/cache directories such as `build/`, `dist/`, `codewiki.egg-info/`, `__pycache__/`, `.pytest_cache/`, and `.ruff_cache/`.
-- Test fixture apps under `tests/fixtures/` are intentional fixtures; edit them only when the test scenario requires it.
+## Testing Expectations
+- For route work, run route detector coverage and at least one `scan_repo(...)` regression.
+- For freshness or update work, run stale and smart-update tests, not just small helpers.
+- For chatbot or generated-site config work, run chatbot config/scaffold tests and the Fumadocs builder tests if scaffold output changed.
+- For non-trivial changes, prefer a focused test first, then `python3 -m pytest -q` if feasible.
+- If you could not run verification, say so clearly and name the next command to run.
+
 ## Code Style
+
 ### Imports And Module Layout
-- Start Python modules with a short module docstring.
-- Use `from __future__ import annotations` in normal package modules; small re-export modules may omit it when matching surrounding style.
+- Start package modules with a short module docstring.
+- Use `from __future__ import annotations` in package modules; this is the prevailing pattern.
 - Group imports as standard library, third-party, then local package imports.
-- Prefer one import per line when that is the surrounding pattern.
-- Use relative imports inside the package when that is how neighboring modules are structured.
+- Prefer relative imports inside the package when neighboring modules already do.
+- Match the existing module structure with section-divider comments where they are already used.
 
 ### Formatting And Structure
-- Follow existing PEP 8-ish formatting with 4-space indentation.
-- Match surrounding style; there is no enforced formatter.
-- Preserve useful divider comments in large orchestration modules.
-- Keep comments sparse and practical.
-- Prefer small, targeted edits over broad refactors.
+- Follow existing PEP 8 style with 4-space indentation.
+- Match surrounding formatting; there is no enforced autoformatter.
+- Keep functions and helpers small when it improves clarity, but avoid needless abstraction.
+- Prefer targeted changes over broad rewrites.
+- Keep comments sparse and practical; explain non-obvious intent, not line-by-line mechanics.
 
 ### Types And Data Modeling
-- Add type hints to new public functions, methods, and constructors.
+- Add type hints to new public functions and helpers.
 - Prefer built-in generics like `dict[str, Any]` and `list[str]`.
-- Prefer `Path | None` style unions over `Optional[...]` unless nearby code uses the older form.
-- Use `Literal[...]` for narrow string domains when it genuinely clarifies behavior.
-- Use dataclasses for structured records, matching models like `DocBucket`, `DocPlan`, `RepoScan`, `ParsedFile`, and `Symbol`.
-- Use `Any` at integration boundaries where exact typing would add noise.
+- Use dataclasses for structured records, matching `planner_v2.py`, `generator_v2.py`, `scan_v2.py`, and route models.
+- Use `Any` only at integration boundaries where stricter typing would add noise.
+- Preserve compatibility fields and return shapes used across v1/v2 boundaries.
 
 ### Naming Conventions
-- Functions, variables, and modules: `snake_case`.
-- Classes and dataclasses: `PascalCase`.
-- Constants: `UPPER_CASE`.
-- Follow the repository's versioned naming convention for major flows: `_v2.py` modules and `V2` class names.
+- Use `snake_case` for functions, variables, and test names.
+- Use `PascalCase` for classes and dataclasses.
+- Use `UPPER_SNAKE_CASE` for module-level constants.
+- Keep CLI option names and user-facing terms consistent with existing command vocabulary: generate, update, serve, deploy, bucket, plan, ledger, sync state.
 
 ### Error Handling And UX
-- CLI-facing failures should usually raise `click.ClickException` or present a clear Rich message.
-- Use Rich for user-facing output; the common pattern is a module-level `console = Console()`.
-- Broad `except Exception` blocks already exist around parsing, git, and persistence boundaries; if you catch broadly, return a safe fallback or re-raise with context.
-- Avoid introducing the standard `logging` module for one-off CLI status output unless making a broader logging change.
+- CLI-facing failures should usually raise `click.ClickException` or print a clear Rich message.
+- Rich console output via `Console`, `Panel`, and `Table` is the dominant CLI UX pattern.
+- Broad `except Exception` blocks already exist around parsing, git, LLM, and persistence boundaries; if you catch broadly, return a safe fallback or preserve the last good state.
+- Avoid swallowing actionable errors silently in core flows.
 
-### Paths, Files, And Persistence
-- Prefer `pathlib.Path` for new filesystem code.
-- Use `Path.read_text()` and `Path.write_text()` with `encoding="utf-8"` for straightforward file I/O.
-- When reading arbitrary repo files, prefer `errors="replace"` if malformed text is possible.
-- Create parent directories with `mkdir(parents=True, exist_ok=True)`.
-- Persist repo-relative paths as strings in saved manifests, plans, ledgers, and related state.
-## Testing Conventions
-- The suite uses pytest and is discovered from `tests/` via `pyproject.toml`.
-- Test modules and functions follow `test_*.py` and `test_*` naming.
+### Testing Style
+- Tests use pytest with `test_*.py` discovery under `tests/`.
 - Shared fixtures live in `tests/conftest.py`.
-- Existing tests often use real temporary git repositories when diff semantics matter.
-- Mock LLM boundaries rather than deeply mocking every internal helper around planning or generation.
-## Editing Guidance For Agents
-- Prefer minimal, targeted edits.
-- Match surrounding style before introducing a new pattern.
-- Do not delete legacy compatibility code unless the task clearly calls for it.
-- If you change persisted state formats, audit both save and load paths, including legacy compatibility files.
-- If you change Fumadocs build behavior, review both the builder module and CLI commands that invoke `next`.
-- If you change user-visible CLI flows, examples, or defaults, update `README.md` in the same task.
-## Verification Expectations
-- For non-trivial Python changes, run at least one narrow verification step.
-- Prefer the smallest command that exercises the edited area: `python -m compileall codewiki`, `python -m codewiki.cli --help`, `python -c "import codewiki; print(codewiki.__version__)"`, or a targeted `python -m pytest ...` invocation.
-- If you could not run verification, say so explicitly and provide the exact command to run next.
+- Existing tests often use real temporary git repos plus mocks at API or LLM boundaries; follow that pattern.
+- Prefer focused regression tests near the changed behavior instead of large new fixture trees.
+
+## Safe Workflow For Agents
+- Read the relevant v2 modules before changing behavior; the same concept often spans planner, generator, persistence, and smart update.
+- If a change touches persisted data or freshness semantics, audit plan save/load, ledger save/load, sync state save/load, manifest updates, and stale detection.
+- If a change touches routing, audit the per-framework detector, route registry, repo resolver, `scan_repo(...)`, and endpoint bucket ownership.
+- If a change touches chatbot behavior, audit `codewiki/chatbot/settings.py`, `codewiki/chatbot/scaffold.py`, `codewiki/site/fumadocs_builder_v2.py`, and `codewiki/cli.py`.
+- If you change CLI behavior or documented commands, update `README.md` in the same task.
+- This repo may be in a dirty worktree; inspect carefully and never revert unrelated user changes.
+
+## Verification Defaults
+- Good default checks are `python3 -m compileall codewiki`, `python3 -m codewiki.cli --help`, and targeted `python3 -m pytest ...` runs.
+- Prefer the smallest command that exercises the edited area first.

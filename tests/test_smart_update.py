@@ -156,3 +156,18 @@ def test_full_replan_update_uses_reconcile_cleanup(tmp_repo_with_plan):
 
     assert stats["strategy"] == "full_replan"
     assert run_mock.call_args.kwargs["reconcile"] is True
+
+
+def test_artifact_only_change_is_not_noop(tmp_repo_with_plan):
+    """Artifact-only updates should still trigger incremental chatbot refreshes."""
+    root, plan = tmp_repo_with_plan
+
+    (root / "package.json").write_text('{"name":"demo"}\n')
+    _run_git(root, "add", ".")
+    _run_git(root, "commit", "-m", "add package config")
+
+    updater = _make_updater(root)
+    cs = updater._classify_changes(plan, "HEAD~1")
+
+    assert "package.json" in cs.new_artifact_files
+    assert cs.strategy == "incremental"

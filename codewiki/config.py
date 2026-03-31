@@ -126,6 +126,58 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "repo_url": "",  # shown in top-bar of documentation site
         "favicon": "",
         "logo": "",
+        "colors": {
+            "primary": "",
+            "light": "",
+            "dark": "",
+        },
+    },
+    "chatbot": {
+        "enabled": False,
+        "index_dir": ".codewiki/chatbot",
+        "backend": {
+            "base_url": "http://127.0.0.1:8001",
+            "allowed_origins": [
+                "http://localhost:3000",
+                "http://127.0.0.1:3000",
+            ],
+        },
+        "answer": {
+            "provider": "azure",
+            "model": "azure/gpt-4o-mini",
+            "api_key_env": "CODEWIKI_CHAT_API_KEY",
+            "base_url": "",
+            "api_version": "",
+            "temperature": 0.1,
+            "max_tokens": 1200,
+        },
+        "embeddings": {
+            "provider": "azure",
+            "model": "azure/text-embedding-3-large",
+            "api_key_env": "CODEWIKI_EMBED_API_KEY",
+            "base_url": "",
+            "api_version": "",
+            "batch_size": 24,
+        },
+        "vector_store": {
+            "kind": "faiss",
+        },
+        "retrieval": {
+            "top_k_code": 8,
+            "top_k_artifact": 4,
+            "top_k_docs": 3,
+            "max_prompt_code_chunks": 6,
+            "max_prompt_artifact_chunks": 3,
+            "max_prompt_doc_chunks": 2,
+        },
+        "chunking": {
+            "code_chunk_lines": 120,
+            "code_chunk_overlap": 20,
+            "artifact_chunk_lines": 140,
+            "artifact_chunk_overlap": 20,
+            "max_doc_summary_chunks_per_page": 2,
+            "max_doc_summary_chars": 1800,
+        },
     },
 }
 

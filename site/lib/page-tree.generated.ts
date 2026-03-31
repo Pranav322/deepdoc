@@ -31,34 +31,48 @@
       "children": [
         {
           "type": "page",
-          "name": "User Management",
-          "url": "/user-management"
-        }
-      ]
-    },
-    {
-      "type": "folder",
-      "name": "API Families",
-      "children": [
-        {
-          "type": "page",
-          "name": "Things Resource API",
-          "url": "/things-resource-api"
+          "name": "Chatbot Core Logic",
+          "url": "/chatbot-core"
         },
         {
           "type": "page",
-          "name": "Health & Monitoring Endpoints",
-          "url": "/health-monitoring"
+          "name": "User Management & Profiles",
+          "url": "/user-management"
+        },
+        {
+          "type": "page",
+          "name": "Parser Engine & API Detection",
+          "url": "/parser-engine"
+        },
+        {
+          "type": "page",
+          "name": "Site Builder & Fumadocs Integration",
+          "url": "/site-builder"
+        },
+        {
+          "type": "page",
+          "name": "LLM Client & Providers",
+          "url": "/llm-client"
+        },
+        {
+          "type": "page",
+          "name": "State Sync & Persistence",
+          "url": "/state-sync"
+        },
+        {
+          "type": "page",
+          "name": "Chatbot Indexer",
+          "url": "/chatbot-indexer"
         }
       ]
     },
     {
       "type": "folder",
-      "name": "Data & Models",
+      "name": "Data & Persistence",
       "children": [
         {
           "type": "page",
-          "name": "Database Models & Schema",
+          "name": "Database Models & Persistence",
           "url": "/database-models"
         }
       ]
@@ -70,17 +84,27 @@
         {
           "type": "page",
           "name": "Anthropic Integration",
-          "url": "/anthropic-integration"
+          "url": "/integration-anthropic"
+        },
+        {
+          "type": "page",
+          "name": "CodeWiki Chat Integration",
+          "url": "/integration-codewiki-chat"
+        },
+        {
+          "type": "page",
+          "name": "CodeWiki Embed Integration",
+          "url": "/integration-codewiki-embed"
         },
         {
           "type": "page",
           "name": "Vinculum Warehouse Management Integration",
-          "url": "/vinculum-integration"
+          "url": "/integration-vinculum"
         },
         {
           "type": "page",
-          "name": "Webhooks & Event Handling",
-          "url": "/webhook-integration"
+          "name": "Webhook Integrations",
+          "url": "/integration-webhooks"
         }
       ]
     },
@@ -91,7 +115,7 @@
         {
           "type": "page",
           "name": "Testing & Quality Assurance",
-          "url": "/testing-quality"
+          "url": "/testing-qa"
         },
         {
           "type": "page",
@@ -106,29 +130,8 @@
       "children": [
         {
           "type": "folder",
-          "name": "Reports API",
-          "children": [
-            {
-              "type": "page",
-              "name": "Reports API",
-              "url": "/reports-api"
-            },
-            {
-              "type": "page",
-              "name": "GET /reports/{slug}",
-              "url": "/get-reports-slug"
-            }
-          ]
-        },
-        {
-          "type": "folder",
           "name": "Other",
           "children": [
-            {
-              "type": "page",
-              "name": "ANY /things",
-              "url": "/any-things"
-            },
             {
               "type": "page",
               "name": "GET /health",
@@ -136,8 +139,23 @@
             },
             {
               "type": "page",
+              "name": "POST /query",
+              "url": "/post-query"
+            },
+            {
+              "type": "page",
+              "name": "ANY /things",
+              "url": "/any-things"
+            },
+            {
+              "type": "page",
               "name": "POST /health",
               "url": "/post-health"
+            },
+            {
+              "type": "page",
+              "name": "GET /reports/{slug}",
+              "url": "/get-reports-slug"
             },
             {
               "type": "page",

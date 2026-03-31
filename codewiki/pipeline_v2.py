@@ -63,6 +63,7 @@ from .persistence_v2 import (
     save_file_map,
     save_sync_state,
 )
+from .chatbot.settings import chatbot_enabled
 
 console = Console()
 
@@ -178,6 +179,7 @@ class PipelineV2:
     def run(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
         stats: dict[str, Any] = {}
         previous_ledger = load_generation_ledger(self.repo_root) if reconcile else {}
+        chatbot_sync_ok = True
 
         # ── Phase 1: Scan ──────────────────────────────────────────────
         console.print(
@@ -250,18 +252,45 @@ class PipelineV2:
         # ── Persist state ──────────────────────────────────────────────
         save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
 
+        if chatbot_enabled(self.cfg):
+            try:
+                from .chatbot.indexer import ChatbotIndexer
+
+                chatbot_stats = ChatbotIndexer(self.repo_root, self.cfg).sync_full(
+                    plan=plan,
+                    scan=scan,
+                    output_dir=self.output_dir,
+                    has_openapi=openapi_ready,
+                )
+                stats["chatbot"] = chatbot_stats
+                total = sum(chatbot_stats.get(k, 0) for k in ("code_chunks", "artifact_chunks", "doc_chunks"))
+                console.print(
+                    f"[green]✓[/green] Chatbot index: {total} chunks "
+                    f"({chatbot_stats.get('code_chunks', 0)} code, "
+                    f"{chatbot_stats.get('artifact_chunks', 0)} artifact, "
+                    f"{chatbot_stats.get('doc_chunks', 0)} doc)"
+                )
+                console.print("[green]✓[/green] Backend scaffold: chatbot_backend/")
+            except Exception as e:
+                chatbot_sync_ok = False
+                stats["chatbot_error"] = str(e)
+                console.print(f"[yellow]⚠ Chatbot sync failed: {e}[/yellow]")
+
         # ── Persist commit baseline for future updates ────────────────
         try:
             import git as _git
 
             _repo = _git.Repo(self.repo_root)
             plan_version = "v2_buckets" if hasattr(plan, "buckets") else "v1_legacy"
+            overall_status = generation_summary.status
+            if not chatbot_sync_ok:
+                overall_status = "partial" if generation_summary.succeeded > 0 else "failed"
             save_sync_state(
                 self.repo_root,
                 commit_sha=_repo.head.commit.hexsha,
-                status=generation_summary.status,
+                status=overall_status,
                 generator_version=plan_version,
-                advance_baseline=generation_summary.failed == 0,
+                advance_baseline=generation_summary.failed == 0 and chatbot_sync_ok,
             )
         except Exception:
             pass  # Not a git repo or detached HEAD — skip silently
@@ -280,6 +309,9 @@ class PipelineV2:
                 console.print(
                     f"[dim]Removed {len(deleted)} stale CodeWiki page(s) no longer in the plan.[/dim]"
                 )
+
+        if not chatbot_sync_ok:
+            stats["status"] = "partial" if generation_summary.succeeded > 0 else "failed"
 
         self._print_summary(stats)
         return stats

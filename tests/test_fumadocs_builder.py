@@ -48,7 +48,17 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     build_fumadocs_from_plan(
         repo_root,
         output_dir,
-        {"project_name": "Demo", "site": {"repo_url": "https://example.com/repo"}},
+        {
+            "project_name": "Demo",
+            "site": {
+                "repo_url": "https://example.com/repo",
+                "colors": {
+                    "primary": "#EB3E25",
+                    "light": "#EF624E",
+                    "dark": "#C1331F",
+                },
+            },
+        },
         plan,
         has_openapi=True,
     )
@@ -66,16 +76,29 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     page_tree = (repo_root / "site" / "lib" / "page-tree.generated.ts").read_text(
         encoding="utf-8"
     )
+    global_css = (repo_root / "site" / "app" / "global.css").read_text(encoding="utf-8")
     assert '"url": "/"' in page_tree
     assert '"name": "Core"' in page_tree
     assert '"url": "/auth"' in page_tree
     assert '"name": "API Reference"' in page_tree
     assert '"url": "/api/get-order"' in page_tree
+    assert "--codewiki-brand-primary: #EB3E25;" in global_css
+    assert ".codewiki-chatbot-toggle" in global_css
 
     build_fumadocs_from_plan(
         repo_root,
         output_dir,
-        {"project_name": "Demo", "site": {"repo_url": "https://example.com/repo"}},
+        {
+            "project_name": "Demo",
+            "site": {
+                "repo_url": "https://example.com/repo",
+                "colors": {
+                    "primary": "#EB3E25",
+                    "light": "#EF624E",
+                    "dark": "#C1331F",
+                },
+            },
+        },
         plan,
         has_openapi=True,
     )
@@ -193,6 +216,37 @@ Inline code: `ANY /get-prod-variants/<str:prod_slug>`
     assert "`ANY /get-prod-variants/<str:prod_slug>`" in escaped
 
 
+def test_escape_mdx_text_hazards_escapes_generic_types_in_tables_only() -> None:
+    content = """| Field | Type | Description |
+|-------|------|-------------|
+| products | array<object> | Product list |
+
+Inline code: `array<object>`
+
+```md
+| products | array<object> | Product list |
+```
+"""
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "| products | array&lt;object&gt; | Product list |" in escaped
+    assert "Inline code: `array<object>`" in escaped
+    assert "```md\n| products | array<object> | Product list |\n```" in escaped
+
+
+def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
+    content = """<Callout>Handler: <strong>statsHandler&lt;/strong&gt; in <code>server.js&lt;/code&gt;</Callout>
+
+Inline code: `<code>server.js&lt;/code&gt;`
+"""
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "<Callout>Handler: <strong>statsHandler</strong> in <code>server.js</code></Callout>" in escaped
+    assert "Inline code: `<code>server.js&lt;/code&gt;`" in escaped
+
+
 def test_normalize_code_fence_languages_rewrites_env_aliases() -> None:
     content = """```env
 SECRET_KEY=test
@@ -228,3 +282,16 @@ SiteBuilder --> FumadocsSite["Fumadocs Site"]
 
     assert "SiteBuilder --> FumadocsSite" in fixed
     assert 'FumadocsSite["Fumadocs Site"]' not in fixed
+
+
+def test_fix_mermaid_diagram_quotes_flowchart_labels_with_html_breaks_and_parentheses() -> None:
+    diagram = """flowchart LR
+    A[Application Code<br>(SyncWeightOfOrder.py,<br>fast_queue.py)]
+    B[requests Library]
+    A --> B
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert 'A["Application Code<br>(SyncWeightOfOrder.py,<br>fast_queue.py)"]' in fixed
+    assert "A --> B" in fixed

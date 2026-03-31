@@ -45,6 +45,8 @@ from .persistence_v2 import (
     load_sync_state,
 )
 from .planner_v2 import DocPlan, DocBucket
+from .chatbot.chunker import is_artifact_file_path
+from .chatbot.settings import chatbot_enabled
 
 console = Console()
 
@@ -66,6 +68,9 @@ class ChangeSet:
     changed_files: list[str] = field(default_factory=list)  # modified existing files
     new_files: list[str] = field(default_factory=list)  # added files not in any bucket
     deleted_files: list[str] = field(default_factory=list)  # files that were deleted
+    changed_artifact_files: list[str] = field(default_factory=list)
+    new_artifact_files: list[str] = field(default_factory=list)
+    deleted_artifact_files: list[str] = field(default_factory=list)
     new_integration_signals: list[str] = field(
         default_factory=list
     )  # new integration hints
@@ -82,6 +87,9 @@ class ChangeSet:
             not self.changed_files
             and not self.new_files
             and not self.deleted_files
+            and not self.changed_artifact_files
+            and not self.new_artifact_files
+            and not self.deleted_artifact_files
             and not self.orphaned_bucket_slugs
         ):
             return "noop"
@@ -101,7 +109,14 @@ class ChangeSet:
 
     @property
     def total_changes(self) -> int:
-        return len(self.changed_files) + len(self.new_files) + len(self.deleted_files)
+        return (
+            len(self.changed_files)
+            + len(self.new_files)
+            + len(self.deleted_files)
+            + len(self.changed_artifact_files)
+            + len(self.new_artifact_files)
+            + len(self.deleted_artifact_files)
+        )
 
 
 @dataclass
@@ -352,12 +367,34 @@ class SmartUpdater:
         gen_results = engine.generate_all(force=True)
         engine.update_manifest(gen_results)
         save_all(merged_plan, scan, gen_results, self.repo_root, self.output_dir)
+        chatbot_ok = True
+        if chatbot_enabled(self.cfg):
+            try:
+                from .chatbot.indexer import ChatbotIndexer
+
+                ChatbotIndexer(self.repo_root, self.cfg).sync_incremental(
+                    plan=merged_plan,
+                    scan=scan,
+                    output_dir=self.output_dir,
+                    changed_files=(
+                        change_set.changed_files
+                        + change_set.new_files
+                        + change_set.changed_artifact_files
+                        + change_set.new_artifact_files
+                    ),
+                    deleted_files=change_set.deleted_files + change_set.deleted_artifact_files,
+                    changed_doc_slugs=sorted(stale_slugs),
+                    has_openapi=scan.has_openapi,
+                )
+            except Exception as e:
+                chatbot_ok = False
+                console.print(f"[yellow]⚠ Chatbot sync failed: {e}[/yellow]")
 
         summary = summarize_generation_results(gen_results)
         return UpdateRunResult(
             strategy="targeted_replan",
             pages_updated=summary.succeeded,
-            pages_failed=summary.failed,
+            pages_failed=summary.failed + (0 if chatbot_ok else 1),
             pages_skipped=summary.skipped,
             replanned=True,
         )
@@ -371,40 +408,63 @@ class SmartUpdater:
         from .planner_v2 import run_phase2_scans
 
         stale_slugs = set(change_set.stale_bucket_slugs)
-        if not stale_slugs:
-            console.print("[green]✓ No stale buckets.[/green]")
-            return UpdateRunResult(strategy="incremental")
-
-        stale_buckets = [b for b in plan.buckets if b.slug in stale_slugs]
+        chatbot_stats: dict[str, Any] | None = None
 
         console.print("[dim]Scanning repo...[/dim]")
         scan = bucket_scan_repo(self.repo_root, self.cfg)
+        gen_results = []
+        if stale_slugs:
+            stale_buckets = [b for b in plan.buckets if b.slug in stale_slugs]
+            mini_plan = DocPlan(
+                buckets=stale_buckets,
+                nav_structure=plan.nav_structure,
+                skipped_files=plan.skipped_files,
+            )
 
-        mini_plan = DocPlan(
-            buckets=stale_buckets,
-            nav_structure=plan.nav_structure,
-            skipped_files=plan.skipped_files,
-        )
+            engine = BucketGenerationEngine(
+                repo_root=self.repo_root,
+                cfg=self.cfg,
+                llm=self.llm,
+                scan=scan,
+                plan=plan,
+                output_dir=self.output_dir,
+            )
+            engine.plan = mini_plan
 
-        engine = BucketGenerationEngine(
-            repo_root=self.repo_root,
-            cfg=self.cfg,
-            llm=self.llm,
-            scan=scan,
-            plan=plan,
-            output_dir=self.output_dir,
-        )
-        engine.plan = mini_plan
+            gen_results = engine.generate_all(force=True)
+            engine.update_manifest(gen_results)
+        else:
+            console.print("[green]✓ No stale buckets. Refreshing chatbot indexes only.[/green]")
 
-        gen_results = engine.generate_all(force=True)
-        engine.update_manifest(gen_results)
         save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+        chatbot_ok = True
+        if chatbot_enabled(self.cfg):
+            try:
+                from .chatbot.indexer import ChatbotIndexer
+
+                chatbot_stats = ChatbotIndexer(self.repo_root, self.cfg).sync_incremental(
+                    plan=plan,
+                    scan=scan,
+                    output_dir=self.output_dir,
+                    changed_files=(
+                        change_set.changed_files
+                        + change_set.new_files
+                        + change_set.changed_artifact_files
+                        + change_set.new_artifact_files
+                    ),
+                    deleted_files=change_set.deleted_files + change_set.deleted_artifact_files,
+                    changed_doc_slugs=change_set.stale_bucket_slugs,
+                    has_openapi=scan.has_openapi,
+                )
+            except Exception as e:
+                chatbot_ok = False
+                console.print(f"[yellow]⚠ Chatbot sync failed: {e}[/yellow]")
 
         summary = summarize_generation_results(gen_results)
         return UpdateRunResult(
             strategy="incremental",
             pages_updated=summary.succeeded,
-            pages_failed=summary.failed,
+            pages_failed=summary.failed + (0 if chatbot_ok else 1),
             pages_skipped=summary.skipped,
         )
 
@@ -435,6 +495,9 @@ class SmartUpdater:
         # Modified: files in the plan that changed
         cs.changed_files = sorted(modified_git & plan_files)
         cs.deleted_files = sorted(deleted_git & plan_files)
+        cs.changed_artifact_files = sorted(f for f in modified_git if is_artifact_file_path(f))
+        cs.new_artifact_files = sorted(f for f in added_git if is_artifact_file_path(f))
+        cs.deleted_artifact_files = sorted(f for f in deleted_git if is_artifact_file_path(f))
 
         # New: added files not covered by any bucket
         cs.new_files = sorted(
@@ -779,6 +842,21 @@ class SmartUpdater:
             str(len(cs.deleted_files)),
             ", ".join(cs.deleted_files[:4])
             + ("..." if len(cs.deleted_files) > 4 else ""),
+        )
+        t.add_row(
+            "Artifact files",
+            str(
+                len(cs.changed_artifact_files)
+                + len(cs.new_artifact_files)
+                + len(cs.deleted_artifact_files)
+            ),
+            ", ".join(
+                (cs.changed_artifact_files + cs.new_artifact_files + cs.deleted_artifact_files)[:4]
+            ) + ("..." if (
+                len(cs.changed_artifact_files)
+                + len(cs.new_artifact_files)
+                + len(cs.deleted_artifact_files)
+            ) > 4 else ""),
         )
         t.add_row(
             "Stale buckets",

@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 import click
@@ -63,7 +64,9 @@ def main(ctx: click.Context) -> None:
               help="Model name to store in config. If omitted, CodeWiki picks a provider-specific default.")
 @click.option("--output-dir", default="docs", show_default=True,
               help="Directory where generated Markdown docs will be written.")
-def init(name, description, provider, model, output_dir):
+@click.option("--with-chatbot", is_flag=True,
+              help="Enable code-and-artifact chatbot scaffolding and indexing in generated repos.")
+def init(name, description, provider, model, output_dir, with_chatbot):
     """Initialize CodeWiki in the current repository.
 
     This command creates `.codewiki.yaml` and fills in sensible defaults for the chosen provider.
@@ -104,6 +107,9 @@ def init(name, description, provider, model, output_dir):
     if provider == "ollama":
         cfg["llm"]["base_url"] = "http://localhost:11434"
         cfg["llm"]["api_key_env"] = ""
+    if with_chatbot:
+        from .chatbot.settings import DEFAULT_CHATBOT_CONFIG
+        cfg["chatbot"] = {**DEFAULT_CHATBOT_CONFIG, "enabled": True}
 
     save_config(cfg, cwd / CONFIG_FILE)
 
@@ -115,6 +121,9 @@ def init(name, description, provider, model, output_dir):
             "site/.next/",
             "site/.source/",
             "site/out/",
+            ".codewiki/chatbot/",
+            "chatbot_backend/.venv/",
+            "chatbot_backend/__pycache__/",
             ".codewiki_manifest.json",
         ],
     )
@@ -132,6 +141,10 @@ def init(name, description, provider, model, output_dir):
         next_steps.append("  2. Make sure Ollama is running locally")
         next_steps.append("  3. Generate docs:     [bold]codewiki generate[/bold]")
         next_steps.append("  4. Preview locally:   [bold]codewiki serve[/bold]")
+    if with_chatbot:
+        next_steps.append(
+            "  5. Set chatbot keys:  [bold]export CODEWIKI_CHAT_API_KEY=... CODEWIKI_EMBED_API_KEY=...[/bold]"
+        )
 
     console.print(Panel.fit(
         f"[bold green]✓ CodeWiki initialized![/bold green]\n\n"
@@ -374,6 +387,7 @@ def serve(port):
     Requires Node.js >= 18 to be installed.
     """
     _load_or_exit()
+    cfg = _load_or_exit()
     repo_root = _find_repo_root()
     site_dir = repo_root / "site"
 
@@ -387,6 +401,9 @@ def serve(port):
     console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
     try:
+        backend_proc = None
+        if cfg.get("chatbot", {}).get("enabled"):
+            backend_proc = _start_chatbot_backend(repo_root, cfg)
         if not (site_dir / "node_modules").exists():
             console.print("[dim]Installing site dependencies...[/dim]")
             install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
@@ -403,6 +420,13 @@ def serve(port):
     except FileNotFoundError:
         console.print("[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
         sys.exit(1)
+    finally:
+        if "backend_proc" in locals() and backend_proc is not None:
+            backend_proc.terminate()
+            try:
+                backend_proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                backend_proc.kill()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -437,6 +461,12 @@ def _deploy():
         title="Deploy",
         border_style="green",
     ))
+    cfg = _load_or_exit()
+    if cfg.get("chatbot", {}).get("enabled"):
+        console.print(
+            "[yellow]Chatbot mode is enabled.[/yellow] Deploy [bold]chatbot_backend/[/bold] "
+            "separately on an internal Python host and point [bold]chatbot.backend.base_url[/bold] at it."
+        )
 
     # Offer to run a static build
     console.print("\n[dim]Running static build...[/dim]")
@@ -572,6 +602,8 @@ def _confirm_clean(repo_root: Path, output_dir: Path, yes: bool) -> None:
         targets.append(str(repo_root / ".codewiki"))
     if (repo_root / "site").exists():
         targets.append(str(repo_root / "site"))
+    if (repo_root / "chatbot_backend").exists():
+        targets.append(str(repo_root / "chatbot_backend"))
 
     target_text = ", ".join(targets) if targets else str(output_dir)
     if not click.confirm(
@@ -592,6 +624,9 @@ def _wipe_codewiki_output(repo_root: Path, output_dir: Path) -> None:
     site_dir = repo_root / "site"
     if site_dir.exists():
         shutil.rmtree(site_dir)
+    backend_dir = repo_root / "chatbot_backend"
+    if backend_dir.exists():
+        shutil.rmtree(backend_dir)
 
     for path in (
         repo_root / ".codewiki_plan.json",
@@ -613,6 +648,61 @@ def _add_gitignore_entries(repo_root: Path, entries: list[str]) -> None:
             f.write("\n# CodeWiki\n")
             for e in new_entries:
                 f.write(f"{e}\n")
+
+
+def _start_chatbot_backend(repo_root: Path, cfg: dict) -> subprocess.Popen | None:
+    import threading
+
+    from .chatbot.scaffold import scaffold_chatbot_backend
+    from .chatbot.settings import chatbot_backend_port
+
+    scaffold_chatbot_backend(repo_root, cfg)
+
+    backend_dir = repo_root / "chatbot_backend"
+    if not (backend_dir / "app.py").exists():
+        console.print("[yellow]⚠ Chatbot backend scaffold missing; continuing without chat.[/yellow]")
+        return None
+
+    port = chatbot_backend_port(cfg)
+    console.print(f"[dim]Starting chatbot backend on http://127.0.0.1:{port}[/dim]")
+    proc = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "uvicorn",
+            "chatbot_backend.app:app",
+            "--host",
+            "127.0.0.1",
+            "--port",
+            str(port),
+        ],
+        cwd=str(repo_root),
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    def _stream_stderr(process: subprocess.Popen) -> None:
+        """Continuously read stderr and print to console."""
+        try:
+            for line in iter(process.stderr.readline, ""):
+                if line.strip():
+                    console.print(f"[dim][chatbot] {line.rstrip()}[/dim]")
+                if process.poll() is not None:
+                    break
+        except (ValueError, OSError):
+            pass
+        if process.poll() is not None and process.returncode != 0:
+            console.print("[yellow]⚠ Chatbot backend exited unexpectedly.[/yellow]")
+
+    stderr_thread = threading.Thread(target=_stream_stderr, args=(proc,), daemon=True)
+    stderr_thread.start()
+
+    time.sleep(2)
+    if proc.poll() is not None:
+        console.print("[yellow]⚠ Chatbot backend failed to start; docs will still serve.[/yellow]")
+        return None
+    return proc
 
 
 def _flatten_config(cfg: dict, prefix: str, table) -> None:

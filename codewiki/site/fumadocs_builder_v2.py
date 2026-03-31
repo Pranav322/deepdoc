@@ -40,7 +40,7 @@ def build_fumadocs_from_plan(
     docs_dir_relative = os.path.relpath(output_dir, repo_root / "site").replace("\\", "/")
     page_tree = _build_page_tree_from_plan(plan, output_dir, project_name, has_openapi)
 
-    _ensure_app_scaffold(repo_root, project_name, repo_url, docs_dir_relative)
+    _ensure_app_scaffold(repo_root, project_name, repo_url, docs_dir_relative, cfg)
     _write_page_tree(repo_root, page_tree)
     _write_static_assets(repo_root)
     _cleanup_legacy_artifacts(repo_root)
@@ -51,6 +51,7 @@ def _ensure_app_scaffold(
     project_name: str,
     repo_url: str,
     docs_dir_relative: str,
+    cfg: dict[str, Any],
 ) -> None:
     """Write or update the CodeWiki-managed Fumadocs app scaffold."""
     site_dir = repo_root / "site"
@@ -65,7 +66,7 @@ def _ensure_app_scaffold(
         site_dir / "source.config.mjs": _source_config_mjs(docs_dir_relative),
         site_dir / "mdx-components.tsx": _mdx_components_tsx(),
         site_dir / "app" / "layout.tsx": _app_layout_tsx(project_name),
-        site_dir / "app" / "global.css": _global_css(),
+        site_dir / "app" / "global.css": _global_css(cfg),
         site_dir / "app" / "search" / "route.ts": _search_route_ts(),
         site_dir / "app" / "[[...slug]]" / "layout.tsx": _docs_layout_tsx(),
         site_dir / "app" / "[[...slug]]" / "page.tsx": _docs_page_tsx(),
@@ -73,7 +74,10 @@ def _ensure_app_scaffold(
         site_dir / "app" / "api" / "[[...slug]]" / "page.tsx": _api_page_tsx(),
         site_dir / "components" / "api-page.tsx": _api_page_component_tsx(),
         site_dir / "components" / "api-page.client.tsx": _api_page_client_tsx(),
+        site_dir / "components" / "chatbot-panel.tsx": _chatbot_panel_tsx(),
+        site_dir / "components" / "chatbot-toggle.tsx": _chatbot_toggle_tsx(),
         site_dir / "components" / "mdx" / "mermaid.tsx": _mermaid_component_tsx(),
+        site_dir / "lib" / "chatbot-config.ts": _chatbot_config_ts(cfg),
         site_dir / "lib" / "source.ts": _source_ts(),
         site_dir / "lib" / "layout-options.ts": _layout_options_ts(project_name, repo_url),
         site_dir / "lib" / "openapi.ts": _openapi_ts(),
@@ -415,6 +419,7 @@ def _package_json(project_name: str) -> str:
                 "next-themes": "^0.4.6",
                 "react": "^19.0.0",
                 "react-dom": "^19.0.0",
+                "react-markdown": "^10.1.0",
                 "tailwindcss": "^4.1.3",
             },
             "devDependencies": {
@@ -574,6 +579,7 @@ def _app_layout_tsx(project_name: str) -> str:
     return dedent(
         f"""\
         import './global.css';
+        import {{ ChatbotToggle }} from '@/components/chatbot-toggle';
         import {{ RootProvider }} from 'fumadocs-ui/provider/next';
         import type {{ Metadata }} from 'next';
         import type {{ ReactNode }} from 'react';
@@ -603,6 +609,7 @@ def _app_layout_tsx(project_name: str) -> str:
                   }}}}
                 >
                   {{children}}
+                  <ChatbotToggle />
                 </RootProvider>
               </body>
             </html>
@@ -612,8 +619,14 @@ def _app_layout_tsx(project_name: str) -> str:
     )
 
 
-def _global_css() -> str:
-    return dedent(
+def _global_css(cfg: dict[str, Any]) -> str:
+    site_cfg = cfg.get("site", {})
+    site_colors = site_cfg.get("colors", {}) if isinstance(site_cfg, dict) else {}
+    primary = site_colors.get("primary") or "#EB3E25"
+    light = site_colors.get("light") or "#EF624E"
+    dark = site_colors.get("dark") or "#C1331F"
+
+    css = dedent(
         """\
         @import 'tailwindcss';
         @import 'fumadocs-ui/css/neutral.css';
@@ -621,13 +634,250 @@ def _global_css() -> str:
         @import 'fumadocs-openapi/css/preset.css';
 
         :root {
-          --codewiki-accent: oklch(0.62 0.11 183);
+          --codewiki-accent: __PRIMARY__;
+          --codewiki-brand-primary: __PRIMARY__;
+          --codewiki-brand-light: __LIGHT__;
+          --codewiki-brand-dark: __DARK__;
+          --color-fd-primary: var(--codewiki-brand-primary);
+          --color-fd-primary-foreground: #fff7f4;
+          --color-fd-ring: color-mix(in srgb, var(--codewiki-brand-primary) 40%, white 60%);
         }
 
         body {
           font-feature-settings: 'liga' 1, 'calt' 1;
+          background:
+            radial-gradient(circle at top right, color-mix(in srgb, var(--codewiki-brand-light) 14%, transparent) 0%, transparent 30%),
+            radial-gradient(circle at top left, color-mix(in srgb, var(--codewiki-brand-primary) 10%, transparent) 0%, transparent 26%);
+        }
+
+        .codewiki-chatbot-shell {
+          position: fixed;
+          right: clamp(0.9rem, 2vw, 1.5rem);
+          bottom: clamp(0.9rem, 2vw, 1.5rem);
+          z-index: 60;
+          display: flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 0.85rem;
+          max-width: min(34rem, calc(100vw - 1.5rem));
+        }
+
+        .codewiki-chatbot-toggle {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.75rem;
+          border: 1px solid color-mix(in srgb, var(--codewiki-brand-dark) 24%, white 76%);
+          border-radius: 999px;
+          padding: 0.75rem 1rem 0.75rem 0.8rem;
+          color: white;
+          background:
+            linear-gradient(135deg, var(--codewiki-brand-light), var(--codewiki-brand-primary) 58%, var(--codewiki-brand-dark));
+          box-shadow:
+            0 20px 45px rgba(193, 51, 31, 0.24),
+            0 8px 18px rgba(235, 62, 37, 0.24);
+          transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+        }
+
+        .codewiki-chatbot-toggle:hover {
+          transform: translateY(-2px) scale(1.01);
+          box-shadow:
+            0 24px 54px rgba(193, 51, 31, 0.3),
+            0 10px 22px rgba(235, 62, 37, 0.26);
+          filter: saturate(1.06);
+        }
+
+        .codewiki-chatbot-toggle:focus-visible {
+          outline: 2px solid color-mix(in srgb, var(--codewiki-brand-light) 50%, white 50%);
+          outline-offset: 4px;
+        }
+
+        .codewiki-chatbot-toggle__icon {
+          position: relative;
+          display: inline-flex;
+          height: 2.35rem;
+          width: 2.35rem;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.16);
+          backdrop-filter: blur(10px);
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+        }
+
+        .codewiki-chatbot-toggle__icon::before {
+          content: '';
+          position: absolute;
+          inset: 0.5rem;
+          border-radius: 0.7rem 0.7rem 0.7rem 0.2rem;
+          background: white;
+          opacity: 0.92;
+        }
+
+        .codewiki-chatbot-toggle__icon::after {
+          content: '';
+          position: absolute;
+          right: 0.42rem;
+          bottom: 0.42rem;
+          height: 0.42rem;
+          width: 0.42rem;
+          border-radius: 999px;
+          background: #ffe0db;
+          box-shadow: 0 0 0 0.18rem rgba(255, 255, 255, 0.24);
+        }
+
+        .codewiki-chatbot-toggle__label {
+          display: flex;
+          flex-direction: column;
+          align-items: flex-start;
+          line-height: 1.05;
+          text-align: left;
+        }
+
+        .codewiki-chatbot-toggle__label strong {
+          font-size: 0.92rem;
+          font-weight: 700;
+          letter-spacing: -0.01em;
+        }
+
+        .codewiki-chatbot-toggle__label span {
+          margin-top: 0.14rem;
+          font-size: 0.72rem;
+          color: rgba(255, 244, 241, 0.88);
+        }
+
+        .codewiki-chatbot-panel {
+          width: min(34rem, calc(100vw - 1.5rem));
+          max-height: min(82vh, 58rem);
+          overflow: hidden;
+          border: 1px solid color-mix(in srgb, var(--codewiki-brand-light) 16%, var(--color-fd-border) 84%);
+          border-radius: 1.5rem;
+          background:
+            linear-gradient(180deg, color-mix(in srgb, white 90%, var(--codewiki-brand-light) 10%), white 24%),
+            var(--color-fd-background);
+          box-shadow:
+            0 36px 80px rgba(131, 39, 25, 0.18),
+            0 12px 28px rgba(235, 62, 37, 0.12);
+          backdrop-filter: blur(18px);
+        }
+
+        .codewiki-chatbot-panel__header {
+          background:
+            linear-gradient(135deg, color-mix(in srgb, var(--codewiki-brand-light) 18%, white 82%), color-mix(in srgb, var(--codewiki-brand-primary) 10%, white 90%));
+        }
+
+        .codewiki-chatbot-panel__input,
+        .codewiki-chatbot-panel__button {
+          border: 1px solid color-mix(in srgb, var(--codewiki-brand-light) 14%, var(--color-fd-border) 86%);
+          background: color-mix(in srgb, white 90%, var(--codewiki-brand-light) 10%);
+        }
+
+        .codewiki-chatbot-panel__button {
+          color: var(--codewiki-brand-dark);
+          transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
+        }
+
+        .codewiki-chatbot-panel__button:hover:not(:disabled) {
+          transform: translateY(-1px);
+          border-color: color-mix(in srgb, var(--codewiki-brand-primary) 32%, white 68%);
+          background: color-mix(in srgb, white 84%, var(--codewiki-brand-light) 16%);
+        }
+
+        .codewiki-chatbot-panel__button:disabled {
+          opacity: 0.7;
+          cursor: wait;
+        }
+
+        .codewiki-chatbot-panel__section-title {
+          color: var(--codewiki-brand-dark);
+        }
+
+        .codewiki-chatbot-citation-list li {
+          border: 1px solid color-mix(in srgb, var(--codewiki-brand-light) 14%, var(--color-fd-border) 86%);
+          border-radius: 0.95rem;
+          padding: 0.65rem 0.8rem;
+          background: color-mix(in srgb, white 92%, var(--codewiki-brand-light) 8%);
+        }
+
+        .codewiki-chatbot-citation-list a,
+        .codewiki-chatbot-answer a,
+        main a {
+          color: var(--codewiki-brand-dark);
+          text-decoration-color: color-mix(in srgb, var(--codewiki-brand-primary) 36%, currentColor 64%);
+        }
+
+        .codewiki-chatbot-citation-list a:hover,
+        .codewiki-chatbot-answer a:hover,
+        main a:hover {
+          color: var(--codewiki-brand-primary);
+        }
+
+        ::selection {
+          background: color-mix(in srgb, var(--codewiki-brand-light) 28%, white 72%);
+          color: #2f120d;
+        }
+
+        .codewiki-chatbot-answer {
+          overflow-wrap: anywhere;
+        }
+
+        .codewiki-chatbot-answer pre {
+          overflow-x: auto;
+          border: 1px solid var(--color-fd-border);
+          border-radius: 0.75rem;
+          padding: 0.875rem;
+          background: color-mix(in srgb, var(--color-fd-card) 92%, black 8%);
+        }
+
+        .codewiki-chatbot-answer code {
+          font-size: 0.875em;
+        }
+
+        .codewiki-chatbot-answer p,
+        .codewiki-chatbot-answer ul,
+        .codewiki-chatbot-answer ol,
+        .codewiki-chatbot-answer pre,
+        .codewiki-chatbot-answer blockquote,
+        .codewiki-chatbot-answer h1,
+        .codewiki-chatbot-answer h2,
+        .codewiki-chatbot-answer h3,
+        .codewiki-chatbot-answer h4 {
+          margin-top: 0.75rem;
+          margin-bottom: 0.75rem;
+        }
+
+        .codewiki-chatbot-answer ul,
+        .codewiki-chatbot-answer ol {
+          padding-left: 1.25rem;
+        }
+
+        .codewiki-chatbot-answer blockquote {
+          border-left: 3px solid var(--color-fd-border);
+          padding-left: 0.875rem;
+          color: var(--color-fd-muted-foreground);
+        }
+
+        @media (max-width: 640px) {
+          .codewiki-chatbot-shell {
+            right: 0.75rem;
+            bottom: 0.75rem;
+            left: 0.75rem;
+            align-items: stretch;
+          }
+
+          .codewiki-chatbot-panel {
+            width: 100%;
+          }
+
+          .codewiki-chatbot-toggle {
+            align-self: flex-end;
+          }
         }
         """
+    )
+    return (
+        css.replace("__PRIMARY__", primary)
+        .replace("__LIGHT__", light)
+        .replace("__DARK__", dark)
     )
 
 
@@ -892,5 +1142,193 @@ def _openapi_ts() -> str:
               plugins: [openapiPlugin()],
             })
           : null;
+        """
+    )
+
+
+def _chatbot_config_ts(cfg: dict[str, Any]) -> str:
+    chatbot_cfg = cfg.get("chatbot", {})
+    backend = chatbot_cfg.get("backend", {})
+    return dedent(
+        f"""\
+        export const chatbotConfig = {{
+          enabled: {str(bool(chatbot_cfg.get("enabled", False))).lower()},
+          apiBaseUrl: {backend.get("base_url", "http://127.0.0.1:8001")!r},
+        }};
+        """
+    )
+
+
+def _chatbot_toggle_tsx() -> str:
+    return dedent(
+        """\
+        'use client';
+
+        import { useState } from 'react';
+        import { chatbotConfig } from '@/lib/chatbot-config';
+        import { ChatbotPanel } from '@/components/chatbot-panel';
+
+        export function ChatbotToggle() {
+          const [open, setOpen] = useState(false);
+
+          if (!chatbotConfig.enabled) return null;
+
+          return (
+            <div className="codewiki-chatbot-shell">
+              {open ? <ChatbotPanel onClose={() => setOpen(false)} /> : null}
+              <button
+                aria-expanded={open}
+                className="codewiki-chatbot-toggle"
+                onClick={() => setOpen((value) => !value)}
+                type="button"
+              >
+                <span aria-hidden="true" className="codewiki-chatbot-toggle__icon" />
+                <span className="codewiki-chatbot-toggle__label">
+                  <strong>Ask the codebase</strong>
+                  <span>Grounded answers with code citations</span>
+                </span>
+              </button>
+            </div>
+          );
+        }
+        """
+    )
+
+
+def _chatbot_panel_tsx() -> str:
+    return dedent(
+        """\
+        'use client';
+
+        import { useState } from 'react';
+        import ReactMarkdown from 'react-markdown';
+        import { chatbotConfig } from '@/lib/chatbot-config';
+
+        type ChatResponse = {
+          answer: string;
+          code_citations: Array<{
+            file_path: string;
+            start_line: number;
+            end_line: number;
+            symbol_names?: string[];
+          }>;
+          artifact_citations: Array<{
+            file_path: string;
+            start_line: number;
+            end_line: number;
+            artifact_type?: string;
+          }>;
+          doc_links: Array<{
+            title: string;
+            url: string;
+            doc_path: string;
+          }>;
+          used_chunks: number;
+        };
+
+        export function ChatbotPanel({ onClose }: { onClose: () => void }) {
+          const [question, setQuestion] = useState('');
+          const [loading, setLoading] = useState(false);
+          const [error, setError] = useState('');
+          const [response, setResponse] = useState<ChatResponse | null>(null);
+
+          async function ask() {
+            if (!question.trim()) return;
+            setLoading(true);
+            setError('');
+            try {
+              const res = await fetch(`${chatbotConfig.apiBaseUrl}/query`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ question }),
+              });
+              if (!res.ok) {
+                throw new Error(`Request failed with ${res.status}`);
+              }
+              const data = (await res.json()) as ChatResponse;
+              setResponse(data);
+            } catch (err) {
+              setError(err instanceof Error ? err.message : 'Chatbot unavailable');
+            } finally {
+              setLoading(false);
+            }
+          }
+
+          return (
+            <div className="codewiki-chatbot-panel mb-1 flex flex-col">
+              <div className="codewiki-chatbot-panel__header flex items-center justify-between border-b border-fd-border px-4 py-3">
+                <h2 className="text-sm font-semibold">Ask the codebase</h2>
+                <button className="text-sm text-fd-muted-foreground" onClick={onClose} type="button">
+                  Close
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto px-4 py-3">
+                <textarea
+                  className="codewiki-chatbot-panel__input mb-3 min-h-28 w-full rounded-xl px-3 py-2 text-sm"
+                  onChange={(event) => setQuestion(event.target.value)}
+                  placeholder="Where is auth handled? How is deployment configured?"
+                  value={question}
+                />
+                <button
+                  className="codewiki-chatbot-panel__button rounded-xl px-3 py-2 text-sm font-medium"
+                  disabled={loading}
+                  onClick={ask}
+                  type="button"
+                >
+                  {loading ? 'Thinking...' : 'Ask'}
+                </button>
+                {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+                {response ? (
+                  <div className="mt-4 space-y-4 text-sm">
+                    <div>
+                      <h3 className="codewiki-chatbot-panel__section-title mb-1 font-semibold">Answer</h3>
+                      <div className="codewiki-chatbot-answer prose prose-sm max-w-none dark:prose-invert">
+                        <ReactMarkdown>{response.answer}</ReactMarkdown>
+                      </div>
+                    </div>
+                    {response.code_citations.length ? (
+                      <div>
+                        <h3 className="codewiki-chatbot-panel__section-title mb-1 font-semibold">Code citations</h3>
+                        <ul className="codewiki-chatbot-citation-list space-y-2">
+                          {response.code_citations.map((citation) => (
+                            <li key={`${citation.file_path}-${citation.start_line}`}>
+                              {citation.file_path}:{citation.start_line}-{citation.end_line}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {response.artifact_citations.length ? (
+                      <div>
+                        <h3 className="codewiki-chatbot-panel__section-title mb-1 font-semibold">Artifact citations</h3>
+                        <ul className="codewiki-chatbot-citation-list space-y-2">
+                          {response.artifact_citations.map((citation) => (
+                            <li key={`${citation.file_path}-${citation.start_line}`}>
+                              {citation.file_path}:{citation.start_line}-{citation.end_line}
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                    {response.doc_links.length ? (
+                      <div>
+                        <h3 className="codewiki-chatbot-panel__section-title mb-1 font-semibold">Read next</h3>
+                        <ul className="codewiki-chatbot-citation-list space-y-2">
+                          {response.doc_links.map((link) => (
+                            <li key={link.url}>
+                              <a className="underline" href={link.url}>
+                                {link.title}
+                              </a>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            </div>
+          );
+        }
         """
     )

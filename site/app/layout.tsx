@@ -1,4 +1,5 @@
 import './global.css';
+import { ChatbotToggle } from '@/components/chatbot-toggle';
 import { RootProvider } from 'fumadocs-ui/provider/next';
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
@@ -28,6 +29,7 @@ export default function RootLayout({
           }}
         >
           {children}
+          <ChatbotToggle />
         </RootProvider>
       </body>
     </html>

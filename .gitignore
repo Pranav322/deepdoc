@@ -22,3 +22,8 @@ __pycache__/
 /venv/
 /env/
 /.venv*
+
+# CodeWiki
+.codewiki/chatbot/
+chatbot_backend/.venv/
+chatbot_backend/__pycache__/

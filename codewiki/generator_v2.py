@@ -69,9 +69,9 @@ class EvidenceAssembler:
     """
 
     # Total char budget for source context per page
-    SOURCE_BUDGET = 80_000
+    SOURCE_BUDGET = 200_000
     # How many chars to reserve for non-source evidence
-    NON_SOURCE_BUDGET = 15_000
+    NON_SOURCE_BUDGET = 40_000
 
     def __init__(
         self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any]
@@ -196,9 +196,9 @@ class EvidenceAssembler:
                 header += f"**Imports**: {', '.join(parsed.imports[:15])}\n\n"
 
             # Choose tier
-            if line_count <= 200:
+            if line_count <= 300:
                 code = content
-            elif line_count <= 500:
+            elif line_count <= 800:
                 code = self._extract_signatures(parsed, content)
             else:
                 # Tier 3 — if giant file with clusters, focus on relevant symbols
@@ -225,11 +225,11 @@ class EvidenceAssembler:
         return "\n".join(parts), included, omitted
 
     def _extract_signatures(self, parsed: ParsedFile | None, content: str) -> str:
-        """Tier 2: signatures + up to 10 body lines each."""
+        """Tier 2: signatures + up to 20 body lines each."""
         if not parsed or not parsed.symbols:
             lines = content.splitlines()
-            return "\n".join(lines[:100]) + (
-                "\n... [truncated]" if len(lines) > 100 else ""
+            return "\n".join(lines[:150]) + (
+                "\n... [truncated]" if len(lines) > 150 else ""
             )
 
         content_lines = content.splitlines()
@@ -238,7 +238,7 @@ class EvidenceAssembler:
 
         for symbol in parsed.symbols:
             start = max(0, symbol.start_line - 1)
-            end = min(start + 12, len(content_lines))
+            end = min(start + 20, len(content_lines))
             for i in range(start, end):
                 if i not in seen:
                     result.append(content_lines[i])
@@ -268,15 +268,15 @@ class EvidenceAssembler:
         if owned_symbols:
             priority = [s for s in parsed.symbols if s.name in owned_symbols]
             others = [s for s in parsed.symbols if s.name not in owned_symbols]
-            # Show priority symbols first, then fill with others up to 25
-            symbols_to_show = priority + others[: max(0, 25 - len(priority))]
+            # Show priority symbols first, then fill with others up to 40
+            symbols_to_show = priority + others[: max(0, 40 - len(priority))]
         else:
-            symbols_to_show = parsed.symbols[:25]
+            symbols_to_show = parsed.symbols[:40]
 
         sig_lines: list[str] = ["\n\n# [Key Symbol Signatures]"]
         for symbol in symbols_to_show:
             start = max(0, symbol.start_line - 1)
-            end = min(start + 5, len(lines))
+            end = min(start + 10, len(lines))
             marker = " [OWNED]" if symbol.name in owned_symbols else ""
             sig_lines.append(f"\n# {symbol.kind}: {symbol.name}{marker}")
             sig_lines.extend(lines[start:end])
@@ -971,6 +971,11 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 line,
             )
             line = re.sub(
+                r'\b([A-Za-z][\w-]*)\[([^\]"]*(?:<br\s*/?>|\(|\))[^\]"]*)\]',
+                lambda m: f'{m.group(1)}["{m.group(2)}"]',
+                line,
+            )
+            line = re.sub(
                 r'(-->|---|-.->|==>)\s*"([^"]+)"',
                 lambda m: (
                     f'{m.group(1)} '
@@ -1113,7 +1118,10 @@ def escape_mdx_route_params(content: str) -> str:
 def escape_mdx_text_hazards(content: str) -> str:
     """Escape plain-text MDX hazards like bare `<5s` outside fenced code.
 
-    A raw `<` followed by a digit is parsed as invalid JSX in MDX prose.
+    A raw `<` followed by a digit or generic type syntax like `array<object>`
+    is parsed as invalid JSX in MDX prose and markdown tables.
+    Also repairs malformed inline HTML where the opening tag is real but the
+    closing tag was escaped by the model, e.g. `<code>path&lt;/code&gt;`.
     """
 
     lines: list[str] = []
@@ -1130,7 +1138,17 @@ def escape_mdx_text_hazards(content: str) -> str:
 
         parts = re.split(r"(`[^`]*`)", line)
         def escape_segment(part: str) -> str:
+            part = re.sub(
+                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)&gt;",
+                lambda match: f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>",
+                part,
+            )
             part = re.sub(r"<(?=\d)", "&lt;", part)
+            part = re.sub(
+                r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, ./-]*)>",
+                lambda match: f"{match.group(1)}&lt;{match.group(2)}&gt;",
+                part,
+            )
             part = re.sub(
                 r"<([A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*)>",
                 lambda match: f"&lt;{match.group(1)}&gt;",
@@ -1368,6 +1386,14 @@ class BucketGenerationEngine:
         try:
             # Step 1: Assemble evidence
             evidence = self.assembler.assemble(bucket)
+
+            if evidence.files_omitted > 0:
+                total_files = evidence.files_included + evidence.files_omitted
+                console.print(
+                    f"[yellow]⚠ bucket \"{bucket.title}\": "
+                    f"{evidence.files_omitted} of {total_files} source files "
+                    f"omitted (context budget reached)[/yellow]"
+                )
 
             # Step 2: Build OpenAPI context for endpoint pages
             openapi_context = ""

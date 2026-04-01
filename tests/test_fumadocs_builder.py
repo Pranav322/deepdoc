@@ -7,6 +7,7 @@ from deepdoc.generator_v2 import (
     _fix_mermaid_diagram,
     escape_mdx_route_params,
     escape_mdx_text_hazards,
+    normalize_html_code_blocks,
     normalize_mdx_steps,
     normalize_code_fence_languages,
 )
@@ -85,7 +86,8 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert '"name": "API Reference"' in page_tree
     assert '"url": "/api/get-order"' in page_tree
     assert "--deepdoc-brand-primary: #EB3E25;" in global_css
-    assert ".deepdoc-chatbot-toggle" in global_css
+    assert ".deepdoc-chatbot-dock" in global_css
+    assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists()
 
     build_fumadocs_from_plan(
         repo_root,
@@ -275,6 +277,14 @@ def test_escape_mdx_text_hazards_escapes_nested_generic_types() -> None:
     assert "Promise&lt;Array&lt;Row&gt;&gt;" in escaped
 
 
+def test_escape_mdx_text_hazards_escapes_literal_brace_ellipsis() -> None:
+    content = "| responseData | Error | {...} |"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "&#123;...&#125;" in escaped
+
+
 def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
     content = """<Callout>Handler: <strong>statsHandler&lt;/strong&gt; in <code>server.js&lt;/code&gt;</Callout>
 
@@ -301,6 +311,16 @@ DEBUG=False
 
     assert "```bash\nSECRET_KEY=test" in normalized
     assert "```bash\nDEBUG=False" in normalized
+
+
+def test_normalize_html_code_blocks_converts_pre_code_to_fences() -> None:
+    content = """<pre><code>git clone &lt;repo-url&gt;
+cd app
+</code></pre>"""
+
+    normalized = normalize_html_code_blocks(content)
+
+    assert normalized == "```bash\ngit clone &lt;repo-url&gt;\ncd app\n```"
 
 
 def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> None:

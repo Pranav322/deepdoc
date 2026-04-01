@@ -68,6 +68,7 @@ def _ensure_app_scaffold(
         site_dir / "mdx-components.tsx": _mdx_components_tsx(),
         site_dir / "app" / "layout.tsx": _app_layout_tsx(project_name),
         site_dir / "app" / "global.css": _global_css(cfg),
+        site_dir / "app" / "ask" / "page.tsx": _chatbot_ask_page_tsx(),
         site_dir / "app" / "search" / "route.ts": _search_route_ts(),
         site_dir / "app" / "[[...slug]]" / "layout.tsx": _docs_layout_tsx(),
         site_dir / "app" / "[[...slug]]" / "page.tsx": _docs_page_tsx(),
@@ -632,157 +633,334 @@ def _global_css(cfg: dict[str, Any]) -> str:
 
         body {
           font-feature-settings: 'liga' 1, 'calt' 1;
-          background:
-            radial-gradient(circle at top right, color-mix(in srgb, var(--deepdoc-brand-light) 14%, transparent) 0%, transparent 30%),
-            radial-gradient(circle at top left, color-mix(in srgb, var(--deepdoc-brand-primary) 10%, transparent) 0%, transparent 26%);
+          background: var(--color-fd-background);
+          padding-bottom: clamp(7.5rem, 18vh, 10rem);
         }
 
         .deepdoc-chatbot-shell {
+          pointer-events: none;
           position: fixed;
-          right: clamp(0.9rem, 2vw, 1.5rem);
+          left: 50%;
           bottom: clamp(0.9rem, 2vw, 1.5rem);
           z-index: 60;
+          width: min(56rem, calc(100vw - 2rem));
+          transform: translateX(-50%);
+        }
+
+        .deepdoc-chatbot-dock {
+          pointer-events: auto;
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 8%, var(--color-fd-border) 92%);
+          border-radius: 1.4rem;
+          padding: 0.9rem;
+          background: color-mix(in srgb, white 98.5%, var(--deepdoc-brand-light) 1.5%);
+          box-shadow:
+            0 10px 28px rgba(131, 39, 25, 0.05),
+            0 4px 10px rgba(235, 62, 37, 0.025);
+          backdrop-filter: blur(8px);
+        }
+
+        .deepdoc-chatbot-dock__meta {
           display: flex;
-          flex-direction: column;
-          align-items: flex-end;
-          gap: 0.85rem;
-          max-width: min(34rem, calc(100vw - 1.5rem));
+          align-items: center;
+          justify-content: space-between;
+          gap: 1rem;
+          margin-bottom: 0.75rem;
         }
 
-        .deepdoc-chatbot-toggle {
+        .deepdoc-chatbot-dock__eyebrow {
           display: inline-flex;
           align-items: center;
-          gap: 0.75rem;
-          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-dark) 24%, white 76%);
-          border-radius: 999px;
-          padding: 0.75rem 1rem 0.75rem 0.8rem;
-          color: white;
-          background:
-            linear-gradient(135deg, var(--deepdoc-brand-light), var(--deepdoc-brand-primary) 58%, var(--deepdoc-brand-dark));
-          box-shadow:
-            0 20px 45px rgba(193, 51, 31, 0.24),
-            0 8px 18px rgba(235, 62, 37, 0.24);
-          transition: transform 180ms ease, box-shadow 180ms ease, filter 180ms ease;
+          gap: 0.5rem;
+          font-size: 0.76rem;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: color-mix(in srgb, var(--deepdoc-brand-dark) 70%, var(--color-fd-muted-foreground) 30%);
         }
 
-        .deepdoc-chatbot-toggle:hover {
-          transform: translateY(-2px) scale(1.01);
-          box-shadow:
-            0 24px 54px rgba(193, 51, 31, 0.3),
-            0 10px 22px rgba(235, 62, 37, 0.26);
-          filter: saturate(1.06);
-        }
-
-        .deepdoc-chatbot-toggle:focus-visible {
-          outline: 2px solid color-mix(in srgb, var(--deepdoc-brand-light) 50%, white 50%);
-          outline-offset: 4px;
-        }
-
-        .deepdoc-chatbot-toggle__icon {
-          position: relative;
-          display: inline-flex;
-          height: 2.35rem;
-          width: 2.35rem;
-          align-items: center;
-          justify-content: center;
-          border-radius: 999px;
-          background: rgba(255, 255, 255, 0.16);
-          backdrop-filter: blur(10px);
-          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
-        }
-
-        .deepdoc-chatbot-toggle__icon::before {
+        .deepdoc-chatbot-dock__eyebrow::before {
           content: '';
-          position: absolute;
-          inset: 0.5rem;
-          border-radius: 0.7rem 0.7rem 0.7rem 0.2rem;
+          height: 0.45rem;
+          width: 0.45rem;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--deepdoc-brand-primary) 72%, white 28%);
+          box-shadow: 0 0 0 0.18rem color-mix(in srgb, var(--deepdoc-brand-light) 8%, white 92%);
+        }
+
+        .deepdoc-chatbot-dock__hint {
+          max-width: 22rem;
+          font-size: 0.84rem;
+          color: color-mix(in srgb, var(--color-fd-muted-foreground) 82%, transparent 18%);
+          text-align: right;
+        }
+
+        .deepdoc-chatbot-dock__row {
+          display: grid;
+          grid-template-columns: minmax(0, 1fr) auto;
+          gap: 0.8rem;
+          align-items: end;
+        }
+
+        .deepdoc-chatbot-dock__input,
+        .deepdoc-chatbot-panel__input,
+        .deepdoc-chatbot-panel__button {
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 8%, var(--color-fd-border) 92%);
+        }
+
+        .deepdoc-chatbot-dock__input,
+        .deepdoc-chatbot-panel__input {
+          min-height: 5rem;
+          resize: vertical;
+          border-radius: 1rem;
           background: white;
-          opacity: 0.92;
+          padding: 0.95rem 1rem;
+          color: var(--color-fd-foreground);
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
         }
 
-        .deepdoc-chatbot-toggle__icon::after {
-          content: '';
-          position: absolute;
-          right: 0.42rem;
-          bottom: 0.42rem;
-          height: 0.42rem;
-          width: 0.42rem;
+        .deepdoc-chatbot-dock__input:focus,
+        .deepdoc-chatbot-panel__input:focus {
+          outline: 2px solid color-mix(in srgb, var(--deepdoc-brand-light) 24%, white 76%);
+          outline-offset: 2px;
+        }
+
+        .deepdoc-chatbot-dock__submit,
+        .deepdoc-chatbot-panel__button {
           border-radius: 999px;
-          background: #ffe0db;
-          box-shadow: 0 0 0 0.18rem rgba(255, 255, 255, 0.24);
+          padding: 0.9rem 1.25rem;
+          background: linear-gradient(135deg, var(--deepdoc-brand-light), var(--deepdoc-brand-primary) 58%, var(--deepdoc-brand-dark));
+          color: white;
+          box-shadow: 0 10px 22px rgba(193, 51, 31, 0.12);
+          transition: transform 160ms ease, box-shadow 160ms ease, filter 160ms ease;
         }
 
-        .deepdoc-chatbot-toggle__label {
+        .deepdoc-chatbot-dock__submit:hover:not(:disabled),
+        .deepdoc-chatbot-panel__button:hover:not(:disabled) {
+          transform: translateY(-1px);
+          box-shadow: 0 14px 28px rgba(193, 51, 31, 0.16);
+          filter: saturate(1.04);
+        }
+
+        .deepdoc-chatbot-dock__submit:disabled,
+        .deepdoc-chatbot-panel__button:disabled {
+          cursor: wait;
+          opacity: 0.74;
+        }
+
+        .deepdoc-chatbot-page {
+          width: min(76rem, calc(100vw - 2.5rem));
+          margin: 0 auto;
+          padding: 2.4rem 0 11rem;
+        }
+
+        .deepdoc-chatbot-page__back {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.5rem;
+          font-size: 0.95rem;
+          color: var(--color-fd-muted-foreground);
+          text-decoration: none;
+        }
+
+        .deepdoc-chatbot-page__back:hover {
+          color: var(--deepdoc-brand-dark);
+        }
+
+        .deepdoc-chatbot-page__hero {
           display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          line-height: 1.05;
-          text-align: left;
+          flex-wrap: wrap;
+          align-items: flex-end;
+          justify-content: space-between;
+          gap: 1rem;
+          margin: 1rem 0 1.4rem;
         }
 
-        .deepdoc-chatbot-toggle__label strong {
-          font-size: 0.92rem;
+        .deepdoc-chatbot-page__eyebrow {
+          margin: 0 0 0.45rem;
+          font-size: 0.82rem;
           font-weight: 700;
-          letter-spacing: -0.01em;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--deepdoc-brand-dark);
         }
 
-        .deepdoc-chatbot-toggle__label span {
-          margin-top: 0.14rem;
-          font-size: 0.72rem;
-          color: rgba(255, 244, 241, 0.88);
+        .deepdoc-chatbot-page__hero h1 {
+          margin: 0;
+          max-width: 40rem;
+          font-size: clamp(2rem, 3vw, 3rem);
+          line-height: 1.04;
+          letter-spacing: -0.04em;
+          color: #25110d;
         }
 
-        .deepdoc-chatbot-panel {
-          width: min(34rem, calc(100vw - 1.5rem));
-          max-height: min(82vh, 58rem);
-          overflow: hidden;
-          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 16%, var(--color-fd-border) 84%);
+        .deepdoc-chatbot-page__hero p {
+          margin: 0.65rem 0 0;
+          max-width: 38rem;
+          color: var(--color-fd-muted-foreground);
+        }
+
+        .deepdoc-chatbot-page__chip {
+          display: inline-flex;
+          align-items: center;
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
+          border-radius: 999px;
+          padding: 0.5rem 0.8rem;
+          font-size: 0.88rem;
+          color: var(--deepdoc-brand-dark);
+          background: color-mix(in srgb, white 92%, var(--deepdoc-brand-light) 8%);
+        }
+
+        .deepdoc-chatbot-page__grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.45fr) minmax(18rem, 0.85fr);
+          gap: 1.25rem;
+          align-items: start;
+        }
+
+        .deepdoc-chatbot-panel,
+        .deepdoc-chatbot-sidebar {
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
           border-radius: 1.5rem;
-          background:
-            linear-gradient(180deg, color-mix(in srgb, white 90%, var(--deepdoc-brand-light) 10%), white 24%),
-            var(--color-fd-background);
-          box-shadow:
-            0 36px 80px rgba(131, 39, 25, 0.18),
-            0 12px 28px rgba(235, 62, 37, 0.12);
-          backdrop-filter: blur(18px);
+          background: color-mix(in srgb, white 96%, var(--deepdoc-brand-light) 4%);
+          box-shadow: 0 20px 60px rgba(131, 39, 25, 0.08);
+        }
+
+        .deepdoc-chatbot-sidebar {
+          position: sticky;
+          top: 1.5rem;
+          padding: 1rem;
+        }
+
+        .deepdoc-chatbot-panel__header,
+        .deepdoc-chatbot-sidebar__header {
+          margin-bottom: 1rem;
+          padding-bottom: 0.85rem;
+          border-bottom: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 10%, var(--color-fd-border) 90%);
         }
 
         .deepdoc-chatbot-panel__header {
-          background:
-            linear-gradient(135deg, color-mix(in srgb, var(--deepdoc-brand-light) 18%, white 82%), color-mix(in srgb, var(--deepdoc-brand-primary) 10%, white 90%));
+          padding: 1.2rem 1.25rem 0;
+          background: transparent;
         }
 
-        .deepdoc-chatbot-panel__input,
-        .deepdoc-chatbot-panel__button {
-          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
-          background: color-mix(in srgb, white 90%, var(--deepdoc-brand-light) 10%);
+        .deepdoc-chatbot-panel__body {
+          padding: 0 1.25rem 1.25rem;
         }
 
-        .deepdoc-chatbot-panel__button {
-          color: var(--deepdoc-brand-dark);
-          transition: transform 160ms ease, background 160ms ease, border-color 160ms ease;
-        }
-
-        .deepdoc-chatbot-panel__button:hover:not(:disabled) {
-          transform: translateY(-1px);
-          border-color: color-mix(in srgb, var(--deepdoc-brand-primary) 32%, white 68%);
-          background: color-mix(in srgb, white 84%, var(--deepdoc-brand-light) 16%);
-        }
-
-        .deepdoc-chatbot-panel__button:disabled {
-          opacity: 0.7;
-          cursor: wait;
+        .deepdoc-chatbot-panel__question {
+          margin: 0;
+          font-size: 0.84rem;
+          font-weight: 600;
+          color: var(--color-fd-muted-foreground);
+          text-transform: uppercase;
+          letter-spacing: 0.06em;
         }
 
         .deepdoc-chatbot-panel__section-title {
           color: var(--deepdoc-brand-dark);
         }
 
+        .deepdoc-chatbot-panel__empty {
+          border: 1px dashed color-mix(in srgb, var(--deepdoc-brand-light) 22%, var(--color-fd-border) 78%);
+          border-radius: 1.2rem;
+          padding: 1.2rem;
+          color: var(--color-fd-muted-foreground);
+          background: color-mix(in srgb, white 94%, var(--deepdoc-brand-light) 6%);
+        }
+
+        .deepdoc-chatbot-skeleton {
+          display: grid;
+          gap: 0.85rem;
+        }
+
+        .deepdoc-chatbot-skeleton__block,
+        .deepdoc-chatbot-skeleton__line,
+        .deepdoc-chatbot-skeleton__card {
+          position: relative;
+          overflow: hidden;
+          background: color-mix(in srgb, white 84%, var(--deepdoc-brand-light) 16%);
+        }
+
+        .deepdoc-chatbot-skeleton__block::after,
+        .deepdoc-chatbot-skeleton__line::after,
+        .deepdoc-chatbot-skeleton__card::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          transform: translateX(-100%);
+          background: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.66) 50%,
+            transparent 100%
+          );
+          animation: deepdoc-chatbot-skeleton-shimmer 1.7s ease-in-out infinite;
+        }
+
+        .deepdoc-chatbot-skeleton__block {
+          height: 12rem;
+          border-radius: 1.2rem;
+        }
+
+        .deepdoc-chatbot-skeleton__line {
+          height: 0.82rem;
+          border-radius: 999px;
+        }
+
+        .deepdoc-chatbot-skeleton__line--sm {
+          width: 28%;
+        }
+
+        .deepdoc-chatbot-skeleton__line--md {
+          width: 56%;
+        }
+
+        .deepdoc-chatbot-skeleton__line--lg {
+          width: 82%;
+        }
+
+        .deepdoc-chatbot-skeleton__line--full {
+          width: 100%;
+        }
+
+        .deepdoc-chatbot-skeleton__cards {
+          display: grid;
+          gap: 0.85rem;
+        }
+
+        .deepdoc-chatbot-skeleton__card {
+          height: 5.6rem;
+          border-radius: 1rem;
+        }
+
+        @keyframes deepdoc-chatbot-skeleton-shimmer {
+          100% {
+            transform: translateX(100%);
+          }
+        }
+
+        .deepdoc-chatbot-citation-list {
+          display: grid;
+          gap: 0.75rem;
+        }
+
         .deepdoc-chatbot-citation-list li {
           border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
-          border-radius: 0.95rem;
-          padding: 0.65rem 0.8rem;
-          background: color-mix(in srgb, white 92%, var(--deepdoc-brand-light) 8%);
+          border-radius: 1rem;
+          padding: 0.8rem 0.9rem;
+          background: white;
+        }
+
+        .deepdoc-chatbot-citation-list strong {
+          display: block;
+          margin-bottom: 0.2rem;
+          color: #2f120d;
+        }
+
+        .deepdoc-chatbot-citation-list span {
+          display: block;
+          font-size: 0.88rem;
+          color: var(--color-fd-muted-foreground);
         }
 
         .deepdoc-chatbot-citation-list a,
@@ -843,20 +1021,59 @@ def _global_css(cfg: dict[str, Any]) -> str:
           color: var(--color-fd-muted-foreground);
         }
 
+        @media (max-width: 960px) {
+          .deepdoc-chatbot-page__grid {
+            grid-template-columns: minmax(0, 1fr);
+          }
+
+          .deepdoc-chatbot-sidebar {
+            position: static;
+          }
+        }
+
         @media (max-width: 640px) {
+          body {
+            padding-bottom: 9.5rem;
+          }
+
           .deepdoc-chatbot-shell {
-            right: 0.75rem;
-            bottom: 0.75rem;
-            left: 0.75rem;
-            align-items: stretch;
+            width: calc(100vw - 1rem);
+            bottom: 0.5rem;
           }
 
-          .deepdoc-chatbot-panel {
+          .deepdoc-chatbot-dock {
+            padding: 0.8rem;
+            border-radius: 1.2rem;
+          }
+
+          .deepdoc-chatbot-dock__meta,
+          .deepdoc-chatbot-dock__row,
+          .deepdoc-chatbot-page__hero {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr);
+          }
+
+          .deepdoc-chatbot-dock__hint {
+            max-width: none;
+            text-align: left;
+          }
+
+          .deepdoc-chatbot-dock__submit,
+          .deepdoc-chatbot-panel__button {
             width: 100%;
+            justify-content: center;
           }
 
-          .deepdoc-chatbot-toggle {
-            align-self: flex-end;
+          .deepdoc-chatbot-page {
+            width: min(calc(100vw - 1rem), 100%);
+            padding-top: 1.35rem;
+          }
+
+          .deepdoc-chatbot-panel__header,
+          .deepdoc-chatbot-panel__body,
+          .deepdoc-chatbot-sidebar {
+            padding-left: 1rem;
+            padding-right: 1rem;
           }
         }
         """
@@ -964,6 +1181,18 @@ def _api_page_tsx() -> str:
               </DocsBody>
             </DocsPage>
           );
+        }
+        """
+    )
+
+
+def _chatbot_ask_page_tsx() -> str:
+    return dedent(
+        """\
+        import { ChatbotPanel } from '@/components/chatbot-panel';
+
+        export default function AskPage() {
+          return <ChatbotPanel />;
         }
         """
     )
@@ -1152,30 +1381,67 @@ def _chatbot_toggle_tsx() -> str:
         """\
         'use client';
 
-        import { useState } from 'react';
+        import { startTransition, useState, type FormEvent, type KeyboardEvent } from 'react';
+        import { usePathname, useRouter } from 'next/navigation';
         import { chatbotConfig } from '@/lib/chatbot-config';
-        import { ChatbotPanel } from '@/components/chatbot-panel';
+
+        function buildAskUrl(question: string, from: string) {
+          const params = new URLSearchParams({
+            q: question,
+            from: from || '/',
+          });
+          return `/ask?${params.toString()}`;
+        }
 
         export function ChatbotToggle() {
-          const [open, setOpen] = useState(false);
+          const pathname = usePathname();
+          const router = useRouter();
+          const [question, setQuestion] = useState('');
 
-          if (!chatbotConfig.enabled) return null;
+          if (!chatbotConfig.enabled || pathname === '/ask') return null;
+
+          function submit(event?: FormEvent<HTMLFormElement>) {
+            event?.preventDefault();
+            const trimmed = question.trim();
+            if (!trimmed) return;
+            startTransition(() => {
+              router.push(buildAskUrl(trimmed, pathname || '/'));
+            });
+          }
 
           return (
             <div className="deepdoc-chatbot-shell">
-              {open ? <ChatbotPanel onClose={() => setOpen(false)} /> : null}
-              <button
-                aria-expanded={open}
-                className="deepdoc-chatbot-toggle"
-                onClick={() => setOpen((value) => !value)}
-                type="button"
-              >
-                <span aria-hidden="true" className="deepdoc-chatbot-toggle__icon" />
-                <span className="deepdoc-chatbot-toggle__label">
-                  <strong>Ask the codebase</strong>
-                  <span>Grounded answers with code citations</span>
-                </span>
-              </button>
+              <form className="deepdoc-chatbot-dock" onSubmit={submit}>
+                <div className="deepdoc-chatbot-dock__meta">
+                  <div className="min-w-0">
+                    <p className="deepdoc-chatbot-dock__eyebrow">Ask the codebase</p>
+                    <p className="text-sm font-medium text-fd-muted-foreground">
+                      Open a dedicated answer page with grounded citations.
+                    </p>
+                  </div>
+                  <p className="deepdoc-chatbot-dock__hint">
+                    Ask from any docs page and keep reading without losing context.
+                  </p>
+                </div>
+                <div className="deepdoc-chatbot-dock__row">
+                  <textarea
+                    className="deepdoc-chatbot-dock__input text-sm"
+                    onChange={(event) => setQuestion(event.target.value)}
+                    onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                      if (event.key === 'Enter' && !event.shiftKey) {
+                        event.preventDefault();
+                        submit();
+                      }
+                    }}
+                    placeholder="Where is auth handled? How is deployment configured?"
+                    rows={1}
+                    value={question}
+                  />
+                  <button className="deepdoc-chatbot-dock__submit text-sm font-semibold" type="submit">
+                    Ask
+                  </button>
+                </div>
+              </form>
             </div>
           );
         }
@@ -1188,7 +1454,9 @@ def _chatbot_panel_tsx() -> str:
         """\
         'use client';
 
-        import { useState } from 'react';
+        import Link from 'next/link';
+        import { startTransition, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
+        import { useRouter, useSearchParams } from 'next/navigation';
         import ReactMarkdown from 'react-markdown';
         import { chatbotConfig } from '@/lib/chatbot-config';
 
@@ -1214,31 +1482,111 @@ def _chatbot_panel_tsx() -> str:
           used_chunks: number;
         };
 
-        export function ChatbotPanel({ onClose }: { onClose: () => void }) {
-          const [question, setQuestion] = useState('');
+        type ChatHistoryItem = {
+          role: 'user' | 'assistant';
+          content: string;
+        };
+
+        function buildAskUrl(question: string, from: string) {
+          const params = new URLSearchParams({
+            q: question,
+            from: from || '/',
+          });
+          return `/ask?${params.toString()}`;
+        }
+
+        function formatLines(startLine: number, endLine: number) {
+          return startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`;
+        }
+
+        function ChatbotLoadingSkeleton() {
+          return (
+            <>
+              <div className="deepdoc-chatbot-skeleton">
+                <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--sm" />
+                <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--full" />
+                <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--lg" />
+                <div className="deepdoc-chatbot-skeleton__block" />
+                <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--full" />
+                <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--lg" />
+                <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--md" />
+              </div>
+            </>
+          );
+        }
+
+        function ChatbotSidebarSkeleton() {
+          return (
+            <div className="deepdoc-chatbot-skeleton">
+              <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--md" />
+              <div className="deepdoc-chatbot-skeleton__cards">
+                <div className="deepdoc-chatbot-skeleton__card" />
+                <div className="deepdoc-chatbot-skeleton__card" />
+                <div className="deepdoc-chatbot-skeleton__card" />
+              </div>
+              <div className="deepdoc-chatbot-skeleton__line deepdoc-chatbot-skeleton__line--sm" />
+            </div>
+          );
+        }
+
+        export function ChatbotPanel() {
+          const router = useRouter();
+          const searchParams = useSearchParams();
+          const question = searchParams.get('q')?.trim() ?? '';
+          const from = searchParams.get('from')?.trim() || '/';
+          const [draft, setDraft] = useState(question);
+          const [activeQuestion, setActiveQuestion] = useState(question);
           const [loading, setLoading] = useState(false);
           const [error, setError] = useState('');
           const [response, setResponse] = useState<ChatResponse | null>(null);
+          const [history, setHistory] = useState<ChatHistoryItem[]>([]);
+          const [loadedQuestion, setLoadedQuestion] = useState('');
 
-          async function ask() {
-            if (!question.trim()) return;
+          useEffect(() => {
+            setDraft(question);
+            if (!question) {
+              setActiveQuestion('');
+              setLoading(false);
+              setError('');
+              setResponse(null);
+              setHistory([]);
+              setLoadedQuestion('');
+              return;
+            }
+            if (question === loadedQuestion) return;
+            void askQuestion(question, []);
+          }, [question, loadedQuestion]);
+
+          async function askQuestion(nextQuestion: string, nextHistory: ChatHistoryItem[]) {
+            if (!nextQuestion.trim()) return;
             if (!chatbotConfig.apiBaseUrl) {
               setError('Chatbot backend URL is not configured.');
               return;
             }
+            setLoadedQuestion(nextQuestion);
             setLoading(true);
             setError('');
+            setResponse(null);
             try {
               const res = await fetch(`${chatbotConfig.apiBaseUrl}/query`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ question }),
+                body: JSON.stringify({
+                  question: nextQuestion,
+                  history: nextHistory,
+                }),
               });
               if (!res.ok) {
                 throw new Error(`Request failed with ${res.status}`);
               }
               const data = (await res.json()) as ChatResponse;
+              setActiveQuestion(nextQuestion);
               setResponse(data);
+              setHistory([
+                ...nextHistory,
+                { role: 'user', content: nextQuestion },
+                { role: 'assistant', content: data.answer },
+              ]);
             } catch (err) {
               setError(err instanceof Error ? err.message : 'Chatbot unavailable');
             } finally {
@@ -1246,78 +1594,172 @@ def _chatbot_panel_tsx() -> str:
             }
           }
 
+          function submit(event?: FormEvent<HTMLFormElement>) {
+            event?.preventDefault();
+            const trimmed = draft.trim();
+            if (!trimmed) return;
+            const nextHistory = activeQuestion && response ? history.slice(-4) : [];
+            void askQuestion(trimmed, nextHistory);
+            startTransition(() => {
+              router.replace(buildAskUrl(trimmed, from));
+            });
+          }
+
           return (
-            <div className="deepdoc-chatbot-panel mb-1 flex max-h-[min(80vh,56rem)] flex-col">
-              <div className="deepdoc-chatbot-panel__header flex items-center justify-between border-b border-fd-border px-4 py-3">
-                <h2 className="text-sm font-semibold">Ask the codebase</h2>
-                <button className="text-sm text-fd-muted-foreground" onClick={onClose} type="button">
-                  Close
-                </button>
-              </div>
-              <div className="flex-1 overflow-y-auto px-4 py-3">
-                <textarea
-                  className="deepdoc-chatbot-panel__input mb-3 min-h-28 w-full rounded-xl px-3 py-2 text-sm"
-                  onChange={(event) => setQuestion(event.target.value)}
-                  placeholder="Where is auth handled? How is deployment configured?"
-                  value={question}
-                />
-                <button
-                  className="deepdoc-chatbot-panel__button rounded-xl px-3 py-2 text-sm font-medium"
-                  disabled={loading}
-                  onClick={ask}
-                  type="button"
-                >
-                  {loading ? 'Thinking...' : 'Ask'}
-                </button>
-                {error ? <p className="mt-3 text-sm text-red-600">{error}</p> : null}
+            <div className="deepdoc-chatbot-page">
+              <Link className="deepdoc-chatbot-page__back" href={from}>
+                <span aria-hidden="true">←</span>
+                <span>Back to docs</span>
+              </Link>
+
+              <div className="deepdoc-chatbot-page__hero">
+                <div>
+                  <p className="deepdoc-chatbot-page__eyebrow">Grounded answer</p>
+                  <h1>{question || 'Ask anything about this codebase'}</h1>
+                  <p>
+                    {question
+                      ? 'Results are generated from indexed code, artifacts, and docs so the answer can stay anchored to the repository.'
+                      : 'Ask a question to open a cleaner research-style answer view with source references and suggested follow-up reading.'}
+                  </p>
+                </div>
                 {response ? (
-                  <div className="mt-4 space-y-4 text-sm">
-                    <div>
-                      <h3 className="deepdoc-chatbot-panel__section-title mb-1 font-semibold">Answer</h3>
-                      <div className="deepdoc-chatbot-answer prose prose-sm max-w-none dark:prose-invert">
-                        <ReactMarkdown>{response.answer}</ReactMarkdown>
-                      </div>
-                    </div>
-                    {response.code_citations.length ? (
-                      <div>
-                        <h3 className="deepdoc-chatbot-panel__section-title mb-1 font-semibold">Code citations</h3>
-                        <ul className="deepdoc-chatbot-citation-list space-y-2">
-                          {response.code_citations.map((citation) => (
-                            <li key={`${citation.file_path}-${citation.start_line}`}>
-                              {citation.file_path}:{citation.start_line}-{citation.end_line}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {response.artifact_citations.length ? (
-                      <div>
-                        <h3 className="deepdoc-chatbot-panel__section-title mb-1 font-semibold">Artifact citations</h3>
-                        <ul className="deepdoc-chatbot-citation-list space-y-2">
-                          {response.artifact_citations.map((citation) => (
-                            <li key={`${citation.file_path}-${citation.start_line}`}>
-                              {citation.file_path}:{citation.start_line}-{citation.end_line}
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
-                    ) : null}
-                    {response.doc_links.length ? (
-                      <div>
-                        <h3 className="deepdoc-chatbot-panel__section-title mb-1 font-semibold">Read next</h3>
-                        <ul className="deepdoc-chatbot-citation-list space-y-2">
-                          {response.doc_links.map((link) => (
-                            <li key={link.url}>
-                              <a className="underline" href={link.url}>
-                                {link.title}
-                              </a>
-                            </li>
-                          ))}
-                        </ul>
-                      </div>
+                  <span className="deepdoc-chatbot-page__chip">{response.used_chunks} retrieved chunks</span>
+                ) : null}
+              </div>
+
+              <div className="deepdoc-chatbot-page__grid">
+                <section className="deepdoc-chatbot-panel">
+                  <div className="deepdoc-chatbot-panel__header">
+                    <p className="deepdoc-chatbot-panel__question">
+                      {question ? 'Question' : 'Ready when you are'}
+                    </p>
+                    {question ? (
+                      <h2 className="mt-2 text-2xl font-semibold tracking-tight text-fd-foreground">{question}</h2>
                     ) : null}
                   </div>
-                ) : null}
+                  <div className="deepdoc-chatbot-panel__body">
+                    {loading ? (
+                      <ChatbotLoadingSkeleton />
+                    ) : error ? (
+                      <div className="deepdoc-chatbot-panel__empty text-red-600">{error}</div>
+                    ) : response ? (
+                      <div className="text-sm">
+                        <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-base font-semibold">Answer</h3>
+                        <div className="deepdoc-chatbot-answer prose prose-sm max-w-none dark:prose-invert">
+                          <ReactMarkdown>{response.answer}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="deepdoc-chatbot-panel__empty">
+                        Ask a question below and this page will turn into a focused answer workspace with citations and related docs.
+                      </div>
+                    )}
+                  </div>
+                </section>
+
+                <aside className="deepdoc-chatbot-sidebar">
+                  <div className="deepdoc-chatbot-sidebar__header">
+                    <h2 className="text-sm font-semibold text-fd-foreground">Supporting context</h2>
+                    <p className="mt-2 text-sm text-fd-muted-foreground">
+                      Code and docs referenced by the current answer appear here.
+                    </p>
+                  </div>
+
+                  {loading ? <ChatbotSidebarSkeleton /> : null}
+
+                  {!loading && response?.code_citations.length ? (
+                    <div className="mb-5">
+                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Code citations</h3>
+                      <ul className="deepdoc-chatbot-citation-list">
+                        {response.code_citations.map((citation) => (
+                          <li key={`${citation.file_path}-${citation.start_line}`}>
+                            <strong>{citation.file_path}</strong>
+                            <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {!loading && response?.artifact_citations.length ? (
+                    <div className="mb-5">
+                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Artifact citations</h3>
+                      <ul className="deepdoc-chatbot-citation-list">
+                        {response.artifact_citations.map((citation) => (
+                          <li key={`${citation.file_path}-${citation.start_line}`}>
+                            <strong>{citation.file_path}</strong>
+                            <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {!loading && response?.doc_links.length ? (
+                    <div>
+                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Read next</h3>
+                      <ul className="deepdoc-chatbot-citation-list">
+                        {response.doc_links.map((link) => (
+                          <li key={link.url}>
+                            <strong>{link.title}</strong>
+                            <span>{link.doc_path}</span>
+                            <Link className="mt-2 inline-flex text-sm underline" href={link.url}>
+                              Open docs
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
+
+                  {!response && !loading ? (
+                    <div className="deepdoc-chatbot-panel__empty">
+                      Ask a question to populate this sidebar with citations and suggested documentation.
+                    </div>
+                  ) : null}
+                </aside>
+              </div>
+
+              <div className="deepdoc-chatbot-shell">
+                <form className="deepdoc-chatbot-dock" onSubmit={submit}>
+                  <div className="deepdoc-chatbot-dock__meta">
+                    <div className="min-w-0">
+                      <p className="deepdoc-chatbot-dock__eyebrow">
+                        {response ? 'Ask a follow-up question' : 'Ask the codebase'}
+                      </p>
+                      <p className="text-sm font-medium text-fd-muted-foreground">
+                        {response
+                          ? 'Stay on this page and keep the answer flow going.'
+                          : 'Start with a question about architecture, files, or behavior.'}
+                      </p>
+                    </div>
+                    <p className="deepdoc-chatbot-dock__hint">
+                      No mode picker needed here. This view always stays grounded in your indexed repository.
+                    </p>
+                  </div>
+                  <div className="deepdoc-chatbot-dock__row">
+                    <textarea
+                      className="deepdoc-chatbot-dock__input text-sm"
+                      onChange={(event) => setDraft(event.target.value)}
+                      onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          submit();
+                        }
+                      }}
+                      placeholder="Ask a follow-up question"
+                      rows={1}
+                      value={draft}
+                    />
+                    <button
+                      className="deepdoc-chatbot-dock__submit text-sm font-semibold"
+                      disabled={loading}
+                      type="submit"
+                    >
+                      {loading ? 'Thinking...' : 'Ask'}
+                    </button>
+                  </div>
+                </form>
               </div>
             </div>
           );

@@ -1566,6 +1566,7 @@ def escape_mdx_text_hazards(content: str) -> str:
                 ),
                 part,
             )
+            part = part.replace("{...}", "&#123;...&#125;")
             return part
 
         escaped = "".join(
@@ -1594,6 +1595,22 @@ def normalize_code_fence_languages(content: str) -> str:
         return f"```{normalized}{rest}"
 
     return re.sub(r"^```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE)
+
+
+def normalize_html_code_blocks(content: str) -> str:
+    """Convert raw <pre><code>...</code></pre> HTML blocks into fenced code blocks."""
+
+    def replace(match: re.Match) -> str:
+        body = match.group("body")
+        normalized = body.strip("\n")
+        return f"```bash\n{normalized}\n```"
+
+    return re.sub(
+        r"<pre><code>(?P<body>.*?)</code></pre>",
+        replace,
+        content,
+        flags=re.DOTALL,
+    )
 
 
 def normalize_mdx_steps(content: str) -> str:
@@ -1878,6 +1895,7 @@ class BucketGenerationEngine:
                 set(self.scan.file_summaries.keys()),
                 bucket.owned_files,
             )
+            content = normalize_html_code_blocks(content)
             content = normalize_code_fence_languages(content)
             content = normalize_mdx_steps(content)
             content = escape_mdx_route_params(content)
@@ -1904,6 +1922,7 @@ class BucketGenerationEngine:
                         set(self.scan.file_summaries.keys()),
                         bucket.owned_files,
                     )
+                    content = normalize_html_code_blocks(content)
                     content = normalize_code_fence_languages(content)
                     content = normalize_mdx_steps(content)
                     content = escape_mdx_route_params(content)

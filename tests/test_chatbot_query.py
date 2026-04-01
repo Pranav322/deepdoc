@@ -35,6 +35,11 @@ class _FailingEmbedClient:
         raise RuntimeError("Embedding request failed: missing API key")
 
 
+class _UnexpectedChatClient:
+    def complete(self, system: str, user: str) -> str:
+        raise AssertionError("chat model should not be called without retrieved context")
+
+
 def test_query_service_returns_code_and_artifact_citations(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -135,7 +140,36 @@ def test_fastapi_query_endpoint_accepts_json_body(tmp_path: Path) -> None:
         response = client.post("/query", json={"question": "Where is auth handled?"})
 
     assert response.status_code == 200
-    assert response.json()["answer"] == "Grounded answer"
+    assert "couldn't find any indexed code" in response.json()["answer"]
+    assert response.json()["used_chunks"] == 0
+
+
+def test_query_service_returns_no_context_response_when_retrieval_is_empty(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(index_dir, "code", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    cfg = {"chatbot": {"enabled": True}}
+
+    with (
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_UnexpectedChatClient()),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.query("how many background syncs are there?")
+
+    assert "couldn't find any indexed code" in result["answer"]
+    assert result["used_chunks"] == 0
+    assert result["code_citations"] == []
+    assert result["artifact_citations"] == []
 
 
 def test_fastapi_query_endpoint_returns_json_error_payload(tmp_path: Path) -> None:

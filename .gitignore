@@ -29,4 +29,9 @@ chatbot_backend/.venv/
 chatbot_backend/__pycache__/
 codewiki.egg-info/
 deepdoc.egg-info/
-pytest-cache-files-7ktahll
+pytest-cache-files-7ktathll
+.claude/
+
+# DeepDoc
+.deepdoc/chatbot/
+.deepdoc_manifest.json

@@ -69,6 +69,9 @@ class ChatbotQueryService:
         selected_artifacts = artifact_hits[: retrieval_cfg["max_prompt_artifact_chunks"]]
         selected_docs = doc_hits[: retrieval_cfg["max_prompt_doc_chunks"]]
 
+        if not (selected_code or selected_artifacts or selected_docs):
+            return self._no_context_result(question)
+
         # Step 6: Build prompt and generate answer
         prompt = self._build_prompt(question, history or [], selected_code, selected_artifacts, selected_docs)
         answer = self.chat_client.complete(self._system_prompt(), prompt)
@@ -95,6 +98,20 @@ class ChatbotQueryService:
             ],
             "doc_links": self._doc_links(selected_docs, selected_code + selected_artifacts),
             "used_chunks": len(selected_code) + len(selected_artifacts) + len(selected_docs),
+        }
+
+    def _no_context_result(self, question: str) -> dict[str, Any]:
+        answer = (
+            f"I couldn't find any indexed code, config, or documentation evidence for `{question}` in this repository.\n\n"
+            "This usually means the chatbot index is empty, stale, or the question terms did not match anything retrievable.\n\n"
+            "Try re-indexing the repo and asking again with a concrete filename, route, symbol, or module name."
+        )
+        return {
+            "answer": answer,
+            "code_citations": [],
+            "artifact_citations": [],
+            "doc_links": [],
+            "used_chunks": 0,
         }
 
     def _expand_query(self, question: str, retrieval_cfg: dict[str, Any]) -> list[str]:

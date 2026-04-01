@@ -1,0 +1,3 @@
+the chat shoucl be able to read form actual source too if the answer is too deep - not just emebddings 
+
+have refference of chat - so that next question can be refenceed

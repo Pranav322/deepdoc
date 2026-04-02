@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from ..llm.litellm_compat import prepare_litellm
+from .chunker import MAX_CHUNK_CHARS
 from .settings import get_chatbot_cfg, resolve_service_api_key
 
 
@@ -63,22 +64,7 @@ class LiteLLMEmbeddingClient:
             vectors: list[list[float]] = []
             for i in range(0, len(texts), self.batch_size):
                 batch = texts[i : i + self.batch_size]
-                kwargs: dict[str, Any] = {
-                    "model": self.service_cfg.get("model"),
-                    "input": batch,
-                }
-                if self.service_cfg.get("base_url"):
-                    kwargs["api_base"] = self.service_cfg["base_url"]
-                if self.service_cfg.get("api_version"):
-                    kwargs["api_version"] = self.service_cfg["api_version"]
-                if self.service_cfg.get("provider") == "azure":
-                    kwargs["api_type"] = "azure"
-                api_key = resolve_service_api_key(self.service_cfg)
-                if api_key:
-                    kwargs["api_key"] = api_key
-
-                response = litellm.embedding(**kwargs)
-                vectors.extend(item["embedding"] for item in response.data)
+                vectors.extend(self._embed_batch(litellm, batch))
             return vectors
         except ImportError as exc:
             raise RuntimeError("litellm not installed. Install deepdoc[chatbot].") from exc
@@ -87,6 +73,53 @@ class LiteLLMEmbeddingClient:
             key_env = self.service_cfg.get("api_key_env", "")
             hint = f" Check env var {key_env}." if key_env else ""
             raise RuntimeError(f"Embedding request failed (model={model}).{hint} {exc}") from exc
+
+    def _embed_batch(self, litellm: Any, batch: list[str]) -> list[list[float]]:
+        try:
+            response = litellm.embedding(**self._embedding_kwargs(batch))
+            return [item["embedding"] for item in response.data]
+        except Exception as exc:
+            if self._is_context_window_error(exc):
+                if len(batch) > 1:
+                    mid = max(len(batch) // 2, 1)
+                    return self._embed_batch(litellm, batch[:mid]) + self._embed_batch(litellm, batch[mid:])
+                trimmed = self._trim_text_for_retry(batch[0])
+                if trimmed != batch[0]:
+                    return self._embed_batch(litellm, [trimmed])
+            raise
+
+    def _embedding_kwargs(self, batch: list[str]) -> dict[str, Any]:
+        kwargs: dict[str, Any] = {
+            "model": self.service_cfg.get("model"),
+            "input": batch,
+        }
+        if self.service_cfg.get("base_url"):
+            kwargs["api_base"] = self.service_cfg["base_url"]
+        if self.service_cfg.get("api_version"):
+            kwargs["api_version"] = self.service_cfg["api_version"]
+        if self.service_cfg.get("provider") == "azure":
+            kwargs["api_type"] = "azure"
+        api_key = resolve_service_api_key(self.service_cfg)
+        if api_key:
+            kwargs["api_key"] = api_key
+        return kwargs
+
+    def _is_context_window_error(self, exc: Exception) -> bool:
+        message = str(exc).lower()
+        return (
+            "contextwindow" in message
+            or "maximum context length" in message
+            or "requested" in message and "tokens" in message
+        )
+
+    def _trim_text_for_retry(self, text: str) -> str:
+        if len(text) <= 1200:
+            return text
+        budget = min(MAX_CHUNK_CHARS, max(int(len(text) * 0.75), 1200))
+        if budget >= len(text):
+            return text
+        trimmed = text[:budget].rstrip()
+        return trimmed + "\n... [truncated for embedding]"
 
 
 def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:

@@ -30,3 +30,9 @@ chatbot_backend/__pycache__/
 codewiki.egg-info/
 deepdoc.egg-info/
 pytest-cache-files-7ktahll
+
+# DeepDoc
+.deepdoc/chatbot/
+.deepdoc_manifest.json
+site/
+

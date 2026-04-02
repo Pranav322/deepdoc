@@ -66,6 +66,27 @@ def test_untracked_file_triggers_targeted_replan(tmp_repo_with_plan):
     assert cs.strategy == "targeted_replan"
 
 
+def test_untracked_generated_site_files_are_ignored(tmp_repo_with_plan):
+    """DeepDoc-managed generated files should not trigger replans."""
+    root, plan = tmp_repo_with_plan
+
+    site_dir = root / "site" / "app"
+    site_dir.mkdir(parents=True)
+    (site_dir / "page.tsx").write_text("export default function Page() { return null }\n")
+    (root / "site" / "package.json").write_text('{"name":"generated-site"}\n')
+
+    updater = _make_updater(root)
+    import git as _git
+
+    repo = _git.Repo(root)
+    cs = updater._classify_changes(plan, repo.head.commit.hexsha)
+
+    assert cs.new_files == []
+    assert cs.changed_artifact_files == []
+    assert cs.new_artifact_files == []
+    assert cs.strategy == "noop"
+
+
 def test_deleted_file(tmp_repo_with_plan):
     """Deleting a file owned by a bucket → deleted_files populated, strategy=full_replan."""
     root, plan = tmp_repo_with_plan

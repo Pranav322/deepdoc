@@ -21,6 +21,7 @@ import json
 import os
 import fnmatch
 import re
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
@@ -44,6 +45,9 @@ from .parser.api_detector import detect_endpoints, APIEndpoint
 from .parser.routes import resolve_repo_endpoints
 
 console = Console()
+
+TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]+")
+PROPOSAL_BUCKET_TOKEN_CACHE: dict[int, set[str]] = {}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -173,6 +177,10 @@ class RepoScan:
     doc_contexts: dict[str, str] = field(default_factory=dict)  # markdown/doc summaries
     research_contexts: list[dict[str, Any]] = field(default_factory=list)  # design/glossary/experiment context
     topic_candidates: list[dict[str, Any]] = field(default_factory=list)  # ranked topic hints
+    semantic_file_token_cache: dict[str, set[str]] = field(default_factory=dict)
+    topic_file_token_cache: dict[str, set[str]] = field(default_factory=dict)
+    topic_context_token_cache: dict[str, set[str]] = field(default_factory=dict)
+    planner_timings: dict[str, float] = field(default_factory=dict)
 
 
 def tracked_bucket_files(bucket: DocBucket) -> list[str]:
@@ -1018,7 +1026,7 @@ PROFILE_TOPIC_TEMPLATES: dict[str, list[tuple[str, list[str], str]]] = {
 def _normalize_tokens(*values: str) -> set[str]:
     tokens: set[str] = set()
     for value in values:
-        for token in re.findall(r"[A-Za-z][A-Za-z0-9_+-]+", value or ""):
+        for token in TOKEN_RE.findall(value or ""):
             normalized = token.lower().strip("_-+")
             if len(normalized) < 3 or normalized in STOPWORD_TOKENS:
                 continue
@@ -1033,6 +1041,8 @@ def _derive_topic_candidates(scan: RepoScan, classification: dict[str, Any]) -> 
     templates = PROFILE_TOPIC_TEMPLATES.get(primary, PROFILE_TOPIC_TEMPLATES["backend_api"])
 
     candidate_map: dict[str, dict[str, Any]] = {}
+    file_token_cache = scan.topic_file_token_cache
+    context_token_cache = scan.topic_context_token_cache
 
     def _ensure_candidate(title: str, category: str) -> dict[str, Any]:
         key = f"{category}:{title}"
@@ -1047,14 +1057,26 @@ def _derive_topic_candidates(scan: RepoScan, classification: dict[str, Any]) -> 
             }
         return candidate_map[key]
 
-    for title, keywords, category in templates:
-        _ensure_candidate(title, category)
+    if not file_token_cache:
         for file_path, parsed in scan.parsed_files.items():
-            file_tokens = _normalize_tokens(
+            file_token_cache[file_path] = _normalize_tokens(
                 file_path,
                 " ".join(symbol.name for symbol in parsed.symbols[:20]),
                 " ".join(parsed.imports[:12]),
             )
+
+    if not context_token_cache:
+        for context in scan.research_contexts:
+            context_key = context.get("file_path") or context.get("title") or str(id(context))
+            context_token_cache[context_key] = _normalize_tokens(
+                context.get("title", ""),
+                context.get("summary", ""),
+                " ".join(context.get("headings", [])),
+            )
+
+    for title, keywords, category in templates:
+        _ensure_candidate(title, category)
+        for file_path, file_tokens in file_token_cache.items():
             matched = sorted({kw for kw in keywords if any(kw in token for token in file_tokens)})
             if not matched:
                 continue
@@ -1064,11 +1086,8 @@ def _derive_topic_candidates(scan: RepoScan, classification: dict[str, Any]) -> 
             candidate["signals"].update(matched)
 
         for context in scan.research_contexts:
-            context_tokens = _normalize_tokens(
-                context.get("title", ""),
-                context.get("summary", ""),
-                " ".join(context.get("headings", [])),
-            )
+            context_key = context.get("file_path") or context.get("title") or str(id(context))
+            context_tokens = context_token_cache.get(context_key, set())
             matched = sorted({kw for kw in keywords if any(kw in token for token in context_tokens)})
             if not matched:
                 continue
@@ -1219,11 +1238,15 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     from rich.live import Live
     from rich.text import Text
 
+    phase_start = time.perf_counter()
+
     # ── Phase 2 Scans (enrich before planning) ───────────────────────────
     console.print(
         Panel("[bold]Running Phase 2 scan upgrades[/bold]", border_style="green")
     )
+    step_start = time.perf_counter()
     scan = run_phase2_scans(scan, cfg, llm)
+    scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
 
     max_pages = cfg.get("max_pages", 0)
     giant_file_threshold = cfg.get("giant_file_lines", 2000)
@@ -1259,7 +1282,9 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         giant_file_threshold=giant_file_threshold,
     )
 
+    step_start = time.perf_counter()
     classification = _llm_step(llm, CLASSIFY_SYSTEM, classify_prompt, "classify")
+    scan.planner_timings["classify"] = time.perf_counter() - step_start
     if not classification:
         console.print(
             "[yellow]⚠ Classification failed — falling back to auto-plan[/yellow]"
@@ -1280,7 +1305,9 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     classification_summary = _build_classification_summary(classification)
     repo_profile = classification.get("repo_profile", {})
     repo_profile_str = json.dumps(repo_profile, indent=2) if repo_profile else "unknown"
+    step_start = time.perf_counter()
     topic_candidates = _derive_topic_candidates(scan, classification)
+    scan.planner_timings["derive_topic_candidates"] = time.perf_counter() - step_start
     topic_candidates_str = _format_topic_candidates(topic_candidates)
     research_context_str = _format_research_context(scan)
 
@@ -1363,7 +1390,9 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         max_pages_instruction=max_pages_instruction,
     )
 
+    step_start = time.perf_counter()
     proposal = _llm_step(llm, PROPOSE_SYSTEM, propose_prompt, "propose")
+    scan.planner_timings["propose"] = time.perf_counter() - step_start
     if not proposal:
         console.print(
             "[yellow]⚠ Bucket proposal failed — falling back to auto-plan[/yellow]"
@@ -1393,7 +1422,9 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         setup_artifacts=setup_artifacts_str,
     )
 
+    step_start = time.perf_counter()
     assignment = _llm_step(llm, ASSIGN_SYSTEM, assign_prompt, "assign")
+    scan.planner_timings["assign"] = time.perf_counter() - step_start
     if not assignment:
         console.print(
             "[yellow]⚠ Assignment failed — falling back to auto-plan[/yellow]"
@@ -1407,7 +1438,9 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     # ── Step 3.5: Decompose broad buckets into focused sub-topics ────────
     repo_profile = classification.get("repo_profile", {})
     console.print("[dim]Decomposing broad buckets...[/dim]")
+    step_start = time.perf_counter()
     plan = _decompose_buckets(plan, scan, cfg, llm, repo_profile)
+    scan.planner_timings["decompose"] = time.perf_counter() - step_start
     plan = _inject_research_context_buckets(plan, scan, classification)
 
     # ── Step 4: Auto-generate per-endpoint reference pages from scan data ─
@@ -1420,15 +1453,28 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     plan = _shape_plan_nav(plan, classification)
     plan = _apply_page_contracts(plan, scan, classification)
 
+    step_start = time.perf_counter()
     plan = _attach_orphans_semantically(plan, scan, classification)
+    scan.planner_timings["attach_orphans"] = time.perf_counter() - step_start
 
     # Validate coverage
     console.print("[dim]Validating file coverage...[/dim]")
+    step_start = time.perf_counter()
     plan = _validate_coverage(plan, scan)
+    scan.planner_timings["validate_coverage"] = time.perf_counter() - step_start
     if plan.orphaned_files:
         console.print(
             f"[yellow]⚠ {len(plan.orphaned_files)} file(s) were unassigned → auto-assigned[/yellow]"
         )
+
+    scan.planner_timings["total"] = time.perf_counter() - phase_start
+    summary = ", ".join(
+        f"{name}={duration:.2f}s"
+        for name, duration in scan.planner_timings.items()
+        if duration >= 0.01
+    )
+    if summary:
+        console.print(f"[dim]Planner timings: {summary}[/dim]")
 
     _print_plan_summary(plan)
     return plan
@@ -1548,7 +1594,10 @@ def _merge_plan(
 
 
 def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
-    return _normalize_tokens(
+    cache = PROPOSAL_BUCKET_TOKEN_CACHE.get(id(bucket))
+    if cache is not None:
+        return cache
+    cache = _normalize_tokens(
         bucket.get("title", ""),
         bucket.get("slug", ""),
         bucket.get("section", ""),
@@ -1556,6 +1605,8 @@ def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
         " ".join(bucket.get("coverage_targets", [])),
         bucket.get("bucket_type", ""),
     )
+    PROPOSAL_BUCKET_TOKEN_CACHE[id(bucket)] = cache
+    return cache
 
 
 def _is_low_value_utility_bucket(bucket: dict[str, Any]) -> bool:
@@ -1683,14 +1734,22 @@ def _refine_proposal(
 
 
 def _file_semantic_tokens(file_path: str, scan: RepoScan) -> set[str]:
+    cached = scan.semantic_file_token_cache.get(file_path)
+    if cached is not None:
+        return cached
     parsed = scan.parsed_files.get(file_path)
     imports = parsed.imports[:12] if parsed else []
     symbols = [symbol.name for symbol in parsed.symbols[:12]] if parsed else []
-    return _normalize_tokens(file_path, " ".join(imports), " ".join(symbols))
+    tokens = _normalize_tokens(file_path, " ".join(imports), " ".join(symbols))
+    scan.semantic_file_token_cache[file_path] = tokens
+    return tokens
 
 
 def _bucket_semantic_tokens(bucket: DocBucket) -> set[str]:
-    return _normalize_tokens(
+    cached = getattr(bucket, "_semantic_tokens", None)
+    if cached is not None:
+        return cached
+    tokens = _normalize_tokens(
         bucket.title,
         bucket.slug,
         bucket.section,
@@ -1701,6 +1760,8 @@ def _bucket_semantic_tokens(bucket: DocBucket) -> set[str]:
         if bucket.generation_hints
         else "",
     )
+    bucket._semantic_tokens = tokens
+    return tokens
 
 
 def _attach_file_to_best_bucket(

@@ -178,6 +178,7 @@ class PipelineV2:
 
     def run(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
         stats: dict[str, Any] = {}
+        phase_timings: dict[str, float] = {}
         previous_ledger = load_generation_ledger(self.repo_root) if reconcile else {}
         chatbot_sync_ok = True
 
@@ -185,7 +186,9 @@ class PipelineV2:
         console.print(
             Panel("[bold]Phase 1/5: Scanning repository[/bold]", border_style="blue")
         )
+        phase_start = time.perf_counter()
         scan = bucket_scan_repo(self.repo_root, self.cfg)
+        phase_timings["scan"] = time.perf_counter() - phase_start
         self._print_scan(scan)
         stats["files_scanned"] = scan.total_files
 
@@ -196,7 +199,9 @@ class PipelineV2:
                 border_style="blue",
             )
         )
+        phase_start = time.perf_counter()
         plan = bucket_plan_docs(scan, self.cfg, self.llm)
+        phase_timings["plan"] = time.perf_counter() - phase_start
         stats["pages_planned"] = len(plan.pages)
 
         # ── Phase 3: Generate ──────────────────────────────────────────
@@ -214,7 +219,9 @@ class PipelineV2:
             plan=plan,
             output_dir=self.output_dir,
         )
+        phase_start = time.perf_counter()
         gen_results = engine.generate_all(force=force)
+        phase_timings["generate"] = time.perf_counter() - phase_start
         engine.update_manifest(gen_results)
         generation_summary = summarize_generation_results(gen_results)
         stats["pages_generated"] = generation_summary.succeeded
@@ -231,7 +238,9 @@ class PipelineV2:
                     border_style="blue",
                 )
             )
+            phase_start = time.perf_counter()
             openapi_ready = self._setup_playground(scan)
+            phase_timings["openapi"] = time.perf_counter() - phase_start
             stats["playground"] = 1 if openapi_ready else 0
         else:
             console.print(
@@ -241,16 +250,21 @@ class PipelineV2:
                 )
             )
             stats["playground"] = 0
+            phase_timings["openapi"] = 0.0
 
         # ── Phase 5: Build site ────────────────────────────────────────
         console.print(
             Panel("[bold]Phase 5/5: Building site[/bold]", border_style="blue")
         )
+        phase_start = time.perf_counter()
         self._build_site(plan, has_openapi=openapi_ready)
+        phase_timings["build_site"] = time.perf_counter() - phase_start
         stats["site"] = 1
 
         # ── Persist state ──────────────────────────────────────────────
+        phase_start = time.perf_counter()
         save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+        phase_timings["persist"] = time.perf_counter() - phase_start
 
         if chatbot_enabled(self.cfg):
             try:
@@ -312,6 +326,13 @@ class PipelineV2:
 
         if not chatbot_sync_ok:
             stats["status"] = "partial" if generation_summary.succeeded > 0 else "failed"
+
+        stats["timings"] = {name: round(duration, 2) for name, duration in phase_timings.items()}
+        timing_summary = ", ".join(
+            f"{name}={duration:.2f}s" for name, duration in phase_timings.items() if duration >= 0.01
+        )
+        if timing_summary:
+            console.print(f"[dim]Pipeline timings: {timing_summary}[/dim]")
 
         self._print_summary(stats)
         return stats

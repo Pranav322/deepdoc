@@ -28,6 +28,15 @@ from .parser.base import ParsedFile, Symbol
 
 console = Console()
 
+IMPORT_FROM_RE = re.compile(r"from\s+([\w.]+)\s+import")
+IMPORT_PLAIN_RE = re.compile(r"import\s+([\w.]+)")
+JS_FROM_RE = re.compile(r"""from\s+['"]([^'"]+)['"]""")
+JS_REQUIRE_RE = re.compile(r"""require\s*\(\s*['"]([^'"]+)['"]\s*\)""")
+GO_IMPORT_RE = re.compile(r'"([^"]+)"')
+PHP_USE_RE = re.compile(r"use\s+([\w\\]+)")
+FILE_EXT_RE = re.compile(r"\.(py|ts|js|tsx|jsx|go|php|mjs|cjs)$")
+WORD_TOKEN_RE = re.compile(r"[\w]+")
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 2.1  Giant-File Clustering
@@ -308,6 +317,7 @@ def build_endpoint_bundles(
 
     bundles = []
     all_files = set(parsed_files.keys())
+    import_lookup = _build_import_lookup(all_files)
 
     for resource, eps in families.items():
         # Collect handler files
@@ -340,7 +350,7 @@ def build_endpoint_bundles(
             parsed = parsed_files.get(hf)
             if not parsed:
                 continue
-            resolved = _resolve_imports_to_files(parsed.imports, hf, all_files)
+            resolved = _resolve_imports_to_files(parsed.imports, hf, import_lookup)
             level1_files.update(resolved)
 
         for f in sorted(level1_files):
@@ -361,7 +371,7 @@ def build_endpoint_bundles(
                 parsed = parsed_files.get(f)
                 if not parsed:
                     continue
-                resolved = _resolve_imports_to_files(parsed.imports, f, all_files)
+                resolved = _resolve_imports_to_files(parsed.imports, f, import_lookup)
                 level2_files.update(resolved)
 
             for f in sorted(level2_files):
@@ -390,10 +400,23 @@ def build_endpoint_bundles(
     return bundles
 
 
+def _build_import_lookup(all_files: set[str]) -> dict[str, set[str]]:
+    """Pre-index normalized file suffixes so import resolution avoids full scans."""
+    lookup: dict[str, set[str]] = defaultdict(set)
+    for file_path in all_files:
+        normalized = FILE_EXT_RE.sub("", file_path).replace("\\", "/").lower()
+        parts = [part for part in normalized.split("/") if part]
+        for i in range(len(parts)):
+            lookup["/".join(parts[i:])].add(file_path)
+        if parts:
+            lookup[parts[-1]].add(file_path)
+    return lookup
+
+
 def _resolve_imports_to_files(
     imports: list[str],
     current_file: str,
-    all_files: set[str],
+    import_lookup: dict[str, set[str]],
 ) -> set[str]:
     """Resolve import statements to actual repo files.
 
@@ -405,16 +428,12 @@ def _resolve_imports_to_files(
         # Normalize the import to a path hint
         hints = _normalize_import(imp)
         for hint in hints:
-            # Try to find a matching file
-            hint_parts = hint.replace(".", "/").replace("\\", "/")
-            for f in all_files:
-                if f == current_file:
-                    continue
-                # Check suffix match
-                f_no_ext = re.sub(r"\.(py|ts|js|tsx|jsx|go|php|mjs|cjs)$", "", f)
-                if f_no_ext.endswith(hint_parts) or hint_parts in f_no_ext:
-                    resolved.add(f)
-                    break
+            hint_parts = hint.replace(".", "/").replace("\\", "/").strip("/").lower()
+            if not hint_parts:
+                continue
+            for candidate in import_lookup.get(hint_parts, set()):
+                if candidate != current_file:
+                    resolved.add(candidate)
 
     return resolved
 
@@ -424,19 +443,19 @@ def _normalize_import(imp: str) -> list[str]:
     hints = []
 
     # Python: from app.services.auth import X
-    m = re.match(r"from\s+([\w.]+)\s+import", imp)
+    m = IMPORT_FROM_RE.match(imp)
     if m:
         hints.append(m.group(1).replace(".", "/"))
         return hints
 
     # Python: import app.services.auth
-    m = re.match(r"import\s+([\w.]+)", imp)
+    m = IMPORT_PLAIN_RE.match(imp)
     if m:
         hints.append(m.group(1).replace(".", "/"))
         return hints
 
     # JS/TS: import { X } from '../models/user'
-    m = re.search(r"""from\s+['"]([^'"]+)['"]""", imp)
+    m = JS_FROM_RE.search(imp)
     if m:
         path = m.group(1)
         # Remove ./ ../ prefixes for matching
@@ -445,7 +464,7 @@ def _normalize_import(imp: str) -> list[str]:
         return hints
 
     # JS/TS: require('./services/payment')
-    m = re.search(r"""require\s*\(\s*['"]([^'"]+)['"]\s*\)""", imp)
+    m = JS_REQUIRE_RE.search(imp)
     if m:
         path = m.group(1)
         path = re.sub(r"^\.{1,2}/", "", path)
@@ -453,13 +472,13 @@ def _normalize_import(imp: str) -> list[str]:
         return hints
 
     # Go: import "github.com/repo/pkg/auth"
-    m = re.search(r'"([^"]+)"', imp)
+    m = GO_IMPORT_RE.search(imp)
     if m:
         hints.append(m.group(1).split("/")[-1])  # just the package name
         return hints
 
     # PHP: use App\Services\AuthService
-    m = re.match(r"use\s+([\w\\]+)", imp)
+    m = PHP_USE_RE.match(imp)
     if m:
         hints.append(m.group(1).replace("\\", "/"))
         return hints
@@ -513,7 +532,7 @@ def _detect_integration_edges_in_bundle(
             imp_lower = imp.lower()
             if any(kw in imp_lower for kw in ("client", "sdk", "api", "http", "request")):
                 # Extract a name hint
-                parts = re.findall(r"[\w]+", imp)
+                parts = WORD_TOKEN_RE.findall(imp)
                 for part in parts:
                     if part.lower() not in ("import", "from", "client", "sdk", "api", "http",
                                             "request", "requests", "axios", "fetch", "self"):
@@ -622,6 +641,10 @@ def _collect_integration_candidates(
         content = file_contents.get(file_path, "")
         if not content:
             continue
+        lines = content.splitlines()
+        line_starts = [0]
+        for line in lines:
+            line_starts.append(line_starts[-1] + len(line) + 1)
 
         # Check imports for client/SDK patterns
         for imp in parsed.imports:
@@ -641,8 +664,8 @@ def _collect_integration_candidates(
         # Check content for outbound HTTP calls
         for pat in http_patterns:
             for m in pat.finditer(content):
-                line_num = content[:m.start()].count("\n") + 1
-                line = content.splitlines()[line_num - 1].strip() if line_num <= len(content.splitlines()) else ""
+                line_num = _line_number_for_offset(line_starts, m.start())
+                line = lines[line_num - 1].strip() if line_num <= len(lines) else ""
                 # Try to extract URL or target name
                 url_match = re.search(r"""['"]https?://([^/'"\s]+)""", content[m.start():m.start() + 300])
                 name = url_match.group(1).split(".")[0] if url_match else "unknown_http"
@@ -672,8 +695,8 @@ def _collect_integration_candidates(
         # Check for webhook handlers
         for pat in webhook_patterns:
             for m in pat.finditer(content):
-                line_num = content[:m.start()].count("\n") + 1
-                line = content.splitlines()[line_num - 1].strip() if line_num <= len(content.splitlines()) else ""
+                line_num = _line_number_for_offset(line_starts, m.start())
+                line = lines[line_num - 1].strip() if line_num <= len(lines) else ""
                 candidates.append(IntegrationCandidate(
                     signal_type="webhook",
                     name_hint="webhook",
@@ -699,6 +722,19 @@ def _collect_integration_candidates(
                         ))
 
     return candidates
+
+
+def _line_number_for_offset(line_starts: list[int], offset: int) -> int:
+    """Map a character offset to a 1-based line number using the cached line starts."""
+    lo = 0
+    hi = len(line_starts) - 1
+    while lo < hi:
+        mid = (lo + hi) // 2
+        if line_starts[mid] <= offset:
+            lo = mid + 1
+        else:
+            hi = mid
+    return max(1, lo)
 
 
 def _normalize_integrations_llm(

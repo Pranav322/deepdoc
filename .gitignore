@@ -35,3 +35,5 @@ pytest-cache-files-7ktathll
 # DeepDoc
 .deepdoc/chatbot/
 .deepdoc_manifest.json
+future.txt
+

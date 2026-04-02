@@ -633,7 +633,12 @@ class SmartUpdater:
         except Exception:
             pass
 
-        return sorted(status_by_path.items())
+        filtered = [
+            (path, status)
+            for path, status in status_by_path.items()
+            if not self._is_deepdoc_managed_path(path)
+        ]
+        return sorted(filtered)
 
     def _discover_new_source_files(self, plan_files: set[str]) -> list[str]:
         """Find source files on disk that are not yet covered by the saved plan."""
@@ -662,6 +667,8 @@ class SmartUpdater:
                 pass
 
             rel_path = path.relative_to(self.repo_root).as_posix()
+            if self._is_deepdoc_managed_path(rel_path):
+                continue
             if rel_path in plan_files:
                 continue
             if self._is_source_file(rel_path):
@@ -738,6 +745,36 @@ class SmartUpdater:
     def _is_source_file(self, path: str) -> bool:
         ext = Path(path).suffix.lower()
         return ext in supported_extensions()
+
+    def _is_deepdoc_managed_path(self, path: str) -> bool:
+        rel = path.strip().lstrip("./")
+        if not rel:
+            return False
+
+        managed_dirs = [
+            self.cfg.get("output_dir", "docs").strip("/"),
+            self.cfg.get("site_dir", "site").strip("/"),
+            ".deepdoc",
+            "chatbot_backend",
+        ]
+        managed_files = {
+            ".deepdoc_manifest.json",
+            ".deepdoc_plan.json",
+            ".deepdoc_file_map.json",
+        }
+
+        rel_path = Path(rel)
+        rel_posix = rel_path.as_posix()
+        if rel_posix in managed_files:
+            return True
+
+        for managed_dir in managed_dirs:
+            if not managed_dir:
+                continue
+            if rel_posix == managed_dir or rel_posix.startswith(f"{managed_dir}/"):
+                return True
+
+        return False
 
     # ── Sync state ─────────────────────────────────────────────────────
 

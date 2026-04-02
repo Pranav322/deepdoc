@@ -16,6 +16,7 @@ from deepdoc.planner_v2 import (
     _decompose_buckets,
     _derive_topic_candidates,
     _inject_research_context_buckets,
+    _normalize_tokens,
     _refine_bucket_ownership,
     _refine_proposal,
     _shape_plan_nav,
@@ -402,6 +403,20 @@ def test_topic_candidates_use_code_and_doc_context() -> None:
     assert "Model Architecture" in titles
     assert "Training" in titles
     assert "Glossary" in titles
+
+
+def test_normalize_tokens_preserves_expected_token_shapes() -> None:
+    tokens = _normalize_tokens(
+        "src/train_loop-v2.py",
+        "TransformerBlock HTTPClient API + helpers",
+        "__init__ x io",
+    )
+
+    assert "train_loop-v2" in tokens
+    assert "transformerblock" in tokens
+    assert "httpclient" in tokens
+    assert "helpers" in tokens
+    assert "io" not in tokens
 
 
 def test_refine_proposal_merges_low_value_utilities_and_http_noise() -> None:

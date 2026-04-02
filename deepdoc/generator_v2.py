@@ -36,6 +36,7 @@ from .parser.base import ParsedFile, Symbol
 from .planner_v2 import DocBucket, DocPlan, RepoScan, _BucketAsPage, tracked_bucket_files
 from .prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
 from .scan_v2 import _classify_file_role
+from .openapi import parse_openapi_spec, spec_to_context_string
 
 console = Console()
 
@@ -1736,6 +1737,21 @@ class BucketGenerationEngine:
         self.validator = PageValidator(repo_root, scan)
         self.max_workers = cfg.get("max_parallel_workers", MAX_PARALLEL_WORKERS)
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
+        self._repo_file_paths = set(self.scan.file_summaries.keys())
+        self._openapi_context = self._precompute_openapi_context()
+
+    def _precompute_openapi_context(self) -> str:
+        """Parse the first available OpenAPI spec once per run."""
+        if not self.scan.has_openapi:
+            return ""
+        for spec_path in self.scan.openapi_paths:
+            spec = parse_openapi_spec(self.repo_root / spec_path)
+            if spec:
+                return (
+                    f"\n## OpenAPI Spec ({spec_path}):\n"
+                    f"{spec_to_context_string(spec)[:4000]}"
+                )
+        return ""
 
     def generate_all(self, force: bool = False) -> list[GenerationResult]:
         """Generate all pages. Returns results for each bucket.
@@ -1871,16 +1887,7 @@ class BucketGenerationEngine:
             openapi_context = ""
             hints = bucket.generation_hints or {}
             if hints.get("include_openapi") and self.scan.has_openapi:
-                from .openapi import parse_openapi_spec, spec_to_context_string
-
-                for spec_path in self.scan.openapi_paths:
-                    spec = parse_openapi_spec(self.repo_root / spec_path)
-                    if spec:
-                        openapi_context = (
-                            f"\n## OpenAPI Spec ({spec_path}):\n"
-                            f"{spec_to_context_string(spec)[:4000]}"
-                        )
-                        break
+                openapi_context = self._openapi_context
 
             # Step 3: Generate with retry
             content = self._call_with_retry(
@@ -1892,7 +1899,7 @@ class BucketGenerationEngine:
             content = fix_file_references(
                 content,
                 self.repo_root,
-                set(self.scan.file_summaries.keys()),
+                self._repo_file_paths,
                 bucket.owned_files,
             )
             content = normalize_html_code_blocks(content)
@@ -1919,7 +1926,7 @@ class BucketGenerationEngine:
                     content = fix_file_references(
                         content,
                         self.repo_root,
-                        set(self.scan.file_summaries.keys()),
+                        self._repo_file_paths,
                         bucket.owned_files,
                     )
                     content = normalize_html_code_blocks(content)

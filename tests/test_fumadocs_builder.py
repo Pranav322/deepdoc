@@ -189,6 +189,15 @@ flowchart TD
     assert 'A["GET /reports/{slug}"]' in escaped
 
 
+def test_escape_mdx_route_params_escapes_typed_route_params() -> None:
+    content = "See [GET /artists/{slug:int}/{page:int}](/get-artists-slug-int-page-int)."
+
+    escaped = escape_mdx_route_params(content)
+
+    assert "&#123;slug:int&#125;" in escaped
+    assert "&#123;page:int&#125;" in escaped
+
+
 def test_escape_mdx_text_hazards_escapes_bare_lt_in_prose_only() -> None:
     content = """- **Timeouts**: Webhook handlers must respond quickly (<5s typical).
 
@@ -204,6 +213,14 @@ Inline code: `<5s`
     assert "(&lt;5s typical)." in escaped
     assert "Inline code: `<5s`" in escaped
     assert "```md\n<5s\n```" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_lte_operator_in_jsx_text() -> None:
+    content = '<Callout type="warn">If `final_points` is missing or <=0, return 400.</Callout>'
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "&lt;=0" in escaped
 
 
 def test_escape_mdx_text_hazards_escapes_django_route_converters() -> None:

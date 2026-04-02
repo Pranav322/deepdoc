@@ -1445,7 +1445,7 @@ def escape_mdx_route_params(content: str) -> str:
 
     def escape_segment(segment: str) -> str:
         return re.sub(
-            r"(?<=/)\{([A-Za-z_][A-Za-z0-9_]*)\}",
+            r"(?<=/)\{([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)\}",
             lambda match: f"&#123;{match.group(1)}&#125;",
             segment,
         )
@@ -1588,6 +1588,7 @@ def escape_mdx_text_hazards(content: str) -> str:
                 ),
                 part,
             )
+            part = part.replace("<=", "&lt;=")
             if "|" in line:
                 part = re.sub(
                     r"(?<!`)(\[\{[^`\n]*\}\])(?!`)",

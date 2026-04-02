@@ -817,8 +817,13 @@ def _global_css(cfg: dict[str, Any]) -> str:
           align-items: start;
         }
 
+        .deepdoc-chatbot-page__grid > * {
+          min-width: 0;
+        }
+
         .deepdoc-chatbot-panel,
         .deepdoc-chatbot-sidebar {
+          min-width: 0;
           border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
           border-radius: 1.5rem;
           background: color-mix(in srgb, white 96%, var(--deepdoc-brand-light) 4%);
@@ -945,6 +950,7 @@ def _global_css(cfg: dict[str, Any]) -> str:
         }
 
         .deepdoc-chatbot-citation-list li {
+          min-width: 0;
           border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
           border-radius: 1rem;
           padding: 0.8rem 0.9rem;
@@ -955,12 +961,16 @@ def _global_css(cfg: dict[str, Any]) -> str:
           display: block;
           margin-bottom: 0.2rem;
           color: #2f120d;
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
 
         .deepdoc-chatbot-citation-list span {
           display: block;
           font-size: 0.88rem;
           color: var(--color-fd-muted-foreground);
+          overflow-wrap: anywhere;
+          word-break: break-word;
         }
 
         .deepdoc-chatbot-citation-list a,
@@ -1404,6 +1414,7 @@ def _chatbot_toggle_tsx() -> str:
             event?.preventDefault();
             const trimmed = question.trim();
             if (!trimmed) return;
+            setQuestion('');
             startTransition(() => {
               router.push(buildAskUrl(trimmed, pathname || '/'));
             });
@@ -1428,9 +1439,10 @@ def _chatbot_toggle_tsx() -> str:
                     className="deepdoc-chatbot-dock__input text-sm"
                     onChange={(event) => setQuestion(event.target.value)}
                     onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                      if (event.nativeEvent.isComposing) return;
                       if (event.key === 'Enter' && !event.shiftKey) {
                         event.preventDefault();
-                        submit();
+                        event.currentTarget.form?.requestSubmit();
                       }
                     }}
                     placeholder="Where is auth handled? How is deployment configured?"
@@ -1534,7 +1546,7 @@ def _chatbot_panel_tsx() -> str:
           const searchParams = useSearchParams();
           const question = searchParams.get('q')?.trim() ?? '';
           const from = searchParams.get('from')?.trim() || '/';
-          const [draft, setDraft] = useState(question);
+          const [draft, setDraft] = useState('');
           const [activeQuestion, setActiveQuestion] = useState(question);
           const [loading, setLoading] = useState(false);
           const [error, setError] = useState('');
@@ -1543,7 +1555,6 @@ def _chatbot_panel_tsx() -> str:
           const [loadedQuestion, setLoadedQuestion] = useState('');
 
           useEffect(() => {
-            setDraft(question);
             if (!question) {
               setActiveQuestion('');
               setLoading(false);
@@ -1599,6 +1610,7 @@ def _chatbot_panel_tsx() -> str:
             const trimmed = draft.trim();
             if (!trimmed) return;
             const nextHistory = activeQuestion && response ? history.slice(-4) : [];
+            setDraft('');
             void askQuestion(trimmed, nextHistory);
             startTransition(() => {
               router.replace(buildAskUrl(trimmed, from));
@@ -1742,9 +1754,10 @@ def _chatbot_panel_tsx() -> str:
                       className="deepdoc-chatbot-dock__input text-sm"
                       onChange={(event) => setDraft(event.target.value)}
                       onKeyDown={(event: KeyboardEvent<HTMLTextAreaElement>) => {
+                        if (event.nativeEvent.isComposing) return;
                         if (event.key === 'Enter' && !event.shiftKey) {
                           event.preventDefault();
-                          submit();
+                          event.currentTarget.form?.requestSubmit();
                         }
                       }}
                       placeholder="Ask a follow-up question"

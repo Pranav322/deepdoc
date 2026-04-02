@@ -285,6 +285,14 @@ def test_escape_mdx_text_hazards_escapes_literal_brace_ellipsis() -> None:
     assert "&#123;...&#125;" in escaped
 
 
+def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:
+    content = '| product_details | has_products | [{"prod_id":101}] |'
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert '`[{"prod_id":101}]`' in escaped
+
+
 def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
     content = """<Callout>Handler: <strong>statsHandler&lt;/strong&gt; in <code>server.js&lt;/code&gt;</Callout>
 

@@ -7,6 +7,28 @@ from click.testing import CliRunner
 from deepdoc import cli
 
 
+def test_cli_autoloads_repo_env_file(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("DEEPDOC_SAMPLE_KEY=from-dotenv\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.delenv("DEEPDOC_SAMPLE_KEY", raising=False)
+
+    result = CliRunner().invoke(cli.main, ["clean", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert cli.os.environ["DEEPDOC_SAMPLE_KEY"] == "from-dotenv"
+
+
+def test_cli_repo_env_does_not_override_existing_exports(monkeypatch, tmp_path: Path) -> None:
+    (tmp_path / ".env").write_text("DEEPDOC_SAMPLE_KEY=from-dotenv\n", encoding="utf-8")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DEEPDOC_SAMPLE_KEY", "from-shell")
+
+    result = CliRunner().invoke(cli.main, ["clean", "--yes"])
+
+    assert result.exit_code == 0, result.output
+    assert cli.os.environ["DEEPDOC_SAMPLE_KEY"] == "from-shell"
+
+
 def test_clean_removes_deepdoc_artifacts_and_config(monkeypatch, tmp_path: Path) -> None:
     repo_root = tmp_path
     output_dir = repo_root / "documentation"

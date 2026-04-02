@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import shlex
 import socket
 import subprocess
 import sys
@@ -46,8 +47,66 @@ def main(ctx: click.Context) -> None:
 
     Use `deepdoc <command> --help` for examples and next-step guidance.
     """
+    _autoload_repo_env(Path.cwd())
     if ctx.invoked_subcommand is None:
         click.echo(ctx.get_help())
+
+
+def _find_repo_env_file(start: Path) -> Path | None:
+    """Walk upward to find the nearest .env file."""
+    for directory in [start, *start.parents]:
+        candidate = directory / ".env"
+        if candidate.exists() and candidate.is_file():
+            return candidate
+    return None
+
+
+def _parse_env_assignment(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("#"):
+        return None
+    if stripped.startswith("export "):
+        stripped = stripped[7:].strip()
+    if "=" not in stripped:
+        return None
+
+    key, raw_value = stripped.split("=", 1)
+    key = key.strip()
+    if not key:
+        return None
+
+    raw_value = raw_value.strip()
+    if not raw_value:
+        return key, ""
+
+    try:
+        parts = shlex.split(raw_value, posix=True)
+        if parts:
+            return key, parts[0]
+    except ValueError:
+        pass
+
+    if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
+        return key, raw_value[1:-1]
+    return key, raw_value
+
+
+def _autoload_repo_env(start: Path) -> Path | None:
+    """Load the nearest repo .env file into process env without overriding exports."""
+    env_path = _find_repo_env_file(start)
+    if env_path is None:
+        return None
+
+    try:
+        for line in env_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            parsed = _parse_env_assignment(line)
+            if not parsed:
+                continue
+            key, value = parsed
+            os.environ.setdefault(key, value)
+    except OSError:
+        return None
+    return env_path
 
 
 # ─────────────────────────────────────────────────────────────────────────────

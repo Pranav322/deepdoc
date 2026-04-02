@@ -49,7 +49,7 @@ The base install does not include chatbot dependencies.
 ### From source (recommended during development)
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/tss-pranavkumar/deepdoc.git
 cd deepdoc
 pip install -e .
 ```

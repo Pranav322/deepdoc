@@ -293,6 +293,14 @@ def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:
     assert '`[{"prod_id":101}]`' in escaped
 
 
+def test_escape_mdx_text_hazards_escapes_generic_types_inside_inline_code_table_cells() -> None:
+    content = '| fn | returns |\n|---|---|\n| `save()` | `Promise<object|boolean>` |'
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert '`Promise&lt;object|boolean&gt;`' in escaped
+
+
 def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
     content = """<Callout>Handler: <strong>statsHandler&lt;/strong&gt; in <code>server.js&lt;/code&gt;</Callout>
 

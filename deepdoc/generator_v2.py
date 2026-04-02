@@ -1467,6 +1467,17 @@ def escape_mdx_route_params(content: str) -> str:
             part if part.startswith("`") and part.endswith("`") else escape_segment(part)
             for part in parts
         )
+        if "|" in line:
+            escaped = re.sub(
+                r"`([A-Za-z_][A-Za-z0-9_]*)&lt;([^`]+)&gt;`",
+                r"`\1<\2>`",
+                escaped,
+            )
+            escaped = re.sub(
+                r"`([A-Za-z_][A-Za-z0-9_]*)<([^`\n]+)>`",
+                lambda match: f"`{match.group(1)}&lt;{match.group(2)}&gt;`",
+                escaped,
+            )
         lines.append(escaped)
 
     return "\n".join(lines)
@@ -1541,6 +1552,16 @@ def escape_mdx_text_hazards(content: str) -> str:
             continue
 
         parts = re.split(r"(`[^`]*`)", line)
+
+        def normalize_code_span(part: str) -> str:
+            if "|" not in line:
+                return part
+            return re.sub(
+                r"`([A-Za-z_][A-Za-z0-9_]*)<([^`\n]+)>`",
+                lambda match: f"`{match.group(1)}&lt;{match.group(2)}&gt;`",
+                part,
+            )
+
         def escape_segment(part: str) -> str:
             part = re.sub(
                 r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)&gt;",
@@ -1577,7 +1598,9 @@ def escape_mdx_text_hazards(content: str) -> str:
             return part
 
         escaped = "".join(
-            part if part.startswith("`") and part.endswith("`") else escape_segment(part)
+            normalize_code_span(part)
+            if part.startswith("`") and part.endswith("`")
+            else escape_segment(part)
             for part in parts
         )
         lines.append(escaped)

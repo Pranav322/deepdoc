@@ -70,5 +70,7 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert "ReactMarkdown" in panel
     assert "Back to docs" in panel
     assert "router.replace(buildAskUrl(trimmed, from))" in panel
+    assert "useRef" in panel
+    assert "latestRequestIdRef" in panel
     assert "usePathname" in toggle
     assert "Chatbot backend URL is not configured." in panel

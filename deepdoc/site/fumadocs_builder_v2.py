@@ -1467,7 +1467,7 @@ def _chatbot_panel_tsx() -> str:
         'use client';
 
         import Link from 'next/link';
-        import { startTransition, useEffect, useState, type FormEvent, type KeyboardEvent } from 'react';
+        import { startTransition, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
         import { useRouter, useSearchParams } from 'next/navigation';
         import ReactMarkdown from 'react-markdown';
         import { chatbotConfig } from '@/lib/chatbot-config';
@@ -1553,9 +1553,11 @@ def _chatbot_panel_tsx() -> str:
           const [response, setResponse] = useState<ChatResponse | null>(null);
           const [history, setHistory] = useState<ChatHistoryItem[]>([]);
           const [loadedQuestion, setLoadedQuestion] = useState('');
+          const latestRequestIdRef = useRef(0);
 
           useEffect(() => {
             if (!question) {
+              latestRequestIdRef.current += 1;
               setActiveQuestion('');
               setLoading(false);
               setError('');
@@ -1574,6 +1576,8 @@ def _chatbot_panel_tsx() -> str:
               setError('Chatbot backend URL is not configured.');
               return;
             }
+            const requestId = latestRequestIdRef.current + 1;
+            latestRequestIdRef.current = requestId;
             setLoadedQuestion(nextQuestion);
             setLoading(true);
             setError('');
@@ -1591,6 +1595,9 @@ def _chatbot_panel_tsx() -> str:
                 throw new Error(`Request failed with ${res.status}`);
               }
               const data = (await res.json()) as ChatResponse;
+              if (latestRequestIdRef.current != requestId) {
+                return;
+              }
               setActiveQuestion(nextQuestion);
               setResponse(data);
               setHistory([
@@ -1599,9 +1606,14 @@ def _chatbot_panel_tsx() -> str:
                 { role: 'assistant', content: data.answer },
               ]);
             } catch (err) {
+              if (latestRequestIdRef.current != requestId) {
+                return;
+              }
               setError(err instanceof Error ? err.message : 'Chatbot unavailable');
             } finally {
-              setLoading(false);
+              if (latestRequestIdRef.current == requestId) {
+                setLoading(false);
+              }
             }
           }
 

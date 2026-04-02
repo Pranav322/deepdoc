@@ -513,6 +513,25 @@ deepdoc serve
 ```
 
 `deepdoc serve` auto-starts the chatbot backend alongside the Fumadocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
+### use this ready to go config 
+```
+deepdoc config set llm.provider azure                                            
+deepdoc config set llm.model azure/gpt-4.1
+deepdoc config set llm.api_key_env AZURE_OPENAI_API_KEY
+deepdoc config set llm.base_url https://aiservices-orizn.openai.azure.com/
+
+deepdoc config set chatbot.enabled true
+
+deepdoc config set chatbot.answer.api_key_env AZURE_OPENAI_API_KEY
+deepdoc config set chatbot.answer.base_url https://aiservices-orizn.openai.azure.com/
+deepdoc config set chatbot.answer.api_version 2024-02-15-preview
+deepdoc config set chatbot.answer.model azure/gpt-4.1
+
+deepdoc config set chatbot.embeddings.api_key_env AZURE_EMBEDDING_API_KEY
+deepdoc config set chatbot.embeddings.base_url https://prod-chatbot-1.cognitiveservices.azure.com/
+deepdoc config set chatbot.embeddings.api_version 2024-12-01-preview
+deepdoc config set chatbot.embeddings.model azure/text-embedding-3-small
+```
 
 ### Installation
 

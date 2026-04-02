@@ -53,7 +53,9 @@ class LiteLLMEmbeddingClient:
 
     def __init__(self, service_cfg: dict[str, Any]) -> None:
         self.service_cfg = service_cfg
-        self.batch_size = service_cfg.get("batch_size", 24)
+        provider = (service_cfg.get("provider") or "").lower()
+        default_batch_size = 1 if provider == "azure" else 24
+        self.batch_size = service_cfg.get("batch_size", default_batch_size)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
@@ -115,7 +117,12 @@ class LiteLLMEmbeddingClient:
     def _trim_text_for_retry(self, text: str) -> str:
         if len(text) <= 1200:
             return text
-        budget = min(MAX_CHUNK_CHARS, max(int(len(text) * 0.75), 1200))
+        provider = (self.service_cfg.get("provider") or "").lower()
+        if provider == "azure":
+            safe_cap = 2800
+            budget = min(safe_cap, max(int(len(text) * 0.5), 1200))
+        else:
+            budget = min(MAX_CHUNK_CHARS, max(int(len(text) * 0.75), 1200))
         if budget >= len(text):
             return text
         trimmed = text[:budget].rstrip()

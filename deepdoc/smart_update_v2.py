@@ -48,6 +48,7 @@ from .persistence_v2 import (
 from .planner_v2 import DocPlan, DocBucket, tracked_bucket_files
 from .chatbot.chunker import is_artifact_file_path
 from .chatbot.settings import chatbot_enabled
+from .chatbot.indexer import chatbot_index_needs_refresh
 
 console = Console()
 
@@ -180,6 +181,10 @@ class SmartUpdater:
         self._print_change_set(change_set)
         stats["changes"] = change_set.total_changes
         stats["strategy"] = change_set.strategy
+        chatbot_recovery_needed = chatbot_enabled(self.cfg) and chatbot_index_needs_refresh(
+            self.repo_root,
+            self.cfg,
+        )
 
         if engine_mismatch:
             console.print(
@@ -189,6 +194,12 @@ class SmartUpdater:
             stats["strategy"] = "full_replan"
         elif force_replan:
             change_set_strategy = "full_replan"
+        elif change_set.strategy == "noop" and chatbot_recovery_needed:
+            console.print(
+                "[yellow]Chatbot index is incomplete; refreshing missing corpora only.[/yellow]"
+            )
+            change_set_strategy = "incremental"
+            stats["strategy"] = "incremental"
         else:
             change_set_strategy = change_set.strategy
 

@@ -54,3 +54,18 @@ def test_embedding_client_trims_single_oversized_text_on_retry(monkeypatch) -> N
     assert len(calls) >= 2
     assert len(calls[-1]) < len(calls[0])
     assert calls[-1].endswith("... [truncated for embedding]")
+
+
+def test_embedding_client_defaults_to_single_item_batches_for_azure() -> None:
+    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small"})
+
+    assert client.batch_size == 1
+
+
+def test_embedding_client_uses_more_aggressive_trim_budget_for_azure() -> None:
+    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 1})
+
+    trimmed = client._trim_text_for_retry("x" * 5000)
+
+    assert len(trimmed) < 3200
+    assert trimmed.endswith("... [truncated for embedding]")

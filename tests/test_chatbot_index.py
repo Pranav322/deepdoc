@@ -2,8 +2,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from deepdoc.chatbot.indexer import ChatbotIndexer
+from deepdoc.chatbot.persistence import load_corpus, save_corpus
 from deepdoc.chatbot.chunker import build_artifact_chunks, build_code_chunks
 from deepdoc.chatbot.docs_summary import build_doc_summary_chunks
+from deepdoc.chatbot.types import ChunkRecord
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner_v2 import RepoScan
 from tests.conftest import make_bucket, make_plan
@@ -104,3 +107,54 @@ def test_doc_summary_chunks_are_deterministic(tmp_path: Path) -> None:
     assert chunks[0].kind == "doc_summary"
     assert chunks[0].doc_url == "/"
     assert any("Architecture" in chunk.text for chunk in chunks)
+
+
+def test_incremental_sync_recovers_missing_doc_corpus(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+    (output_dir / "index.mdx").write_text(
+        "# Demo\n\nWelcome aboard.\n\n## Architecture\n\nAuth flows through middleware.\n",
+        encoding="utf-8",
+    )
+
+    overview = make_bucket(
+        "Overview",
+        "overview",
+        ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    plan = make_plan([overview])
+    scan = _scan_for(tmp_path)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="demo code",
+                chunk_hash="hashc1",
+                file_path="src/auth.py",
+            )
+        ],
+        [[1.0]],
+    )
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return [[float(len(text))] for text in texts]
+
+    monkeypatch.setattr("deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient())
+
+    indexer = ChatbotIndexer(repo_root, {"chatbot": {"enabled": True}})
+    stats = indexer.sync_incremental(plan=plan, scan=scan, output_dir=output_dir)
+
+    assert stats["doc_chunks"] >= 1
+    doc_records, doc_vectors = load_corpus(index_dir, "doc_summary")
+    assert len(doc_records) == stats["doc_chunks"]
+    assert len(doc_vectors) == len(doc_records)

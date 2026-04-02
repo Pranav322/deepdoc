@@ -14,7 +14,7 @@ from .chunker import (
     is_artifact_file_path,
 )
 from .docs_summary import build_doc_summary_chunks
-from .persistence import load_corpus, save_corpus
+from .persistence import corpus_paths, load_corpus, save_corpus
 from .providers import build_embedding_client
 from .scaffold import scaffold_chatbot_backend
 from .settings import chatbot_index_dir, get_chatbot_cfg, service_model_identity
@@ -93,6 +93,20 @@ class ChatbotIndexer:
             else []
         )
 
+        # If a previous full sync failed midway, recover any corpus that is
+        # still missing even when there are no changed files for it.
+        if self._corpus_needs_rebuild("code"):
+            code_records = build_code_chunks(scan, plan, self.cfg)
+        if self._corpus_needs_rebuild("artifact"):
+            artifact_records = build_artifact_chunks(self.repo_root, scan, plan, output_dir, self.cfg)
+        if self._corpus_needs_rebuild("doc_summary"):
+            doc_records = build_doc_summary_chunks(
+                output_dir,
+                plan,
+                self.cfg,
+                has_openapi=has_openapi,
+            )
+
         self._merge_records("code", code_records, changed_keys=code_targets, deleted_keys=deleted_files)
         self._merge_records("artifact", artifact_records, changed_keys=artifact_targets, deleted_keys=deleted_files)
         deleted_doc_paths = [f"{slug}.mdx" for slug in deleted_files if slug.endswith(".mdx")]
@@ -140,3 +154,23 @@ class ChatbotIndexer:
         merged_vectors = kept_vectors + new_vectors
         meta = {"embedding_model": service_model_identity(self.chatbot_cfg["embeddings"])}
         save_corpus(self.index_dir, corpus, merged_records, merged_vectors, meta=meta)
+
+    def _corpus_needs_rebuild(self, corpus: str) -> bool:
+        paths = corpus_paths(self.index_dir, corpus)
+        if not paths["chunks"].exists() or not paths["vectors"].exists() or not paths["meta"].exists():
+            return True
+
+        records, vectors = load_corpus(self.index_dir, corpus)
+        try:
+            vector_count = int(getattr(vectors, "shape", [len(vectors)])[0])
+        except Exception:
+            vector_count = len(vectors)
+        if not records:
+            return vector_count != 0
+        return vector_count != len(records)
+
+
+def chatbot_index_needs_refresh(repo_root: Path, cfg: dict[str, Any]) -> bool:
+    """Return whether any chatbot corpus is missing or inconsistent."""
+    indexer = ChatbotIndexer(repo_root, cfg)
+    return any(indexer._corpus_needs_rebuild(corpus) for corpus in ("code", "artifact", "doc_summary"))

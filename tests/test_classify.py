@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
-from deepdoc.smart_update_v2 import SmartUpdater, ChangeSet, REPLAN_THRESHOLD
+import git as _git
+
+from deepdoc.smart_update_v2 import SmartUpdater, ChangeSet, REPLAN_THRESHOLD, UpdateRunResult
 
 from .conftest import _run_git, make_bucket, make_plan
 
@@ -149,8 +151,6 @@ def test_noop_when_nothing_changed(tmp_repo_with_plan):
     # HEAD~1..HEAD is the initial commit range — but since the plan's files
     # match the ledger hashes exactly, there should be no changes.
     # Use a commit that IS HEAD to get an empty diff.
-    import git as _git
-
     repo = _git.Repo(root)
     cs = updater._classify_changes(plan, repo.head.commit.hexsha)
 
@@ -159,3 +159,31 @@ def test_noop_when_nothing_changed(tmp_repo_with_plan):
     assert cs.deleted_files == []
     assert cs.orphaned_bucket_slugs == []
     assert cs.strategy == "noop"
+
+
+def test_update_recovers_chatbot_index_even_when_repo_changes_are_noop(tmp_repo_with_plan, monkeypatch):
+    root, _plan = tmp_repo_with_plan
+
+    updater = SmartUpdater(
+        root,
+        {
+            "output_dir": "docs",
+            "llm": {"provider": "anthropic", "model": "test"},
+            "chatbot": {"enabled": True},
+        },
+    )
+
+    called = {"incremental": 0}
+
+    def _fake_incremental(plan, change_set):
+        called["incremental"] += 1
+        return UpdateRunResult(strategy="incremental", pages_updated=0, pages_failed=0, pages_skipped=0)
+
+    monkeypatch.setattr(updater, "_incremental_update", _fake_incremental)
+    monkeypatch.setattr(updater, "_save_update_sync_state", lambda **kwargs: None)
+
+    repo = _git.Repo(root)
+    stats = updater.update(since=repo.head.commit.hexsha)
+
+    assert called["incremental"] == 1
+    assert stats["strategy"] == "incremental"

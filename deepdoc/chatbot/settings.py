@@ -35,7 +35,7 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "api_key_env": "DEEPDOC_EMBED_API_KEY",
         "base_url": "",
         "api_version": "",
-        "batch_size": 24,
+        "batch_size": 1,
     },
     "vector_store": {
         "kind": "faiss",

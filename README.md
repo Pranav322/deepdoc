@@ -126,6 +126,8 @@ deepdoc init --provider openai --model gpt-4o
 deepdoc init --provider ollama --model ollama/llama3.2
 deepdoc init --provider azure --model azure/gpt-4o
 deepdoc init --output-dir documentation
+deepdoc init --with-chatbot
+deepdoc init --provider openai --with-chatbot
 ```
 
 **Options:**
@@ -137,6 +139,7 @@ deepdoc init --output-dir documentation
 | `--provider` | `anthropic` | LLM provider: `anthropic`, `openai`, `ollama`, `azure` |
 | `--model` | provider default | Model name |
 | `--output-dir` | `docs` | Where generated docs are written |
+| `--with-chatbot` | off | Enable chatbot scaffolding and indexing (see [Chatbot](#chatbot) section) |
 
 ### `deepdoc generate`
 
@@ -485,6 +488,266 @@ site:
 | `site.repo_url` | `""` | Repo URL shown in the generated Fumadocs navigation |
 | `site.favicon` | `""` | Path to favicon |
 | `site.logo` | `""` | Path to logo |
+
+---
+
+## Chatbot
+
+DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using RAG (Retrieval-Augmented Generation). The chatbot indexes your source code, config artifacts, and generated docs into a FAISS vector store, then serves a FastAPI backend that your Fumadocs site talks to.
+
+### Quick Start
+
+```bash
+# 1. Initialize with chatbot enabled
+deepdoc init --with-chatbot
+
+# 2. Set chatbot-specific API keys
+export DEEPDOC_CHAT_API_KEY=your-answer-model-key
+export DEEPDOC_EMBED_API_KEY=your-embedding-model-key
+
+# 3. Generate docs + chatbot indexes
+deepdoc generate
+
+# 4. Serve docs + chatbot backend locally
+deepdoc serve
+```
+
+`deepdoc serve` auto-starts the chatbot backend alongside the Fumadocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
+
+### Installation
+
+The chatbot requires extra dependencies not included in the base install:
+
+```bash
+# From PyPI
+pip install "deepdoc[chatbot]"
+
+# From source (development)
+pip install -e ".[chatbot]"
+```
+
+Extra dependencies: `numpy`, `faiss-cpu`, `fastapi`, `uvicorn`, `httpx`.
+
+Verify the chatbot extras are installed:
+
+```bash
+pip show faiss-cpu fastapi uvicorn
+```
+
+### Chatbot Configuration
+
+All chatbot settings live under the `chatbot` key in `.deepdoc.yaml`. Running `deepdoc init --with-chatbot` populates these defaults:
+
+```yaml
+chatbot:
+  enabled: true
+  index_dir: ".deepdoc/chatbot"
+
+  backend:
+    base_url: ""                              # Leave empty for auto-assigned local port
+    allowed_origins:
+      - "http://localhost:3000"
+      - "http://127.0.0.1:3000"
+
+  answer:                                     # LLM used for answering user questions
+    provider: "azure"
+    model: "azure/gpt-4o-mini"
+    api_key_env: "DEEPDOC_CHAT_API_KEY"
+    base_url: ""
+    api_version: ""
+    temperature: 0.1
+    max_tokens: 1200
+
+  embeddings:                                 # LLM used for embedding code/docs
+    provider: "azure"
+    model: "azure/text-embedding-3-large"
+    api_key_env: "DEEPDOC_EMBED_API_KEY"
+    base_url: ""
+    api_version: ""
+    batch_size: 1
+
+  vector_store:
+    kind: "faiss"
+
+  retrieval:
+    top_k_code: 8
+    top_k_artifact: 4
+    top_k_docs: 3
+    max_prompt_code_chunks: 6
+    max_prompt_artifact_chunks: 3
+    max_prompt_doc_chunks: 2
+    max_prompt_chars: 200000
+    query_expansion: true
+    expansion_max_queries: 3
+    rerank: true
+    rerank_candidate_limit: 20
+
+  chunking:
+    code_chunk_lines: 120
+    code_chunk_overlap: 20
+    artifact_chunk_lines: 140
+    artifact_chunk_overlap: 20
+    max_doc_summary_chunks_per_page: 2
+    max_doc_summary_chars: 1800
+```
+
+### Chatbot Configuration Reference
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| **General** | | |
+| `chatbot.enabled` | `false` | Enable chatbot indexing and backend |
+| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for vector indexes and chunk data |
+| **Backend** | | |
+| `chatbot.backend.base_url` | `""` | External backend URL. Leave empty for auto-assigned local port |
+| `chatbot.backend.allowed_origins` | `[localhost:3000, 127.0.0.1:3000]` | CORS origins the backend accepts |
+| **Answer LLM** | | |
+| `chatbot.answer.provider` | `azure` | Provider for the answer model |
+| `chatbot.answer.model` | `azure/gpt-4o-mini` | Model used to generate answers |
+| `chatbot.answer.api_key_env` | `DEEPDOC_CHAT_API_KEY` | Env var holding the answer model API key |
+| `chatbot.answer.base_url` | `""` | Custom endpoint (for Azure, Ollama, etc.) |
+| `chatbot.answer.api_version` | `""` | Azure API version string |
+| `chatbot.answer.temperature` | `0.1` | Sampling temperature (lower = more deterministic) |
+| `chatbot.answer.max_tokens` | `1200` | Max tokens per answer |
+| **Embeddings LLM** | | |
+| `chatbot.embeddings.provider` | `azure` | Provider for the embedding model |
+| `chatbot.embeddings.model` | `azure/text-embedding-3-large` | Embedding model |
+| `chatbot.embeddings.api_key_env` | `DEEPDOC_EMBED_API_KEY` | Env var holding the embedding API key |
+| `chatbot.embeddings.base_url` | `""` | Custom endpoint |
+| `chatbot.embeddings.api_version` | `""` | Azure API version string |
+| `chatbot.embeddings.batch_size` | `1` | Texts per embedding API call. Use `24` for OpenAI |
+| **Retrieval** | | |
+| `chatbot.retrieval.top_k_code` | `8` | Top code chunks retrieved per query |
+| `chatbot.retrieval.top_k_artifact` | `4` | Top artifact chunks retrieved per query |
+| `chatbot.retrieval.top_k_docs` | `3` | Top doc summary chunks retrieved per query |
+| `chatbot.retrieval.max_prompt_code_chunks` | `6` | Max code chunks included in the final prompt |
+| `chatbot.retrieval.max_prompt_artifact_chunks` | `3` | Max artifact chunks in the final prompt |
+| `chatbot.retrieval.max_prompt_doc_chunks` | `2` | Max doc chunks in the final prompt |
+| `chatbot.retrieval.max_prompt_chars` | `200000` | Total character budget for the assembled prompt |
+| `chatbot.retrieval.query_expansion` | `true` | Use LLM to generate alternative search queries |
+| `chatbot.retrieval.expansion_max_queries` | `3` | Number of alternative queries to generate |
+| `chatbot.retrieval.rerank` | `true` | Use LLM to rerank retrieved chunks |
+| `chatbot.retrieval.rerank_candidate_limit` | `20` | Max candidates sent to the reranker |
+| **Chunking** | | |
+| `chatbot.chunking.code_chunk_lines` | `120` | Lines per code chunk |
+| `chatbot.chunking.code_chunk_overlap` | `20` | Overlap lines between code chunks |
+| `chatbot.chunking.artifact_chunk_lines` | `140` | Lines per artifact chunk |
+| `chatbot.chunking.artifact_chunk_overlap` | `20` | Overlap lines between artifact chunks |
+| `chatbot.chunking.max_doc_summary_chunks_per_page` | `2` | Doc summary chunks extracted per page |
+| `chatbot.chunking.max_doc_summary_chars` | `1800` | Max chars per doc summary chunk |
+
+### Chatbot Provider Examples
+
+The chatbot's `answer` and `embeddings` sections are configured independently from the main `llm` section, so you can use different providers for doc generation vs. chatbot.
+
+**Azure (default):**
+
+```yaml
+chatbot:
+  answer:
+    provider: "azure"
+    model: "azure/gpt-4o-mini"
+    base_url: "https://YOUR-RESOURCE.openai.azure.com/"
+    api_version: "2024-08-01-preview"
+    api_key_env: "DEEPDOC_CHAT_API_KEY"
+  embeddings:
+    provider: "azure"
+    model: "azure/text-embedding-3-large"
+    base_url: "https://YOUR-RESOURCE.openai.azure.com/"
+    api_version: "2024-08-01-preview"
+    api_key_env: "DEEPDOC_EMBED_API_KEY"
+```
+
+**OpenAI:**
+
+```yaml
+chatbot:
+  answer:
+    provider: "openai"
+    model: "gpt-4o-mini"
+    api_key_env: "DEEPDOC_CHAT_API_KEY"
+  embeddings:
+    provider: "openai"
+    model: "text-embedding-3-large"
+    api_key_env: "DEEPDOC_EMBED_API_KEY"
+    batch_size: 24                            # OpenAI supports larger batches
+```
+
+**Anthropic:**
+
+```yaml
+chatbot:
+  answer:
+    provider: "anthropic"
+    model: "claude-3-5-sonnet-20241022"
+    api_key_env: "DEEPDOC_CHAT_API_KEY"
+  embeddings:
+    provider: "openai"                        # Anthropic doesn't offer embedding models
+    model: "text-embedding-3-large"
+    api_key_env: "DEEPDOC_EMBED_API_KEY"
+```
+
+### How Chatbot Indexing Works
+
+During `deepdoc generate`, three corpora are built and stored in `.deepdoc/chatbot/`:
+
+| Corpus | Source | Description |
+|--------|--------|-------------|
+| **Code chunks** | All parsed source files | Code split by line count with overlap, tagged with symbols and file paths |
+| **Artifact chunks** | Config files (Dockerfile, package.json, OpenAPI specs, etc.) | Non-code project files split similarly |
+| **Doc summary chunks** | Generated documentation pages | First sections extracted from each generated MDX page |
+
+`deepdoc update` incrementally syncs the chatbot indexes — only changed files and regenerated doc pages are re-indexed.
+
+### Chatbot Query Pipeline
+
+When a user asks a question, the backend runs a multi-step retrieval pipeline:
+
+1. **Query expansion** — The LLM generates up to 3 alternative search queries to improve recall.
+2. **Embedding** — All queries are embedded using the configured embedding model.
+3. **Similarity search** — FAISS finds the top-K most similar chunks from each corpus.
+4. **Reranking** — The LLM scores and reranks the retrieved chunks for relevance.
+5. **Prompt assembly** — The best chunks are packed into a prompt within the character budget.
+6. **Answer generation** — The answer LLM produces a grounded response with code citations and doc links.
+
+### Chatbot API Endpoints
+
+The generated `chatbot_backend/` exposes two endpoints:
+
+**Health check:**
+```
+GET /health → { "status": "ok" }
+```
+
+**Query:**
+```
+POST /query
+{
+  "question": "How does authentication work?",
+  "history": [
+    { "role": "user", "content": "What endpoints exist?" },
+    { "role": "assistant", "content": "..." }
+  ]
+}
+```
+
+The response includes the answer text, code citations (file path + line range), artifact citations, and links to relevant generated doc pages.
+
+### Deploying the Chatbot
+
+For local development, `deepdoc serve` handles everything automatically. For production:
+
+1. Deploy the Fumadocs static site (`site/out/`) to any static host.
+2. Deploy `chatbot_backend/` separately to a Python-capable host.
+3. Set `chatbot.backend.base_url` in `.deepdoc.yaml` to point at the deployed backend URL.
+4. Rebuild the site so the frontend picks up the new backend URL: `deepdoc deploy`.
+
+### Cleaning Up Chatbot Files
+
+```bash
+deepdoc clean          # Removes chatbot_backend/, .deepdoc/chatbot/, and other generated state
+deepdoc clean --yes    # Skip confirmation prompt
+```
 
 ---
 

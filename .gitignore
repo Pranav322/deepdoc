@@ -32,8 +32,11 @@ deepdoc.egg-info/
 pytest-cache-files-7ktathll
 .claude/
 
+
 # DeepDoc
 .deepdoc/chatbot/
 .deepdoc_manifest.json
 future.txt
+site/
+
 

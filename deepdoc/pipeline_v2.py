@@ -1055,6 +1055,24 @@ class PipelineV2:
                     lambda m: f'{m.group(1)}["{m.group(2)}"]',
                     line,
                 )
+                line = re.sub(
+                    r'^(\s*)([A-Za-z][\w-]*)\s*--\s*"([^"]+)"\s*-->\s*([A-Za-z][\w-]*)\s*$',
+                    lambda m: f"{m.group(1)}{m.group(2)} -->|{m.group(3)}| {m.group(4)}",
+                    line,
+                )
+                line = re.sub(
+                    r'^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$',
+                    lambda m: f"{m.group(1)}{m.group(3)} --> {m.group(2)}",
+                    line,
+                )
+                line = re.sub(
+                    r'^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$',
+                    lambda m: (
+                        f"{m.group(1)}{m.group(2)} --> {m.group(3)}\n"
+                        f"{m.group(1)}{m.group(3)} --> {m.group(2)}"
+                    ),
+                    line,
+                )
 
             # Fix 2: Node labels with colons not in quotes (breaks mermaid parser)
             # A[label: value] → A["label: value"]
@@ -1074,12 +1092,24 @@ class PipelineV2:
             # Fix 4: classDiagram method arrows that use -> instead of --
             if diagram_type == "classdiagram":
                 line = re.sub(r"\s+->\s+", " --> ", line)
+                line = re.sub(
+                    r'(-->\s+)"([A-Za-z][A-Za-z0-9_]*)"',
+                    r"\1\2",
+                    line,
+                )
 
             # Fix 5: sequenceDiagram participants emitted with flowchart node syntax
             if diagram_type == "sequencediagram":
                 line = re.sub(
                     r'^(\s*participant\s+)([A-Za-z][\w-]*)\["([^"]+)"\]\s*$',
                     lambda m: f"{m.group(1)}{m.group(2)} as {m.group(3)}",
+                    line,
+                )
+
+            if diagram_type in ("statediagram", "statediagram-v2"):
+                line = re.sub(
+                    r'"([A-Za-z][A-Za-z0-9_]*)"',
+                    r"\1",
                     line,
                 )
 

@@ -84,6 +84,8 @@ class ChatbotQueryService:
                     "start_line": hit.record.start_line,
                     "end_line": hit.record.end_line,
                     "symbol_names": hit.record.symbol_names,
+                    "text": hit.record.text,
+                    "language": hit.record.language,
                 }
                 for hit in selected_code
             ],
@@ -93,6 +95,8 @@ class ChatbotQueryService:
                     "start_line": hit.record.start_line,
                     "end_line": hit.record.end_line,
                     "artifact_type": hit.record.artifact_type,
+                    "text": hit.record.text,
+                    "language": hit.record.language,
                 }
                 for hit in selected_artifacts
             ],

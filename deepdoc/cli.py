@@ -563,12 +563,20 @@ def serve(port):
             backend_proc, backend_url = _start_chatbot_backend(repo_root, cfg, port)
             if backend_url:
                 next_env["NEXT_PUBLIC_DEEPDOC_CHATBOT_BASE_URL"] = backend_url
-        if not (site_dir / "node_modules").exists():
+        if _site_dependencies_need_install(site_dir):
             console.print("[dim]Installing site dependencies...[/dim]")
             install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
             if install.returncode != 0:
                 console.print("[red]npm install failed.[/red]")
                 sys.exit(1)
+
+        # Auto-open browser after a short delay to let Next.js start
+        import threading, webbrowser
+        def _open_browser():
+            import time
+            time.sleep(3)
+            webbrowser.open(preview_url)
+        threading.Thread(target=_open_browser, daemon=True).start()
 
         subprocess.run(
             ["npx", "next", "dev", "--port", str(port)],
@@ -631,7 +639,7 @@ def _deploy():
     # Offer to run a static build
     console.print("\n[dim]Running static build...[/dim]")
     try:
-        if not (site_dir / "node_modules").exists():
+        if _site_dependencies_need_install(site_dir):
             console.print("[dim]Installing site dependencies...[/dim]")
             install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
             if install.returncode != 0:
@@ -650,6 +658,23 @@ def _deploy():
     except FileNotFoundError:
         console.print("[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
         sys.exit(1)
+
+
+def _site_dependencies_need_install(site_dir: Path) -> bool:
+    """Return True when site dependencies are missing or stale."""
+    node_modules = site_dir / "node_modules"
+    package_json = site_dir / "package.json"
+    package_lock = site_dir / "package-lock.json"
+
+    if not node_modules.exists():
+        return True
+    if not package_lock.exists():
+        return True
+
+    try:
+        return package_json.stat().st_mtime > package_lock.stat().st_mtime
+    except FileNotFoundError:
+        return True
 
 
 # ─────────────────────────────────────────────────────────────────────────────

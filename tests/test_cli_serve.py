@@ -1,8 +1,46 @@
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from deepdoc import cli
+
+
+def test_site_dependencies_need_install_when_lockfile_missing(tmp_path: Path) -> None:
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "package.json").write_text("{}", encoding="utf-8")
+    (site_dir / "node_modules").mkdir()
+
+    assert cli._site_dependencies_need_install(site_dir) is True
+
+
+def test_site_dependencies_need_install_when_package_json_is_newer(tmp_path: Path) -> None:
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    package_json = site_dir / "package.json"
+    package_lock = site_dir / "package-lock.json"
+    (site_dir / "node_modules").mkdir()
+    package_lock.write_text("{}", encoding="utf-8")
+    package_json.write_text("{}", encoding="utf-8")
+    os.utime(package_lock, (1, 1))
+    os.utime(package_json, (2, 2))
+
+    assert cli._site_dependencies_need_install(site_dir) is True
+
+
+def test_site_dependencies_need_install_false_when_lockfile_is_current(tmp_path: Path) -> None:
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    package_json = site_dir / "package.json"
+    package_lock = site_dir / "package-lock.json"
+    (site_dir / "node_modules").mkdir()
+    package_json.write_text("{}", encoding="utf-8")
+    package_lock.write_text("{}", encoding="utf-8")
+    os.utime(package_json, (1, 1))
+    os.utime(package_lock, (2, 2))
+
+    assert cli._site_dependencies_need_install(site_dir) is False
 
 
 def test_find_available_loopback_port_skips_busy_port(monkeypatch) -> None:

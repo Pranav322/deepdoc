@@ -1340,6 +1340,24 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 ),
                 line,
             )
+            line = re.sub(
+                r'^(\s*)([A-Za-z][\w-]*)\s*--\s*"([^"]+)"\s*-->\s*([A-Za-z][\w-]*)\s*$',
+                lambda m: f"{m.group(1)}{m.group(2)} -->|{m.group(3)}| {m.group(4)}",
+                line,
+            )
+            line = re.sub(
+                r'^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$',
+                lambda m: f"{m.group(1)}{m.group(3)} --> {m.group(2)}",
+                line,
+            )
+            line = re.sub(
+                r'^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$',
+                lambda m: (
+                    f"{m.group(1)}{m.group(2)} --> {m.group(3)}\n"
+                    f"{m.group(1)}{m.group(3)} --> {m.group(2)}"
+                ),
+                line,
+            )
 
         # Fix: Node labels with colons not in quotes
         line = re.sub(
@@ -1361,6 +1379,11 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 line,
             )
             line = re.sub(
+                r'(-->\s+)"([A-Za-z][A-Za-z0-9_]*)"',
+                r"\1\2",
+                line,
+            )
+            line = re.sub(
                 r'^(\s*)([A-Za-z][\w-]*)\["[^"]+"\]\s*$',
                 r"\1class \2",
                 line,
@@ -1371,6 +1394,13 @@ def _fix_mermaid_diagram(diagram: str) -> str:
             line = re.sub(
                 r'^(\s*participant\s+)([A-Za-z][\w-]*)\["([^"]+)"\]\s*$',
                 lambda m: f"{m.group(1)}{m.group(2)} as {m.group(3)}",
+                line,
+            )
+
+        if diagram_type in ("statediagram", "statediagram-v2"):
+            line = re.sub(
+                r'"([A-Za-z][A-Za-z0-9_]*)"',
+                r"\1",
                 line,
             )
 

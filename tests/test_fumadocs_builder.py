@@ -70,6 +70,8 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert (repo_root / "site" / "package.json").exists()
     assert (repo_root / "site" / "postcss.config.mjs").exists()
     assert (repo_root / "site" / "source.config.mjs").exists()
+    assert (repo_root / "site" / "next.config.mjs").exists()
+    assert (repo_root / "site" / "app" / "layout.tsx").exists()
     assert (repo_root / "site" / "app" / "search" / "route.ts").exists()
     assert (repo_root / "site" / "public" / "favicon.svg").exists()
     assert not (repo_root / "mint.json").exists()
@@ -80,6 +82,14 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
         encoding="utf-8"
     )
     global_css = (repo_root / "site" / "app" / "global.css").read_text(encoding="utf-8")
+    next_config = (repo_root / "site" / "next.config.mjs").read_text(encoding="utf-8")
+    app_layout = (repo_root / "site" / "app" / "layout.tsx").read_text(encoding="utf-8")
+    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(encoding="utf-8")
+    docs_page = (repo_root / "site" / "app" / "[[...slug]]" / "page.tsx").read_text(encoding="utf-8")
+    ask_page = (repo_root / "site" / "app" / "ask" / "page.tsx").read_text(encoding="utf-8")
+    api_page_component = (repo_root / "site" / "components" / "api-page.tsx").read_text(encoding="utf-8")
+    openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(encoding="utf-8")
+    auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
     assert '"url": "/"' in page_tree
     assert '"name": "Core"' in page_tree
     assert '"url": "/auth"' in page_tree
@@ -88,6 +98,33 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "--deepdoc-brand-primary: #EB3E25;" in global_css
     assert ".deepdoc-chatbot-dock" in global_css
     assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists()
+
+    package_json = json.loads(
+        (repo_root / "site" / "package.json").read_text(encoding="utf-8")
+    )
+    assert package_json["dependencies"]["fumadocs-openapi"] == "9.3.9"
+    assert package_json["dependencies"]["fumadocs-ui"] == "15.7.11"
+    assert package_json["dependencies"]["next"] == "15.3.0"
+    assert package_json["dependencies"]["react"] == "19.1.0"
+    assert "fumadocs-ui/provider';" in app_layout
+    assert "provider/next" not in app_layout
+    assert "turbopack" not in next_config
+    assert "APIPage" in mdx_components
+    assert "ComponentType" in docs_page
+    assert "TOCItemType" in docs_page
+    assert "page.data as { body:" in docs_page
+    assert "Suspense" in ask_page
+    assert "<ChatbotPanel />" in ask_page
+    assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
+    assert "satisfies PageTree.Root" in page_tree
+    assert "APIPage as FumadocsAPIPage" in api_page_component
+    assert "createAPIPage" not in api_page_component
+    assert "openapiPlugin" not in openapi_lib
+    assert "openapiSource" not in openapi_lib
+    assert "type APISource =" in openapi_lib
+    assert "export const apiSource: APISource | null = null;" in openapi_lib
+    assert auth_doc.startswith("---\n")
+    assert 'title: "Auth"' in auth_doc
 
     build_fumadocs_from_plan(
         repo_root,
@@ -108,6 +145,41 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     )
 
     assert (repo_root / "site" / "package.json").exists()
+
+
+def test_build_fumadocs_without_openapi_omits_api_route_scaffold(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+
+    overview = make_bucket(
+        "Overview",
+        "overview",
+        ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    auth = make_bucket("Auth", "auth", ["auth.py"], section="Core")
+    plan = make_plan([overview, auth])
+    plan.nav_structure = {"Core": ["auth"]}
+
+    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+
+    build_fumadocs_from_plan(
+        repo_root,
+        output_dir,
+        {"project_name": "Demo"},
+        plan,
+        has_openapi=False,
+    )
+
+    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(encoding="utf-8")
+    assert not (repo_root / "site" / "app" / "api" / "[[...slug]]" / "page.tsx").exists()
+    assert not (repo_root / "site" / "app" / "api" / "[[...slug]]" / "layout.tsx").exists()
+    assert not (repo_root / "site" / "components" / "api-page.tsx").exists()
+    assert not (repo_root / "site" / "lib" / "openapi.ts").exists()
+    assert "@/components/api-page" not in mdx_components
+    assert "APIPage," not in mdx_components
 
 
 def test_fumadocs_prompts_drop_mintlify_only_components() -> None:
@@ -430,3 +502,60 @@ def test_fix_mermaid_diagram_quotes_flowchart_labels_with_html_breaks_and_parent
 
     assert 'A["Application Code<br>(SyncWeightOfOrder.py,<br>fast_queue.py)"]' in fixed
     assert "A --> B" in fixed
+
+
+def test_fix_mermaid_diagram_rewrites_reverse_flowchart_edges() -> None:
+    diagram = """flowchart TD
+    D <-- H
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert "H --> D" in fixed
+    assert "D <-- H" not in fixed
+
+
+def test_fix_mermaid_diagram_rewrites_quoted_flowchart_edge_labels() -> None:
+    diagram = """flowchart TD
+    A -- "forks" --> B
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert 'A -->|forks| B' in fixed
+    assert '-- "forks" -->' not in fixed
+
+
+def test_fix_mermaid_diagram_rewrites_bidirectional_flowchart_edges() -> None:
+    diagram = """flowchart TD
+    App <--> DB
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert "App --> DB" in fixed
+    assert "DB --> App" in fixed
+    assert "<-->" not in fixed
+
+
+def test_fix_mermaid_diagram_strips_quotes_from_class_diagram_targets() -> None:
+    diagram = """classDiagram
+    MySQLCart --> "CartSerializer"
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert 'MySQLCart --> CartSerializer' in fixed
+    assert '"CartSerializer"' not in fixed
+
+
+def test_fix_mermaid_diagram_strips_quotes_from_simple_state_ids() -> None:
+    diagram = """stateDiagram-v2
+    Open --> "InProgress": updateOneDirectComplaint
+    "InProgress" --> Closed: closeOneDirectTicket
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert 'Open --> InProgress: updateOneDirectComplaint' in fixed
+    assert 'InProgress --> Closed: closeOneDirectTicket' in fixed

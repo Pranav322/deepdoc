@@ -56,6 +56,10 @@ def build_doc_summary_chunks(
                     title=title,
                     doc_path=doc_path.relative_to(output_dir).as_posix(),
                     doc_url=url,
+                    publication_tier=getattr(page._b, "publication_tier", "core") if hasattr(page, "_b") else "core",
+                    source_kind="docs",
+                    framework="",
+                    trust_score=0.9 if (getattr(page._b, "publication_tier", "core") if hasattr(page, "_b") else "core") == "core" else 0.7,
                     related_bucket_slugs=[page.slug],
                     owned_files=list(getattr(page, "source_files", [])),
                 )

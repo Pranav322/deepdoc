@@ -25,6 +25,7 @@ from rich.console import Console
 from .llm import LLMClient
 from .parser import parse_file
 from .parser.base import ParsedFile, Symbol
+from .source_metadata import classify_integration_party
 
 console = Console()
 
@@ -565,6 +566,7 @@ class IntegrationIdentity:
     files: list[str] = field(default_factory=list)
     evidence: list[str] = field(default_factory=list)
     is_substantial: bool = True  # True = standalone page; False = embed in feature page
+    party: str = "third_party"
 
 
 def discover_integrations(
@@ -589,9 +591,9 @@ def discover_integrations(
 
     # Step 2: If LLM available, normalize via LLM; otherwise use heuristic
     if llm:
-        return _normalize_integrations_llm(candidates, llm)
+        return _normalize_integrations_llm(candidates, llm, repo_root)
     else:
-        return _normalize_integrations_heuristic(candidates)
+        return _normalize_integrations_heuristic(candidates, repo_root)
 
 
 def _collect_integration_candidates(
@@ -740,6 +742,7 @@ def _line_number_for_offset(line_starts: list[int], offset: int) -> int:
 def _normalize_integrations_llm(
     candidates: list[IntegrationCandidate],
     llm: LLMClient,
+    repo_root: Path,
 ) -> list[IntegrationIdentity]:
     """Use LLM to group integration candidates into normalized identities."""
     # Build candidate summary for the LLM
@@ -784,7 +787,7 @@ candidate_indices = which signals (by 0-based index) belong to this identity."""
         result = _parse_json(response)
     except Exception as e:
         console.print(f"  [yellow]⚠ LLM integration normalization failed: {e}[/yellow]")
-        return _normalize_integrations_heuristic(candidates)
+        return _normalize_integrations_heuristic(candidates, repo_root)
 
     identities = []
     for item in result.get("integrations", []):
@@ -810,6 +813,7 @@ candidate_indices = which signals (by 0-based index) belong to this identity."""
             files=sorted(files),
             evidence=evidence[:10],
             is_substantial=item.get("is_substantial", len(files) >= 3),
+            party=classify_integration_party(name, repo_root),
         ))
 
     return identities
@@ -817,6 +821,7 @@ candidate_indices = which signals (by 0-based index) belong to this identity."""
 
 def _normalize_integrations_heuristic(
     candidates: list[IntegrationCandidate],
+    repo_root: Path,
 ) -> list[IntegrationIdentity]:
     """Fallback: group candidates by name_hint similarity."""
     groups: dict[str, list[IntegrationCandidate]] = defaultdict(list)
@@ -835,6 +840,7 @@ def _normalize_integrations_heuristic(
             files=files,
             evidence=[c.evidence for c in cands[:5]],
             is_substantial=len(files) >= 3,
+            party=classify_integration_party(name, repo_root),
         ))
 
     return identities

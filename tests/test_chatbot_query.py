@@ -7,7 +7,7 @@ import pytest
 
 from deepdoc.chatbot.persistence import save_corpus
 from deepdoc.chatbot.service import ChatbotQueryService, create_fastapi_app
-from deepdoc.chatbot.types import ChunkRecord
+from deepdoc.chatbot.types import ChunkRecord, RetrievedChunk
 from deepdoc.persistence_v2 import save_plan
 from tests.conftest import make_bucket, make_plan
 
@@ -360,3 +360,71 @@ def test_system_prompt_contains_project_name(tmp_path: Path) -> None:
     assert "MyProject" in prompt
     assert "file path and line range" in prompt
     assert "Sources" in prompt
+
+
+def test_query_service_passes_loaded_indexes_into_similarity_search(tmp_path: Path, monkeypatch) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text("chatbot:\n  enabled: true\n", encoding="utf-8")
+
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user): ...",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=5,
+                symbol_names=["login"],
+                related_bucket_slugs=["auth"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    loaded_indexes = {
+        "code": object(),
+        "artifact": object(),
+        "doc_summary": object(),
+    }
+    seen_indexes: list[object | None] = []
+
+    def fake_load_vector_index(index_dir, corpus):
+        del index_dir
+        return loaded_indexes[corpus]
+
+    def fake_similarity_search(records, vectors, query_vector, top_k, *, vector_index=None):
+        del vectors, query_vector, top_k
+        seen_indexes.append(vector_index)
+        return [RetrievedChunk(record=records[0], score=1.0)] if records else []
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {"query_expansion": False, "rerank": False},
+        }
+    }
+
+    monkeypatch.setattr("deepdoc.chatbot.service.load_vector_index", fake_load_vector_index)
+    monkeypatch.setattr("deepdoc.chatbot.service.similarity_search", fake_similarity_search)
+
+    with (
+        patch("deepdoc.chatbot.service.build_embedding_client", return_value=_FakeEmbedClient()),
+        patch("deepdoc.chatbot.service.build_chat_client", return_value=_FakeChatClient()),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.query("Where is auth handled?")
+
+    assert result["answer"] == "Grounded answer"
+    assert seen_indexes == [loaded_indexes["code"]]

@@ -20,7 +20,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "large_file_lines": 500,  # files above this get tiered summarization
     "giant_file_lines": 2000,  # files above this get LLM-based feature clustering
     "source_context_budget": 200000,  # raw-source char budget before compressed evidence cards kick in
-    "decompose_threshold": 5,  # buckets with 5+ files trigger decomposition consideration
+    "decompose_threshold": 7,  # buckets with 7+ files trigger decomposition consideration
+    "consolidation_similarity_threshold": 0.55,  # Jaccard threshold for merging near-duplicate buckets
+    # ── Concurrency ─────────────────────────────────────────────────────
+    "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
+    "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)
     # ── Integration detection ────────────────────────────────────────────
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────

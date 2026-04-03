@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib
 import shutil
 import shlex
 import socket
@@ -238,7 +239,11 @@ def init(name, description, provider, model, output_dir, with_chatbot):
               help="Run `deepdoc deploy` automatically after a successful generation.")
 @click.option("--batch-size", default=10, show_default=True,
               help="How many pages to generate per batch before pausing briefly for rate limits.")
-def generate(force, clean, yes, include, exclude, include_api, deploy, batch_size):
+@click.option("--max-parallel-workers", default=None, type=int,
+              help="Max concurrent LLM calls for generation, clustering, and decompose. Default: 6.")
+@click.option("--rate-limit-pause", default=None, type=float,
+              help="Seconds to pause between generation batches. 0 = no pause. Default: 0.5.")
+def generate(force, clean, yes, include, exclude, include_api, deploy, batch_size, max_parallel_workers, rate_limit_pause):
     """Generate documentation for the entire codebase.
 
     \b
@@ -288,6 +293,10 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
     if include_api is not None:
         cfg["include_endpoint_pages"] = include_api
     cfg["batch_size"] = batch_size
+    if max_parallel_workers is not None:
+        cfg["max_parallel_workers"] = max_parallel_workers
+    if rate_limit_pause is not None:
+        cfg["rate_limit_pause"] = rate_limit_pause
 
     console.print(Panel.fit(
         f"[bold]Generating docs for [cyan]{cfg.get('project_name') or repo_root.name}[/cyan][/bold]\n"
@@ -569,6 +578,7 @@ def serve(port):
             if install.returncode != 0:
                 console.print("[red]npm install failed.[/red]")
                 sys.exit(1)
+            _record_site_dependencies_synced(site_dir)
 
         # Auto-open browser after a short delay to let Next.js start
         import threading, webbrowser
@@ -645,6 +655,7 @@ def _deploy():
             if install.returncode != 0:
                 console.print("[red]npm install failed.[/red]")
                 sys.exit(1)
+            _record_site_dependencies_synced(site_dir)
 
         build_result = subprocess.run(
             ["npx", "next", "build"],
@@ -663,7 +674,6 @@ def _deploy():
 def _site_dependencies_need_install(site_dir: Path) -> bool:
     """Return True when site dependencies are missing or stale."""
     node_modules = site_dir / "node_modules"
-    package_json = site_dir / "package.json"
     package_lock = site_dir / "package-lock.json"
 
     if not node_modules.exists():
@@ -672,9 +682,42 @@ def _site_dependencies_need_install(site_dir: Path) -> bool:
         return True
 
     try:
-        return package_json.stat().st_mtime > package_lock.stat().st_mtime
+        stamp_path = _site_dependency_stamp_path(site_dir)
+        if not stamp_path.exists():
+            return True
+
+        expected_hash = _site_package_manifest_hash(site_dir)
+        stamp_data = json.loads(stamp_path.read_text(encoding="utf-8"))
+        return stamp_data.get("package_json_hash") != expected_hash
     except FileNotFoundError:
         return True
+    except json.JSONDecodeError:
+        return True
+
+
+def _site_dependency_stamp_path(site_dir: Path) -> Path:
+    return site_dir / "node_modules" / ".deepdoc-package-sync.json"
+
+
+def _site_package_manifest_hash(site_dir: Path) -> str:
+    package_json = site_dir / "package.json"
+    content = package_json.read_bytes()
+    return hashlib.sha256(content).hexdigest()
+
+
+def _record_site_dependencies_synced(site_dir: Path) -> None:
+    stamp_path = _site_dependency_stamp_path(site_dir)
+    stamp_path.parent.mkdir(parents=True, exist_ok=True)
+    stamp_path.write_text(
+        json.dumps(
+            {
+                "package_json_hash": _site_package_manifest_hash(site_dir),
+            },
+            indent=2,
+        )
+        + "\n",
+        encoding="utf-8",
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

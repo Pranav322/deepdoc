@@ -414,6 +414,8 @@ Welcome to the **{project_name}** developer documentation.
 def _ensure_mdx_frontmatter(output_dir: Path) -> None:
     """Add minimal frontmatter to generated MDX pages when it is missing."""
     for mdx_path in output_dir.glob("*.mdx"):
+        if mdx_path.name == "index.mdx":
+            continue
         text = mdx_path.read_text(encoding="utf-8", errors="replace")
         stripped = text.lstrip()
         if stripped.startswith("---"):
@@ -1046,15 +1048,86 @@ def _global_css(cfg: dict[str, Any]) -> str:
           overflow-wrap: anywhere;
         }
 
-        .deepdoc-chatbot-answer pre {
-          overflow-x: auto;
-          border: 1px solid var(--color-fd-border);
-          border-radius: 0.75rem;
-          padding: 0.875rem;
-          background: color-mix(in srgb, var(--color-fd-card) 92%, black 8%);
+        .deepdoc-chatbot-answer__pre {
+          margin: 1rem 0;
+          overflow: hidden;
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 10%, var(--color-fd-border) 90%);
+          border-radius: 1.05rem;
+          background:
+            linear-gradient(180deg, rgba(26, 27, 38, 0.96), rgba(18, 19, 28, 0.98));
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 18px 40px rgba(17, 24, 39, 0.16);
         }
 
-        .deepdoc-chatbot-answer code {
+        .deepdoc-chatbot-answer__pre-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.75rem;
+          padding: 0.7rem 0.9rem;
+          border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+          background: rgba(255, 255, 255, 0.03);
+        }
+
+        .deepdoc-chatbot-answer__pre-dots {
+          display: inline-flex;
+          gap: 0.35rem;
+        }
+
+        .deepdoc-chatbot-answer__pre-dots span {
+          height: 0.55rem;
+          width: 0.55rem;
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.2);
+        }
+
+        .deepdoc-chatbot-answer__pre-dots span:nth-child(1) {
+          background: #f38ba8;
+        }
+
+        .deepdoc-chatbot-answer__pre-dots span:nth-child(2) {
+          background: #f9e2af;
+        }
+
+        .deepdoc-chatbot-answer__pre-dots span:nth-child(3) {
+          background: #a6e3a1;
+        }
+
+        .deepdoc-chatbot-answer__pre-label {
+          font-size: 0.72rem;
+          font-weight: 600;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: rgba(226, 232, 240, 0.72);
+        }
+
+        .deepdoc-chatbot-answer__pre pre {
+          margin: 0;
+          overflow-x: auto;
+          padding: 1rem 1.05rem 1.1rem;
+          background: transparent;
+          border: none;
+        }
+
+        .deepdoc-chatbot-answer__pre code {
+          display: block;
+          font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
+          font-size: 0.88rem;
+          line-height: 1.72;
+          color: #e5e7eb;
+          white-space: pre;
+        }
+
+        .deepdoc-chatbot-answer__inline-code {
+          display: inline-flex;
+          align-items: center;
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 12%, var(--color-fd-border) 88%);
+          border-radius: 0.6rem;
+          padding: 0.12rem 0.42rem;
+          background: color-mix(in srgb, white 91%, var(--deepdoc-brand-light) 9%);
+          color: var(--deepdoc-brand-dark);
+          font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
           font-size: 0.875em;
         }
 
@@ -1085,13 +1158,17 @@ def _global_css(cfg: dict[str, Any]) -> str:
         /* Clickable citation cards */
         .deepdoc-chatbot-citation-list__clickable {
           cursor: pointer;
-          transition: border-color 0.15s, box-shadow 0.15s, background 0.15s;
+          transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s, background 0.15s;
         }
 
         .deepdoc-chatbot-citation-list__clickable:hover {
-          border-color: var(--deepdoc-brand-primary) !important;
-          box-shadow: 0 0 0 1px var(--deepdoc-brand-primary);
-          background: color-mix(in srgb, var(--deepdoc-brand-light) 6%, white 94%);
+          transform: translateY(-1px);
+          border-color: color-mix(in srgb, var(--deepdoc-brand-primary) 50%, white 50%) !important;
+          box-shadow:
+            0 0 0 1px color-mix(in srgb, var(--deepdoc-brand-primary) 34%, white 66%),
+            0 14px 28px rgba(193, 51, 31, 0.08);
+          background:
+            linear-gradient(180deg, color-mix(in srgb, var(--deepdoc-brand-light) 4%, white 96%), white);
         }
 
         .deepdoc-chatbot-citation-list__clickable:focus-visible {
@@ -1105,6 +1182,37 @@ def _global_css(cfg: dict[str, Any]) -> str:
           color: var(--color-fd-muted-foreground);
         }
 
+        .deepdoc-chatbot-citation-list__row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.85rem;
+        }
+
+        .deepdoc-chatbot-citation-list__text {
+          min-width: 0;
+          flex: 1;
+        }
+
+        .deepdoc-chatbot-citation-list__action {
+          flex-shrink: 0;
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 12%, var(--color-fd-border) 88%);
+          border-radius: 999px;
+          padding: 0.32rem 0.56rem;
+          font-size: 0.72rem;
+          font-weight: 600;
+          color: var(--deepdoc-brand-dark);
+          background: color-mix(in srgb, white 93%, var(--deepdoc-brand-light) 7%);
+        }
+
+        .deepdoc-chatbot-citation-list__action::after {
+          content: '↗';
+          font-size: 0.78rem;
+        }
+
         /* Code modal overlay */
         .deepdoc-code-modal-overlay {
           position: fixed;
@@ -1113,8 +1221,10 @@ def _global_css(cfg: dict[str, Any]) -> str:
           display: flex;
           align-items: center;
           justify-content: center;
-          background: rgba(0, 0, 0, 0.55);
-          backdrop-filter: blur(4px);
+          background:
+            radial-gradient(circle at top, rgba(235, 62, 37, 0.12), transparent 30%),
+            rgba(9, 11, 19, 0.6);
+          backdrop-filter: blur(6px);
           animation: deepdoc-modal-fadein 0.15s ease-out;
         }
 
@@ -1124,14 +1234,14 @@ def _global_css(cfg: dict[str, Any]) -> str:
         }
 
         .deepdoc-code-modal {
-          width: min(90vw, 56rem);
-          max-height: 80vh;
+          width: min(92vw, 64rem);
+          max-height: 84vh;
           display: flex;
           flex-direction: column;
-          background: #1e1e2e;
+          background: #171824;
           border: 1px solid rgba(255, 255, 255, 0.08);
-          border-radius: 1rem;
-          box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+          border-radius: 1.2rem;
+          box-shadow: 0 30px 80px rgba(0, 0, 0, 0.5);
           overflow: hidden;
           animation: deepdoc-modal-scalein 0.15s ease-out;
         }
@@ -1146,8 +1256,9 @@ def _global_css(cfg: dict[str, Any]) -> str:
           align-items: center;
           justify-content: space-between;
           gap: 1rem;
-          padding: 0.75rem 1rem;
-          background: #181825;
+          padding: 0.95rem 1.1rem;
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0));
           border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .deepdoc-code-modal__title strong {
@@ -1188,8 +1299,8 @@ def _global_css(cfg: dict[str, Any]) -> str:
           display: flex;
           flex-direction: column;
           gap: 0.4rem;
-          padding: 0.6rem 1rem;
-          background: #11111b;
+          padding: 0.7rem 1.1rem;
+          background: #11131c;
           border-bottom: 1px solid rgba(255, 255, 255, 0.06);
         }
         .deepdoc-code-modal__meta-row {
@@ -1242,6 +1353,9 @@ def _global_css(cfg: dict[str, Any]) -> str:
           flex: 1;
           overflow: auto;
           padding: 0;
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
+            #181a27;
         }
         .deepdoc-code-modal__table {
           width: 100%;
@@ -1609,8 +1723,8 @@ def _openapi_ts() -> str:
         """\
         import fs from 'node:fs';
         import path from 'node:path';
-        import { createOpenAPI } from 'fumadocs-openapi/server';
-        import type { ApiPageProps } from 'fumadocs-openapi/ui';
+        import { loader } from 'fumadocs-core/source';
+        import { createOpenAPI, openapiPlugin, openapiSource } from 'fumadocs-openapi/server';
 
         const schemaDir = path.join(process.cwd(), 'openapi');
         const schemaFiles = fs.existsSync(schemaDir)
@@ -1627,19 +1741,15 @@ def _openapi_ts() -> str:
               })
             : null;
 
-        type APISource = {
-          generateParams: () => { slug?: string[] }[];
-          getPage: (slugs: string[]) =>
-            | {
-                data: {
-                  type: 'openapi';
-                  getAPIPageProps: () => ApiPageProps;
-                };
-              }
-            | undefined;
-        };
-
-        export const apiSource: APISource | null = null;
+        export const apiSource = openapi
+          ? loader({
+              baseUrl: '/api',
+              source: await openapiSource(openapi, {
+                baseDir: '',
+              }),
+              plugins: [openapiPlugin()],
+            })
+          : null;
         """
     )
 
@@ -1739,7 +1849,7 @@ def _chatbot_panel_tsx() -> str:
         'use client';
 
         import Link from 'next/link';
-        import { startTransition, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
+        import { isValidElement, startTransition, useEffect, useRef, useState, type FormEvent, type KeyboardEvent, type ReactNode } from 'react';
         import { useRouter, useSearchParams } from 'next/navigation';
         import ReactMarkdown from 'react-markdown';
         import { chatbotConfig } from '@/lib/chatbot-config';
@@ -1781,6 +1891,32 @@ def _chatbot_panel_tsx() -> str:
 
         function formatLines(startLine: number, endLine: number) {
           return startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`;
+        }
+
+        function extractCodeLanguage(node: ReactNode): string {
+          if (!isValidElement(node)) return '';
+          const props = node.props as { className?: string };
+          const className = typeof props.className === 'string' ? props.className : '';
+          const match = className.match(/language-([\\w-]+)/);
+          return match?.[1] ?? '';
+        }
+
+        function AnswerPre({ children }: { children?: ReactNode }) {
+          const language = extractCodeLanguage(children) || 'code';
+
+          return (
+            <div className="deepdoc-chatbot-answer__pre">
+              <div className="deepdoc-chatbot-answer__pre-header">
+                <span className="deepdoc-chatbot-answer__pre-dots" aria-hidden="true">
+                  <span />
+                  <span />
+                  <span />
+                </span>
+                <span className="deepdoc-chatbot-answer__pre-label">{language}</span>
+              </div>
+              <pre>{children}</pre>
+            </div>
+          );
         }
 
         type ParsedChunk = {
@@ -1948,7 +2084,7 @@ def _chatbot_panel_tsx() -> str:
           const from = searchParams.get('from')?.trim() || '/';
           const [draft, setDraft] = useState('');
           const [activeQuestion, setActiveQuestion] = useState(question);
-          const [loading, setLoading] = useState(!!question);
+          const [loading, setLoading] = useState(false);
           const [error, setError] = useState('');
           const [response, setResponse] = useState<ChatResponse | null>(null);
           const [history, setHistory] = useState<ChatHistoryItem[]>([]);
@@ -1974,7 +2110,9 @@ def _chatbot_panel_tsx() -> str:
           async function askQuestion(nextQuestion: string, nextHistory: ChatHistoryItem[]) {
             if (!nextQuestion.trim()) return;
             if (!chatbotConfig.apiBaseUrl) {
+              setResponse(null);
               setError('Chatbot backend URL is not configured.');
+              setLoading(false);
               return;
             }
             const requestId = latestRequestIdRef.current + 1;
@@ -2071,7 +2209,35 @@ def _chatbot_panel_tsx() -> str:
                       <div className="text-sm">
                         <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-base font-semibold">Answer</h3>
                         <div className="deepdoc-chatbot-answer prose prose-sm max-w-none dark:prose-invert">
-                          <ReactMarkdown>{response.answer}</ReactMarkdown>
+                          <ReactMarkdown
+                            components={{
+                              pre({ children }) {
+                                return <AnswerPre>{children}</AnswerPre>;
+                              },
+                              code(props) {
+                                const { className, children, ...rest } = props;
+                                const content = String(children ?? '');
+                                const isInline = !className && !content.includes('\n');
+                                if (isInline) {
+                                  return (
+                                    <code
+                                      {...rest}
+                                      className="deepdoc-chatbot-answer__inline-code"
+                                    >
+                                      {children}
+                                    </code>
+                                  );
+                                }
+                                return (
+                                  <code {...rest} className={className}>
+                                    {children}
+                                  </code>
+                                );
+                              },
+                            }}
+                          >
+                            {response.answer}
+                          </ReactMarkdown>
                         </div>
                       </div>
                     ) : (
@@ -2113,8 +2279,15 @@ def _chatbot_panel_tsx() -> str:
                               }
                             }}
                           >
-                            <strong>{citation.file_path}</strong>
-                            <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                            <div className="deepdoc-chatbot-citation-list__row">
+                              <div className="deepdoc-chatbot-citation-list__text">
+                                <strong>{citation.file_path}</strong>
+                                <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                              </div>
+                              {citation.text ? (
+                                <span className="deepdoc-chatbot-citation-list__action">Preview</span>
+                              ) : null}
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -2142,8 +2315,15 @@ def _chatbot_panel_tsx() -> str:
                               }
                             }}
                           >
-                            <strong>{citation.file_path}</strong>
-                            <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                            <div className="deepdoc-chatbot-citation-list__row">
+                              <div className="deepdoc-chatbot-citation-list__text">
+                                <strong>{citation.file_path}</strong>
+                                <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                              </div>
+                              {citation.text ? (
+                                <span className="deepdoc-chatbot-citation-list__action">Preview</span>
+                              ) : null}
+                            </div>
                           </li>
                         ))}
                       </ul>
@@ -2195,9 +2375,6 @@ def _chatbot_panel_tsx() -> str:
                           : 'Start with a question about architecture, files, or behavior.'}
                       </p>
                     </div>
-                    <p className="deepdoc-chatbot-dock__hint">
-                      No mode picker needed here. This view always stays grounded in your indexed repository.
-                    </p>
                   </div>
                   <div className="deepdoc-chatbot-dock__row">
                     <textarea

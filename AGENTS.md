@@ -38,6 +38,10 @@ Guidance for coding agents working in this repository.
 - Keep `deepdoc/parser/api_detector.py` as a compatibility facade.
 - Repo-aware route fixes belong in `deepdoc/parser/routes/repo_resolver.py`, not in planner code.
 - Generated outputs should be fixed through generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
+- Scan and plan state now carry `source_kind` metadata and bucket `publication_tier` semantics; preserve them consistently across planner, persistence, generation, smart update, and chatbot indexing.
+- Published API structure should be derived from validated runtime endpoints only; use `RepoScan.published_api_endpoints` and keep lower-confidence candidates available for retrieval/debugging rather than publishing them.
+- Integration discovery now distinguishes first-party vs third-party relationships; first-party systems should generally be documented as subsystems, not external integrations.
+- The chatbot is expected to index exhaustive corpora, but retrieval should prefer core/runtime/docs evidence before supporting material unless the question explicitly targets tests, examples, or other support sources.
 - If freshness semantics change, audit `planner_v2.py`, `generator_v2.py`, `persistence_v2.py`, and `smart_update_v2.py` together.
 - If persisted state changes, maintain save/load parity for both current and legacy compatibility files.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.

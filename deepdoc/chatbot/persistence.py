@@ -54,6 +54,18 @@ def load_corpus(index_dir: Path, corpus: str) -> tuple[list[ChunkRecord], Any]:
         return records, json.loads(raw) if raw else []
 
 
+def load_vector_index(index_dir: Path, corpus: str) -> Any | None:
+    paths = corpus_paths(index_dir, corpus)
+    if not paths["index"].exists():
+        return None
+    try:
+        import faiss  # type: ignore
+
+        return faiss.read_index(str(paths["index"]))
+    except Exception:
+        return None
+
+
 def save_corpus(
     index_dir: Path,
     corpus: str,
@@ -115,10 +127,29 @@ def normalize_vectors(vectors: Any) -> Any:
         return normalized
 
 
-def similarity_search(records: list[ChunkRecord], vectors: Any, query_vector: list[float], top_k: int) -> list[RetrievedChunk]:
-    arr = normalize_vectors(vectors)
+def similarity_search(
+    records: list[ChunkRecord],
+    vectors: Any,
+    query_vector: list[float],
+    top_k: int,
+    *,
+    vector_index: Any | None = None,
+) -> list[RetrievedChunk]:
     if not records:
         return []
+    if vector_index is not None:
+        try:
+            query = normalize_vectors([query_vector])
+            scores, order = vector_index.search(query, top_k)
+            return [
+                RetrievedChunk(record=records[idx], score=float(score))
+                for score, idx in zip(scores[0], order[0])
+                if idx >= 0 and idx < len(records)
+            ]
+        except Exception:
+            pass
+
+    arr = normalize_vectors(vectors)
     try:
         import numpy as np
 

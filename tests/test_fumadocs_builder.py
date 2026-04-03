@@ -119,10 +119,12 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "satisfies PageTree.Root" in page_tree
     assert "APIPage as FumadocsAPIPage" in api_page_component
     assert "createAPIPage" not in api_page_component
-    assert "openapiPlugin" not in openapi_lib
-    assert "openapiSource" not in openapi_lib
-    assert "type APISource =" in openapi_lib
-    assert "export const apiSource: APISource | null = null;" in openapi_lib
+    assert "import { loader } from 'fumadocs-core/source';" in openapi_lib
+    assert "openapiPlugin" in openapi_lib
+    assert "openapiSource" in openapi_lib
+    assert "source: await openapiSource(openapi" in openapi_lib
+    assert "plugins: [openapiPlugin()]" in openapi_lib
+    assert "export const apiSource = openapi" in openapi_lib
     assert auth_doc.startswith("---\n")
     assert 'title: "Auth"' in auth_doc
 
@@ -145,6 +147,42 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     )
 
     assert (repo_root / "site" / "package.json").exists()
+
+
+def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+
+    overview = make_bucket(
+        "Overview",
+        "overview",
+        ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    auth = make_bucket("Auth", "auth", ["auth.py"], section="Core")
+    plan = make_plan([overview, auth])
+    plan.nav_structure = {"Core": ["auth"]}
+
+    custom_index = "# Custom landing\n\nThis page is handwritten.\n"
+    (output_dir / "index.mdx").write_text(custom_index, encoding="utf-8")
+    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+
+    build_fumadocs_from_plan(
+        repo_root,
+        output_dir,
+        {"project_name": "Demo"},
+        plan,
+        has_openapi=False,
+    )
+
+    index_text = (output_dir / "index.mdx").read_text(encoding="utf-8")
+    auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
+
+    assert index_text == custom_index
+    assert "_deepdoc_autogen_" not in index_text
+    assert auth_doc.startswith("---\n")
 
 
 def test_build_fumadocs_without_openapi_omits_api_route_scaffold(tmp_path: Path) -> None:
@@ -418,6 +456,17 @@ DEBUG=False
     assert "```bash\nDEBUG=False" in normalized
 
 
+def test_normalize_code_fence_languages_rewrites_indented_env_aliases() -> None:
+    content = """  ```env
+  CLIMES_URL=https://api.climes.io/
+  ```
+"""
+
+    normalized = normalize_code_fence_languages(content)
+
+    assert "  ```bash" in normalized
+
+
 def test_normalize_html_code_blocks_converts_pre_code_to_fences() -> None:
     content = """<pre><code>git clone &lt;repo-url&gt;
 cd app
@@ -442,7 +491,7 @@ def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> 
 
     normalized = normalize_mdx_steps(content)
 
-    assert "<h3>1. Clone the repository</h3>" in normalized
+    assert "**1. Clone the repository**" in normalized
     assert "### 1. Clone the repository" not in normalized
     assert "```bash" in normalized
 
@@ -463,7 +512,22 @@ def test_normalize_mdx_steps_leaves_code_fence_contents_and_external_headings_un
 
     assert normalized.startswith("## Setup")
     assert "### not-a-real-heading" in normalized
-    assert "<h3>not-a-real-heading</h3>" not in normalized
+    assert "**not-a-real-heading**" not in normalized
+
+
+def test_normalize_mdx_steps_converts_html_headings_inside_step_blocks() -> None:
+    content = """<Steps>
+  <Step>
+    <h3>Install dependencies</h3>
+    Run `npm install`.
+  </Step>
+</Steps>
+"""
+
+    normalized = normalize_mdx_steps(content)
+
+    assert "<h3>Install dependencies</h3>" not in normalized
+    assert "**Install dependencies**" in normalized
 
 
 def test_endpoint_ref_slug_strips_angle_bracket_path_converters() -> None:
@@ -559,3 +623,24 @@ def test_fix_mermaid_diagram_strips_quotes_from_simple_state_ids() -> None:
 
     assert 'Open --> InProgress: updateOneDirectComplaint' in fixed
     assert 'InProgress --> Closed: closeOneDirectTicket' in fixed
+
+
+def test_fix_mermaid_diagram_strips_erdiagram_placeholders_and_rewrites_comments() -> None:
+    diagram = """erDiagram
+  ORDERS {
+    bigint id PK
+    datetime created_at
+    ...
+  }
+  -- MongoDB (denormalized, flexible)
+  PRODUCTSV2 {
+    int id PK
+    ... "Flexible fields"
+  }
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert "\n    ...\n" not in fixed
+    assert '... "Flexible fields"' not in fixed
+    assert "%% MongoDB (denormalized, flexible)" in fixed

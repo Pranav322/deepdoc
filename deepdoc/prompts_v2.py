@@ -142,24 +142,39 @@ Use these to link to other pages wherever relevant. Syntax: `[Title](/slug)`
 # ─────────────────────────────────────────────────────────────────────────────
 
 OVERVIEW_V2 = """\
-Generate the **project overview** page for: {project_name}
+Generate the **project overview and system guide** page.
 
-Description: {description}
+Page: {title}
+Project: {project_name}
+Description: {page_description}
 Languages: {languages}
 Frameworks: {frameworks}
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+Coverage targets: {coverage_targets}
 
-Source files for context:
+Repository-wide architecture and source evidence:
 {source_context}
 """ + CROSS_LINK_SECTION + """
 
-Write a comprehensive overview with these sections:
+Write the single best starting page for a new internal developer. This page must explain
+the system from start to finish, not just introduce it. It should help someone understand:
+- what the system does
+- how requests and background work flow through it
+- which major subsystems own which responsibilities
+- which integrations matter
+- where data lives
+- how to get productive quickly
+- which pages to read next for deeper detail
 
-# {project_name}
+Assume this is the first page most people will read.
+
+# {title}
 
 Short tagline (1 sentence) describing what the project does.
 
 ## What This Does
-2-3 sentences on the project's purpose. Be specific, not vague.
+2-3 specific sentences on the system's purpose, scope, and who/what it serves.
 
 ## Architecture Overview
 Include a **Mermaid flowchart** showing the high-level architecture:
@@ -170,21 +185,52 @@ Include a **Mermaid flowchart** showing the high-level architecture:
 Link to each component's dedicated documentation page from the sitemap above \
 wherever you describe it.
 
+## End-to-End Runtime Flow
+Explain the main request or processing lifecycle from entry point to completion.
+If the system has multiple major flows, cover the most important 2-4 flows.
+Include a **Mermaid sequence diagram** or flowchart for the primary flow.
+Tie each step back to the actual files and related pages.
+
+## Major Subsystems
+Describe the major internal areas of the system as a map:
+- what each subsystem owns
+- which files or modules anchor it
+- which integrations or data models it depends on
+- which page to read for the deep dive
+
 ## Tech Stack
-List the actual technologies with versions where detectable.
+List the actual technologies, frameworks, runtime model, storage, messaging, and deployment
+tools where detectable. If a framework is clearly central, say how it shapes the architecture.
 
 ## Project Structure
 Map the directory layout to what each part does. Reference actual directories. \
 For each major section, link to its documentation page from the sitemap.
 
-## Key Concepts
-The 3-5 most important things a new dev must understand. For each:
+## Data, State, And Integrations
+Summarize:
+- the key models or persistent state
+- important caches, queues, or scheduled jobs
+- external systems and what role they play
+
+Link to the relevant database, integration, and operations pages from the sitemap.
+
+## Key Concepts And Gotchas
+The 3-7 most important things a new dev must understand. For each:
 - Reference the actual files that implement it
 - Link to the relevant documentation page from the sitemap
+- Mention non-obvious behavior or operational gotchas where relevant
 
 ## Getting Started
 Use a `<Steps>` component (not a numbered list) for the installation and run steps. \
 Infer from config files. Link to the Setup page from the sitemap if it exists.
+
+## How To Read This Docs Set
+Tell a new joiner which pages to read next, in order, depending on their goal:
+- understanding architecture
+- working on runtime/API behavior
+- working on integrations
+- working on data models
+- local setup and debugging
 
 ## Explore the Docs
 End the page with a `<Cards>` block that links to the most important pages \
@@ -192,7 +238,7 @@ from the sitemap. Each `<Card>` must have a `title`, an `href` (the `/slug`), \
 and a 1-sentence description.
 
 Be detailed and specific. Reference actual file paths everywhere. \
-This overview is the entry point — make sure every major feature links to its deep-dive page.
+This overview is the entry point and must feel substantial, architectural, and actionable.
 """
 
 
@@ -1266,6 +1312,8 @@ def get_prompt_for_bucket(bucket) -> str:
     Works with DocBucket objects or anything with a generation_hints dict.
     """
     hints = getattr(bucket, "generation_hints", {}) or {}
+    if hints.get("is_introduction_page"):
+        return OVERVIEW_V2
     style = hints.get("prompt_style", "general")
     return PROMPT_STYLE_TEMPLATES.get(style, PROMPT_STYLE_TEMPLATES["general"])
 

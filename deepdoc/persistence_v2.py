@@ -236,6 +236,8 @@ def _bucket_to_dict(b: DocBucket) -> dict:
         "generation_hints": b.generation_hints,
         "priority": b.priority,
         "parent_slug": b.parent_slug,
+        "publication_tier": b.publication_tier,
+        "source_kind_summary": b.source_kind_summary,
     }
 
 
@@ -284,6 +286,8 @@ def _dict_to_bucket(d: dict) -> DocBucket:
         generation_hints=hints,
         priority=d.get("priority", 0),
         parent_slug=d.get("parent_slug"),
+        publication_tier=d.get("publication_tier", "core"),
+        source_kind_summary=d.get("source_kind_summary", {}),
     )
 
 
@@ -343,6 +347,8 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
         "openapi_paths": scan.openapi_paths,
         "file_line_counts": scan.file_line_counts,
         "api_endpoints": scan.api_endpoints,
+        "source_kind_by_file": scan.source_kind_by_file,
+        "file_frameworks": scan.file_frameworks,
         # Lightweight integration summary
         "integration_summary": [
             {
@@ -351,6 +357,7 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
                 "description": i.description,
                 "files": i.files[:20],
                 "is_substantial": i.is_substantial,
+                "party": getattr(i, "party", "third_party"),
             }
             for i in (scan.integration_identities or [])
         ],
@@ -439,7 +446,10 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
             "title": bucket.title,
             "bucket_type": bucket.bucket_type,
             "section": bucket.section,
-            "doc_path": "index.mdx" if (bucket.generation_hints or {}).get("is_introduction_page") else f"{bucket.slug}.mdx",
+            "publication_tier": getattr(bucket, "publication_tier", "core"),
+            "source_kind_summary": getattr(bucket, "source_kind_summary", {}),
+            "generation_hints": getattr(bucket, "generation_hints", {}),
+            "doc_path": "index.mdx" if (getattr(bucket, "generation_hints", {}) or {}).get("is_introduction_page") else f"{bucket.slug}.mdx",
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),

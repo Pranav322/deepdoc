@@ -6,6 +6,7 @@ from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.generator_v2 import EvidenceAssembler
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner_v2 import RepoScan
+from deepdoc.prompts_v2 import OVERVIEW_V2, get_prompt_for_bucket
 
 from tests.conftest import make_bucket, make_plan
 
@@ -200,3 +201,42 @@ def test_evidence_cards_preserve_all_tracked_files_when_bucket_is_large(tmp_path
     for rel in bucket_files:
         if rel not in evidence.source_context:
             assert rel in evidence.compressed_cards_context
+
+
+def test_intro_bucket_uses_overview_prompt_even_if_prompt_style_is_system() -> None:
+    bucket = make_bucket(
+        "System Architecture & Component Overview",
+        "architecture",
+        ["main.py"],
+        generation_hints={"is_introduction_page": True, "prompt_style": "system"},
+    )
+
+    assert get_prompt_for_bucket(bucket) == OVERVIEW_V2
+
+
+def test_intro_evidence_includes_repo_map_context(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "src" / "services").mkdir(parents=True)
+    (repo_root / "src" / "app.py").write_text("def create_app():\n    return 'ok'\n", encoding="utf-8")
+    (repo_root / "settings.py").write_text("API_PREFIX='/api/v1'\n", encoding="utf-8")
+
+    intro = make_bucket(
+        "System Architecture & Component Overview",
+        "architecture",
+        ["src/app.py"],
+        generation_hints={"is_introduction_page": True, "prompt_style": "system"},
+    )
+    auth = make_bucket("Authentication", "authentication", ["src/services/auth.py"], section="Runtime & Frameworks")
+    plan = make_plan([intro, auth])
+    plan.nav_structure = {"Overview": ["architecture"], "Runtime & Frameworks": ["authentication"]}
+
+    scan = _make_scan(repo_root)
+    scan.frameworks_detected = ["falcon"]
+    scan.entry_points = ["src/app.py"]
+    scan.config_files = ["settings.py"]
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(intro)
+
+    assert "Planned Documentation Map" in evidence.plan_summary_context
+    assert "Authentication" in evidence.plan_summary_context
+    assert "Primary entry points" in evidence.plan_summary_context

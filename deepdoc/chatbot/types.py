@@ -23,8 +23,12 @@ class ChunkRecord:
     doc_path: str = ""
     doc_url: str = ""
     language: str = ""
+    framework: str = ""
     artifact_type: str = ""
     section_name: str = ""
+    source_kind: str = ""
+    publication_tier: str = ""
+    trust_score: float = 0.0
     start_line: int = 0
     end_line: int = 0
     symbol_names: list[str] = field(default_factory=list)
@@ -47,4 +51,3 @@ class RetrievedChunk:
 
     record: ChunkRecord
     score: float
-

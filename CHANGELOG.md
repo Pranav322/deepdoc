@@ -1,0 +1,66 @@
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The automated release workflow reads the section that matches the version in
+`pyproject.toml` and uses it as the GitHub Release notes.
+
+## Unreleased
+
+- Ongoing development.
+
+## [1.0.0] - 2026-04-03
+
+DeepDoc 1.0.0 is the first stable release and significantly improves documentation planning,
+retrieval quality, generation throughput, and release automation.
+
+### Added
+
+- Added source classification and publication-tier metadata across scanning, planning,
+  persistence, generation, and chatbot indexing.
+- Added publishability filtering for runtime API endpoints so generated API structure
+  only includes validated product routes.
+- Added first-party versus third-party integration classification so internal systems
+  are documented as subsystems instead of external integrations when appropriate.
+- Added repo-profile normalization for more accurate documentation structures across
+  backend services, Falcon apps, monorepos, CLI tooling, framework libraries, and
+  hybrid codebases.
+- Added FAISS index loading support in chatbot retrieval paths and new retrieval
+  metadata such as framework, source kind, publication tier, and trust score.
+- Added concurrency controls for generation with `--max-parallel-workers` and
+  `--rate-limit-pause`.
+- Added site dependency sync stamping so `serve` and `deploy` can detect stale
+  `node_modules` more reliably.
+
+### Changed
+
+- Reworked planner behavior to prefer fewer, deeper pages instead of over-splitting
+  concepts into many shallow buckets.
+- Raised decomposition thresholds, parallelized giant-file clustering and bucket
+  decomposition, and added post-planning bucket consolidation for near-duplicate pages.
+- Improved landing-page generation with a repository-wide map, richer overview prompts,
+  stronger framework awareness, and better routing into deeper docs pages.
+- Updated chatbot retrieval ranking to prefer core runtime/docs evidence by default
+  while still allowing tests, fixtures, examples, and generated artifacts to surface
+  when explicitly requested.
+- Improved generated Fumadocs scaffolding, including preserved handwritten `index.mdx`
+  pages, updated OpenAPI loading, and more polished chatbot answer and citation UI.
+- Hardened MDX and Mermaid normalization, including safer `<Step>` heading handling,
+  indented code-fence normalization, and ER diagram cleanup.
+- Split GitHub release creation into changelog-driven notes when a matching version
+  section exists, with auto-generated notes as the fallback.
+
+### Docs And Tests
+
+- Documented the changelog-based release flow in `README.md`.
+- Expanded regression coverage for planner consolidation, publication metadata,
+  parallel pipeline behavior, chatbot retrieval, persistence, Fumadocs generation,
+  Mermaid cleanup, and CLI site dependency syncing.
+
+## [0.1.1] - 2026-04-01
+
+- Published DeepDoc to PyPI.
+- Improved package metadata for the PyPI project page.
+- Added installation instructions for `pip install deepdoc`.
+- Documented `deepdoc[chatbot]` for chatbot features.
+- Added automated release workflow scaffolding for future releases.

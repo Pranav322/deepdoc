@@ -58,6 +58,7 @@ class AssembledEvidence:
     graph_context: str  # static edges for diagram seeds
     cross_ref_context: str  # which other buckets reference this one's files
     database_context: str = ""  # database/schema info for database-type buckets
+    plan_summary_context: str = ""  # repo-wide summary for introduction pages
     total_evidence_chars: int = 0
     compressed_cards_context: str = ""
     files_included_raw: int = 0
@@ -136,6 +137,7 @@ class EvidenceAssembler:
         graph_ctx = self._build_graph_context(bucket)
         cross_ref_ctx = self._build_cross_ref_context(bucket)
         database_ctx = self._build_database_context(bucket)
+        plan_summary_ctx = self._build_plan_summary_context(bucket)
 
         total = sum(
             len(s)
@@ -149,6 +151,7 @@ class EvidenceAssembler:
                 graph_ctx,
                 cross_ref_ctx,
                 database_ctx,
+                plan_summary_ctx,
             ]
         )
 
@@ -163,6 +166,7 @@ class EvidenceAssembler:
             graph_context=graph_ctx,
             cross_ref_context=cross_ref_ctx,
             database_context=database_ctx,
+            plan_summary_context=plan_summary_ctx,
             total_evidence_chars=total,
             files_included_raw=files_included_raw,
             files_compressed=files_compressed,
@@ -959,6 +963,95 @@ class EvidenceAssembler:
 
         return "\n".join(lines)
 
+    def _build_plan_summary_context(self, bucket: DocBucket) -> str:
+        """Build repo-wide planning context for the landing page."""
+        hints = bucket.generation_hints or {}
+        if not hints.get("is_introduction_page"):
+            return ""
+
+        lines: list[str] = [
+            "This is the landing page. Use this summary to explain the system from end to end.",
+        ]
+
+        if self.scan.languages:
+            languages = ", ".join(
+                f"{name} ({count})" for name, count in sorted(self.scan.languages.items())
+            )
+            lines.append(f"Languages detected: {languages}")
+        if self.scan.frameworks_detected:
+            lines.append(
+                "Frameworks detected: "
+                + ", ".join(sorted(self.scan.frameworks_detected))
+            )
+        if self.scan.entry_points:
+            lines.append(
+                "Primary entry points: "
+                + ", ".join(f"`{path}`" for path in self.scan.entry_points[:8])
+            )
+        if self.scan.config_files:
+            lines.append(
+                "Key config files: "
+                + ", ".join(f"`{path}`" for path in self.scan.config_files[:8])
+            )
+
+        if self.plan.nav_structure:
+            lines.append("\n## Planned Documentation Map")
+            for section, slugs in self.plan.nav_structure.items():
+                section_lines: list[str] = []
+                for slug in slugs[:8]:
+                    page = self._slug_to_bucket.get(slug)
+                    if not page:
+                        continue
+                    section_lines.append(
+                        f"- {page.title} (`/{page.slug}`): {page.description}"
+                    )
+                if section_lines:
+                    lines.append(f"\n### {section}")
+                    lines.extend(section_lines)
+
+        integration_pages = [
+            page
+            for page in self.plan.buckets
+            if page.bucket_type == "integration" or "integration" in page.slug
+        ]
+        if integration_pages:
+            lines.append("\n## Major Integrations")
+            for page in integration_pages[:8]:
+                lines.append(f"- {page.title} (`/{page.slug}`): {page.description}")
+
+        workflow_pages = [
+            page
+            for page in self.plan.buckets
+            if page.bucket_type == "feature"
+            or any(
+                token in page.slug
+                for token in (
+                    "workflow",
+                    "flow",
+                    "process",
+                    "management",
+                    "tracking",
+                )
+            )
+        ]
+        if workflow_pages:
+            lines.append("\n## Major Workflows Or Domains")
+            for page in workflow_pages[:10]:
+                lines.append(f"- {page.title} (`/{page.slug}`): {page.description}")
+
+        published_endpoints = [
+            ep for ep in self.scan.api_endpoints if ep.get("publication_ready", True)
+        ]
+        if published_endpoints:
+            lines.append("\n## Runtime API Surfaces")
+            for ep in published_endpoints[:12]:
+                lines.append(
+                    f"- {ep.get('method', '').upper()} {ep.get('path', '')} "
+                    f"→ `{ep.get('handler_file') or ep.get('file') or '?'}`"
+                )
+
+        return "\n".join(lines)
+
     @staticmethod
     def _extract_model_snippets(content: str, model_names: list[str]) -> str:
         """Extract model class definitions from source for database context."""
@@ -1034,6 +1127,8 @@ class PageGenerator:
             full_source += f"\n\n## Dependency Graph\n{evidence.graph_context}"
         if evidence.cross_ref_context:
             full_source += f"\n\n{evidence.cross_ref_context}"
+        if evidence.plan_summary_context:
+            full_source += f"\n\n## Repository Map\n{evidence.plan_summary_context}"
         page_contract = (bucket.generation_hints or {}).get("page_contract", {})
         if page_contract:
             contract_lines = [
@@ -1076,7 +1171,7 @@ class PageGenerator:
             languages=", ".join(
                 k for k in (self.cfg.get("languages") or ["python", "javascript"])
             ),
-            frameworks="",
+            frameworks=", ".join(self.cfg.get("frameworks") or []),
             source_context=full_source,
             endpoints_detail=evidence.endpoints_detail,
             openapi_context=openapi_context,
@@ -1404,6 +1499,13 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 line,
             )
 
+        if diagram_type == "erdiagram":
+            if stripped == "...":
+                continue
+            if re.match(r"^\s*\.\.\.\s*(\"[^\"]+\")?\s*$", line):
+                continue
+            line = re.sub(r"^(\s*)--\s+", r"\1%% ", line)
+
         fixed.append(line)
 
     result = "\n".join(fixed)
@@ -1650,12 +1752,13 @@ def normalize_code_fence_languages(content: str) -> str:
     }
 
     def replace(match: re.Match) -> str:
-        lang = match.group(1)
-        rest = match.group(2) or ""
+        indent = match.group(1) or ""
+        lang = match.group(2)
+        rest = match.group(3) or ""
         normalized = alias_map.get(lang.lower(), lang)
-        return f"```{normalized}{rest}"
+        return f"{indent}```{normalized}{rest}"
 
-    return re.sub(r"^```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE)
+    return re.sub(r"^([ \t]*)```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE)
 
 
 def normalize_html_code_blocks(content: str) -> str:
@@ -1675,11 +1778,13 @@ def normalize_html_code_blocks(content: str) -> str:
 
 
 def normalize_mdx_steps(content: str) -> str:
-    """Rewrite markdown headings inside <Step> blocks into HTML headings.
+    """Rewrite heading-like content inside <Step> blocks into safe markdown text.
 
     MDX can choke on ATX headings such as `### Title` when they appear directly
-    inside JSX flow components like <Step>. Convert those headings into
-    `<h3>Title</h3>` while leaving headings outside steps and fenced code alone.
+    inside JSX flow components like <Step>. Also, raw heading tags such as
+    `<h3>Title</h3>` can end up nested inside `<p>` during hydration. Convert
+    both forms into simple bold lines while leaving headings outside steps and
+    fenced code alone.
     """
 
     def replace_step(match: re.Match) -> str:
@@ -1699,9 +1804,14 @@ def normalize_mdx_steps(content: str) -> str:
             if not in_fence:
                 heading = re.match(r"^(\s*)(#{1,6})\s+(.+?)\s*$", line)
                 if heading:
-                    indent, hashes, title = heading.groups()
-                    level = min(len(hashes), 6)
-                    lines.append(f"{indent}<h{level}>{title.strip()}</h{level}>")
+                    indent, _hashes, title = heading.groups()
+                    lines.append(f"{indent}**{title.strip()}**")
+                    continue
+
+                html_heading = re.match(r"^(\s*)<h[1-6]>(.+?)</h[1-6]>\s*$", line)
+                if html_heading:
+                    indent, title = html_heading.groups()
+                    lines.append(f"{indent}**{title.strip()}**")
                     continue
 
             lines.append(line)
@@ -1797,6 +1907,7 @@ class BucketGenerationEngine:
         self.validator = PageValidator(repo_root, scan)
         self.max_workers = cfg.get("max_parallel_workers", MAX_PARALLEL_WORKERS)
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
+        self.rate_limit_pause = cfg.get("rate_limit_pause", RATE_LIMIT_PAUSE)
         self._repo_file_paths = set(self.scan.file_summaries.keys())
         self._openapi_context = self._precompute_openapi_context()
 
@@ -1909,8 +2020,8 @@ class BucketGenerationEngine:
                         progress.advance(task)
 
                 # Rate limit between batches
-                if batch_start + self.batch_size < total:
-                    time.sleep(RATE_LIMIT_PAUSE)
+                if batch_start + self.batch_size < total and self.rate_limit_pause > 0:
+                    time.sleep(self.rate_limit_pause)
 
         if failed_count > 0:
             console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")

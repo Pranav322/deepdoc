@@ -12,6 +12,12 @@ from typing import Any
 from ..parser import supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner_v2 import DocPlan, RepoScan
+from ..source_metadata import (
+    classify_source_kind,
+    infer_publication_tier,
+    is_low_trust_source_kind,
+    select_primary_framework,
+)
 from .settings import get_chatbot_cfg
 from .types import ChunkRecord
 
@@ -80,6 +86,29 @@ def _bucket_map(plan: DocPlan) -> dict[str, list[str]]:
     return mapping
 
 
+def _bucket_tier_map(plan: DocPlan) -> dict[str, str]:
+    return {bucket.slug: bucket.publication_tier for bucket in plan.buckets}
+
+
+def _related_publication_tier(related_bucket_slugs: list[str], bucket_tiers: dict[str, str], rel_path: str) -> str:
+    if any(bucket_tiers.get(slug) == "core" for slug in related_bucket_slugs):
+        return "core"
+    if any(bucket_tiers.get(slug) == "supporting" for slug in related_bucket_slugs):
+        return "supporting"
+    return infer_publication_tier([rel_path], {rel_path: classify_source_kind(rel_path)})
+
+
+def _trust_score(source_kind: str, publication_tier: str) -> float:
+    score = 1.0
+    if publication_tier == "supporting":
+        score -= 0.2
+    elif publication_tier == "retrieval_only":
+        score -= 0.35
+    if is_low_trust_source_kind(source_kind):
+        score -= 0.35
+    return max(0.1, score)
+
+
 def build_code_chunks(
     scan: RepoScan,
     plan: DocPlan,
@@ -90,6 +119,7 @@ def build_code_chunks(
     max_lines = chatbot_cfg["chunking"]["code_chunk_lines"]
     overlap = chatbot_cfg["chunking"]["code_chunk_overlap"]
     related = _bucket_map(plan)
+    bucket_tiers = _bucket_tier_map(plan)
     chunks: list[ChunkRecord] = []
 
     target_files = files or sorted(scan.file_contents.keys())
@@ -99,6 +129,9 @@ def build_code_chunks(
         if not content:
             continue
         parsed = scan.parsed_files.get(rel_path)
+        source_kind = scan.source_kind_by_file.get(rel_path, classify_source_kind(rel_path))
+        framework = select_primary_framework(scan.file_frameworks.get(rel_path, []))
+        publication_tier = _related_publication_tier(related.get(rel_path, []), bucket_tiers, rel_path)
         if rel_path in giant and getattr(giant[rel_path], "clusters", None):
             chunks.extend(
                 _chunks_from_giant_file(
@@ -107,6 +140,9 @@ def build_code_chunks(
                     parsed,
                     giant[rel_path],
                     related.get(rel_path, []),
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    framework=framework,
                     max_lines=max_lines,
                     overlap=overlap,
                 )
@@ -119,6 +155,9 @@ def build_code_chunks(
                     parsed,
                     content,
                     related.get(rel_path, []),
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    framework=framework,
                     max_lines=max_lines,
                     overlap=overlap,
                 )
@@ -129,6 +168,9 @@ def build_code_chunks(
                 rel_path,
                 content,
                 related.get(rel_path, []),
+                source_kind=source_kind,
+                publication_tier=publication_tier,
+                framework=framework,
                 language=parsed.language if parsed else "",
                 max_lines=max_lines,
                 overlap=overlap,
@@ -144,6 +186,9 @@ def _chunks_from_giant_file(
     analysis: Any,
     related_bucket_slugs: list[str],
     *,
+    source_kind: str,
+    publication_tier: str,
+    framework: str,
     max_lines: int,
     overlap: int,
 ) -> list[ChunkRecord]:
@@ -184,6 +229,10 @@ def _chunks_from_giant_file(
                     chunk_hash=chunk_hash,
                     file_path=rel_path,
                     language=language,
+                    framework=framework,
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    trust_score=_trust_score(source_kind, publication_tier),
                     start_line=win_start,
                     end_line=win_end,
                     symbol_names=list(cluster.symbols),
@@ -203,6 +252,9 @@ def _chunks_from_symbols(
     content: str,
     related_bucket_slugs: list[str],
     *,
+    source_kind: str,
+    publication_tier: str,
+    framework: str,
     max_lines: int,
     overlap: int,
 ) -> list[ChunkRecord]:
@@ -233,6 +285,10 @@ def _chunks_from_symbols(
                     chunk_hash=chunk_hash,
                     file_path=rel_path,
                     language=parsed.language,
+                    framework=framework,
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    trust_score=_trust_score(source_kind, publication_tier),
                     start_line=start_line,
                     end_line=end_line,
                     symbol_names=[symbol.name],
@@ -249,6 +305,9 @@ def _chunks_from_windows(
     content: str,
     related_bucket_slugs: list[str],
     *,
+    source_kind: str,
+    publication_tier: str,
+    framework: str,
     language: str,
     max_lines: int,
     overlap: int,
@@ -279,6 +338,10 @@ def _chunks_from_windows(
                 chunk_hash=chunk_hash,
                 file_path=rel_path,
                 language=language,
+                framework=framework,
+                source_kind=source_kind,
+                publication_tier=publication_tier,
+                trust_score=_trust_score(source_kind, publication_tier),
                 start_line=start_line,
                 end_line=end_line,
                 related_bucket_slugs=list(related_bucket_slugs),
@@ -381,6 +444,7 @@ def build_artifact_chunks(
     max_lines = chatbot_cfg["chunking"]["artifact_chunk_lines"]
     overlap = chatbot_cfg["chunking"]["artifact_chunk_overlap"]
     related = _bucket_map(plan)
+    bucket_tiers = _bucket_tier_map(plan)
     chunks: list[ChunkRecord] = []
     target_files = files or discover_artifact_files(repo_root, scan, output_dir)
     for rel_path in target_files:
@@ -389,6 +453,8 @@ def build_artifact_chunks(
             continue
         content = path.read_text(encoding="utf-8", errors="replace")
         artifact_type = _artifact_type_for(rel_path)
+        source_kind = scan.source_kind_by_file.get(rel_path, classify_source_kind(rel_path))
+        publication_tier = _related_publication_tier(related.get(rel_path, []), bucket_tiers, rel_path)
         lines = content.splitlines()
         windows = _artifact_windows(lines, max_lines=max_lines, overlap=overlap)
         for start_line, end_line, section_name in windows:
@@ -409,6 +475,9 @@ def build_artifact_chunks(
                     chunk_hash=chunk_hash,
                     file_path=rel_path,
                     artifact_type=artifact_type,
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    trust_score=_trust_score(source_kind, publication_tier),
                     section_name=section_name,
                     start_line=start_line,
                     end_line=end_line,

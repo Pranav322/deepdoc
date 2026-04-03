@@ -941,14 +941,38 @@ If that version does not already have a matching Git tag like `v0.1.1`, GitHub A
 - publish it to PyPI
 - create the Git tag
 - create a GitHub Release and attach the built files
+- use the matching section from `CHANGELOG.md` as the release notes when present
 
 ### Your release flow
 
 1. Update `version = "..."` in `pyproject.toml`
-2. Commit your changes
-3. Push to `main`
+2. Add a matching section to `CHANGELOG.md`
+3. Commit your changes
+4. Push to `main`
 
 That is it. You do not need to manually create tags or GitHub Releases anymore.
+
+### Changelog format
+
+The release workflow looks for a section in `CHANGELOG.md` that matches the version in `pyproject.toml`.
+These heading styles all work:
+
+- `## 0.1.2`
+- `## [0.1.2]`
+- `## v0.1.2`
+- `## [0.1.2] - 2026-04-03`
+
+Example:
+
+```md
+## [0.1.2] - 2026-04-03
+
+- Added automated GitHub releases
+- Improved PyPI metadata
+- Documented `deepdoc[chatbot]` installation
+```
+
+If the matching version section is missing, GitHub falls back to auto-generated release notes.
 
 ### One-time setup
 

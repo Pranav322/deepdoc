@@ -130,6 +130,68 @@ jobs:
           name: release-dists
           path: dist
 
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        env:
+          RELEASE_VERSION: ${{ needs.plan-release.outputs.version }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          version = os.environ["RELEASE_VERSION"]
+          changelog_path = Path("CHANGELOG.md")
+          output_path = Path(os.environ["RUNNER_TEMP"]) / "release-notes.md"
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+
+          if not changelog_path.exists():
+              with github_output.open("a", encoding="utf-8") as fh:
+                  fh.write("has_notes=false\n")
+              raise SystemExit(0)
+
+          heading_pattern = re.compile(
+              rf"^##\s+(?:\[{re.escape(version)}\]|{re.escape(version)}|v{re.escape(version)}|\[v{re.escape(version)}\])(?:\s+-\s+.+)?\s*$"
+          )
+          next_heading_pattern = re.compile(r"^##\s+")
+
+          lines = changelog_path.read_text(encoding="utf-8").splitlines()
+          start_index = None
+          end_index = len(lines)
+
+          for index, line in enumerate(lines):
+              if heading_pattern.match(line.strip()):
+                  start_index = index + 1
+                  break
+
+          if start_index is None:
+              with github_output.open("a", encoding="utf-8") as fh:
+                  fh.write("has_notes=false\n")
+              raise SystemExit(0)
+
+          for index in range(start_index, len(lines)):
+              if next_heading_pattern.match(lines[index].strip()):
+                  end_index = index
+                  break
+
+          body_lines = lines[start_index:end_index]
+          while body_lines and not body_lines[0].strip():
+              body_lines.pop(0)
+          while body_lines and not body_lines[-1].strip():
+              body_lines.pop()
+
+          if not body_lines:
+              with github_output.open("a", encoding="utf-8") as fh:
+                  fh.write("has_notes=false\n")
+              raise SystemExit(0)
+
+          output_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
+
+          with github_output.open("a", encoding="utf-8") as fh:
+              fh.write("has_notes=true\n")
+              fh.write(f"notes_file={output_path}\n")
+          PY
+
       - name: Create git tag
         run: |
           git config user.name "github-actions[bot]"
@@ -137,7 +199,18 @@ jobs:
           git tag "${{ needs.plan-release.outputs.tag }}" "${{ github.sha }}"
           git push origin "${{ needs.plan-release.outputs.tag }}"
 
-      - name: Create GitHub release
+      - name: Create GitHub release from CHANGELOG.md
+        if: steps.notes.outputs.has_notes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ needs.plan-release.outputs.tag }}" dist/* \
+            --target "${{ github.sha }}" \
+            --title "${{ needs.plan-release.outputs.tag }}" \
+            --notes-file "${{ steps.notes.outputs.notes_file }}"
+
+      - name: Create GitHub release with generated notes
+        if: steps.notes.outputs.has_notes != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |

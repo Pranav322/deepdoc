@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import re
 from pathlib import Path
 from typing import Any
 
 from pydantic import BaseModel, Field
 
 from ..persistence_v2 import load_plan
-from .persistence import load_corpus, similarity_search
+from .persistence import load_corpus, load_vector_index, similarity_search
 from .providers import build_chat_client, build_embedding_client
 from .settings import chatbot_allowed_origins, get_chatbot_cfg
 from .types import RetrievedChunk
@@ -38,6 +39,9 @@ class ChatbotQueryService:
         self.code_records, self.code_vectors = load_corpus(self.index_dir, "code")
         self.artifact_records, self.artifact_vectors = load_corpus(self.index_dir, "artifact")
         self.doc_records, self.doc_vectors = load_corpus(self.index_dir, "doc_summary")
+        self.code_index = load_vector_index(self.index_dir, "code")
+        self.artifact_index = load_vector_index(self.index_dir, "artifact")
+        self.doc_index = load_vector_index(self.index_dir, "doc_summary")
 
     def query(self, question: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         retrieval_cfg = self.chat_cfg["retrieval"]
@@ -50,13 +54,25 @@ class ChatbotQueryService:
 
         # Step 3: Similarity search per corpus, merge results across variants
         code_hits = self._multi_query_search(
-            self.code_records, self.code_vectors, query_vectors, retrieval_cfg["top_k_code"],
+            self.code_records,
+            self.code_vectors,
+            query_vectors,
+            retrieval_cfg["top_k_code"],
+            vector_index=self.code_index,
         )
         artifact_hits = self._multi_query_search(
-            self.artifact_records, self.artifact_vectors, query_vectors, retrieval_cfg["top_k_artifact"],
+            self.artifact_records,
+            self.artifact_vectors,
+            query_vectors,
+            retrieval_cfg["top_k_artifact"],
+            vector_index=self.artifact_index,
         )
         doc_hits = self._multi_query_search(
-            self.doc_records, self.doc_vectors, query_vectors, retrieval_cfg["top_k_docs"],
+            self.doc_records,
+            self.doc_vectors,
+            query_vectors,
+            retrieval_cfg["top_k_docs"],
+            vector_index=self.doc_index,
         )
 
         # Step 4: Rerank with LLM for better precision
@@ -86,6 +102,9 @@ class ChatbotQueryService:
                     "symbol_names": hit.record.symbol_names,
                     "text": hit.record.text,
                     "language": hit.record.language,
+                    "source_kind": hit.record.source_kind,
+                    "publication_tier": hit.record.publication_tier,
+                    "framework": hit.record.framework,
                 }
                 for hit in selected_code
             ],
@@ -97,6 +116,9 @@ class ChatbotQueryService:
                     "artifact_type": hit.record.artifact_type,
                     "text": hit.record.text,
                     "language": hit.record.language,
+                    "source_kind": hit.record.source_kind,
+                    "publication_tier": hit.record.publication_tier,
+                    "framework": hit.record.framework,
                 }
                 for hit in selected_artifacts
             ],
@@ -146,6 +168,8 @@ class ChatbotQueryService:
         vectors: Any,
         query_vectors: list[list[float]],
         top_k: int,
+        *,
+        vector_index: Any | None = None,
     ) -> list[RetrievedChunk]:
         """Search with multiple query vectors and merge by max score per chunk."""
         if not records:
@@ -153,13 +177,20 @@ class ChatbotQueryService:
 
         best: dict[str, RetrievedChunk] = {}
         for qv in query_vectors:
-            hits = similarity_search(records, vectors, qv, top_k)
+            hits = similarity_search(records, vectors, qv, top_k, vector_index=vector_index)
             for hit in hits:
                 cid = hit.record.chunk_id
                 if cid not in best or hit.score > best[cid].score:
                     best[cid] = hit
 
         merged = sorted(best.values(), key=lambda h: h.score, reverse=True)
+        merged.sort(
+            key=lambda hit: (
+                self._evidence_priority(hit.record, self._question_support_profile("")),
+                hit.score,
+            ),
+            reverse=True,
+        )
         return merged[:top_k]
 
     def _rerank(
@@ -172,7 +203,12 @@ class ChatbotQueryService:
     ) -> tuple[list[RetrievedChunk], list[RetrievedChunk], list[RetrievedChunk]]:
         """LLM-based reranking of candidate chunks for better precision."""
         if not retrieval_cfg.get("rerank", False):
-            return code_hits, artifact_hits, doc_hits
+            profile = self._question_support_profile(question)
+            return (
+                self._sort_hits(code_hits, profile),
+                self._sort_hits(artifact_hits, profile),
+                self._sort_hits(doc_hits, profile),
+            )
 
         candidate_limit = retrieval_cfg.get("rerank_candidate_limit", 20)
         all_hits = code_hits + artifact_hits + doc_hits
@@ -217,8 +253,11 @@ class ChatbotQueryService:
             scores = scores[: len(candidates)]
 
             # Re-sort candidates by LLM relevance score
+            profile = self._question_support_profile(question)
             scored_hits = sorted(
-                zip(scores, candidates), key=lambda x: x[0], reverse=True,
+                zip(scores, candidates),
+                key=lambda item: (item[0] + self._evidence_priority(item[1].record, profile), item[1].score),
+                reverse=True,
             )
 
             # Split back into kind-based buckets
@@ -230,7 +269,71 @@ class ChatbotQueryService:
 
         except Exception:
             # Fallback to original ordering if reranking fails
-            return code_hits, artifact_hits, doc_hits
+            profile = self._question_support_profile(question)
+            return (
+                self._sort_hits(code_hits, profile),
+                self._sort_hits(artifact_hits, profile),
+                self._sort_hits(doc_hits, profile),
+            )
+
+    def _sort_hits(self, hits: list[RetrievedChunk], profile: dict[str, Any]) -> list[RetrievedChunk]:
+        return sorted(
+            hits,
+            key=lambda hit: (self._evidence_priority(hit.record, profile), hit.score),
+            reverse=True,
+        )
+
+    def _question_support_profile(self, question: str) -> dict[str, Any]:
+        lower = question.lower()
+        supporting_requested = any(
+            token in lower
+            for token in (
+                "test",
+                "tests",
+                "fixture",
+                "fixtures",
+                "example",
+                "examples",
+                "generated",
+                "mock",
+                "spec",
+                "playwright",
+                "cypress",
+            )
+        )
+        framework_mentions = re.findall(
+            r"\b(falcon|django|fastapi|flask|express|fastify|laravel|vue|go|nestjs)\b",
+            lower,
+        )
+        return {
+            "supporting_requested": supporting_requested,
+            "framework_mentions": set(framework_mentions),
+        }
+
+    def _evidence_priority(self, record: Any, profile: dict[str, Any]) -> float:
+        priority = 0.0
+        supporting_requested = profile.get("supporting_requested")
+        if record.publication_tier == "core":
+            priority += 1.5 if supporting_requested else 3.0
+        elif record.publication_tier == "supporting":
+            priority += 2.5 if supporting_requested else 1.5
+        else:
+            priority += 0.5
+
+        source_kind = record.source_kind or ""
+        if source_kind == "product":
+            priority += 0.8 if supporting_requested else 2.5
+        elif source_kind in {"config", "docs", "ops", "tooling"}:
+            priority += 1.2
+        elif source_kind in {"test", "fixture", "example", "generated"}:
+            priority += 4.5 if supporting_requested else -1.0
+
+        framework = (record.framework or "").lower()
+        if framework and framework in profile.get("framework_mentions", set()):
+            priority += 1.0
+
+        priority += float(getattr(record, "trust_score", 0.0))
+        return priority
 
     def _build_prompt(
         self,
@@ -307,9 +410,10 @@ class ChatbotQueryService:
             "You answer developer questions using ONLY the retrieved context provided in each query. "
             "Never fabricate file paths, function names, class names, or code that does not appear in the context.\n\n"
             "## Evidence hierarchy\n"
-            "1. **Code chunks** are primary evidence — they contain actual source code with file paths and line ranges.\n"
+            "1. **Core code chunks** are primary evidence — especially runtime, architecture, and product code.\n"
             "2. **Artifact chunks** (config files, Dockerfiles, migrations, OpenAPI specs) are secondary evidence.\n"
-            "3. **Doc summaries** provide high-level context from generated documentation pages.\n\n"
+            "3. **Doc summaries** provide high-level context from generated documentation pages.\n"
+            "4. **Supporting material** (tests, examples, fixtures, generated files) is valid evidence when it is explicitly requested or needed to answer precisely, but it should not dominate a normal answer.\n\n"
             "## Formatting rules\n"
             "- When referencing code, always include the file path and line range: `path/to/file.py:10-20`.\n"
             "- Show relevant code snippets in fenced code blocks with the correct language tag (```python, ```typescript, etc.).\n"

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 from deepdoc import cli
@@ -15,30 +14,38 @@ def test_site_dependencies_need_install_when_lockfile_missing(tmp_path: Path) ->
     assert cli._site_dependencies_need_install(site_dir) is True
 
 
-def test_site_dependencies_need_install_when_package_json_is_newer(tmp_path: Path) -> None:
+def test_site_dependencies_need_install_when_stamp_missing(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
     site_dir.mkdir()
-    package_json = site_dir / "package.json"
-    package_lock = site_dir / "package-lock.json"
+    (site_dir / "package.json").write_text("{}", encoding="utf-8")
+    (site_dir / "package-lock.json").write_text("{}", encoding="utf-8")
     (site_dir / "node_modules").mkdir()
-    package_lock.write_text("{}", encoding="utf-8")
-    package_json.write_text("{}", encoding="utf-8")
-    os.utime(package_lock, (1, 1))
-    os.utime(package_json, (2, 2))
 
     assert cli._site_dependencies_need_install(site_dir) is True
 
 
-def test_site_dependencies_need_install_false_when_lockfile_is_current(tmp_path: Path) -> None:
+def test_site_dependencies_need_install_when_stamp_mismatches(tmp_path: Path) -> None:
     site_dir = tmp_path / "site"
     site_dir.mkdir()
     package_json = site_dir / "package.json"
-    package_lock = site_dir / "package-lock.json"
+    package_json.write_text('{"name":"demo"}', encoding="utf-8")
+    (site_dir / "package-lock.json").write_text("{}", encoding="utf-8")
     (site_dir / "node_modules").mkdir()
-    package_json.write_text("{}", encoding="utf-8")
-    package_lock.write_text("{}", encoding="utf-8")
-    os.utime(package_json, (1, 1))
-    os.utime(package_lock, (2, 2))
+    cli._site_dependency_stamp_path(site_dir).write_text(
+        '{"package_json_hash":"stale"}\n',
+        encoding="utf-8",
+    )
+
+    assert cli._site_dependencies_need_install(site_dir) is True
+
+
+def test_site_dependencies_need_install_false_when_stamp_matches(tmp_path: Path) -> None:
+    site_dir = tmp_path / "site"
+    site_dir.mkdir()
+    (site_dir / "package.json").write_text('{"name":"demo"}', encoding="utf-8")
+    (site_dir / "package-lock.json").write_text("{}", encoding="utf-8")
+    (site_dir / "node_modules").mkdir()
+    cli._record_site_dependencies_synced(site_dir)
 
     assert cli._site_dependencies_need_install(site_dir) is False
 

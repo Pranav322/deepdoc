@@ -110,6 +110,10 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "fumadocs-ui/provider';" in app_layout
     assert "provider/next" not in app_layout
     assert "turbopack" not in next_config
+    assert "GITHUB_REPOSITORY" in next_config
+    assert "basePath: githubPagesBasePath || undefined" in next_config
+    assert "assetPrefix: githubPagesBasePath || undefined" in next_config
+    assert "trailingSlash: process.env.GITHUB_PAGES === 'true'" in next_config
     assert "APIPage" in mdx_components
     assert "ComponentType" in docs_page
     assert "TOCItemType" in docs_page

@@ -626,11 +626,21 @@ def _next_config_mjs() -> str:
         const withMDX = createMDX({
           configPath: './source.config.mjs',
         });
+        const repository = process.env.GITHUB_REPOSITORY ?? '';
+        const [, repoName = ''] = repository.split('/');
+        const isUserSite = repoName.endsWith('.github.io');
+        const githubPagesBasePath =
+          process.env.GITHUB_PAGES === 'true' && repoName && !isUserSite
+            ? `/${repoName}`
+            : '';
 
         /** @type {import('next').NextConfig} */
         const config = {
           reactStrictMode: true,
           output: 'export',
+          trailingSlash: process.env.GITHUB_PAGES === 'true',
+          basePath: githubPagesBasePath || undefined,
+          assetPrefix: githubPagesBasePath || undefined,
           images: {
             unoptimized: true,
           },
@@ -705,7 +715,7 @@ def _app_layout_tsx(project_name: str) -> str:
           title: '{project_name}',
           description: 'Auto-generated developer documentation',
           icons: {{
-            icon: '/favicon.svg',
+            icon: 'favicon.svg',
           }},
         }};
 

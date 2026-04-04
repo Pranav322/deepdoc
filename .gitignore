@@ -37,7 +37,10 @@ pytest-cache-files-7ktathll
 .deepdoc/chatbot/
 .deepdoc_manifest.json
 future.txt
-site/
+!site/
+site/*
+!site/out/
+!site/out/**
 
 
 .env

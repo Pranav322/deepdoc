@@ -254,6 +254,8 @@ deepdoc deploy
 
 This runs `next build` inside `site/` and writes the static export to `site/out/`. You can deploy that directory to Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any static host.
 
+If you want GitHub Pages specifically, this repo includes a workflow at `.github/workflows/github-pages.yml` that publishes `site/out/` through the official Pages Actions flow. That means you do not need to move the export into a branch `docs/` folder.
+
 ### `deepdoc config`
 
 View or update config values without editing YAML manually.
@@ -882,21 +884,72 @@ your-repo/
 
 ## GitHub Actions CI/CD
 
-Automate doc updates on every push to main:
+Use GitHub Pages Actions when you want to publish the already-generated static export from `site/out/`:
 
 ```yaml
-# .github/workflows/docs.yml
-name: Update Documentation
+# .github/workflows/github-pages.yml
+name: Deploy GitHub Pages
 
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: actions/configure-pages@v5
+      - run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e .
+      - run: deepdoc deploy
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/out
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
+```
+
+This workflow publishes `site/out/` directly, so GitHub Pages does not need a `docs/` folder.
+
+If you want to regenerate docs on every push before deploying them, use a separate workflow like this:
+
+```yaml
+# .github/workflows/docs.yml
+name: Update And Deploy Documentation
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
 
 jobs:
   update-docs:
     runs-on: ubuntu-latest
     permissions:
-      contents: write       # Needed for gh-pages push
+      contents: read
+      pages: write
+      id-token: write
 
     steps:
       - uses: actions/checkout@v4
@@ -919,9 +972,21 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           deepdoc update --deploy
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site/out
+
+  deploy:
+    needs: update-docs
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
 ```
 
 Add your API key to repo Settings → Secrets → Actions → `ANTHROPIC_API_KEY`.

@@ -506,7 +506,8 @@ class ChatbotQueryService:
             "1. **Overview** — one paragraph explaining what this component is and its role in the system.\n"
             "2. **Implementation details** — full code with explanations, organized by method/function.\n"
             "3. **Dependencies & connections** — what this file imports, what calls it, data flow.\n"
-            "4. **Sources** — list all files referenced, formatted as `- path/to/file.py:start-end`."
+            "4. **Sources** — list all files referenced, formatted as `- path/to/file.py:start-end`.\n"
+            "5. **Summary** — always end with a short closing section titled `## Summary` that wraps up the main takeaway in 1-3 sentences."
         )
 
 

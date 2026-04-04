@@ -518,6 +518,15 @@ def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:
     assert '`[{"prod_id":101}]`' in escaped
 
 
+def test_escape_mdx_text_hazards_rewrites_br_tags_inside_table_cells() -> None:
+    content = "| logger | methods | .error(),<br>.warn(),<br />.info() |"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "<br" not in escaped.lower()
+    assert ".error(), / .warn(), / .info()" in escaped
+
+
 def test_escape_mdx_text_hazards_escapes_generic_types_inside_inline_code_table_cells() -> None:
     content = '| fn | returns |\n|---|---|\n| `save()` | `Promise<object|boolean>` |'
 

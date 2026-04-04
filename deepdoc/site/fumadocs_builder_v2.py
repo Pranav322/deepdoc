@@ -1503,6 +1503,129 @@ def _global_css(cfg: dict[str, Any]) -> str:
           padding-bottom: 0.6rem;
         }
 
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__back {
+          color: rgba(226, 232, 240, 0.76);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__back:hover {
+          color: #f8d1ca;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__eyebrow,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-dock__eyebrow,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__section-title,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list__action,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer__inline-code {
+          color: #ffd7cf;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__hero h1 {
+          color: #fff5f2;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__hero p,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-dock__hint,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__question,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__empty,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list span,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-section-hint {
+          color: rgba(226, 232, 240, 0.72);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__chip {
+          border-color: rgba(255, 255, 255, 0.1);
+          background: rgba(255, 237, 233, 0.08);
+          color: #ffcabf;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-dock,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-sidebar {
+          border-color: rgba(255, 255, 255, 0.08);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+            #14151f;
+          box-shadow:
+            0 24px 60px rgba(0, 0, 0, 0.34),
+            inset 0 1px 0 rgba(255, 255, 255, 0.025);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__header,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-sidebar__header {
+          border-bottom-color: rgba(255, 255, 255, 0.08);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-dock__input,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__input {
+          border-color: rgba(255, 255, 255, 0.08);
+          background: #10111a;
+          color: #f8fafc;
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-dock__input::placeholder,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__input::placeholder {
+          color: rgba(226, 232, 240, 0.42);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-panel__empty {
+          border-color: rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.02);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-skeleton__block,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-skeleton__line,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-skeleton__card {
+          background: rgba(255, 255, 255, 0.07);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-skeleton__block::after,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-skeleton__line::after,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-skeleton__card::after {
+          background: linear-gradient(
+            90deg,
+            transparent 0%,
+            rgba(255, 255, 255, 0.12) 50%,
+            transparent 100%
+          );
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list li {
+          border-color: rgba(255, 255, 255, 0.08);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+            #11131c;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list strong {
+          color: #fff1ed;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list__clickable:hover {
+          border-color: rgba(255, 202, 191, 0.42) !important;
+          box-shadow:
+            0 0 0 1px rgba(255, 202, 191, 0.16),
+            0 14px 28px rgba(0, 0, 0, 0.24);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.02)),
+            #141722;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list__action {
+          border-color: rgba(255, 255, 255, 0.08);
+          background: rgba(255, 237, 233, 0.06);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer__inline-code {
+          border-color: rgba(255, 255, 255, 0.08);
+          background: rgba(255, 237, 233, 0.08);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer blockquote {
+          border-left-color: rgba(255, 255, 255, 0.14);
+          color: rgba(226, 232, 240, 0.78);
+        }
+
         @media (max-width: 960px) {
           .deepdoc-chatbot-page__grid {
             grid-template-columns: minmax(0, 1fr);

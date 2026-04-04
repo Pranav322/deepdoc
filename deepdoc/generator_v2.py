@@ -2220,6 +2220,8 @@ def escape_mdx_text_hazards(content: str) -> str:
                 lambda match: f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>",
                 part,
             )
+            if "|" in line:
+                part = re.sub(r"<br\s*/?>", " / ", part, flags=re.IGNORECASE)
             part = re.sub(r"<(?=\d)", "&lt;", part)
             part = re.sub(
                 r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, .|/&;<>-]*)>",

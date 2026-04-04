@@ -1,0 +1,2564 @@
+{
+  "version": "v2_buckets",
+  "generated_at": "2026-04-04T07:38:39.387590+00:00",
+  "buckets": [
+    {
+      "bucket_type": "architecture_overview",
+      "title": "DeepDoc Architecture & Overview",
+      "slug": "architecture-overview",
+      "section": "Overview",
+      "description": "Comprehensive overview of DeepDoc's architecture, core components, and high-level workflows.",
+      "depends_on": [],
+      "owned_files": [
+        "deepdoc/__main__.py",
+        "deepdoc/generator_v2.py",
+        "deepdoc/planner_v2.py",
+        "deepdoc/site/fumadocs_builder_v2.py",
+        "README.md",
+        "deepdoc/__init__.py",
+        "deepdoc/manifest.py",
+        "deepdoc/prompts_v2.py",
+        "deepdoc/source_metadata.py",
+        "deepdoc/parser/registry.py",
+        "deepdoc/openapi.py",
+        "deepdoc/benchmark_v2.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "pyproject.toml"
+      ],
+      "required_sections": [
+        "overview",
+        "system_components",
+        "core_workflows",
+        "technology_stack",
+        "extensibility"
+      ],
+      "required_diagrams": [
+        "architecture_flow",
+        "component_diagram"
+      ],
+      "coverage_targets": [
+        "System architecture",
+        "Major data and control flows"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": true,
+        "prompt_style": "system",
+        "icon": "cube",
+        "page_contract": {
+          "intent": "Comprehensive overview of DeepDoc's architecture, core components, and high-level workflows.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "architecture-overview",
+            "architecture_overview",
+            "components",
+            "comprehensive",
+            "control",
+            "data",
+            "deepdoc",
+            "flows",
+            "high-level",
+            "major"
+          ]
+        }
+      },
+      "priority": 0,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "docs": 1,
+        "product": 8,
+        "config": 1
+      }
+    },
+    {
+      "bucket_type": "runtime_services",
+      "title": "Runtime Services & Operations",
+      "slug": "runtime-services",
+      "section": "Architecture",
+      "description": "Covers the runtime services, background tasks, and operational concerns for DeepDoc.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/chatbot/__init__.py",
+        "deepdoc/chatbot/providers.py",
+        "deepdoc/chatbot/indexer.py",
+        "deepdoc/chatbot/service.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "service_overview",
+        "background_tasks",
+        "operational_workflows",
+        "monitoring"
+      ],
+      "required_diagrams": [
+        "service_flow"
+      ],
+      "coverage_targets": [
+        "Service orchestration",
+        "Background processing"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "feature",
+        "icon": "server",
+        "page_contract": {
+          "intent": "Covers the runtime services, background tasks, and operational concerns for DeepDoc.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "parsing-analysis",
+            "pipeline-generation-planning"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "background",
+            "concerns",
+            "covers",
+            "deepdoc",
+            "operational",
+            "operations",
+            "orchestration",
+            "processing",
+            "runtime",
+            "runtime-services",
+            "runtime_services",
+            "tasks"
+          ]
+        }
+      },
+      "priority": 0,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 4
+      }
+    },
+    {
+      "bucket_type": "parsing_and_analysis",
+      "title": "Parsing & Source Analysis",
+      "slug": "parsing-analysis",
+      "section": "Architecture",
+      "description": "Explains the parsing logic, source code analysis, and extraction of documentation artifacts.",
+      "depends_on": [
+        "pipeline-generation-planning"
+      ],
+      "owned_files": [
+        "deepdoc/parser/vue_parser.py",
+        "deepdoc/parser/__init__.py",
+        "deepdoc/parser/other_parsers.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "parsing_overview",
+        "supported_languages",
+        "analysis_workflows",
+        "custom_parsers"
+      ],
+      "required_diagrams": [
+        "sequence_diagram"
+      ],
+      "coverage_targets": [
+        "Parsing logic",
+        "Source analysis"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "feature",
+        "icon": "book-open",
+        "page_contract": {
+          "intent": "Explains the parsing logic, source code analysis, and extraction of documentation artifacts.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "runtime-services",
+            "pipeline-generation-planning"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "analysis",
+            "artifacts",
+            "code",
+            "documentation",
+            "explains",
+            "extraction",
+            "parsing",
+            "parsing-analysis",
+            "parsing_and_analysis",
+            "pipeline",
+            "source"
+          ]
+        }
+      },
+      "priority": 0,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 3
+      }
+    },
+    {
+      "bucket_type": "testing",
+      "title": "Testing & Quality Assurance Overview",
+      "slug": "testing",
+      "section": "Testing",
+      "description": "Overview of Testing & Quality Assurance \u2014 how the sub-components fit together",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "tests/test_chatbot_providers.py",
+        "tests/test_framework_support.py",
+        "tests/test_fumadocs_builder.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "architecture",
+        "component_summary"
+      ],
+      "required_diagrams": [
+        "test_flow"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "system",
+        "icon": "check",
+        "page_contract": {
+          "intent": "Overview of Testing & Quality Assurance \u2014 how the sub-components fit together",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "framework-support-testing-strategy",
+            "planner-builder-quality-assurance",
+            "cli-chatbot-provider-test-coverage"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "assurance",
+            "fit",
+            "how",
+            "operations",
+            "quality",
+            "sub-components",
+            "testing",
+            "together"
+          ]
+        }
+      },
+      "priority": 0,
+      "parent_slug": null,
+      "publication_tier": "supporting",
+      "source_kind_summary": {
+        "test": 3
+      }
+    },
+    {
+      "bucket_type": "setup",
+      "title": "Setup & Getting Started",
+      "slug": "setup-getting-started",
+      "section": "CI/CD and Release",
+      "description": "Installation, configuration, and environment setup for DeepDoc.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "README.md",
+        "deepdoc/config.py",
+        "deepdoc/chatbot/settings.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "pyproject.toml",
+        ".github/workflows/release.yml",
+        ".github/workflows/tests.yml"
+      ],
+      "required_sections": [
+        "installation",
+        "environment_variables",
+        "configuration",
+        "quick_start"
+      ],
+      "required_diagrams": [
+        "setup_sequence"
+      ],
+      "coverage_targets": [
+        "Installation",
+        "Initial configuration"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "general",
+        "icon": "cog",
+        "page_contract": {
+          "intent": "Installation, configuration, and environment setup for DeepDoc.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "configuration",
+            "deepdoc",
+            "environment",
+            "getting",
+            "initial",
+            "installation",
+            "setup",
+            "setup-getting-started",
+            "started"
+          ]
+        }
+      },
+      "priority": 1,
+      "parent_slug": null,
+      "publication_tier": "supporting",
+      "source_kind_summary": {
+        "ops": 2,
+        "docs": 1,
+        "product": 2,
+        "config": 1
+      }
+    },
+    {
+      "bucket_type": "testing",
+      "title": "Framework Support Testing Strategy",
+      "slug": "framework-support-testing-strategy",
+      "section": "Testing",
+      "description": "Covers the test strategy and quality assurance practices for DeepDoc's multi-framework support, including detection and analysis of Django, Express, Fastify, Falcon, and Vue projects.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "tests/test_framework_support.py",
+        "deepdoc/parser/routes/django.py",
+        "deepdoc/parser/routes/express.py",
+        "deepdoc/parser/routes/falcon.py",
+        "deepdoc/parser/routes/fastify.py",
+        "deepdoc/parser/routes/registry.py",
+        "deepdoc/parser/routes/repo_resolver.py"
+      ],
+      "owned_symbols": [
+        "test_django_detects_class_views_and_drf_router_actions",
+        "test_django_detects_sync_to_async_wrapped_async_and_generic_views",
+        "test_django_infers_function_view_methods_from_request_usage",
+        "test_express_detects_mounted_router_prefixes_and_chained_routes",
+        "test_fastify_detects_registered_plugin_prefixes_and_schema",
+        "test_scan_repo_detects_vue_projects_and_sfc_signals",
+        "test_scan_repo_resolves_express_mounts_across_files",
+        "test_scan_repo_resolves_falcon_prefixes_and_imported_resources",
+        "test_scan_repo_ignores_commented_falcon_routes",
+        "test_scan_repo_resolves_django_nested_includes_and_settings_prefixes",
+        "test_scan_repo_resolves_django_sync_wrapped_imported_views_and_datatables",
+        "test_scan_repo_resolves_django_multiline_imported_datatable_handlers"
+      ],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "test_coverage",
+        "implementation_details",
+        "framework_specific_cases"
+      ],
+      "required_diagrams": [
+        "test_coverage_matrix"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "feature",
+        "icon": "check",
+        "page_contract": {
+          "intent": "Covers the test strategy and quality assurance practices for DeepDoc's multi-framework support, including detection and analysis of Django, Express, Fastify, Falcon, and Vue projects.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "testing",
+            "planner-builder-quality-assurance",
+            "cli-chatbot-provider-test-coverage"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "analysis",
+            "assurance",
+            "covers",
+            "deepdoc",
+            "detection",
+            "django",
+            "express",
+            "falcon",
+            "fastify",
+            "framework",
+            "framework-support-testing-strategy",
+            "including"
+          ]
+        }
+      },
+      "priority": 1,
+      "parent_slug": "testing",
+      "publication_tier": "supporting",
+      "source_kind_summary": {
+        "test": 1
+      }
+    },
+    {
+      "bucket_type": "testing",
+      "title": "Planner and Builder Quality Assurance",
+      "slug": "planner-builder-quality-assurance",
+      "section": "Testing",
+      "description": "Describes the test coverage and QA practices for DeepDoc's planner consolidation logic and Fumadocs site builder, including consolidation algorithms and site generation workflows.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "tests/test_fumadocs_builder.py",
+        "tests/test_planner_consolidation.py",
+        "deepdoc/site/__init__.py",
+        "scripts/refresh_generated_sites.py",
+        "tests/test_chatbot_scaffold.py",
+        "tests/test_planner_granularity.py"
+      ],
+      "owned_symbols": [
+        "test_build_fumadocs_from_plan_creates_site_scaffold",
+        "test_build_fumadocs_preserves_handwritten_index_without_frontmatter",
+        "test_build_fumadocs_without_openapi_omits_api_route_scaffold",
+        "test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endpoint_pages",
+        "test_fumadocs_prompts_drop_mintlify_only_components",
+        "test_stage_openapi_assets_uses_endpoint_ref_slug_shape",
+        "test_stage_openapi_assets_strips_server_origin_from_manifest_paths",
+        "test_escape_mdx_route_params_avoids_runtime_expressions",
+        "test_escape_mdx_route_params_escapes_typed_route_params",
+        "test_escape_mdx_text_hazards_escapes_bare_lt_in_prose_only",
+        "test_escape_mdx_text_hazards_escapes_lte_operator_in_jsx_text",
+        "test_escape_mdx_text_hazards_escapes_django_route_converters",
+        "_make_scan",
+        "_make_bucket",
+        "test_should_decompose_below_new_threshold",
+        "test_should_decompose_at_new_threshold",
+        "test_should_decompose_symbol_threshold_raised",
+        "test_should_decompose_giant_file_still_triggers",
+        "test_should_decompose_skips_endpoint_ref",
+        "test_consolidate_merges_highly_similar_buckets",
+        "test_consolidate_preserves_different_sections",
+        "test_consolidate_does_not_merge_dissimilar",
+        "test_consolidate_skips_introduction_pages",
+        "test_consolidate_skips_endpoint_refs"
+      ],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "planner_tests",
+        "builder_tests",
+        "test_coverage",
+        "edge_cases"
+      ],
+      "required_diagrams": [
+        "planner_consolidation_flow",
+        "site_generation_flow"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "feature",
+        "icon": "check",
+        "page_contract": {
+          "intent": "Describes the test coverage and QA practices for DeepDoc's planner consolidation logic and Fumadocs site builder, including consolidation algorithms and site generation workflows.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "testing",
+            "framework-support-testing-strategy",
+            "cli-chatbot-provider-test-coverage"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "algorithms",
+            "assurance",
+            "builder",
+            "consolidation",
+            "coverage",
+            "deepdoc",
+            "describes",
+            "fumadocs",
+            "generation",
+            "including",
+            "operations",
+            "planner"
+          ]
+        }
+      },
+      "priority": 2,
+      "parent_slug": "testing",
+      "publication_tier": "supporting",
+      "source_kind_summary": {
+        "test": 2
+      }
+    },
+    {
+      "bucket_type": "core_pipeline",
+      "title": "Pipeline: Document Generation & Planning",
+      "slug": "pipeline-generation-planning",
+      "section": "Architecture",
+      "description": "Details the document generation pipeline, including planning, evidence assembly, and output orchestration.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/generator_v2.py",
+        "deepdoc/planner_v2.py",
+        "deepdoc/prompts_v2.py",
+        "deepdoc/pipeline_v2.py",
+        "deepdoc/smart_update_v2.py",
+        "deepdoc/updater_v2.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "pipeline_overview",
+        "planning_stage",
+        "generation_stage",
+        "validation",
+        "orchestration",
+        "error_handling"
+      ],
+      "required_diagrams": [
+        "sequence_diagram",
+        "pipeline_flow"
+      ],
+      "coverage_targets": [
+        "Document generation pipeline",
+        "Planning and orchestration logic"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "data_pipeline",
+        "icon": "bolt",
+        "page_contract": {
+          "intent": "Details the document generation pipeline, including planning, evidence assembly, and output orchestration.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "runtime-services",
+            "parsing-analysis"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "assembly",
+            "core_pipeline",
+            "details",
+            "document",
+            "evidence",
+            "generation",
+            "including",
+            "orchestration",
+            "output",
+            "pipeline",
+            "pipeline-generation-planning",
+            "planning"
+          ]
+        }
+      },
+      "priority": 2,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 6
+      }
+    },
+    {
+      "bucket_type": "testing",
+      "title": "CLI and Chatbot Provider Test Coverage",
+      "slug": "cli-chatbot-provider-test-coverage",
+      "section": "Testing",
+      "description": "Documents the test strategy and coverage for DeepDoc's CLI commands and chatbot provider integrations, focusing on environment handling, artifact cleanup, and embedding client behaviors.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "tests/test_cli_generate.py",
+        "tests/test_chatbot_providers.py",
+        "deepdoc/chatbot/types.py",
+        "deepdoc/llm/__init__.py",
+        "tests/test_chatbot_config.py",
+        "tests/test_chatbot_index.py",
+        "tests/test_chatbot_persistence.py",
+        "tests/test_cli_serve.py",
+        "tests/test_internal_docs_metadata.py"
+      ],
+      "owned_symbols": [
+        "test_cli_autoloads_repo_env_file",
+        "test_cli_repo_env_does_not_override_existing_exports",
+        "test_clean_removes_deepdoc_artifacts_and_config",
+        "test_generate_clean_keeps_config_for_rebuilds",
+        "test_generate_skip_api_overrides_config",
+        "test_generate_api_flag_can_reenable_endpoint_pages",
+        "test_embedding_client_splits_batches_on_context_window_error",
+        "test_embedding_client_trims_single_oversized_text_on_retry",
+        "test_embedding_client_defaults_to_single_item_batches_for_azure",
+        "test_embedding_client_uses_more_aggressive_trim_budget_for_azure"
+      ],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "cli_test_coverage",
+        "chatbot_provider_tests",
+        "implementation_details"
+      ],
+      "required_diagrams": [
+        "cli_test_flow",
+        "embedding_client_test_cases"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "feature",
+        "icon": "check",
+        "page_contract": {
+          "intent": "Documents the test strategy and coverage for DeepDoc's CLI commands and chatbot provider integrations, focusing on environment handling, artifact cleanup, and embedding client behaviors.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "testing",
+            "framework-support-testing-strategy",
+            "planner-builder-quality-assurance"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "artifact",
+            "assurance",
+            "behaviors",
+            "chatbot",
+            "cleanup",
+            "cli",
+            "cli-chatbot-provider-test-coverage",
+            "client",
+            "commands",
+            "coverage",
+            "deepdoc",
+            "documents"
+          ]
+        }
+      },
+      "priority": 3,
+      "parent_slug": "testing",
+      "publication_tier": "supporting",
+      "source_kind_summary": {
+        "test": 2
+      }
+    },
+    {
+      "bucket_type": "frontend",
+      "title": "Frontend & UI Integration Overview",
+      "slug": "frontend-ui",
+      "section": "Integrations",
+      "description": "Overview of Frontend & UI Integration \u2014 how the sub-components fit together",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/_legacy_types.py",
+        "deepdoc/chatbot/chunker.py",
+        "deepdoc/chatbot/docs_summary.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "architecture",
+        "component_summary"
+      ],
+      "required_diagrams": [
+        "component_diagram",
+        "ui_flow"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "system",
+        "icon": "globe-alt",
+        "page_contract": {
+          "intent": "Overview of Frontend & UI Integration \u2014 how the sub-components fit together",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-anthropic",
+            "integration-deepdoc-chat"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "fit",
+            "frontend",
+            "frontend-ui",
+            "how",
+            "integration",
+            "pipeline",
+            "sub-components",
+            "together"
+          ]
+        }
+      },
+      "priority": 3,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 3
+      }
+    },
+    {
+      "bucket_type": "api_family:chatbot",
+      "title": "API Family: Chatbot",
+      "slug": "api-family-chatbot",
+      "section": "API",
+      "description": "Documents the public API endpoints for chatbot interaction, including health checks and query processing.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/chatbot/scaffold.py",
+        "deepdoc/chatbot/service.py",
+        "tests/fixtures/frameworks/django_app/urls.py"
+      ],
+      "owned_symbols": [
+        "_health",
+        "_query",
+        "health",
+        "query"
+      ],
+      "artifact_refs": [],
+      "required_sections": [
+        "endpoint_overview",
+        "request_response_examples",
+        "authentication",
+        "error_handling"
+      ],
+      "required_diagrams": [
+        "sequence_diagram"
+      ],
+      "coverage_targets": [
+        "GET /health",
+        "POST /query"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": true,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": true,
+        "include_openapi": true,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "endpoint",
+        "icon": "server",
+        "page_contract": {
+          "intent": "Documents the public API endpoints for chatbot interaction, including health checks and query processing.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "api",
+            "api-family-chatbot",
+            "api_family",
+            "chatbot",
+            "checks",
+            "documents",
+            "endpoints",
+            "family",
+            "get",
+            "health",
+            "including",
+            "interaction"
+          ]
+        }
+      },
+      "priority": 4,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 2,
+        "fixture": 1
+      }
+    },
+    {
+      "bucket_type": "frontend",
+      "title": "Vue Component Parsing and Integration",
+      "slug": "vue-component-parsing-integration",
+      "section": "Integrations",
+      "description": "Explains how Vue components are parsed, analyzed, and integrated into the documentation frontend.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/parser/vue_parser.py",
+        "tests/fixtures/frameworks/vue_app/src/components/UserList.vue"
+      ],
+      "owned_symbols": [
+        "parse_vue",
+        "UserList"
+      ],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "implementation_details",
+        "usage_patterns"
+      ],
+      "required_diagrams": [
+        "component_flow"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "feature",
+        "icon": "globe-alt",
+        "page_contract": {
+          "intent": "Explains how Vue components are parsed, analyzed, and integrated into the documentation frontend.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-anthropic",
+            "integration-deepdoc-chat"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "analyzed",
+            "are",
+            "component",
+            "components",
+            "documentation",
+            "explains",
+            "frontend",
+            "how",
+            "integrated",
+            "integration",
+            "parsed",
+            "parsing"
+          ]
+        }
+      },
+      "priority": 4,
+      "parent_slug": "frontend-ui",
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 1,
+        "fixture": 1
+      }
+    },
+    {
+      "bucket_type": "database_models",
+      "title": "Database Models & Schema",
+      "slug": "database-models-schema",
+      "section": "Data Layer",
+      "description": "Describes the SQLAlchemy models, database schema, and relationships used in DeepDoc.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/scan_v2.py",
+        "deepdoc/persistence_v2.py",
+        "deepdoc/chatbot/persistence.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "pyproject.toml"
+      ],
+      "required_sections": [
+        "er_diagram",
+        "table_definitions",
+        "relationships",
+        "migrations"
+      ],
+      "required_diagrams": [
+        "er_diagram"
+      ],
+      "coverage_targets": [
+        "SymbolCluster",
+        "GiantFileAnalysis",
+        "EvidenceUnit",
+        "EndpointBundle",
+        "IntegrationCandidate",
+        "IntegrationIdentity",
+        "ModelFileInfo",
+        "DatabaseScan",
+        "ArtifactScan"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": true,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "database",
+        "icon": "database",
+        "page_contract": {
+          "intent": "Describes the SQLAlchemy models, database schema, and relationships used in DeepDoc.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "artifactscan",
+            "data",
+            "database",
+            "database-models-schema",
+            "database_models",
+            "databasescan",
+            "deepdoc",
+            "describes",
+            "endpointbundle",
+            "evidenceunit",
+            "giantfileanalysis",
+            "integrationcandidate"
+          ]
+        }
+      },
+      "priority": 5,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 3,
+        "config": 1
+      }
+    },
+    {
+      "bucket_type": "frontend",
+      "title": "Frontend Documentation Site Builder",
+      "slug": "frontend-docs-site-builder",
+      "section": "Integrations",
+      "description": "Details the process and logic for building and rendering the documentation site frontend, including integration with the core pipeline.",
+      "depends_on": [
+        "architecture-overview"
+      ],
+      "owned_files": [
+        "deepdoc/site/fumadocs_builder_v2.py",
+        "deepdoc/_legacy_types.py"
+      ],
+      "owned_symbols": [
+        "build_fumadocs_from_plan",
+        "DocPage",
+        "DocPlan",
+        "RepoScan"
+      ],
+      "artifact_refs": [],
+      "required_sections": [
+        "overview",
+        "implementation_details",
+        "usage_patterns"
+      ],
+      "required_diagrams": [
+        "pipeline_flow"
+      ],
+      "coverage_targets": [],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "prompt_style": "architecture_component",
+        "icon": "globe-alt",
+        "page_contract": {
+          "intent": "Details the process and logic for building and rendering the documentation site frontend, including integration with the core pipeline.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "cli-commands",
+            "integration-anthropic",
+            "integration-deepdoc-chat"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "builder",
+            "building",
+            "details",
+            "documentation",
+            "frontend",
+            "frontend-docs-site-builder",
+            "including",
+            "integration",
+            "pipeline",
+            "process",
+            "rendering",
+            "site"
+          ]
+        }
+      },
+      "priority": 5,
+      "parent_slug": "frontend-ui",
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 2
+      }
+    },
+    {
+      "bucket_type": "cli_commands",
+      "title": "CLI Commands & Usage",
+      "slug": "cli-commands",
+      "section": "Integrations",
+      "description": "Documents the available CLI commands, their options, and usage examples.",
+      "depends_on": [
+        "setup-getting-started"
+      ],
+      "owned_files": [
+        "deepdoc/cli.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "cli_overview",
+        "command_reference",
+        "usage_examples",
+        "integration_options"
+      ],
+      "required_diagrams": [
+        "cli_flow"
+      ],
+      "coverage_targets": [
+        "CLI entry points",
+        "Integration triggers"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": false,
+        "is_introduction_page": false,
+        "prompt_style": "cli-commands",
+        "icon": "command-line",
+        "page_contract": {
+          "intent": "Documents the available CLI commands, their options, and usage examples.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "integration-anthropic",
+            "integration-deepdoc-chat"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "available",
+            "cli",
+            "cli-commands",
+            "cli_commands",
+            "commands",
+            "documents",
+            "entry",
+            "examples",
+            "integration",
+            "operations",
+            "options",
+            "points"
+          ]
+        }
+      },
+      "priority": 6,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 1
+      }
+    },
+    {
+      "bucket_type": "integration:anthropic",
+      "title": "Integration: Anthropic",
+      "slug": "integration-anthropic",
+      "section": "Integrations",
+      "description": "Details the Anthropic integration, including authentication, API usage, and configuration.",
+      "depends_on": [
+        "setup-getting-started"
+      ],
+      "owned_files": [
+        "deepdoc/cli.py",
+        "deepdoc/config.py",
+        "deepdoc/llm/client.py",
+        "deepdoc/scan_v2.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "pyproject.toml"
+      ],
+      "required_sections": [
+        "integration_overview",
+        "authentication",
+        "api_usage",
+        "configuration",
+        "error_handling"
+      ],
+      "required_diagrams": [
+        "integration_flow"
+      ],
+      "coverage_targets": [
+        "Anthropic API integration"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": true,
+        "is_introduction_page": false,
+        "prompt_style": "integration",
+        "icon": "puzzle-piece",
+        "page_contract": {
+          "intent": "Details the Anthropic integration, including authentication, API usage, and configuration.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-deepdoc-chat"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "anthropic",
+            "api",
+            "authentication",
+            "configuration",
+            "details",
+            "including",
+            "integration",
+            "integration-anthropic",
+            "integrations",
+            "usage"
+          ]
+        }
+      },
+      "priority": 7,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 4,
+        "config": 1
+      }
+    },
+    {
+      "bucket_type": "integration:deepdoc_chat",
+      "title": "Integration: Deepdoc Chat API",
+      "slug": "integration-deepdoc-chat",
+      "section": "Integrations",
+      "description": "Documents the Deepdoc Chat API integration, including authentication, endpoints, and configuration.",
+      "depends_on": [
+        "setup-getting-started"
+      ],
+      "owned_files": [
+        "deepdoc/chatbot/scaffold.py",
+        "deepdoc/chatbot/settings.py",
+        "deepdoc/cli.py",
+        "deepdoc/config.py",
+        "deepdoc/llm/client.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "pyproject.toml"
+      ],
+      "required_sections": [
+        "integration_overview",
+        "authentication",
+        "api_usage",
+        "configuration",
+        "error_handling"
+      ],
+      "required_diagrams": [
+        "integration_flow"
+      ],
+      "coverage_targets": [
+        "Deepdoc Chat API integration"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": true,
+        "is_introduction_page": false,
+        "prompt_style": "integration",
+        "icon": "puzzle-piece",
+        "page_contract": {
+          "intent": "Documents the Deepdoc Chat API integration, including authentication, endpoints, and configuration.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-anthropic"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "api",
+            "authentication",
+            "chat",
+            "configuration",
+            "deepdoc",
+            "deepdoc_chat",
+            "documents",
+            "endpoints",
+            "including",
+            "integration",
+            "integration-deepdoc-chat",
+            "integrations"
+          ]
+        }
+      },
+      "priority": 8,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 5,
+        "config": 1
+      }
+    },
+    {
+      "bucket_type": "integration:deepdoc_embed",
+      "title": "Integration: Deepdoc Embed API",
+      "slug": "integration-deepdoc-embed",
+      "section": "Integrations",
+      "description": "Documents the Deepdoc Embed API integration, including authentication, usage, and configuration.",
+      "depends_on": [
+        "setup-getting-started"
+      ],
+      "owned_files": [
+        "deepdoc/chatbot/scaffold.py",
+        "deepdoc/chatbot/settings.py",
+        "deepdoc/cli.py",
+        "deepdoc/config.py",
+        "deepdoc/scan_v2.py",
+        "tests/test_chatbot_query.py",
+        "tests/test_chatbot_relationship.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "pyproject.toml"
+      ],
+      "required_sections": [
+        "integration_overview",
+        "authentication",
+        "api_usage",
+        "configuration",
+        "error_handling"
+      ],
+      "required_diagrams": [
+        "integration_flow"
+      ],
+      "coverage_targets": [
+        "Deepdoc Embed API integration"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": true,
+        "is_introduction_page": false,
+        "prompt_style": "integration",
+        "icon": "puzzle-piece",
+        "page_contract": {
+          "intent": "Documents the Deepdoc Embed API integration, including authentication, usage, and configuration.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-anthropic"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "api",
+            "authentication",
+            "configuration",
+            "deepdoc",
+            "deepdoc_embed",
+            "documents",
+            "embed",
+            "including",
+            "integration",
+            "integration-deepdoc-embed",
+            "integrations",
+            "usage"
+          ]
+        }
+      },
+      "priority": 9,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 5,
+        "config": 1,
+        "test": 2
+      }
+    },
+    {
+      "bucket_type": "integration:vinculum",
+      "title": "Integration: Vinculum Warehouse Management",
+      "slug": "integration-vinculum",
+      "section": "Integrations",
+      "description": "Describes the Vinculum Warehouse Management integration, including API usage, events, and data flows.",
+      "depends_on": [
+        "setup-getting-started"
+      ],
+      "owned_files": [
+        "deepdoc/planner_v2.py",
+        "deepdoc/prompts_v2.py",
+        "deepdoc/scan_v2.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "integration_overview",
+        "api_usage",
+        "event_handling",
+        "configuration"
+      ],
+      "required_diagrams": [
+        "integration_flow"
+      ],
+      "coverage_targets": [
+        "Vinculum integration"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": true,
+        "is_introduction_page": false,
+        "prompt_style": "integration",
+        "icon": "puzzle-piece",
+        "page_contract": {
+          "intent": "Describes the Vinculum Warehouse Management integration, including API usage, events, and data flows.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-anthropic"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "api",
+            "data",
+            "describes",
+            "events",
+            "flows",
+            "including",
+            "integration",
+            "integration-vinculum",
+            "integrations",
+            "management",
+            "usage",
+            "vinculum"
+          ]
+        }
+      },
+      "priority": 10,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 3
+      }
+    },
+    {
+      "bucket_type": "integration:webhook",
+      "title": "Integration: Webhook Handlers",
+      "slug": "integration-webhook",
+      "section": "Integrations",
+      "description": "Documents the webhook integration points, handler logic, and event-driven workflows.",
+      "depends_on": [
+        "setup-getting-started"
+      ],
+      "owned_files": [
+        "deepdoc/chatbot/indexer.py",
+        "deepdoc/chatbot/providers.py",
+        "deepdoc/chatbot/settings.py",
+        "deepdoc/cli.py",
+        "deepdoc/llm/client.py"
+      ],
+      "owned_symbols": [],
+      "artifact_refs": [],
+      "required_sections": [
+        "webhook_overview",
+        "handler_logic",
+        "event_flows",
+        "security"
+      ],
+      "required_diagrams": [
+        "sequence_diagram",
+        "event_flow"
+      ],
+      "coverage_targets": [
+        "Webhook handler logic",
+        "Event-driven integrations"
+      ],
+      "generation_hints": {
+        "include_endpoint_detail": false,
+        "is_endpoint_ref": false,
+        "is_endpoint_family": false,
+        "include_openapi": false,
+        "include_database_context": false,
+        "include_integration_detail": true,
+        "is_introduction_page": false,
+        "prompt_style": "integration",
+        "icon": "bolt",
+        "page_contract": {
+          "intent": "Documents the webhook integration points, handler logic, and event-driven workflows.",
+          "must_cover_concepts": [],
+          "required_sibling_links": [
+            "frontend-ui",
+            "vue-component-parsing-integration",
+            "frontend-docs-site-builder",
+            "cli-commands",
+            "integration-anthropic"
+          ],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "documents",
+            "event-driven",
+            "handler",
+            "handlers",
+            "integration",
+            "integration-webhook",
+            "integrations",
+            "points",
+            "webhook"
+          ]
+        }
+      },
+      "priority": 11,
+      "parent_slug": null,
+      "publication_tier": "core",
+      "source_kind_summary": {
+        "product": 5
+      }
+    },
+    {
+      "bucket_type": "research-context",
+      "title": "Development Notes",
+      "slug": "development-notes",
+      "section": "Design & Notes",
+      "description": "Headings: DeepDoc, Features, Installation, From PyPI (recommended), From source (recommended during development), Verify installation, Quick Start, 1. Go to your project | Summary: [![PyPI version](https://img.shields.io/pypi/v/deepdoc)](https://pypi.org/project/deepdoc/) [![Python versions](https://img.shields.io/pypi/pyversions/deepdoc)](https://pypi.org/project/deepdoc/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)",
+      "depends_on": [],
+      "owned_files": [],
+      "owned_symbols": [],
+      "artifact_refs": [
+        "README.md"
+      ],
+      "required_sections": [
+        "overview",
+        "key_findings",
+        "references"
+      ],
+      "required_diagrams": [],
+      "coverage_targets": [],
+      "generation_hints": {
+        "prompt_style": "research_context",
+        "icon": "book-open",
+        "page_contract": {
+          "intent": "Headings: DeepDoc, Features, Installation, From PyPI (recommended), From source (recommended during development), Verify installation, Quick Start, 1. Go to your project | Summary: [![PyPI version](https://img.shields.io/pypi/v/deepdoc)](https://pypi.org/project/deepdoc/) [![Python versions](https://img.shields.io/pypi/pyversions/deepdoc)](https://pypi.org/project/deepdoc/) [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)",
+          "must_cover_concepts": [],
+          "required_sibling_links": [],
+          "forbidden_filler": [
+            "miscellaneous",
+            "various helpers",
+            "other stuff"
+          ],
+          "title_tokens": [
+            "badge",
+            "context",
+            "deepdoc",
+            "development",
+            "development-notes",
+            "during",
+            "features",
+            "headings",
+            "https",
+            "img",
+            "installation",
+            "license"
+          ]
+        }
+      },
+      "priority": 40,
+      "parent_slug": null,
+      "publication_tier": "supporting",
+      "source_kind_summary": {
+        "docs": 1
+      }
+    }
+  ],
+  "nav_structure": {
+    "Overview": [
+      "architecture-overview"
+    ],
+    "Architecture": [
+      "runtime-services",
+      "parsing-analysis",
+      "pipeline-generation-planning"
+    ],
+    "Testing": [
+      "testing",
+      "framework-support-testing-strategy",
+      "planner-builder-quality-assurance",
+      "cli-chatbot-provider-test-coverage"
+    ],
+    "CI/CD and Release": [
+      "setup-getting-started"
+    ],
+    "Integrations": [
+      "frontend-ui",
+      "vue-component-parsing-integration",
+      "frontend-docs-site-builder",
+      "cli-commands",
+      "integration-anthropic",
+      "integration-deepdoc-chat",
+      "integration-deepdoc-embed",
+      "integration-vinculum",
+      "integration-webhook"
+    ],
+    "API": [
+      "api-family-chatbot"
+    ],
+    "Data Layer": [
+      "database-models-schema"
+    ],
+    "Design & Notes": [
+      "development-notes"
+    ]
+  },
+  "skipped_files": [
+    "deepdoc/chatbot/__init__.py",
+    "deepdoc/chatbot/types.py",
+    "deepdoc/llm/__init__.py",
+    "deepdoc/llm/litellm_compat.py",
+    "deepdoc/parser/__init__.py",
+    "deepdoc/parser/routes/__init__.py",
+    "deepdoc/parser/routes/base.py",
+    "deepdoc/parser/routes/common.py",
+    "deepdoc/parser/routes/detector.py",
+    "deepdoc/parser/routes/django.py",
+    "deepdoc/parser/routes/express.py",
+    "deepdoc/parser/routes/falcon.py",
+    "deepdoc/parser/routes/fastapi.py",
+    "deepdoc/parser/routes/fastify.py",
+    "deepdoc/parser/routes/flask.py",
+    "deepdoc/parser/routes/go.py",
+    "deepdoc/parser/routes/js_shared.py",
+    "deepdoc/parser/routes/laravel.py",
+    "deepdoc/parser/routes/nestjs.py",
+    "deepdoc/parser/routes/python_shared.py",
+    "deepdoc/parser/routes/registry.py",
+    "deepdoc/parser/routes/repo_resolver.py",
+    "deepdoc/parser/api_detector.py",
+    "deepdoc/parser/base.py",
+    "deepdoc/parser/go_parser.py",
+    "deepdoc/parser/js_ts_parser.py",
+    "deepdoc/parser/php_parser.py",
+    "deepdoc/parser/python_parser.py",
+    "tests/__init__.py",
+    "tests/conftest.py",
+    "tests/fixtures/frameworks/django_app/urls.py",
+    "tests/fixtures/frameworks/django_app/requirements.txt",
+    "tests/fixtures/frameworks/express_app/server.js",
+    "tests/fixtures/frameworks/express_app/package.json",
+    "tests/fixtures/frameworks/fastify_app/server.js",
+    "tests/fixtures/frameworks/fastify_app/package.json",
+    "tests/fixtures/frameworks/vue_app/src/components/UserList.vue",
+    "tests/fixtures/frameworks/vue_app/package.json",
+    "scripts/fix_generated_mdx.py",
+    "scripts/refresh_generated_sites.py",
+    "tests/test_chatbot_config.py",
+    "tests/test_chatbot_index.py",
+    "tests/test_chatbot_persistence.py",
+    "tests/test_chatbot_providers.py",
+    "tests/test_chatbot_query.py",
+    "tests/test_chatbot_relationship.py",
+    "tests/test_chatbot_scaffold.py",
+    "tests/test_classify.py",
+    "tests/test_cli_generate.py",
+    "tests/test_cli_serve.py",
+    "tests/test_framework_fixtures.py",
+    "tests/test_framework_support.py",
+    "tests/test_fumadocs_builder.py",
+    "tests/test_generation_evidence.py",
+    "tests/test_internal_docs_metadata.py",
+    "tests/test_litellm_compat.py",
+    "tests/test_parallel_pipeline.py",
+    "tests/test_planner_consolidation.py",
+    "tests/test_planner_granularity.py",
+    "tests/test_route_registry.py",
+    "tests/test_smart_update.py",
+    "tests/test_stale.py",
+    "tests/test_state.py"
+  ],
+  "orphaned_files": [
+    "deepdoc/benchmark_v2.py",
+    "deepdoc/openapi.py",
+    "deepdoc/parser/registry.py"
+  ],
+  "integration_candidates": [
+    {
+      "name": "LiteLLM",
+      "evidence": [
+        "LiteLLMChatClient",
+        "LiteLLMEmbeddingClient",
+        "patch_litellm_logging",
+        "prepare_litellm"
+      ],
+      "files": [
+        "deepdoc/chatbot/providers.py",
+        "deepdoc/llm/client.py",
+        "deepdoc/llm/litellm_compat.py",
+        "tests/test_chatbot_providers.py",
+        "tests/test_litellm_compat.py"
+      ]
+    }
+  ],
+  "classification": {
+    "source_files": {
+      "deepdoc/__init__.py": {
+        "primary": "other",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 3
+      },
+      "deepdoc/__main__.py": {
+        "primary": "cli",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 9
+      },
+      "deepdoc/_legacy_types.py": {
+        "primary": "type_def",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 48
+      },
+      "deepdoc/benchmark_v2.py": {
+        "primary": "task",
+        "secondary": [
+          "evaluation"
+        ],
+        "domain_hint": "shared",
+        "line_count": 124
+      },
+      "deepdoc/chatbot/__init__.py": {
+        "primary": "other",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 12
+      },
+      "deepdoc/chatbot/chunker.py": {
+        "primary": "util",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 687
+      },
+      "deepdoc/chatbot/docs_summary.py": {
+        "primary": "util",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 118
+      },
+      "deepdoc/chatbot/indexer.py": {
+        "primary": "service",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 197
+      },
+      "deepdoc/chatbot/persistence.py": {
+        "primary": "service",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 180
+      },
+      "deepdoc/chatbot/providers.py": {
+        "primary": "integration_client",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 137
+      },
+      "deepdoc/chatbot/scaffold.py": {
+        "primary": "service",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 121
+      },
+      "deepdoc/chatbot/service.py": {
+        "primary": "service",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 545
+      },
+      "deepdoc/chatbot/settings.py": {
+        "primary": "config",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 164
+      },
+      "deepdoc/chatbot/types.py": {
+        "primary": "type_def",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 53
+      },
+      "deepdoc/cli.py": {
+        "primary": "cli",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 1015
+      },
+      "deepdoc/config.py": {
+        "primary": "config",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 232
+      },
+      "deepdoc/generator_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 2937
+      },
+      "deepdoc/llm/__init__.py": {
+        "primary": "other",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 5
+      },
+      "deepdoc/llm/client.py": {
+        "primary": "integration_client",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 84
+      },
+      "deepdoc/llm/litellm_compat.py": {
+        "primary": "util",
+        "secondary": [
+          "integration_client"
+        ],
+        "domain_hint": "shared",
+        "line_count": 32
+      },
+      "deepdoc/manifest.py": {
+        "primary": "model",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 63
+      },
+      "deepdoc/openapi.py": {
+        "primary": "util",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 218
+      },
+      "deepdoc/parser/__init__.py": {
+        "primary": "other",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 6
+      },
+      "deepdoc/parser/api_detector.py": {
+        "primary": "util",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 21
+      },
+      "deepdoc/parser/base.py": {
+        "primary": "model",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 73
+      },
+      "deepdoc/parser/go_parser.py": {
+        "primary": "parser",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 481
+      },
+      "deepdoc/parser/js_ts_parser.py": {
+        "primary": "parser",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 649
+      },
+      "deepdoc/parser/php_parser.py": {
+        "primary": "parser",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 555
+      },
+      "deepdoc/parser/python_parser.py": {
+        "primary": "parser",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 382
+      },
+      "deepdoc/parser/registry.py": {
+        "primary": "util",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 48
+      },
+      "deepdoc/parser/routes/__init__.py": {
+        "primary": "other",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 16
+      },
+      "deepdoc/parser/routes/base.py": {
+        "primary": "type_def",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 57
+      },
+      "deepdoc/parser/routes/common.py": {
+        "primary": "util",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 129
+      },
+      "deepdoc/parser/routes/detector.py": {
+        "primary": "route",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 30
+      },
+      "deepdoc/parser/routes/django.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 441
+      },
+      "deepdoc/parser/routes/express.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 121
+      },
+      "deepdoc/parser/routes/falcon.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 131
+      },
+      "deepdoc/parser/routes/fastapi.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 65
+      },
+      "deepdoc/parser/routes/fastify.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 122
+      },
+      "deepdoc/parser/routes/flask.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 55
+      },
+      "deepdoc/parser/routes/go.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 91
+      },
+      "deepdoc/parser/routes/js_shared.py": {
+        "primary": "util",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 180
+      },
+      "deepdoc/parser/routes/laravel.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 139
+      },
+      "deepdoc/parser/routes/nestjs.py": {
+        "primary": "route",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 58
+      },
+      "deepdoc/parser/routes/python_shared.py": {
+        "primary": "util",
+        "secondary": [
+          "parser"
+        ],
+        "domain_hint": "shared",
+        "line_count": 29
+      },
+      "deepdoc/parser/routes/registry.py": {
+        "primary": "util",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 44
+      },
+      "deepdoc/parser/routes/repo_resolver.py": {
+        "primary": "service",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 984
+      },
+      "deepdoc/parser/vue_parser.py": {
+        "primary": "parser",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 491
+      },
+      "deepdoc/persistence_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 708
+      },
+      "deepdoc/pipeline_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 1396
+      },
+      "deepdoc/planner_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 3466
+      },
+      "deepdoc/prompts_v2.py": {
+        "primary": "model",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 1448
+      },
+      "deepdoc/scan_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 1163
+      },
+      "deepdoc/site/__init__.py": {
+        "primary": "other",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 1
+      },
+      "deepdoc/site/fumadocs_builder_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 2546
+      },
+      "deepdoc/smart_update_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 949
+      },
+      "deepdoc/source_metadata.py": {
+        "primary": "util",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 217
+      },
+      "deepdoc/updater_v2.py": {
+        "primary": "service",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 330
+      },
+      "scripts/fix_generated_mdx.py": {
+        "primary": "task",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 82
+      },
+      "scripts/refresh_generated_sites.py": {
+        "primary": "task",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 95
+      },
+      "tests/__init__.py": {
+        "primary": "test",
+        "secondary": [],
+        "domain_hint": "shared",
+        "line_count": 0
+      },
+      "tests/conftest.py": {
+        "primary": "test",
+        "secondary": [
+          "util"
+        ],
+        "domain_hint": "shared",
+        "line_count": 247
+      },
+      "tests/fixtures/frameworks/django_app/urls.py": {
+        "primary": "test",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "users",
+        "line_count": 43
+      },
+      "tests/fixtures/frameworks/express_app/server.js": {
+        "primary": "test",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 9
+      },
+      "tests/fixtures/frameworks/fastify_app/server.js": {
+        "primary": "test",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 22
+      },
+      "tests/fixtures/frameworks/vue_app/src/components/UserList.vue": {
+        "primary": "test",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "users",
+        "line_count": 24
+      },
+      "tests/test_chatbot_config.py": {
+        "primary": "test",
+        "secondary": [
+          "config"
+        ],
+        "domain_hint": "shared",
+        "line_count": 110
+      },
+      "tests/test_chatbot_index.py": {
+        "primary": "test",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 160
+      },
+      "tests/test_chatbot_persistence.py": {
+        "primary": "test",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 42
+      },
+      "tests/test_chatbot_providers.py": {
+        "primary": "test",
+        "secondary": [
+          "integration_client"
+        ],
+        "domain_hint": "shared",
+        "line_count": 71
+      },
+      "tests/test_chatbot_query.py": {
+        "primary": "test",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 433
+      },
+      "tests/test_chatbot_relationship.py": {
+        "primary": "test",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 281
+      },
+      "tests/test_chatbot_scaffold.py": {
+        "primary": "test",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 79
+      },
+      "tests/test_classify.py": {
+        "primary": "test",
+        "secondary": [
+          "service"
+        ],
+        "domain_hint": "shared",
+        "line_count": 189
+      },
+      "tests/test_cli_generate.py": {
+        "primary": "test",
+        "secondary": [
+          "cli"
+        ],
+        "domain_hint": "shared",
+        "line_count": 181
+      },
+      "tests/test_cli_serve.py": {
+        "primary": "test",
+        "secondary": [
+          "cli"
+        ],
+        "domain_hint": "shared",
+        "line_count": 89
+      },
+      "tests/test_framework_fixtures.py": {
+        "primary": "test",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 64
+      },
+      "tests/test_framework_support.py": {
+        "primary": "test",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 673
+      },
+      "tests/test_fumadocs_builder.py": {
+        "primary": "test",
+        "secondary": [
+          "handler"
+        ],
+        "domain_hint": "shared",
+        "line_count": 756
+      },
+      "tests/test_generation_evidence.py": {
+        "primary": "test",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 714
+      },
+      "tests/test_internal_docs_metadata.py": {
+        "primary": "test",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 268
+      },
+      "tests/test_litellm_compat.py": {
+        "primary": "test",
+        "secondary": [
+          "integration_client"
+        ],
+        "domain_hint": "shared",
+        "line_count": 38
+      },
+      "tests/test_parallel_pipeline.py": {
+        "primary": "test",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 328
+      },
+      "tests/test_planner_consolidation.py": {
+        "primary": "test",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 559
+      },
+      "tests/test_planner_granularity.py": {
+        "primary": "test",
+        "secondary": [
+          "model"
+        ],
+        "domain_hint": "shared",
+        "line_count": 653
+      },
+      "tests/test_route_registry.py": {
+        "primary": "test",
+        "secondary": [
+          "route"
+        ],
+        "domain_hint": "shared",
+        "line_count": 69
+      },
+      "tests/test_smart_update.py": {
+        "primary": "test",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 214
+      },
+      "tests/test_stale.py": {
+        "primary": "test",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 118
+      },
+      "tests/test_state.py": {
+        "primary": "test",
+        "secondary": [
+          "task"
+        ],
+        "domain_hint": "shared",
+        "line_count": 180
+      }
+    },
+    "setup_artifacts": [
+      "pyproject.toml",
+      "tests/fixtures/frameworks/django_app/requirements.txt",
+      "tests/fixtures/frameworks/fastify_app/package.json",
+      "tests/fixtures/frameworks/vue_app/package.json",
+      "tests/fixtures/frameworks/express_app/package.json"
+    ],
+    "test_artifacts": [
+      "tests/__init__.py",
+      "tests/conftest.py",
+      "tests/fixtures/frameworks/django_app/urls.py",
+      "tests/fixtures/frameworks/express_app/server.js",
+      "tests/fixtures/frameworks/fastify_app/server.js",
+      "tests/fixtures/frameworks/vue_app/src/components/UserList.vue",
+      "tests/test_chatbot_config.py",
+      "tests/test_chatbot_index.py",
+      "tests/test_chatbot_persistence.py",
+      "tests/test_chatbot_providers.py",
+      "tests/test_chatbot_query.py",
+      "tests/test_chatbot_relationship.py",
+      "tests/test_chatbot_scaffold.py",
+      "tests/test_classify.py",
+      "tests/test_cli_generate.py",
+      "tests/test_cli_serve.py",
+      "tests/test_framework_fixtures.py",
+      "tests/test_framework_support.py",
+      "tests/test_fumadocs_builder.py",
+      "tests/test_generation_evidence.py",
+      "tests/test_internal_docs_metadata.py",
+      "tests/test_litellm_compat.py",
+      "tests/test_parallel_pipeline.py",
+      "tests/test_planner_consolidation.py",
+      "tests/test_planner_granularity.py",
+      "tests/test_route_registry.py",
+      "tests/test_smart_update.py",
+      "tests/test_stale.py",
+      "tests/test_state.py"
+    ],
+    "deploy_artifacts": [
+      ".github/workflows/release.yml",
+      ".github/workflows/tests.yml"
+    ],
+    "integration_signals": [
+      {
+        "name": "LiteLLM",
+        "evidence": [
+          "LiteLLMChatClient",
+          "LiteLLMEmbeddingClient",
+          "patch_litellm_logging",
+          "prepare_litellm"
+        ],
+        "files": [
+          "deepdoc/chatbot/providers.py",
+          "deepdoc/llm/client.py",
+          "deepdoc/llm/litellm_compat.py",
+          "tests/test_chatbot_providers.py",
+          "tests/test_litellm_compat.py"
+        ]
+      }
+    ],
+    "cross_cutting": [
+      {
+        "concern": "configuration",
+        "files": [
+          "deepdoc/config.py",
+          "deepdoc/chatbot/settings.py"
+        ]
+      },
+      {
+        "concern": "integration_client",
+        "files": [
+          "deepdoc/chatbot/providers.py",
+          "deepdoc/llm/client.py",
+          "deepdoc/llm/litellm_compat.py"
+        ]
+      }
+    ],
+    "giant_files": [
+      "deepdoc/generator_v2.py",
+      "deepdoc/planner_v2.py",
+      "deepdoc/prompts_v2.py",
+      "deepdoc/site/fumadocs_builder_v2.py"
+    ],
+    "repo_profile": {
+      "primary_type": "hybrid",
+      "secondary_traits": [
+        "has_ci_release",
+        "has_cli",
+        "has_frontend",
+        "has_pipeline_stages",
+        "has_public_api",
+        "uses_django",
+        "uses_express",
+        "uses_falcon",
+        "uses_fastapi",
+        "uses_fastify",
+        "uses_laravel",
+        "uses_vue"
+      ],
+      "confidence": "high",
+      "evidence": "Core files implement parsers, planners, generators, and pipeline stages for documentation and code analysis; CLI entry points and integration clients present; test fixtures cover multiple frameworks; giant files are framework/model/service abstractions."
+    }
+  }
+}

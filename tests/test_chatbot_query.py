@@ -360,6 +360,7 @@ def test_system_prompt_contains_project_name(tmp_path: Path) -> None:
     assert "MyProject" in prompt
     assert "file path and line range" in prompt
     assert "Sources" in prompt
+    assert "## Summary" in prompt
 
 
 def test_query_service_passes_loaded_indexes_into_similarity_search(tmp_path: Path, monkeypatch) -> None:

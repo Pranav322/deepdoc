@@ -17,7 +17,7 @@ def test_chatbot_defaults_are_present() -> None:
 
     assert chatbot["enabled"] is False
     assert chatbot["vector_store"]["kind"] == "faiss"
-    assert chatbot["retrieval"]["top_k_code"] == 8
+    assert chatbot["retrieval"]["top_k_code"] == 15
     assert chatbot["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
     assert chatbot["embeddings"]["api_key_env"] == "DEEPDOC_EMBED_API_KEY"
     assert "http://localhost:3000" in chatbot["backend"]["allowed_origins"]

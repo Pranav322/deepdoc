@@ -9,6 +9,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 
 def find_openapi_specs(repo_root: Path) -> list[Path]:
@@ -56,7 +57,13 @@ def extract_endpoints_from_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
     if "openapi" in spec:
         servers = spec.get("servers", [])
         if servers:
-            base_path = servers[0].get("url", "").rstrip("/")
+            server_url = str(servers[0].get("url", "") or "").strip()
+            if server_url:
+                parsed = urlparse(server_url)
+                if parsed.scheme or parsed.netloc:
+                    base_path = parsed.path.rstrip("/")
+                else:
+                    base_path = server_url.rstrip("/")
 
     # Swagger 2.x
     elif "swagger" in spec:

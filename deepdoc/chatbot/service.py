@@ -39,9 +39,16 @@ class ChatbotQueryService:
         self.code_records, self.code_vectors = load_corpus(self.index_dir, "code")
         self.artifact_records, self.artifact_vectors = load_corpus(self.index_dir, "artifact")
         self.doc_records, self.doc_vectors = load_corpus(self.index_dir, "doc_summary")
+        self.relationship_records, self.relationship_vectors = load_corpus(self.index_dir, "relationship")
         self.code_index = load_vector_index(self.index_dir, "code")
         self.artifact_index = load_vector_index(self.index_dir, "artifact")
         self.doc_index = load_vector_index(self.index_dir, "doc_summary")
+        self.relationship_index = load_vector_index(self.index_dir, "relationship")
+
+        # Build code record lookup for chain-retrieval
+        self._code_by_file: dict[str, list[int]] = {}
+        for idx, record in enumerate(self.code_records):
+            self._code_by_file.setdefault(record.file_path, []).append(idx)
 
     def query(self, question: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
         retrieval_cfg = self.chat_cfg["retrieval"]
@@ -74,6 +81,16 @@ class ChatbotQueryService:
             retrieval_cfg["top_k_docs"],
             vector_index=self.doc_index,
         )
+        relationship_hits = self._multi_query_search(
+            self.relationship_records,
+            self.relationship_vectors,
+            query_vectors,
+            retrieval_cfg.get("top_k_relationship", 6),
+            vector_index=self.relationship_index,
+        )
+
+        # Step 3.5: Chain-retrieval — use relationship hits to pull in related code
+        code_hits = self._chain_retrieve(code_hits, relationship_hits, retrieval_cfg)
 
         # Step 4: Rerank with LLM for better precision
         code_hits, artifact_hits, doc_hits = self._rerank(
@@ -84,12 +101,16 @@ class ChatbotQueryService:
         selected_code = code_hits[: retrieval_cfg["max_prompt_code_chunks"]]
         selected_artifacts = artifact_hits[: retrieval_cfg["max_prompt_artifact_chunks"]]
         selected_docs = doc_hits[: retrieval_cfg["max_prompt_doc_chunks"]]
+        selected_relationships = relationship_hits[:4]  # lightweight, always include a few
 
         if not (selected_code or selected_artifacts or selected_docs):
             return self._no_context_result(question)
 
         # Step 6: Build prompt and generate answer
-        prompt = self._build_prompt(question, history or [], selected_code, selected_artifacts, selected_docs)
+        prompt = self._build_prompt(
+            question, history or [], selected_code, selected_artifacts,
+            selected_docs, selected_relationships,
+        )
         answer = self.chat_client.complete(self._system_prompt(), prompt)
 
         return {
@@ -123,7 +144,7 @@ class ChatbotQueryService:
                 for hit in selected_artifacts
             ],
             "doc_links": self._doc_links(selected_docs, selected_code + selected_artifacts),
-            "used_chunks": len(selected_code) + len(selected_artifacts) + len(selected_docs),
+            "used_chunks": len(selected_code) + len(selected_artifacts) + len(selected_docs) + len(selected_relationships),
         }
 
     def _no_context_result(self, question: str) -> dict[str, Any]:
@@ -192,6 +213,49 @@ class ChatbotQueryService:
             reverse=True,
         )
         return merged[:top_k]
+
+    def _chain_retrieve(
+        self,
+        code_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk],
+        retrieval_cfg: dict[str, Any],
+    ) -> list[RetrievedChunk]:
+        """Use relationship chunks to pull in code from related files.
+
+        When a relationship chunk (import graph) mentions files that aren't
+        already in the code hits, grab their top code chunks too. This lets
+        the chatbot see the full picture — e.g., OrderController + the
+        OrderService it imports.
+        """
+        already_seen_files = {hit.record.file_path for hit in code_hits}
+        already_seen_ids = {hit.record.chunk_id for hit in code_hits}
+        extra_hits: list[RetrievedChunk] = []
+
+        for rel_hit in relationship_hits:
+            # Look at files mentioned in the relationship chunk's imports
+            for imp in rel_hit.record.imports_summary:
+                # Try to extract file paths from import statements
+                for file_path, indices in self._code_by_file.items():
+                    if file_path in already_seen_files:
+                        continue
+                    # Match if the import mentions a module/file name that
+                    # corresponds to this file path
+                    file_stem = Path(file_path).stem
+                    file_name = Path(file_path).name
+                    if file_stem in imp or file_name in imp or file_path in imp:
+                        # Grab the first 2 code chunks from this related file
+                        for idx in indices[:2]:
+                            record = self.code_records[idx]
+                            if record.chunk_id not in already_seen_ids:
+                                extra_hits.append(RetrievedChunk(
+                                    record=record,
+                                    score=rel_hit.score * 0.8,  # slightly discount chain-retrieved
+                                ))
+                                already_seen_ids.add(record.chunk_id)
+                        already_seen_files.add(file_path)
+
+        # Merge: original hits first, then chain-retrieved extras
+        return code_hits + extra_hits
 
     def _rerank(
         self,
@@ -342,6 +406,7 @@ class ChatbotQueryService:
         code_hits: list[RetrievedChunk],
         artifact_hits: list[RetrievedChunk],
         doc_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk] | None = None,
     ) -> str:
         max_chars = self.chat_cfg["retrieval"].get("max_prompt_chars", 200000)
 
@@ -359,6 +424,7 @@ class ChatbotQueryService:
         used = sum(len(s) for s in sections)
 
         for label, hits in [
+            ("File relationships (imports & symbols)", relationship_hits or []),
             ("Code context", code_hits),
             ("Artifact context", artifact_hits),
             ("Docs summaries", doc_hits),
@@ -406,29 +472,41 @@ class ChatbotQueryService:
 
     def _system_prompt(self) -> str:
         return (
-            f"You are a codebase assistant for the **{self.project_name}** project. "
+            f"You are a **deep codebase knowledge assistant** for the **{self.project_name}** project. "
             "You answer developer questions using ONLY the retrieved context provided in each query. "
             "Never fabricate file paths, function names, class names, or code that does not appear in the context.\n\n"
+            "## YOUR PRIMARY DIRECTIVE: BE EXHAUSTIVE\n"
+            "Developers are asking you because they want DEEP understanding, not shallow summaries. "
+            "Your answers should be as detailed as a senior engineer explaining the code during a code review.\n\n"
+            "- **Show the actual code** — always prefer showing full method/function implementations over paraphrasing.\n"
+            "- **Explain the logic** — walk through what the code does step-by-step, explaining non-obvious decisions.\n"
+            "- **Cover all methods** — if asked about a class/controller/service, explain EVERY method, not just the main ones.\n"
+            "- **Follow the chain** — when a method calls another service/function, explain that too with its code.\n"
+            "- **Include imports and dependencies** — show what the file imports and how it connects to other files.\n"
+            "- **Show data flow** — explain inputs → processing → outputs for each operation.\n"
+            "- **Never say 'and more'** — list everything explicitly. Developers need complete information.\n\n"
             "## Evidence hierarchy\n"
-            "1. **Core code chunks** are primary evidence — especially runtime, architecture, and product code.\n"
-            "2. **Artifact chunks** (config files, Dockerfiles, migrations, OpenAPI specs) are secondary evidence.\n"
-            "3. **Doc summaries** provide high-level context from generated documentation pages.\n"
-            "4. **Supporting material** (tests, examples, fixtures, generated files) is valid evidence when it is explicitly requested or needed to answer precisely, but it should not dominate a normal answer.\n\n"
+            "1. **Code chunks** are primary evidence — show the actual implementation, not summaries.\n"
+            "2. **Relationship chunks** show import graphs and symbol indexes — use these to explain how files connect.\n"
+            "3. **Artifact chunks** (config files, Dockerfiles, migrations, OpenAPI specs) are supporting evidence.\n"
+            "4. **Doc summaries** provide high-level context from generated documentation pages.\n"
+            "5. **Supporting material** (tests, examples, fixtures) is valid evidence when explicitly requested.\n\n"
             "## Formatting rules\n"
             "- When referencing code, always include the file path and line range: `path/to/file.py:10-20`.\n"
-            "- Show relevant code snippets in fenced code blocks with the correct language tag (```python, ```typescript, etc.).\n"
-            "- Prefer showing the actual code over paraphrasing it — developers want to see the real implementation.\n"
-            "- Use bullet points for multi-part answers. Keep answers concise but complete.\n"
-            "- If multiple chunks cover the same topic, synthesize them into one coherent answer.\n\n"
+            "- Show code in fenced blocks with the correct language tag (```python, ```typescript, etc.).\n"
+            "- **Show FULL implementations**, not truncated snippets. If a method is 50 lines, show all 50 lines.\n"
+            "- Use headers (##) to organize complex answers by topic/method/component.\n"
+            "- Use bullet points for listing attributes, parameters, or quick facts.\n\n"
             "## Grounding rules\n"
             "- If the retrieved context does not contain enough information to fully answer, say exactly what is missing "
             "and suggest a more specific question the user could ask.\n"
             "- When a related documentation page exists in the doc summaries, mention it naturally "
             '(e.g. "See the Authentication docs for the full auth flow").\n\n'
             "## Answer structure\n"
-            "1. A direct answer to the question, with code snippets and file references inline.\n"
-            "2. A **Sources** section at the end listing the key files you referenced, one per line, "
-            "formatted as `- path/to/file.py:start-end`."
+            "1. **Overview** — one paragraph explaining what this component is and its role in the system.\n"
+            "2. **Implementation details** — full code with explanations, organized by method/function.\n"
+            "3. **Dependencies & connections** — what this file imports, what calls it, data flow.\n"
+            "4. **Sources** — list all files referenced, formatted as `- path/to/file.py:start-end`."
         )
 
 

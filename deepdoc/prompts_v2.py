@@ -35,13 +35,27 @@ the source context — never invent paths.
 and detailed. No generic filler.
 4. **Code examples**: Include realistic code snippets showing actual usage, not toy examples.
 5. **Edge cases**: Mention gotchas, error handling, and non-obvious behavior.
-6. **Cross-page links**: This is a LINKED documentation site. Whenever you mention a concept, \
+6. **Business logic depth**: Document ALL conditional branches, feature flags, guard clauses, \
+and validation checks you find in the source code. If a handler checks `is_block`, `is_two_fa`, \
+a Redis feature flag, or any other conditional — document it explicitly. Name the flag/field, \
+explain when each branch triggers, and what the user-facing behavior is. Do NOT gloss over \
+branching logic — every `if/else` in a handler is a business rule that developers need to know about.
+7. **Helper functions**: When the source calls utility functions (e.g., `create_token()`, \
+`sync_cart()`, `getAddresses()`, `data_sanitization()`), explain what they do, where they live, \
+and what they return. If helper source is provided in the "Resolved Helper Functions" section, \
+use it to give accurate descriptions. Document SQL queries or ORM patterns you see.
+8. **Evidence hierarchy & uncertainty**: Runtime/source evidence is authoritative. \
+If "Internal Docs Context" or README/design summaries are provided, use them only to enrich \
+high-level explanation and onboarding context — never let them override code truth. \
+If the evidence is partial, say so plainly instead of inventing exact paths, payloads, \
+feature flags, auth modes, health endpoints, or deployment topology.
+9. **Cross-page links**: This is a LINKED documentation site. Whenever you mention a concept, \
 module, service, API, or feature that is documented in another page, you MUST link to it using \
 standard Markdown: `[Page Title](/page-slug)`. \
 Every prompt includes a sitemap of all available pages — use it. \
 If a page is listed in "Dependency Links", you MUST link to it at least once where it is \
 first mentioned. Think of each page as part of a wiki, not a standalone document.
-7. **Fumadocs UI components**: This documentation site runs on Fumadocs. Use its rich \
+10. **Fumadocs UI components**: This documentation site runs on Fumadocs. Use its rich \
 JSX components to make pages beautiful and scannable. Never use `:::type` admonition syntax.
 
 **Callouts** — for tips, warnings, notes, gotchas:
@@ -117,6 +131,23 @@ Use at the end of overview/architecture pages to create a visual navigation grid
 - Use `<Tabs>` when showing the same thing in multiple languages, environments, or configs.
 - Use `<Accordions>` and `<Accordion>` for reference material with many options or a FAQ section.
 - Use callouts (`<Callout>`, `<Callout type="warn">`, etc.) liberally — they draw the eye to important info.
+
+11. **Grounded snippets over invented examples**: When showing code in documentation, \
+prefer quoting short, targeted snippets verbatim from the provided source evidence. \
+Use the exact function signatures, variable names, constants, and branching terms from \
+the source files. Only write synthetic examples when the source does not already demonstrate \
+the behavior — and label synthetic code clearly (e.g. "Example usage:") so developers know \
+it is not a direct quote. Never paraphrase a function signature or invent import paths.
+12. **Constants, types, and state values**: When the evidence contains enums, status \
+constants, type definitions, config schemas, or state machine values that affect behavior \
+or contracts, document them explicitly. Surface valid values, default states, and \
+transition rules where they appear in the source. Do not dump every constant — only those \
+that affect runtime behavior, API contracts, or integration interfaces.
+13. **Environment variables and config knobs**: When the evidence shows `os.environ`, \
+`os.getenv`, `process.env`, or framework config lookups, document the actual variable \
+names, whether they are required, their defaults if visible, and what behavior they gate. \
+Render them in a table where there are 3+ variables. Do not invent env vars not present \
+in the evidence.
 """
 
 
@@ -168,6 +199,8 @@ the system from start to finish, not just introduce it. It should help someone u
 - which pages to read next for deeper detail
 
 Assume this is the first page most people will read.
+Use "Internal Docs Context" only as supporting architectural/onboarding context. If repo docs
+and code differ, follow the code and say the docs appear outdated rather than picking one silently.
 
 # {title}
 
@@ -198,6 +231,12 @@ Describe the major internal areas of the system as a map:
 - which integrations or data models it depends on
 - which page to read for the deep dive
 
+## Key Files To Know First
+Include a table of the 8-15 most important files a new developer should be aware of. \
+For each file, show: file path, role (e.g. entry point, router, core service, config), \
+and a one-line summary of what it does. Sort by importance, not alphabetically. \
+This table should help someone know where to look first when debugging or extending the system.
+
 ## Tech Stack
 List the actual technologies, frameworks, runtime model, storage, messaging, and deployment
 tools where detectable. If a framework is clearly central, say how it shapes the architecture.
@@ -210,6 +249,7 @@ For each major section, link to its documentation page from the sitemap.
 Summarize:
 - the key models or persistent state
 - important caches, queues, or scheduled jobs
+- background workers, cron tasks, or async job processors and when they run
 - external systems and what role they play
 
 Link to the relevant database, integration, and operations pages from the sitemap.
@@ -523,6 +563,10 @@ Source files:
 
 Write deployment docs:
 
+Do not invent deployment topology, orchestrators, health endpoints, or environment-specific
+behavior that are not evidenced in the provided files. If the repo only partially documents
+deployment, say what is explicit vs uncertain.
+
 # {title}
 
 ## Deployment Architecture
@@ -657,10 +701,17 @@ Write comprehensive feature documentation following this mandatory outline:
 What this feature does, why it exists, and its business purpose. \
 Link to the architecture page and related features from the sitemap.
 
+## Files Covered
+Include a summary table of all source files relevant to this feature. Columns: \
+File Path, Role (handler/service/model/validator/task/config), Key Symbols, \
+and a one-line Responsibility. Sort by role importance (handlers first, then services, \
+then models, then utilities). Skip this section only if the feature has fewer than 3 files.
+
 ## Main Workflows
 Step-by-step explanation of the primary workflows in this feature. \
 Include a **Mermaid flowchart** for the main flow. \
 For each step that involves another module or service, link to that page.
+If a workflow path is only partially evidenced, say which part is inferred vs directly grounded.
 
 ## Participating Endpoints
 List all API endpoints involved in this feature. For each:
@@ -674,6 +725,13 @@ Key functions, classes, and validation rules. For each:
 - File path (always!)
 - Important parameters and return values
 - Code example showing real usage
+- ALL conditional logic inside the function — document every feature flag, \
+guard clause, and branching path. If a function checks Redis keys, config flags, \
+user state (is_block, is_two_fa, is_exclusive), or request parameters to change \
+behavior, document each branch explicitly.
+
+If "Resolved Helper Functions" are provided in the source context, use their actual \
+implementation to describe behavior accurately rather than guessing.
 
 ## State Transitions
 How data/entity state changes through this feature. \
@@ -686,6 +744,7 @@ External systems this feature talks to. For each:
 
 ## Configuration & Environment
 Config flags, feature toggles, env vars that affect this feature.
+Do not invent env vars or flags that are not present in the evidence.
 
 ## Edge Cases & Failure Modes
 Non-obvious behavior, error scenarios, race conditions, known limitations.
@@ -693,6 +752,17 @@ Non-obvious behavior, error scenarios, race conditions, known limitations.
 ## Diagrams
 Include all required diagrams: {required_diagrams}. \
 Every diagram must be Mermaid and must reference actual code artifacts.
+
+## Quick Reference
+Include a compact reference table of the most important public functions, classes, \
+and handlers in this feature. Columns: Symbol, File Path, Signature or Key Args, \
+and What It Does (one line). This is for quick scanning — keep it concise. \
+Include 5-15 entries, prioritizing handlers, service functions, and key validators.
+
+## Constants, Enums & Status Values
+If the evidence contains enums, status constants, state machine values, or important \
+type definitions that affect this feature's behavior, list them here with their valid \
+values and what each value means. Skip this section if no such constants exist in the evidence.
 
 ## See Also
 Related feature, endpoint, and integration pages from the sitemap.
@@ -722,6 +792,10 @@ Handler source code and evidence:
 
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
+
+Ground this page in the provided route evidence and handler code only. If a path, auth mode,
+health endpoint, payload field, or side effect is not present in the evidence, state uncertainty
+instead of asserting it.
 
 Write comprehensive endpoint family documentation:
 
@@ -792,11 +866,21 @@ curl https://api.example.com/v1/resource/123 \\
 
 ## Execution Flow
 Step-by-step walkthrough of what happens internally when a request is processed. \
-Reference exact function names and file paths throughout.
+Reference exact function names and file paths throughout. Document ALL conditional \
+branches — feature flags, user state checks (blocked, 2FA, subscription), platform- \
+specific behavior, and error guards. Every `if/else` is a business rule.
 
 ## State Changes & Side Effects
 What database records, cache keys, or queues are modified. \
-Background jobs or webhooks triggered. Reference exact functions.
+Background jobs or webhooks triggered. Reference exact functions. \
+Include async tasks (Celery), analytics events, cache invalidations, and \
+any Redis feature flag checks that gate behavior.
+
+## Constants, Enums & Status Values
+If endpoints in this family use status enums, type constants, role values, or \
+state machine transitions, list them with their valid values. Document what each \
+value means and which endpoint paths produce or consume them. Skip if none appear \
+in the evidence.
 
 ## See Also
 Related endpoint, feature, and integration pages from the sitemap.
@@ -836,7 +920,10 @@ Link to each from the sitemap.
 
 ## Request/Response or Message Flow
 Include a **Mermaid sequence diagram** showing the typical interaction pattern. \
-Document payload structures, headers, authentication.
+Document payload structures, headers, authentication. \
+If the evidence contains request/response type definitions, schemas, or payload shapes, \
+include them as grounded code snippets or tables. Show the actual field names and types \
+from the source, not invented examples.
 
 ## Auth & Configuration
 How to set up credentials, API keys, base URLs. \
@@ -883,6 +970,11 @@ Write comprehensive system documentation following this mandatory outline:
 What this system component does and its role in the architecture. \
 Link to the architecture overview and related system pages from the sitemap.
 
+## Files Covered
+Include a summary table of all source files relevant to this system component. Columns: \
+File Path, Role, Key Symbols, and Responsibility (one line). Sort by importance. \
+Skip this section only if the component has fewer than 3 files.
+
 ## Architecture & Design
 Include a **Mermaid diagram** showing how this component fits into the system. \
 Explain key design decisions and patterns used.
@@ -908,6 +1000,11 @@ What can go wrong, how errors are handled, known limitations.
 
 ## Diagrams
 Include all required diagrams: {required_diagrams}. Use Mermaid.
+
+## Quick Reference
+Include a compact reference table of the most important public functions, classes, \
+and interfaces in this component. Columns: Symbol, File Path, Signature or Key Args, \
+and What It Does (one line). Include 5-15 entries.
 
 ## See Also
 Related system, feature, and integration pages.
@@ -1028,6 +1125,9 @@ Handler source code and evidence:
 """ + CROSS_LINK_SECTION + """
 
 Write the page body directly — do NOT emit YAML frontmatter or interactive API JSX components.
+Only assert route shapes, auth modes, validation rules, response fields, side effects, and
+health/ops claims that are explicitly supported by the provided evidence. If evidence is partial,
+say so clearly.
 
 ## Overview
 One paragraph describing what this endpoint does, when to use it, and any important \
@@ -1077,13 +1177,29 @@ curl -X POST https://api.example.com/v1/orders \\
 ```
 ```
 
+## Business Logic & Branching
+Document EVERY conditional branch in the handler. For each `if/else` or guard clause:
+- What condition is checked (feature flag, user state, request field)
+- What happens in each branch
+- What error is raised or what alternate flow is triggered
+Include feature flags (e.g., Redis flags, config toggles), user state checks (blocked, \
+2FA enabled, subscription tier), and any version/platform-specific behavior. \
+If the handler calls helper functions, explain what each helper does using the resolved \
+helper source if available.
+
+If the handler uses status enums, role constants, or type values that determine behavior, \
+list the valid values and what each means for this endpoint's response or side effects.
+
 ## Validation
 What validations run (schema validation, auth checks, business rules). \
-Reference exact validator functions and files.
+Reference exact validator functions and files. Document the specific validation logic — \
+not just "validates email" but "uses `email_validation()` from `utils/hooks.py` which \
+checks format via regex".
 
 ## Side Effects
 Database writes, cache updates, events, queue jobs, or webhooks triggered by this endpoint. \
-Reference exact functions and files.
+Reference exact functions and files. Include async tasks (Celery jobs), analytics events \
+(Facebook events, tracking pixels), and cache invalidations.
 
 ## Error Responses
 Use a clean table:
@@ -1171,6 +1287,10 @@ Write comprehensive component documentation following this mandatory outline:
 ## Overview
 What this component is, why it exists, and its role in the system. \
 One paragraph, precise.
+
+## Files Covered
+Include a summary table of all source files in this component. Columns: \
+File Path, Role, Key Symbols, and Responsibility (one line). Skip if fewer than 3 files.
 
 ## Design & Purpose
 Include a **Mermaid diagram** (class, flowchart, or sequence — whichever fits best) \

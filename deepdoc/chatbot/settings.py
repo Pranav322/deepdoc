@@ -27,7 +27,7 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "base_url": "",
         "api_version": "",
         "temperature": 0.1,
-        "max_tokens": 1200,
+        "max_tokens": 16000,
     },
     "embeddings": {
         "provider": "azure",
@@ -41,12 +41,12 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "kind": "faiss",
     },
     "retrieval": {
-        "top_k_code": 8,
-        "top_k_artifact": 4,
-        "top_k_docs": 3,
-        "max_prompt_code_chunks": 6,
-        "max_prompt_artifact_chunks": 3,
-        "max_prompt_doc_chunks": 2,
+        "top_k_code": 15,
+        "top_k_artifact": 8,
+        "top_k_docs": 6,
+        "max_prompt_code_chunks": 12,
+        "max_prompt_artifact_chunks": 6,
+        "max_prompt_doc_chunks": 4,
         "max_prompt_chars": 200000,
         "query_expansion": True,
         "expansion_max_queries": 3,
@@ -58,8 +58,8 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "code_chunk_overlap": 20,
         "artifact_chunk_lines": 140,
         "artifact_chunk_overlap": 20,
-        "max_doc_summary_chunks_per_page": 2,
-        "max_doc_summary_chars": 1800,
+        "max_doc_summary_chunks_per_page": 4,
+        "max_doc_summary_chars": 4000,
     },
 }
 

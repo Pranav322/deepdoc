@@ -575,3 +575,113 @@ def _deduplicate_overlapping(chunks: list[ChunkRecord]) -> list[ChunkRecord]:
                 kept.append(chunk)
         result.extend(kept)
     return result
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Relationship / import-graph chunks
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def build_relationship_chunks(
+    scan: RepoScan,
+    plan: DocPlan,
+    cfg: dict[str, Any],
+    files: list[str] | None = None,
+) -> list[ChunkRecord]:
+    """Build lightweight chunks that map file relationships and symbol indexes.
+
+    Two chunk types per file:
+    1. **Import graph** — what the file imports and from where.
+    2. **Symbol index** — every class, function, method defined in the file.
+
+    These chunks are small (~200-500 chars) and cheap to embed, but they
+    dramatically improve the chatbot's ability to follow imports and find
+    related files.
+    """
+    related = _bucket_map(plan)
+    bucket_tiers = _bucket_tier_map(plan)
+    chunks: list[ChunkRecord] = []
+    target_files = files or sorted(scan.parsed_files.keys())
+
+    for rel_path in target_files:
+        parsed = scan.parsed_files.get(rel_path)
+        if not parsed:
+            continue
+        source_kind = scan.source_kind_by_file.get(rel_path, classify_source_kind(rel_path))
+        framework = select_primary_framework(scan.file_frameworks.get(rel_path, []))
+        publication_tier = _related_publication_tier(related.get(rel_path, []), bucket_tiers, rel_path)
+        related_slugs = related.get(rel_path, [])
+
+        # 1. Import graph chunk
+        if parsed.imports:
+            import_lines = []
+            for imp in parsed.imports[:30]:  # cap at 30 to stay within embedding limits
+                import_lines.append(f"  - {imp}")
+            text = (
+                f"File: {rel_path}\n"
+                f"Language: {parsed.language}\n"
+                f"Type: import_graph\n\n"
+                f"{Path(rel_path).name} imports:\n"
+                + "\n".join(import_lines)
+            )
+            chunk_hash = _hash_text(text)
+            chunks.append(
+                ChunkRecord(
+                    chunk_id=f"{rel_path}:imports:{chunk_hash[:8]}",
+                    kind="relationship",
+                    source_key=rel_path,
+                    text=text,
+                    chunk_hash=chunk_hash,
+                    file_path=rel_path,
+                    language=parsed.language,
+                    framework=framework,
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    trust_score=_trust_score(source_kind, publication_tier),
+                    imports_summary=list(parsed.imports[:30]),
+                    related_bucket_slugs=list(related_slugs),
+                    title=f"{Path(rel_path).name} :: imports",
+                )
+            )
+
+        # 2. Symbol index chunk
+        if parsed.symbols:
+            symbol_lines = []
+            for sym in parsed.symbols:
+                sig = f" — {sym.signature.strip()}" if sym.signature else ""
+                lines_info = ""
+                if sym.start_line > 0 and sym.end_line > 0:
+                    lines_info = f" (lines {sym.start_line}-{sym.end_line})"
+                symbol_lines.append(f"  - {sym.kind}: {sym.name}{sig}{lines_info}")
+            text = (
+                f"File: {rel_path}\n"
+                f"Language: {parsed.language}\n"
+                f"Type: symbol_index\n\n"
+                f"{Path(rel_path).name} defines {len(parsed.symbols)} symbols:\n"
+                + "\n".join(symbol_lines)
+            )
+            # Respect embedding limits
+            if len(text) > MAX_CHUNK_CHARS:
+                text = text[:MAX_CHUNK_CHARS - 20] + "\n... [truncated]"
+            chunk_hash = _hash_text(text)
+            chunks.append(
+                ChunkRecord(
+                    chunk_id=f"{rel_path}:symbols:{chunk_hash[:8]}",
+                    kind="relationship",
+                    source_key=rel_path,
+                    text=text,
+                    chunk_hash=chunk_hash,
+                    file_path=rel_path,
+                    language=parsed.language,
+                    framework=framework,
+                    source_kind=source_kind,
+                    publication_tier=publication_tier,
+                    trust_score=_trust_score(source_kind, publication_tier),
+                    symbol_names=[sym.name for sym in parsed.symbols],
+                    related_bucket_slugs=list(related_slugs),
+                    title=f"{Path(rel_path).name} :: symbol index",
+                )
+            )
+
+    return chunks
+

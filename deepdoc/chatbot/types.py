@@ -6,7 +6,7 @@ from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
 
-ChunkKind = Literal["code", "artifact", "doc_summary"]
+ChunkKind = Literal["code", "artifact", "doc_summary", "relationship"]
 
 
 @dataclass

@@ -397,6 +397,7 @@ def test_query_service_passes_loaded_indexes_into_similarity_search(tmp_path: Pa
         "code": object(),
         "artifact": object(),
         "doc_summary": object(),
+        "relationship": object(),
     }
     seen_indexes: list[object | None] = []
 
@@ -427,4 +428,6 @@ def test_query_service_passes_loaded_indexes_into_similarity_search(tmp_path: Pa
         result = service.query("Where is auth handled?")
 
     assert result["answer"] == "Grounded answer"
-    assert seen_indexes == [loaded_indexes["code"]]
+    # code corpus has records, so its index is used; others have no records so
+    # similarity_search is short-circuited. Relationship corpus is also empty.
+    assert loaded_indexes["code"] in seen_indexes

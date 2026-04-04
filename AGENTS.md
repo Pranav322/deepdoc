@@ -1,5 +1,5 @@
 # AGENTS.md
-Guidance for coding agents working in this repository.
+Guidance for coding agents working in this repository. Might be stale , dont be too dependant on this file 
 
 ## Scope
 - Applies to the repository root only.
@@ -41,7 +41,12 @@ Guidance for coding agents working in this repository.
 - Scan and plan state now carry `source_kind` metadata and bucket `publication_tier` semantics; preserve them consistently across planner, persistence, generation, smart update, and chatbot indexing.
 - Published API structure should be derived from validated runtime endpoints only; use `RepoScan.published_api_endpoints` and keep lower-confidence candidates available for retrieval/debugging rather than publishing them.
 - Integration discovery now distinguishes first-party vs third-party relationships; first-party systems should generally be documented as subsystems, not external integrations.
+- The chatbot indexes 4 corpora: `code` (symbol-aware source chunks), `artifact` (config/migration files), `doc_summary` (generated docs), and `relationship` (import graphs + symbol indexes). Relationship chunks enable chain-retrieval — when a relationship chunk mentions imported files, the query service pulls additional code chunks from those files.
 - The chatbot is expected to index exhaustive corpora, but retrieval should prefer core/runtime/docs evidence before supporting material unless the question explicitly targets tests, examples, or other support sources.
+- Generator source-evidence tiers should follow config (`large_file_lines`, `giant_file_lines`, `source_context_budget`) rather than hardcoded thresholds.
+- Helper-following in generation should be import-aware and repo-local; do not reintroduce global call-name matching across unrelated files.
+- Repo-authored markdown docs may be used as secondary context for overview/system pages, but code/runtime evidence remains authoritative when they disagree.
+- Validation for generated API/ops pages should prefer grounded route/file claims and flag references that are outside the assembled evidence set.
 - If freshness semantics change, audit `planner_v2.py`, `generator_v2.py`, `persistence_v2.py`, and `smart_update_v2.py` together.
 - If persisted state changes, maintain save/load parity for both current and legacy compatibility files.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
@@ -107,6 +112,7 @@ python3 -m pytest tests/test_state.py::test_save_and_load_sync_state_roundtrip -
 python3 -m pytest tests/test_smart_update.py -q
 python3 -m pytest tests/test_framework_support.py -q
 python3 -m pytest tests/test_chatbot_scaffold.py -q
+python3 -m pytest tests/test_chatbot_relationship.py -q
 python3 -m pytest -k "route or stale or chatbot" -q
 ```
 
@@ -119,7 +125,7 @@ Single-test guidance:
 ## Testing Expectations
 - For route work, run route detector coverage and at least one `scan_repo(...)` regression.
 - For freshness or update work, run stale and smart-update tests, not just small helpers.
-- For chatbot or generated-site config work, run chatbot config/scaffold tests and the Fumadocs builder tests if scaffold output changed.
+- For chatbot or generated-site config work, run chatbot config/scaffold/relationship tests and the Fumadocs builder tests if scaffold output changed.
 - For non-trivial changes, prefer a focused test first, then `python3 -m pytest -q` if feasible.
 - If you could not run verification, say so clearly and name the next command to run.
 
@@ -168,7 +174,8 @@ Single-test guidance:
 - Read the relevant v2 modules before changing behavior; the same concept often spans planner, generator, persistence, and smart update.
 - If a change touches persisted data or freshness semantics, audit plan save/load, ledger save/load, sync state save/load, manifest updates, and stale detection.
 - If a change touches routing, audit the per-framework detector, route registry, repo resolver, `scan_repo(...)`, and endpoint bucket ownership.
-- If a change touches chatbot behavior, audit `deepdoc/chatbot/settings.py`, `deepdoc/chatbot/scaffold.py`, `deepdoc/site/fumadocs_builder_v2.py`, and `deepdoc/cli.py`.
+- If a change touches chatbot behavior, audit `deepdoc/chatbot/settings.py`, `deepdoc/chatbot/chunker.py`, `deepdoc/chatbot/indexer.py`, `deepdoc/chatbot/service.py`, `deepdoc/chatbot/scaffold.py`, `deepdoc/site/fumadocs_builder_v2.py`, and `deepdoc/cli.py`.
+- If a change adds or removes a chatbot corpus, update `deepdoc/chatbot/persistence.py` (CORPUS_FILES), `deepdoc/chatbot/types.py` (ChunkKind), `deepdoc/chatbot/indexer.py` (sync flows + needs_refresh), and `deepdoc/chatbot/service.py` (init + query).
 - If you change CLI behavior or documented commands, update `README.md` in the same task.
 - This repo may be in a dirty worktree; inspect carefully and never revert unrelated user changes.
 

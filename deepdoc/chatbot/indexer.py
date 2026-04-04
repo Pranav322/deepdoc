@@ -10,6 +10,7 @@ from ..planner_v2 import DocPlan, RepoScan
 from .chunker import (
     build_artifact_chunks,
     build_code_chunks,
+    build_relationship_chunks,
     discover_artifact_files,
     is_artifact_file_path,
 )
@@ -42,15 +43,18 @@ class ChatbotIndexer:
         code_records = build_code_chunks(scan, plan, self.cfg)
         artifact_records = build_artifact_chunks(self.repo_root, scan, plan, output_dir, self.cfg)
         doc_records = build_doc_summary_chunks(output_dir, plan, self.cfg, has_openapi=has_openapi)
+        relationship_records = build_relationship_chunks(scan, plan, self.cfg)
 
         self._save_records("code", code_records)
         self._save_records("artifact", artifact_records)
         self._save_records("doc_summary", doc_records)
+        self._save_records("relationship", relationship_records)
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         return {
             "code_chunks": len(code_records),
             "artifact_chunks": len(artifact_records),
             "doc_chunks": len(doc_records),
+            "relationship_chunks": len(relationship_records),
         }
 
     def sync_incremental(
@@ -107,6 +111,16 @@ class ChatbotIndexer:
                 has_openapi=has_openapi,
             )
 
+        # Relationship chunks — rebuild for any changed code files, or full rebuild if missing
+        relationship_targets = [path for path in (changed_files or []) if path in scan.parsed_files]
+        relationship_records = (
+            build_relationship_chunks(scan, plan, self.cfg, files=relationship_targets)
+            if relationship_targets
+            else []
+        )
+        if self._corpus_needs_rebuild("relationship"):
+            relationship_records = build_relationship_chunks(scan, plan, self.cfg)
+
         self._merge_records("code", code_records, changed_keys=code_targets, deleted_keys=deleted_files)
         self._merge_records("artifact", artifact_records, changed_keys=artifact_targets, deleted_keys=deleted_files)
         deleted_doc_paths = [f"{slug}.mdx" for slug in deleted_files if slug.endswith(".mdx")]
@@ -116,11 +130,18 @@ class ChatbotIndexer:
             changed_keys=[f"{slug}.mdx" for slug in changed_doc_slugs],
             deleted_keys=deleted_doc_paths,
         )
+        self._merge_records(
+            "relationship",
+            relationship_records,
+            changed_keys=relationship_targets,
+            deleted_keys=deleted_files,
+        )
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         return {
             "code_chunks": len(code_records),
             "artifact_chunks": len(artifact_records),
             "doc_chunks": len(doc_records),
+            "relationship_chunks": len(relationship_records),
         }
 
     def _save_records(self, corpus: str, records: list[ChunkRecord]) -> None:
@@ -173,4 +194,4 @@ class ChatbotIndexer:
 def chatbot_index_needs_refresh(repo_root: Path, cfg: dict[str, Any]) -> bool:
     """Return whether any chatbot corpus is missing or inconsistent."""
     indexer = ChatbotIndexer(repo_root, cfg)
-    return any(indexer._corpus_needs_rebuild(corpus) for corpus in ("code", "artifact", "doc_summary"))
+    return any(indexer._corpus_needs_rebuild(corpus) for corpus in ("code", "artifact", "doc_summary", "relationship"))

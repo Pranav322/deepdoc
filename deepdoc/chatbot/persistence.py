@@ -12,6 +12,7 @@ CORPUS_FILES = {
     "code": ("code_chunks.jsonl", "code_vectors.npy", "code.faiss"),
     "artifact": ("artifact_chunks.jsonl", "artifact_vectors.npy", "artifacts.faiss"),
     "doc_summary": ("doc_chunks.jsonl", "doc_vectors.npy", "docs.faiss"),
+    "relationship": ("relationship_chunks.jsonl", "relationship_vectors.npy", "relationship.faiss"),
 }
 
 

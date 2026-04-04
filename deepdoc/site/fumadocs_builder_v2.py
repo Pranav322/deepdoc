@@ -40,7 +40,13 @@ def build_fumadocs_from_plan(
     _ensure_landing_page(output_dir, project_name, plan)
 
     docs_dir_relative = os.path.relpath(output_dir, repo_root / "site").replace("\\", "/")
-    page_tree = _build_page_tree_from_plan(plan, output_dir, project_name, has_openapi)
+    page_tree = _build_page_tree_from_plan(
+        repo_root,
+        plan,
+        output_dir,
+        project_name,
+        has_openapi,
+    )
 
     _ensure_app_scaffold(
         repo_root,
@@ -119,6 +125,7 @@ def _ensure_app_scaffold(
 
 
 def _build_page_tree_from_plan(
+    repo_root: Path,
     plan: DocPlan,
     output_dir: Path,
     project_name: str,
@@ -147,6 +154,43 @@ def _build_page_tree_from_plan(
         if has_openapi and is_endpoint_ref(page):
             return f"/api/{page.slug}"
         return f"/{page.slug}"
+
+    def load_openapi_manifest() -> list[dict[str, str]]:
+        manifest_path = repo_root / "site" / "openapi" / "manifest.json"
+        if not manifest_path.exists():
+            return []
+        try:
+            data = json.loads(manifest_path.read_text(encoding="utf-8"))
+        except Exception:
+            return []
+        if not isinstance(data, list):
+            return []
+        out: list[dict[str, str]] = []
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            slug = str(item.get("slug") or "").strip()
+            title = str(item.get("title") or "").strip()
+            method = str(item.get("method") or "").strip().upper()
+            path = str(item.get("path") or "").strip()
+            if slug and title and method and path:
+                out.append(
+                    {
+                        "slug": slug,
+                        "title": title,
+                        "method": method,
+                        "path": path,
+                    }
+                )
+        return out
+
+    def display_openapi_path(path: str) -> str:
+        if "://" in path:
+            from urllib.parse import urlparse
+
+            parsed = urlparse(path)
+            return parsed.path or "/"
+        return path
 
     slug_to_page = {page.slug: page for page in plan.pages if page_exists(page)}
     root_children: list[dict[str, Any]] = []
@@ -250,6 +294,39 @@ def _build_page_tree_from_plan(
                     ],
                 }
             )
+        else:
+            manifest_entries = load_openapi_manifest()
+            if manifest_entries:
+                operations_folder = {
+                    "type": "folder",
+                    "name": "OpenAPI Operations",
+                    "children": [
+                        _page_tree_node(
+                            f"/api/{entry['slug']}",
+                            f"{entry['method']} {display_openapi_path(entry['path'])}",
+                        )
+                        for entry in manifest_entries
+                    ],
+                }
+
+                existing_api_folder = next(
+                    (
+                        child
+                        for child in root_children
+                        if child.get("type") == "folder" and child.get("name") == "API Reference"
+                    ),
+                    None,
+                )
+                if existing_api_folder:
+                    existing_api_folder.setdefault("children", []).append(operations_folder)
+                else:
+                    root_children.append(
+                        {
+                            "type": "folder",
+                            "name": "API Reference",
+                            "children": [operations_folder],
+                        }
+                    )
 
     return {"name": project_name, "children": root_children}
 
@@ -414,8 +491,6 @@ Welcome to the **{project_name}** developer documentation.
 def _ensure_mdx_frontmatter(output_dir: Path) -> None:
     """Add minimal frontmatter to generated MDX pages when it is missing."""
     for mdx_path in output_dir.glob("*.mdx"):
-        if mdx_path.name == "index.mdx":
-            continue
         text = mdx_path.read_text(encoding="utf-8", errors="replace")
         stripped = text.lstrip()
         if stripped.startswith("---"):
@@ -430,13 +505,14 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
         if not title:
             title = mdx_path.stem.replace("-", " ").replace("_", " ").title()
 
-        frontmatter = (
-            "---\n"
-            f"title: {json.dumps(title)}\n"
-            "description: Auto-generated developer documentation\n"
-            "_deepdoc_autogen_: true\n"
-            "---\n\n"
-        )
+        frontmatter_lines = [
+            "---",
+            f"title: {json.dumps(title)}",
+            "description: Auto-generated developer documentation",
+        ]
+        if mdx_path.name != "index.mdx":
+            frontmatter_lines.append("_deepdoc_autogen_: true")
+        frontmatter = "\n".join(frontmatter_lines) + "\n---\n\n"
         mdx_path.write_text(frontmatter + text.lstrip(), encoding="utf-8")
 
 
@@ -1054,7 +1130,7 @@ def _global_css(cfg: dict[str, Any]) -> str:
           border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 10%, var(--color-fd-border) 90%);
           border-radius: 1.05rem;
           background:
-            linear-gradient(180deg, rgba(26, 27, 38, 0.96), rgba(18, 19, 28, 0.98));
+            linear-gradient(180deg, rgba(36, 38, 53, 0.98), rgba(20, 21, 32, 1));
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.04),
             0 18px 40px rgba(17, 24, 39, 0.16);
@@ -1106,8 +1182,9 @@ def _global_css(cfg: dict[str, Any]) -> str:
           margin: 0;
           overflow-x: auto;
           padding: 1rem 1.05rem 1.1rem;
-          background: transparent;
+          background: #181a27 !important;
           border: none;
+          color: #e5e7eb !important;
         }
 
         .deepdoc-chatbot-answer__pre code {
@@ -1115,8 +1192,30 @@ def _global_css(cfg: dict[str, Any]) -> str:
           font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
           font-size: 0.88rem;
           line-height: 1.72;
-          color: #e5e7eb;
+          color: #e5e7eb !important;
+          background: transparent !important;
           white-space: pre;
+        }
+
+        .deepdoc-chatbot-answer.prose :where(pre):not(:where([class~="not-prose"] *)) {
+          margin: 0 !important;
+          padding: 1rem 1.05rem 1.1rem !important;
+          background: #181a27 !important;
+          border: none !important;
+          border-radius: 0 !important;
+          box-shadow: none !important;
+          color: #e5e7eb !important;
+        }
+
+        .deepdoc-chatbot-answer.prose :where(pre code):not(:where([class~="not-prose"] *)) {
+          padding: 0 !important;
+          background: transparent !important;
+          border-radius: 0 !important;
+          color: #e5e7eb !important;
+          font-size: 0.88rem !important;
+          line-height: 1.72 !important;
+          white-space: pre !important;
+          -webkit-text-fill-color: #e5e7eb;
         }
 
         .deepdoc-chatbot-answer__inline-code {
@@ -1545,19 +1644,17 @@ def _api_page_tsx() -> str:
         import { notFound } from 'next/navigation';
         import { DocsBody, DocsPage } from 'fumadocs-ui/page';
         import { APIPage } from '@/components/api-page';
-        import { apiSource } from '@/lib/openapi';
+        import { generateAPIParams, getAPIPage } from '@/lib/openapi';
 
         export function generateStaticParams() {
-          return apiSource ? apiSource.generateParams() : [];
+          return generateAPIParams();
         }
 
         export default async function Page(props: {
           params: Promise<{ slug?: string[] }>;
         }) {
           const params = await props.params;
-          if (!apiSource) notFound();
-
-          const page = apiSource.getPage(params.slug ?? []);
+          const page = getAPIPage(params.slug ?? []);
           if (!page || page.data.type !== 'openapi') notFound();
 
           return (
@@ -1723,15 +1820,20 @@ def _openapi_ts() -> str:
         """\
         import fs from 'node:fs';
         import path from 'node:path';
-        import { loader } from 'fumadocs-core/source';
-        import { createOpenAPI, openapiPlugin, openapiSource } from 'fumadocs-openapi/server';
+        import { createOpenAPI } from 'fumadocs-openapi/server';
+        import type { ApiPageProps } from 'fumadocs-openapi/ui';
 
         const schemaDir = path.join(process.cwd(), 'openapi');
         const schemaFiles = fs.existsSync(schemaDir)
           ? fs
               .readdirSync(schemaDir)
-              .filter((file) => /\\.(json|ya?ml)$/i.test(file))
-              .map((file) => `./openapi/${file}`)
+              .filter(
+                (file) =>
+                  /\\.(json|ya?ml)$/i.test(file) &&
+                  !/^manifest\\.json$/i.test(file) &&
+                  /^(openapi|swagger)(\\.|$)/i.test(file),
+              )
+              .map((file) => path.join(schemaDir, file))
           : [];
 
         export const openapi =
@@ -1741,15 +1843,51 @@ def _openapi_ts() -> str:
               })
             : null;
 
-        export const apiSource = openapi
-          ? loader({
-              baseUrl: '/api',
-              source: await openapiSource(openapi, {
-                baseDir: '',
-              }),
-              plugins: [openapiPlugin()],
-            })
-          : null;
+        type ManifestEntry = {
+          slug: string;
+          title: string;
+          method: string;
+          path: string;
+        };
+
+        const manifestPath = path.join(schemaDir, 'manifest.json');
+        const apiManifest: ManifestEntry[] = fs.existsSync(manifestPath)
+          ? JSON.parse(fs.readFileSync(manifestPath, 'utf8'))
+          : [];
+
+        export function generateAPIParams() {
+          return apiManifest.map((entry) => ({
+            slug: entry.slug.split('/').filter(Boolean),
+          }));
+        }
+
+        export function getAPIPage(slugs: string[]) {
+          if (!openapi || schemaFiles.length === 0) return null;
+
+          const slug = slugs.join('/');
+          const entry = apiManifest.find((item) => item.slug === slug);
+          if (!entry) return null;
+
+          return {
+            url: `/api/${entry.slug}`,
+            data: {
+              type: 'openapi' as const,
+              title: entry.title,
+              getAPIPageProps(): ApiPageProps {
+                return {
+                  document: schemaFiles[0],
+                  hasHead: true,
+                  operations: [
+                    {
+                      path: entry.path,
+                      method: entry.method.toLowerCase() as Lowercase<ManifestEntry['method']>,
+                    },
+                  ],
+                };
+              },
+            },
+          };
+        }
         """
     )
 
@@ -2217,7 +2355,7 @@ def _chatbot_panel_tsx() -> str:
                               code(props) {
                                 const { className, children, ...rest } = props;
                                 const content = String(children ?? '');
-                                const isInline = !className && !content.includes('\n');
+                                const isInline = !className && !content.includes('\\n');
                                 if (isInline) {
                                   return (
                                     <code

@@ -59,11 +59,15 @@ class AssembledEvidence:
     cross_ref_context: str  # which other buckets reference this one's files
     database_context: str = ""  # database/schema info for database-type buckets
     plan_summary_context: str = ""  # repo-wide summary for introduction pages
+    repo_docs_context: str = ""  # secondary repo-authored docs context for overview/system pages
     total_evidence_chars: int = 0
     compressed_cards_context: str = ""
     files_included_raw: int = 0
     files_compressed: int = 0
     coverage_files_total: int = 0
+    helper_context: str = ""  # resolved helper/utility function bodies
+    evidence_file_paths: set[str] = field(default_factory=set)
+    config_env_context: str = ""  # extracted env var names and config keys
 
 
 @dataclass
@@ -105,6 +109,8 @@ class EvidenceAssembler:
         self.plan = plan
         self.cfg = cfg
         self.source_budget = int(cfg.get("source_context_budget", self.SOURCE_BUDGET))
+        self.large_file_lines = int(cfg.get("large_file_lines", 500))
+        self.giant_file_lines = int(cfg.get("giant_file_lines", 2000))
         # Pre-index: file → bucket slugs for cross-referencing
         self._file_to_buckets: dict[str, list[str]] = defaultdict(list)
         for b in plan.buckets:
@@ -138,6 +144,15 @@ class EvidenceAssembler:
         cross_ref_ctx = self._build_cross_ref_context(bucket)
         database_ctx = self._build_database_context(bucket)
         plan_summary_ctx = self._build_plan_summary_context(bucket)
+        helper_ctx, helper_files = self._build_helper_context(bucket, source_ctx)
+        repo_docs_ctx, repo_doc_files = self._build_repo_docs_context(bucket)
+
+        evidence_files = set(tracked_bucket_files(bucket))
+        evidence_files.update(helper_files)
+        if bucket.generation_hints.get("is_introduction_page"):
+            evidence_files.update(self.scan.entry_points)
+            evidence_files.update(self.scan.config_files)
+        evidence_files.update(repo_doc_files)
 
         total = sum(
             len(s)
@@ -152,8 +167,12 @@ class EvidenceAssembler:
                 cross_ref_ctx,
                 database_ctx,
                 plan_summary_ctx,
+                repo_docs_ctx,
+                helper_ctx,
             ]
         )
+
+        config_env_ctx = self._build_config_env_context(bucket)
 
         return AssembledEvidence(
             bucket=bucket,
@@ -167,10 +186,14 @@ class EvidenceAssembler:
             cross_ref_context=cross_ref_ctx,
             database_context=database_ctx,
             plan_summary_context=plan_summary_ctx,
+            repo_docs_context=repo_docs_ctx,
             total_evidence_chars=total,
             files_included_raw=files_included_raw,
             files_compressed=files_compressed,
             coverage_files_total=coverage_total,
+            helper_context=helper_ctx,
+            evidence_file_paths=evidence_files,
+            config_env_context=config_env_ctx,
         )
 
     # ── Source context (tiered + compressed coverage) ───────────────────
@@ -178,9 +201,9 @@ class EvidenceAssembler:
     def _build_source_context(self, bucket: DocBucket) -> tuple[str, str, int, int, int]:
         """Build raw-source context plus compressed evidence cards for tracked files.
 
-        Tier 1 (≤200 lines): full source
-        Tier 2 (201-500 lines): signatures + docstrings + first body lines
-        Tier 3 (>500 lines): header + key symbol signatures
+        Tier 1 (≤large_file_lines): full source
+        Tier 2 (large_file_lines+1..giant_file_lines): signatures + bounded body excerpts
+        Tier 3 (>giant_file_lines): header + key symbol bodies with deeper owned-symbol coverage
           - If giant-file clusters exist, include only symbols from relevant clusters
 
         Returns (raw_source_context, compressed_cards_context, raw_count, compressed_count, coverage_total).
@@ -242,9 +265,9 @@ class EvidenceAssembler:
                 header += f"**Imports**: {', '.join(parsed.imports[:15])}\n\n"
 
             # Choose tier
-            if line_count <= 300:
+            if line_count <= self.large_file_lines:
                 code = content
-            elif line_count <= 800:
+            elif line_count <= self.giant_file_lines:
                 code = self._extract_signatures(parsed, content)
             else:
                 # Tier 3 — if giant file with clusters, focus on relevant symbols
@@ -281,6 +304,263 @@ class EvidenceAssembler:
             included,
             len(compressed_cards),
             len(ranked_files),
+        )
+
+    # ── Helper/utility resolution ────────────────────────────────────────
+
+    def _build_helper_context(
+        self, bucket: DocBucket, source_ctx: str
+    ) -> tuple[str, set[str]]:
+        """Resolve imported repo-local helpers deterministically.
+
+        Helper following is restricted to imported local modules and imported symbols.
+        We do not resolve helpers by call-name alone across the whole repo.
+        """
+        if not self._should_follow_helpers(bucket):
+            return "", set()
+
+        helper_budget = 60_000
+        bucket_files = set(tracked_bucket_files(bucket))
+        called_names = self._extract_called_symbol_names(source_ctx)
+        module_index = self._build_module_file_index()
+        symbol_index = self._build_symbol_index()
+
+        helper_sections: list[str] = []
+        helper_files: set[str] = set()
+        emitted_symbols: set[tuple[str, str]] = set()
+        total_chars = 0
+
+        for src_file in bucket_files:
+            parsed = self.scan.parsed_files.get(src_file)
+            source_content = self.scan.file_contents.get(src_file, "")
+            if not parsed:
+                continue
+
+            imported_symbols, imported_files = self._resolve_import_targets(
+                parsed.imports, source_content, module_index
+            )
+            for imported_file in imported_files:
+                if imported_file in bucket_files:
+                    continue
+                candidates = symbol_index.get(imported_file, [])
+                for symbol in candidates:
+                    if symbol.name in self._builtin_helper_skip_names():
+                        continue
+                    if imported_symbols.get(imported_file) and symbol.name not in imported_symbols[imported_file]:
+                        continue
+                    if called_names and symbol.name not in called_names:
+                        continue
+                    symbol_key = (imported_file, symbol.name)
+                    if symbol_key in emitted_symbols:
+                        continue
+                    section = self._render_helper_symbol(imported_file, symbol)
+                    if not section:
+                        continue
+                    if total_chars + len(section) > helper_budget:
+                        return (
+                            "## Resolved Helper Functions\n" + "\n".join(helper_sections)
+                            if helper_sections
+                            else "",
+                            helper_files,
+                        )
+                    helper_sections.append(section)
+                    helper_files.add(imported_file)
+                    emitted_symbols.add(symbol_key)
+                    total_chars += len(section)
+
+        if not helper_sections:
+            return "", set()
+        return "## Resolved Helper Functions\n" + "\n".join(helper_sections), helper_files
+
+    def _should_follow_helpers(self, bucket: DocBucket) -> bool:
+        hints = bucket.generation_hints or {}
+        if hints.get("is_introduction_page"):
+            return False
+        if bucket.bucket_type == "research-context":
+            return False
+        if bucket.publication_tier == "supporting" and bucket.section in {
+            "Testing",
+            "Examples",
+            "Design & Notes",
+            "CI/CD and Release",
+        }:
+            return False
+        style = hints.get("prompt_style", "")
+        return style in {
+            "endpoint",
+            "endpoint_ref",
+            "feature",
+            "system",
+            "architecture_component",
+        } or bucket.bucket_type in {"feature", "system", "endpoint", "endpoint-family"}
+
+    def _build_repo_docs_context(self, bucket: DocBucket) -> tuple[str, set[str]]:
+        """Build secondary context from repo-authored docs for overview/system pages."""
+        hints = bucket.generation_hints or {}
+        style = hints.get("prompt_style", "")
+        title_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", bucket.title)}
+        if not (
+            hints.get("is_introduction_page")
+            or style == "architecture_component"
+            or {"architecture", "overview", "system"} & title_tokens
+        ):
+            return "", set()
+
+        lines: list[str] = [
+            "Use this as secondary context only. Runtime/source evidence wins on conflicts.",
+        ]
+        doc_files: set[str] = set()
+
+        for context in self.scan.research_contexts[:10]:
+            file_path = context.get("file_path")
+            summary = context.get("summary")
+            title = context.get("title") or Path(file_path or "").stem
+            if not file_path or not summary:
+                continue
+            doc_files.add(file_path)
+            lines.append(f"- {title} (`{file_path}`): {summary}")
+
+        if self.scan.doc_contexts:
+            lines.append("\nAdditional repo documentation:")
+            for file_path, summary in list(self.scan.doc_contexts.items())[:10]:
+                doc_files.add(file_path)
+                lines.append(f"- `{file_path}`: {summary}")
+
+        if len(lines) == 1:
+            return "", set()
+        return "## Internal Docs Context\n" + "\n".join(lines), doc_files
+
+    def _extract_called_symbol_names(self, source_ctx: str) -> set[str]:
+        call_pattern = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+        return {
+            name
+            for name in call_pattern.findall(source_ctx)
+            if name not in self._builtin_helper_skip_names() and len(name) > 2
+        }
+
+    def _builtin_helper_skip_names(self) -> set[str]:
+        return {
+            "print", "len", "str", "int", "float", "dict", "list", "set", "tuple",
+            "range", "enumerate", "zip", "map", "filter", "sorted", "reversed",
+            "isinstance", "issubclass", "hasattr", "getattr", "setattr", "delattr",
+            "super", "property", "staticmethod", "classmethod", "type", "object",
+            "open", "round", "abs", "max", "min", "sum", "any", "all", "format",
+            "json", "os", "sys", "re", "logging", "datetime", "time", "self",
+            "__init__", "__str__", "__repr__",
+        }
+
+    def _build_module_file_index(self) -> dict[str, set[str]]:
+        index: dict[str, set[str]] = defaultdict(set)
+        for file_path in self.scan.parsed_files:
+            rel = Path(file_path)
+            stem = rel.with_suffix("")
+            parts = stem.parts
+            candidates: set[str] = set()
+            if parts and parts[-1] == "__init__":
+                parts = parts[:-1]
+            if parts:
+                dotted = ".".join(parts)
+                candidates.add(dotted)
+                for idx in range(1, len(parts)):
+                    candidates.add(".".join(parts[idx:]))
+                candidates.add(parts[-1])
+            for candidate in candidates:
+                index[candidate].add(file_path)
+        return index
+
+    def _build_symbol_index(self) -> dict[str, list[Symbol]]:
+        index: dict[str, list[Symbol]] = {}
+        for file_path, parsed in self.scan.parsed_files.items():
+            if not parsed or not parsed.symbols:
+                continue
+            index[file_path] = [
+                sym for sym in parsed.symbols if sym.kind in {"function", "method", "class"}
+            ]
+        return index
+
+    def _resolve_import_targets(
+        self,
+        imports: list[str],
+        content: str,
+        module_index: dict[str, set[str]],
+    ) -> tuple[dict[str, set[str]], set[str]]:
+        imported_symbols: dict[str, set[str]] = defaultdict(set)
+        imported_files: set[str] = set()
+
+        for module_name in imports or []:
+            module_files = self._resolve_repo_local_module(module_name, module_index)
+            imported_files.update(module_files)
+
+        for module_name, symbol_names in self._extract_explicit_import_symbols(content):
+            module_files = self._resolve_repo_local_module(module_name, module_index)
+            for file_path in module_files:
+                imported_files.add(file_path)
+                imported_symbols[file_path].update(symbol_names)
+
+        return imported_symbols, imported_files
+
+    def _resolve_repo_local_module(
+        self, module_name: str, module_index: dict[str, set[str]]
+    ) -> set[str]:
+        module_name = module_name.strip().strip(".")
+        if not module_name:
+            return set()
+        candidates = [
+            module_name,
+            module_name.replace("/", "."),
+        ]
+        resolved: set[str] = set()
+        for candidate in candidates:
+            if candidate in module_index:
+                resolved.update(module_index[candidate])
+            else:
+                for known_module, files in module_index.items():
+                    if known_module.endswith(candidate):
+                        resolved.update(files)
+        return resolved
+
+    def _extract_explicit_import_symbols(
+        self, content: str
+    ) -> list[tuple[str, set[str]]]:
+        results: list[tuple[str, set[str]]] = []
+        for match in re.finditer(r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\s+(.+)$", content, re.MULTILINE):
+            module_name = match.group(1).strip()
+            raw_symbols = match.group(2).split(",")
+            names = set()
+            for raw in raw_symbols:
+                symbol_name = raw.strip().split(" as ", 1)[0].strip()
+                if symbol_name and symbol_name != "*":
+                    names.add(symbol_name)
+            if module_name and names:
+                results.append((module_name, names))
+        return results
+
+    def _render_helper_symbol(self, file_path: str, symbol: Symbol) -> str:
+        src_path = self.repo_root / file_path
+        if not src_path.exists():
+            return ""
+        try:
+            file_content = src_path.read_text(encoding="utf-8", errors="replace")
+        except Exception:
+            return ""
+
+        file_lines = file_content.splitlines()
+        start = max(0, symbol.start_line - 1)
+        parsed = self.scan.parsed_files.get(file_path)
+        end = len(file_lines)
+        if parsed and parsed.symbols:
+            for idx, candidate in enumerate(parsed.symbols):
+                if candidate.start_line == symbol.start_line and idx + 1 < len(parsed.symbols):
+                    end = parsed.symbols[idx + 1].start_line - 1
+                    break
+
+        excerpt_end = min(end, start + 60)
+        body = "\n".join(file_lines[start:excerpt_end])
+        if excerpt_end < end:
+            body += f"\n    ... [{end - excerpt_end} more lines]"
+        return (
+            f"\n### Helper: `{symbol.name}()` (`{file_path}:{symbol.start_line}`)\n"
+            f"```python\n{body}\n```\n"
         )
 
     def _source_priority(
@@ -393,6 +673,49 @@ class EvidenceAssembler:
         if "process.env" in content or "os.environ" in content or "ENV.get(" in content:
             signals.append("environment_lookup")
         return signals[:5]
+
+    # ── Config / env var extraction ──────────────────────────────────────
+
+    _ENV_VAR_PATTERNS = [
+        re.compile(r"""os\.environ\s*\[\s*['"]([\w]+)['"]\s*\]"""),
+        re.compile(r"""os\.getenv\s*\(\s*['"]([\w]+)['"]"""),
+        re.compile(r"""os\.environ\.get\s*\(\s*['"]([\w]+)['"]"""),
+        re.compile(r"""process\.env\.([A-Z][A-Z0-9_]+)"""),
+        re.compile(r"""ENV\s*\[\s*['"]([\w]+)['"]\s*\]"""),
+        re.compile(r"""getenv\s*\(\s*['"]([\w]+)['"]"""),
+        re.compile(r"""env\s*\(\s*['"]([\w]+)['"]"""),
+    ]
+
+    def _build_config_env_context(self, bucket: DocBucket) -> str:
+        """Extract actual env var names from source files for grounded config docs."""
+        env_vars: dict[str, list[str]] = {}  # var_name -> [file_paths]
+
+        for src_file in bucket.owned_files:
+            src_path = self.repo_root / src_file
+            if not src_path.exists():
+                continue
+            try:
+                content = src_path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            for pattern in self._ENV_VAR_PATTERNS:
+                for match in pattern.finditer(content):
+                    var_name = match.group(1)
+                    if var_name and len(var_name) > 2:
+                        env_vars.setdefault(var_name, []).append(src_file)
+
+        if not env_vars:
+            return ""
+
+        lines = ["**Extracted Environment Variables & Config Keys**\n"]
+        lines.append("| Variable | Found In |")
+        lines.append("|----------|----------|")
+        for var_name in sorted(env_vars.keys()):
+            files = sorted(set(env_vars[var_name]))
+            files_str = ", ".join(f"`{f}`" for f in files[:3])
+            lines.append(f"| `{var_name}` | {files_str} |")
+
+        return "\n".join(lines)
 
     def _build_database_signals(self, src_file: str) -> list[str]:
         artifact_scan = getattr(self.scan, "artifact_scan", None)
@@ -508,26 +831,45 @@ class EvidenceAssembler:
         return "\n".join(compact_lines)
 
     def _extract_signatures(self, parsed: ParsedFile | None, content: str) -> str:
-        """Tier 2: signatures + up to 20 body lines each."""
+        """Tier 2: signatures + deeper body excerpts, scaled from config thresholds."""
         if not parsed or not parsed.symbols:
             lines = content.splitlines()
-            return "\n".join(lines[:150]) + (
-                "\n... [truncated]" if len(lines) > 150 else ""
+            fallback_limit = max(150, min(300, self.large_file_lines // 2))
+            return "\n".join(lines[:fallback_limit]) + (
+                "\n... [truncated]" if len(lines) > fallback_limit else ""
             )
 
         content_lines = content.splitlines()
         result: list[str] = []
         seen: set[int] = set()
+        excerpt_limit = max(30, min(80, self.large_file_lines // 10))
+        full_body_limit = max(40, min(100, self.large_file_lines // 8))
 
-        for symbol in parsed.symbols:
+        # Calculate actual end line for each symbol (next symbol's start or end of file)
+        symbol_ends: list[int] = []
+        for idx, symbol in enumerate(parsed.symbols):
+            if idx + 1 < len(parsed.symbols):
+                symbol_ends.append(parsed.symbols[idx + 1].start_line - 1)
+            else:
+                symbol_ends.append(len(content_lines))
+
+        for idx, symbol in enumerate(parsed.symbols):
             start = max(0, symbol.start_line - 1)
-            end = min(start + 20, len(content_lines))
+            actual_end = symbol_ends[idx]
+            body_length = actual_end - start
+
+            # Include full short bodies; otherwise take a deeper excerpt.
+            if body_length <= full_body_limit:
+                end = actual_end
+            else:
+                end = min(start + excerpt_limit, len(content_lines))
+
             for i in range(start, end):
                 if i not in seen:
                     result.append(content_lines[i])
                     seen.add(i)
-            if end < len(content_lines) and end not in seen:
-                result.append("    ...")
+            if end < actual_end and end not in seen:
+                result.append(f"    ... [{actual_end - end} more lines in {symbol.name}]")
 
         return "\n".join(result)
 
@@ -538,32 +880,47 @@ class EvidenceAssembler:
         file_path: str,
         owned_symbols: set[str],
     ) -> str:
-        """Tier 3: header + key symbol signatures, optionally filtered by owned_symbols."""
+        """Tier 3: header + key symbol bodies, prioritizing owned symbols with full bodies."""
         lines = content.splitlines()
         header = "\n".join(lines[:30])
 
         if not parsed or not parsed.symbols:
             return header + "\n... [large file — see symbol list above]"
 
+        def _symbol_end(idx: int) -> int:
+            if idx + 1 < len(parsed.symbols):
+                return parsed.symbols[idx + 1].start_line - 1
+            return len(lines)
+
         # If we have owned_symbols AND this is a giant file with clusters,
         # prioritize showing those symbols
-        symbols_to_show = parsed.symbols
         if owned_symbols:
-            priority = [s for s in parsed.symbols if s.name in owned_symbols]
-            others = [s for s in parsed.symbols if s.name not in owned_symbols]
+            priority = [(i, s) for i, s in enumerate(parsed.symbols) if s.name in owned_symbols]
+            others = [(i, s) for i, s in enumerate(parsed.symbols) if s.name not in owned_symbols]
             # Show priority symbols first, then fill with others up to 40
-            symbols_to_show = priority + others[: max(0, 40 - len(priority))]
+            indexed_symbols = priority + others[: max(0, 40 - len(priority))]
         else:
-            symbols_to_show = parsed.symbols[:40]
+            indexed_symbols = list(enumerate(parsed.symbols[:40]))
 
-        sig_lines: list[str] = ["\n\n# [Key Symbol Signatures]"]
-        for symbol in symbols_to_show:
+        sig_lines: list[str] = ["\n\n# [Key Symbol Bodies]"]
+        owned_excerpt_limit = max(60, min(120, self.giant_file_lines // 25))
+        secondary_excerpt_limit = max(20, min(40, self.giant_file_lines // 80))
+        for orig_idx, symbol in indexed_symbols:
             start = max(0, symbol.start_line - 1)
-            end = min(start + 10, len(lines))
-            marker = " [OWNED]" if symbol.name in owned_symbols else ""
+            sym_end = _symbol_end(orig_idx)
+            is_owned = symbol.name in owned_symbols
+
+            if is_owned:
+                max_body = owned_excerpt_limit
+            else:
+                max_body = secondary_excerpt_limit
+
+            end = min(start + max_body, sym_end, len(lines))
+            marker = " [OWNED — full body]" if is_owned else ""
             sig_lines.append(f"\n# {symbol.kind}: {symbol.name}{marker}")
             sig_lines.extend(lines[start:end])
-            sig_lines.append("    ...")
+            if end < sym_end:
+                sig_lines.append(f"    ... [{sym_end - end} more lines]")
 
         return header + "\n".join(sig_lines)
 
@@ -1129,6 +1486,12 @@ class PageGenerator:
             full_source += f"\n\n{evidence.cross_ref_context}"
         if evidence.plan_summary_context:
             full_source += f"\n\n## Repository Map\n{evidence.plan_summary_context}"
+        if evidence.repo_docs_context:
+            full_source += f"\n\n{evidence.repo_docs_context}"
+        if evidence.helper_context:
+            full_source += f"\n\n{evidence.helper_context}"
+        if evidence.config_env_context:
+            full_source += f"\n\n## Config & Environment Evidence\n{evidence.config_env_context}"
         page_contract = (bucket.generation_hints or {}).get("page_contract", {})
         if page_contract:
             contract_lines = [
@@ -1211,6 +1574,8 @@ class ValidationResult:
     warnings: list[str] = field(default_factory=list)
     missing_sibling_links: list[str] = field(default_factory=list)
     missing_contract_concepts: list[str] = field(default_factory=list)
+    unmatched_routes: list[str] = field(default_factory=list)
+    out_of_evidence_refs: list[str] = field(default_factory=list)
 
 
 class PageValidator:
@@ -1218,9 +1583,20 @@ class PageValidator:
 
     def __init__(self, repo_root: Path, scan: RepoScan):
         self.repo_root = repo_root
+        self.scan = scan
         self.known_files = set(scan.file_summaries.keys())
+        self.known_route_paths = {
+            self._normalize_route_path(ep.get("path", ""))
+            for ep in scan.published_api_endpoints
+            if ep.get("path")
+        }
 
-    def validate(self, content: str, bucket: DocBucket) -> ValidationResult:
+    def validate(
+        self,
+        content: str,
+        bucket: DocBucket,
+        evidence: AssembledEvidence | None = None,
+    ) -> ValidationResult:
         """Run all validation checks on generated content."""
         result = ValidationResult(is_valid=True)
         result.word_count = len(content.split())
@@ -1234,22 +1610,31 @@ class PageValidator:
         # 3. Check for hallucinated file paths
         self._check_hallucinated_paths(content, result)
 
-        # 4. Count mermaid diagrams
+        # 4. Check references against assembled evidence when available
+        self._check_evidence_backed_refs(content, evidence, result)
+
+        # 5. Check route/path claims for API and operations-heavy pages
+        self._check_route_claims(content, bucket, result)
+
+        # 6. Count mermaid diagrams
         result.mermaid_block_count = len(re.findall(r"```mermaid", content))
 
-        # 5. Minimum content check
+        # 7. Minimum content check
         if result.word_count < 100:
             result.warnings.append("Very short page (<100 words) — may be incomplete")
             result.is_valid = False
 
-        # 6. Check for required diagrams
+        # 8. Check for required diagrams
         if bucket.required_diagrams and result.mermaid_block_count == 0:
             result.warnings.append(
                 f"No Mermaid diagrams found but required: {', '.join(bucket.required_diagrams)}"
             )
 
-        # 7. Check page contract
+        # 9. Check page contract
         self._check_page_contract(content, bucket, result)
+
+        # 10. Check overview grounding depth
+        self._check_overview_grounding(content, bucket, result)
 
         return result
 
@@ -1331,6 +1716,83 @@ class PageValidator:
             )
             result.is_valid = False
 
+    def _check_evidence_backed_refs(
+        self,
+        content: str,
+        evidence: AssembledEvidence | None,
+        result: ValidationResult,
+    ) -> None:
+        if evidence is None or not evidence.evidence_file_paths:
+            return
+
+        referenced_files = set(
+            re.findall(r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8})(?::\d+)?`", content)
+        )
+        violations = sorted(
+            ref
+            for ref in referenced_files
+            if ref in self.known_files and ref not in evidence.evidence_file_paths
+        )
+        if violations:
+            result.out_of_evidence_refs = violations[:10]
+            result.warnings.append(
+                f"References files outside assembled evidence: {', '.join(violations[:4])}"
+            )
+            if len(violations) >= 4:
+                result.is_valid = False
+
+    def _check_route_claims(
+        self, content: str, bucket: DocBucket, result: ValidationResult
+    ) -> None:
+        if not self.known_route_paths:
+            return
+
+        hints = bucket.generation_hints or {}
+        title_lower = bucket.title.lower()
+        if not (
+            hints.get("include_endpoint_detail")
+            or hints.get("is_endpoint_ref")
+            or hints.get("is_endpoint_family")
+            or bucket.section == "API Reference"
+            or "health" in title_lower
+            or "deployment" in title_lower
+            or "api" in title_lower
+        ):
+            return
+
+        candidates = {
+            self._normalize_route_path(match)
+            for match in re.findall(r"(\/[A-Za-z0-9{}_<>\-./]+)", content)
+        }
+        candidates = {
+            route for route in candidates
+            if route and "." not in route.split("/")[-1]
+        }
+        unmatched = sorted(
+            route for route in candidates
+            if route not in self.known_route_paths
+        )
+        if unmatched:
+            result.unmatched_routes = unmatched[:10]
+            result.warnings.append(
+                f"Unmatched route/path claims: {', '.join(unmatched[:4])}"
+            )
+            if len(unmatched) >= 2 or any("health" in route for route in unmatched):
+                result.is_valid = False
+
+    @staticmethod
+    def _normalize_route_path(path: str) -> str:
+        path = path.strip()
+        if not path:
+            return ""
+        path = re.sub(r"^https?://[^/]+", "", path)
+        path = path.split("?", 1)[0].split("#", 1)[0]
+        if not path.startswith("/"):
+            path = "/" + path.lstrip("/")
+        if path != "/" and path.endswith("/"):
+            path = path[:-1]
+        return path
+
     def _check_page_contract(
         self, content: str, bucket: DocBucket, result: ValidationResult
     ) -> None:
@@ -1374,6 +1836,51 @@ class PageValidator:
                 f"Missing sibling links: {', '.join(result.missing_sibling_links[:4])}"
             )
 
+    def _check_overview_grounding(
+        self, content: str, bucket: DocBucket, result: ValidationResult
+    ) -> None:
+        """Warn if overview/landing pages lack key structural elements."""
+        hints = bucket.generation_hints or {}
+        if not hints.get("is_introduction_page"):
+            return
+
+        content_lower = content.lower()
+        headings = {
+            match.group(1).strip().lower()
+            for match in re.finditer(r"^#{1,4}\s+(.+)$", content, re.MULTILINE)
+        }
+
+        # Check for key structural elements
+        has_flow = any(
+            token in content_lower
+            for token in ("runtime flow", "request lifecycle", "end-to-end", "sequence")
+        )
+        has_subsystem = any(
+            token in content_lower
+            for token in ("subsystem", "major component", "key component", "architecture")
+        )
+        has_key_files = any(
+            "key file" in h or "files to know" in h for h in headings
+        )
+        has_mermaid = "```mermaid" in content
+
+        if not has_flow:
+            result.warnings.append(
+                "Overview page lacks runtime flow explanation"
+            )
+        if not has_subsystem:
+            result.warnings.append(
+                "Overview page lacks subsystem or component map"
+            )
+        if not has_key_files:
+            result.warnings.append(
+                "Overview page missing Key Files section"
+            )
+        if not has_mermaid:
+            result.warnings.append(
+                "Overview page has no Mermaid diagrams"
+            )
+
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 3.4  Mermaid Post-Processing
@@ -1393,6 +1900,14 @@ def fix_mermaid_diagrams(content: str) -> str:
 
 def _fix_mermaid_diagram(diagram: str) -> str:
     """Fix the most common Mermaid mistakes LLMs make."""
+    def sanitize_edge_label(label: str) -> str:
+        cleaned = re.sub(r"<br\s*/?>", " ", label, flags=re.IGNORECASE)
+        cleaned = cleaned.replace("(", " ").replace(")", " ")
+        cleaned = cleaned.replace("/", " ")
+        cleaned = re.sub(r"[^A-Za-z0-9 _:-]+", " ", cleaned)
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned or "link"
+
     lines = diagram.splitlines()
     fixed: list[str] = []
     diagram_type = ""
@@ -1451,6 +1966,11 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                     f"{m.group(1)}{m.group(2)} --> {m.group(3)}\n"
                     f"{m.group(1)}{m.group(3)} --> {m.group(2)}"
                 ),
+                line,
+            )
+            line = re.sub(
+                r"\|([^|]+)\|",
+                lambda m: f"|{sanitize_edge_label(m.group(1))}|",
                 line,
             )
 
@@ -2080,7 +2600,7 @@ class BucketGenerationEngine:
             content = escape_mdx_text_hazards(content)
 
             # Step 5: Validate
-            validation = self.validator.validate(content, bucket)
+            validation = self.validator.validate(content, bucket, evidence)
 
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
@@ -2105,7 +2625,7 @@ class BucketGenerationEngine:
                     content = normalize_mdx_steps(content)
                     content = escape_mdx_route_params(content)
                     content = escape_mdx_text_hazards(content)
-                    validation = self.validator.validate(content, bucket)
+                    validation = self.validator.validate(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -2113,7 +2633,7 @@ class BucketGenerationEngine:
             if not validation.is_valid:
                 content = self._apply_degradation_fixes(content, bucket, validation)
                 # Re-validate after fixes
-                validation = self.validator.validate(content, bucket)
+                validation = self.validator.validate(content, bucket, evidence)
 
             elapsed = time.time() - start
 

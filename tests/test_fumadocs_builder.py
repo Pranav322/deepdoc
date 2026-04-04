@@ -88,6 +88,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     docs_page = (repo_root / "site" / "app" / "[[...slug]]" / "page.tsx").read_text(encoding="utf-8")
     ask_page = (repo_root / "site" / "app" / "ask" / "page.tsx").read_text(encoding="utf-8")
     api_page_component = (repo_root / "site" / "components" / "api-page.tsx").read_text(encoding="utf-8")
+    chatbot_panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(encoding="utf-8")
     openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(encoding="utf-8")
     auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
     assert '"url": "/"' in page_tree
@@ -115,16 +116,20 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "page.data as { body:" in docs_page
     assert "Suspense" in ask_page
     assert "<ChatbotPanel />" in ask_page
+    assert "!content.includes('\\n')" in chatbot_panel
     assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
     assert "satisfies PageTree.Root" in page_tree
     assert "APIPage as FumadocsAPIPage" in api_page_component
     assert "createAPIPage" not in api_page_component
-    assert "import { loader } from 'fumadocs-core/source';" in openapi_lib
-    assert "openapiPlugin" in openapi_lib
-    assert "openapiSource" in openapi_lib
-    assert "source: await openapiSource(openapi" in openapi_lib
-    assert "plugins: [openapiPlugin()]" in openapi_lib
-    assert "export const apiSource = openapi" in openapi_lib
+    assert "createOpenAPI" in openapi_lib
+    assert "generateAPIParams" in openapi_lib
+    assert "getAPIPage" in openapi_lib
+    assert "manifest.json" in openapi_lib
+    assert "path.join(schemaDir, file)" in openapi_lib
+    assert "!/^manifest\\.json$/i.test(file)" in openapi_lib
+    assert "/^(openapi|swagger)(\\.|$)/i.test(file)" in openapi_lib
+    assert "openapiSource" not in openapi_lib
+    assert "openapiPlugin" not in openapi_lib
     assert auth_doc.startswith("---\n")
     assert 'title: "Auth"' in auth_doc
 
@@ -180,8 +185,10 @@ def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(tmp_path
     index_text = (output_dir / "index.mdx").read_text(encoding="utf-8")
     auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
 
-    assert index_text == custom_index
+    assert index_text.startswith("---\n")
+    assert 'title: "Custom landing"' in index_text
     assert "_deepdoc_autogen_" not in index_text
+    assert index_text.endswith(custom_index)
     assert auth_doc.startswith("---\n")
 
 
@@ -218,6 +225,57 @@ def test_build_fumadocs_without_openapi_omits_api_route_scaffold(tmp_path: Path)
     assert not (repo_root / "site" / "lib" / "openapi.ts").exists()
     assert "@/components/api-page" not in mdx_components
     assert "APIPage," not in mdx_components
+
+
+def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endpoint_pages(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+    (repo_root / "site" / "openapi").mkdir(parents=True)
+    (repo_root / "site" / "openapi" / "manifest.json").write_text(
+        json.dumps(
+            [
+                {
+                    "slug": "get-http-localhost-3000-health",
+                    "title": "Deep health check",
+                    "method": "GET",
+                    "path": "http://localhost:3000/health",
+                }
+            ]
+        ),
+        encoding="utf-8",
+    )
+
+    overview = make_bucket(
+        "Overview",
+        "overview",
+        ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    health = make_bucket("Health & Readiness Endpoints", "operations-health", ["health.js"], section="API Reference")
+    plan = make_plan([overview, health])
+    plan.nav_structure = {"API Reference": ["operations-health"]}
+
+    (output_dir / "index.mdx").write_text("# Overview\n", encoding="utf-8")
+    (output_dir / "operations-health.mdx").write_text("# Health\n", encoding="utf-8")
+
+    build_fumadocs_from_plan(
+        repo_root,
+        output_dir,
+        {"project_name": "Demo"},
+        plan,
+        has_openapi=True,
+    )
+
+    page_tree = (repo_root / "site" / "lib" / "page-tree.generated.ts").read_text(
+        encoding="utf-8"
+    )
+    assert '"name": "OpenAPI Operations"' in page_tree
+    assert '"url": "/api/get-http-localhost-3000-health"' in page_tree
+    assert '"name": "GET /health"' in page_tree
 
 
 def test_fumadocs_prompts_drop_mintlify_only_components() -> None:
@@ -272,6 +330,46 @@ def test_stage_openapi_assets_uses_endpoint_ref_slug_shape(tmp_path: Path) -> No
             "title": "Get an order",
             "method": "GET",
             "path": "/orders/{id}",
+        }
+    ]
+
+
+def test_stage_openapi_assets_strips_server_origin_from_manifest_paths(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    spec_path = repo_root / "openapi.yaml"
+    spec_path.write_text(
+        """
+openapi: 3.0.3
+info:
+  title: Demo API
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000
+paths:
+  /health:
+    get:
+      summary: Health
+      responses:
+        '200':
+          description: ok
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+
+    assert stage_openapi_assets(repo_root, ["openapi.yaml"]) is True
+
+    manifest = json.loads(
+        (repo_root / "site" / "openapi" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert manifest == [
+        {
+            "slug": "get-health",
+            "title": "Health",
+            "method": "GET",
+            "path": "/health",
         }
     ]
 
@@ -644,3 +742,15 @@ def test_fix_mermaid_diagram_strips_erdiagram_placeholders_and_rewrites_comments
     assert "\n    ...\n" not in fixed
     assert '... "Flexible fields"' not in fixed
     assert "%% MongoDB (denormalized, flexible)" in fixed
+
+
+def test_fix_mermaid_diagram_sanitizes_flowchart_edge_labels_with_punctuation() -> None:
+    diagram = """flowchart TD
+    Client -->|HTTP (REST/Webhook)| API
+    Inventory -->|DB/Cache| DB
+"""
+
+    fixed = _fix_mermaid_diagram(diagram)
+
+    assert "Client -->|HTTP REST Webhook| API" in fixed
+    assert "Inventory -->|DB Cache| DB" in fixed

@@ -9,6 +9,43 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.1.0] - 2026-04-04
+
+DeepDoc 1.1.0 improves generation grounding, chatbot retrieval depth, and generated
+site/OpenAPI behavior so docs stay closer to real code and staged API assets.
+
+### Added
+
+- Added helper-function evidence assembly for imported repo-local utilities so feature
+  and endpoint pages can describe called helpers from actual source instead of guesses.
+- Added secondary internal-doc context and extracted environment/config evidence for
+  overview and system-style pages.
+- Added a chatbot `relationship` corpus with import-graph and symbol-index chunks,
+  plus chain retrieval that pulls related code from imported files.
+- Added validation checks for unmatched route claims and references to files outside
+  the assembled evidence set.
+
+### Changed
+
+- Made evidence extraction thresholds follow config and expanded large-file excerpts so
+  generated pages keep more real branch logic, symbol bodies, and owned code paths.
+- Tightened generation prompts to require grounded business logic, helper behavior,
+  config knobs, constants, file coverage tables, and clearer uncertainty handling.
+- Reworked Fumadocs OpenAPI support to build API pages from the staged manifest,
+  surface OpenAPI operations in navigation when endpoint pages are absent, and strip
+  server origins from manifest paths.
+- Improved generated site scaffolding by preserving handwritten landing-page content
+  while still injecting frontmatter, and refined chatbot code-block styling in the UI.
+- Increased default chatbot retrieval and answer budgets so responses can include more
+  code, artifacts, docs, and relationship context in a single answer.
+- Hardened Mermaid cleanup by sanitizing problematic flowchart edge labels.
+
+### Docs And Tests
+
+- Expanded regression coverage for configurable evidence thresholds, helper following,
+  internal-doc context, evidence-backed validation, relationship indexing and chain
+  retrieval, OpenAPI manifest routing, origin stripping, and Mermaid cleanup.
+
 ## [1.0.0] - 2026-04-03
 
 DeepDoc 1.0.0 is the first stable release and significantly improves documentation planning,

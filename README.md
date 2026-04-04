@@ -254,7 +254,7 @@ deepdoc deploy
 
 This runs `next build` inside `site/` and writes the static export to `site/out/`. You can deploy that directory to Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any static host.
 
-If you want GitHub Pages specifically, this repo includes a workflow at `.github/workflows/github-pages.yml` that publishes `site/out/` through the official Pages Actions flow. That means you do not need to move the export into a branch `docs/` folder.
+If you want GitHub Pages specifically, this repo includes a workflow at `.github/workflows/github-pages.yml` that publishes the checked-in `site/out/` export through the official Pages Actions flow. That means you do not need to move the export into a branch `docs/` folder.
 
 ### `deepdoc config`
 
@@ -905,17 +905,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
       - uses: actions/configure-pages@v5
       - run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e .
-      - run: deepdoc deploy
+          test -d site/out
+          test -f site/out/index.html
       - uses: actions/upload-pages-artifact@v3
         with:
           path: site/out
@@ -930,7 +923,7 @@ jobs:
         uses: actions/deploy-pages@v4
 ```
 
-This workflow publishes `site/out/` directly, so GitHub Pages does not need a `docs/` folder.
+This workflow publishes the committed `site/out/` directory directly, so GitHub Pages does not need a `docs/` folder.
 
 If you want to regenerate docs on every push before deploying them, use a separate workflow like this:
 

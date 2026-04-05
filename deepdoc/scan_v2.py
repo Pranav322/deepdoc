@@ -860,13 +860,98 @@ class ModelFileInfo:
 
 
 @dataclass
+class DatabaseGroup:
+    """Deterministic documentation grouping for related model/schema files."""
+
+    key: str
+    label: str
+    file_paths: list[str] = field(default_factory=list)
+    model_names: list[str] = field(default_factory=list)
+    orm_frameworks: list[str] = field(default_factory=list)
+    external_refs: list[str] = field(default_factory=list)
+
+
+@dataclass
+class GraphQLInterface:
+    """Detected GraphQL schema surface."""
+
+    name: str
+    file_path: str
+    kind: str  # object_type | mutation | schema | resolver | field
+    fields: list[str] = field(default_factory=list)
+    related_types: list[str] = field(default_factory=list)
+
+
+@dataclass
+class KnexArtifact:
+    """Knex schema/query evidence extracted from JS/TS files."""
+
+    file_path: str
+    artifact_type: str  # schema | query
+    table_name: str = ""
+    columns: list[str] = field(default_factory=list)
+    foreign_keys: list[str] = field(default_factory=list)
+    query_patterns: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RuntimeTask:
+    """Background task or job definition."""
+
+    name: str
+    file_path: str
+    runtime_kind: str  # celery | scheduled_job
+    decorator: str = ""
+    queue: str = ""
+    retry_policy: str = ""
+    schedule_sources: list[str] = field(default_factory=list)
+    triggers: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RuntimeScheduler:
+    """Scheduler or cron registration."""
+
+    name: str
+    file_path: str
+    scheduler_type: str  # beat | node_cron | crontab
+    cron: str = ""
+    invoked_targets: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RealtimeConsumer:
+    """Realtime/websocket surface such as a Django Channels consumer."""
+
+    name: str
+    file_path: str
+    consumer_type: str
+    routes: list[str] = field(default_factory=list)
+    groups: list[str] = field(default_factory=list)
+    auth_hints: list[str] = field(default_factory=list)
+
+
+@dataclass
+class RuntimeScan:
+    """Runtime/background-job/realtime discovery results."""
+
+    tasks: list[RuntimeTask] = field(default_factory=list)
+    schedulers: list[RuntimeScheduler] = field(default_factory=list)
+    realtime_consumers: list[RealtimeConsumer] = field(default_factory=list)
+
+
+@dataclass
 class DatabaseScan:
     """Database/schema discovery results."""
     model_files: list[ModelFileInfo] = field(default_factory=list)
     migration_files: list[str] = field(default_factory=list)
     schema_files: list[str] = field(default_factory=list)    # prisma.schema, schema.graphql, etc.
     orm_framework: str = ""                                   # primary detected ORM
+    orm_frameworks: list[str] = field(default_factory=list)
     total_models: int = 0
+    groups: list[DatabaseGroup] = field(default_factory=list)
+    graphql_interfaces: list[GraphQLInterface] = field(default_factory=list)
+    knex_artifacts: list[KnexArtifact] = field(default_factory=list)
 
 
 @dataclass
@@ -1033,6 +1118,11 @@ def discover_database_schema(
             re.compile(r"gorm\.DB"),
             re.compile(r"db\.AutoMigrate"),
         ],
+        "knex": [
+            re.compile(r"knex\.schema\.(?:createTable|alterTable|table)\s*\("),
+            re.compile(r"\bknex\s*\(\s*['\"][A-Za-z0-9_.-]+['\"]\s*\)"),
+            re.compile(r"\btable\.(?:string|integer|bigInteger|uuid|boolean|timestamp|json|enu)\s*\("),
+        ],
     }
 
     # Migration directory/file patterns
@@ -1128,6 +1218,15 @@ def discover_database_schema(
     # Phase 2: Determine primary ORM
     if orm_counts:
         result.orm_framework = max(orm_counts, key=lambda k: orm_counts[k])
+        result.orm_frameworks = sorted(orm_counts.keys())
+
+    result.graphql_interfaces = discover_graphql_interfaces(parsed_files, file_contents)
+    result.knex_artifacts = discover_knex_artifacts(parsed_files, file_contents)
+    if result.knex_artifacts and "knex" not in result.orm_frameworks:
+        result.orm_frameworks.append("knex")
+        if not result.orm_framework:
+            result.orm_framework = "knex"
+    result.groups = build_database_groups(result, parsed_files)
 
     # Deduplicate
     result.migration_files = sorted(set(result.migration_files))
@@ -1142,6 +1241,375 @@ def discover_database_schema(
         )
 
     return result
+
+
+def discover_graphql_interfaces(
+    parsed_files: dict[str, ParsedFile],
+    file_contents: dict[str, str],
+) -> list[GraphQLInterface]:
+    """Detect GraphQL schema surfaces, primarily Graphene-style Python code."""
+    interfaces: list[GraphQLInterface] = []
+    object_pattern = re.compile(r"class\s+(\w+)\((?:graphene\.)?(ObjectType|Mutation)\)\s*:")
+    schema_pattern = re.compile(r"(\w+)\s*=\s*graphene\.Schema\s*\(([^)]*)\)")
+    field_pattern = re.compile(r"^\s*(\w+)\s*=\s*graphene\.(Field|List|String|Int|Boolean|ID|Float)\b", re.MULTILINE)
+    resolver_pattern = re.compile(r"def\s+(resolve_\w+|mutate)\s*\(")
+
+    for file_path, content in file_contents.items():
+        if not content:
+            continue
+        lowered = content.lower()
+        if "graphene" not in lowered and "graphql" not in lowered:
+            continue
+
+        for match in object_pattern.finditer(content):
+            name = match.group(1)
+            kind = match.group(2).lower()
+            class_body = content[match.start() : match.start() + 4000]
+            fields = sorted(set(field_pattern.findall(class_body)))
+            resolvers = sorted(set(resolver_pattern.findall(class_body)))
+            interfaces.append(
+                GraphQLInterface(
+                    name=name,
+                    file_path=file_path,
+                    kind="mutation" if kind == "mutation" else "object_type",
+                    fields=[item[0] for item in fields[:20]],
+                    related_types=resolvers[:20],
+                )
+            )
+
+        for match in schema_pattern.finditer(content):
+            name = match.group(1)
+            related = []
+            for token in ("query", "mutation", "subscription"):
+                value_match = re.search(rf"{token}\s*=\s*([A-Za-z_][A-Za-z0-9_]*)", match.group(2))
+                if value_match:
+                    related.append(f"{token}:{value_match.group(1)}")
+            interfaces.append(
+                GraphQLInterface(
+                    name=name,
+                    file_path=file_path,
+                    kind="schema",
+                    related_types=related,
+                )
+            )
+
+    deduped: dict[tuple[str, str, str], GraphQLInterface] = {}
+    for item in interfaces:
+        deduped[(item.file_path, item.name, item.kind)] = item
+    return list(deduped.values())
+
+
+def discover_knex_artifacts(
+    parsed_files: dict[str, ParsedFile],
+    file_contents: dict[str, str],
+) -> list[KnexArtifact]:
+    """Detect Knex schema and query-builder usage."""
+    artifacts: list[KnexArtifact] = []
+    schema_call = re.compile(r"knex\.schema\.(createTable|alterTable|table)\s*\(\s*['\"]([A-Za-z0-9_.-]+)['\"]")
+    table_column = re.compile(r"table\.(string|integer|bigInteger|uuid|boolean|timestamp|json|enu)\s*\(\s*['\"]([A-Za-z0-9_.-]+)['\"]")
+    fk_pattern = re.compile(r"\.references\s*\(\s*['\"]([^'\"]+)['\"]\s*\)")
+    query_pattern = re.compile(r"\bknex\s*\(\s*['\"]([A-Za-z0-9_.-]+)['\"]\s*\)\s*(\.[A-Za-z_][A-Za-z0-9_]*(?:\([^)]*\))?){0,6}")
+
+    for file_path, content in file_contents.items():
+        if "knex" not in content:
+            continue
+
+        for match in schema_call.finditer(content):
+            snippet = content[match.start() : match.start() + 3000]
+            artifacts.append(
+                KnexArtifact(
+                    file_path=file_path,
+                    artifact_type="schema",
+                    table_name=match.group(2),
+                    columns=[col[1] for col in table_column.findall(snippet)[:30]],
+                    foreign_keys=fk_pattern.findall(snippet)[:20],
+                )
+            )
+
+        for match in query_pattern.finditer(content):
+            table_name = match.group(1)
+            chain = match.group(0)
+            artifacts.append(
+                KnexArtifact(
+                    file_path=file_path,
+                    artifact_type="query",
+                    table_name=table_name,
+                    query_patterns=[chain[:200]],
+                )
+            )
+
+    deduped: dict[tuple[str, str, str, str], KnexArtifact] = {}
+    for item in artifacts:
+        key = (
+            item.file_path,
+            item.artifact_type,
+            item.table_name,
+            "|".join(item.query_patterns[:1]),
+        )
+        if key not in deduped:
+            deduped[key] = item
+    return list(deduped.values())
+
+
+def build_database_groups(
+    db_scan: DatabaseScan,
+    parsed_files: dict[str, ParsedFile],
+) -> list[DatabaseGroup]:
+    """Group model/schema files into deterministic database documentation buckets."""
+    grouped: dict[str, DatabaseGroup] = {}
+    model_lookup = {
+        mf.file_path: mf for mf in db_scan.model_files
+    }
+
+    for file_path in sorted({*model_lookup.keys(), *db_scan.schema_files}):
+        parts = Path(file_path).parts
+        group_key = _database_group_key(parts)
+        label = group_key.replace("-", " ").replace("_", " ").title()
+        group = grouped.setdefault(
+            group_key,
+            DatabaseGroup(key=group_key, label=label),
+        )
+        group.file_paths.append(file_path)
+        model_info = model_lookup.get(file_path)
+        if model_info:
+            group.model_names.extend(model_info.model_names)
+            if model_info.orm_framework:
+                group.orm_frameworks.append(model_info.orm_framework)
+        elif file_path in db_scan.schema_files:
+            group.orm_frameworks.extend(db_scan.orm_frameworks[:1])
+
+    # Add cross-group references using parsed imports
+    path_to_group = {
+        file_path: group.key
+        for group in grouped.values()
+        for file_path in group.file_paths
+    }
+    import_lookup = _build_import_lookup(set(path_to_group.keys()))
+    for group in grouped.values():
+        external_refs: set[str] = set()
+        for file_path in group.file_paths:
+            parsed = parsed_files.get(file_path)
+            if not parsed:
+                continue
+            for imported in _resolve_imports_to_files(parsed.imports, file_path, import_lookup):
+                imported_group = path_to_group.get(imported)
+                if imported_group and imported_group != group.key:
+                    external_refs.add(imported_group)
+        group.model_names = sorted(set(group.model_names))
+        group.orm_frameworks = sorted(set(group.orm_frameworks))
+        group.external_refs = sorted(external_refs)
+
+    return sorted(grouped.values(), key=lambda item: item.key)
+
+
+def _database_group_key(parts: tuple[str, ...]) -> str:
+    lowered = [part.lower() for part in parts]
+    if "models" in lowered:
+        idx = lowered.index("models")
+        if idx > 0:
+            return lowered[idx - 1]
+        if idx + 1 < len(lowered):
+            return lowered[idx + 1]
+    for anchor in ("orderrefund", "orderreturnstatus", "graphql", "schema", "schemas", "entities"):
+        if anchor in lowered:
+            return anchor
+    if len(lowered) >= 3 and lowered[0] in {"src", "app", "api", "orderreverse"}:
+        return lowered[1]
+    if len(lowered) >= 2:
+        return lowered[-2]
+    return lowered[0] if lowered else "database"
+
+
+def discover_runtime_surfaces(
+    parsed_files: dict[str, ParsedFile],
+    file_contents: dict[str, str],
+) -> RuntimeScan:
+    """Detect first-class background job, scheduler, and realtime surfaces."""
+    runtime = RuntimeScan()
+    celery_tasks, celery_schedulers = _discover_celery_tasks(file_contents)
+    runtime.tasks.extend(celery_tasks)
+    runtime.schedulers.extend(celery_schedulers)
+    runtime.schedulers.extend(_discover_schedulers(file_contents))
+    runtime.realtime_consumers.extend(_discover_realtime_consumers(file_contents))
+    return runtime
+
+
+def _discover_celery_tasks(
+    file_contents: dict[str, str],
+) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
+    tasks: list[RuntimeTask] = []
+    schedulers: list[RuntimeScheduler] = []
+    task_pattern = re.compile(
+        r"@(?P<decorator>(?:\w+\.)?(?:task|shared_task))(?P<args>\([^\n]*\))?\s*\n(?:async\s+)?def\s+(?P<name>\w+)\s*\(",
+        re.MULTILINE,
+    )
+    queue_pattern = re.compile(r"(?:queue|routing_key)\s*=\s*['\"]([^'\"]+)['\"]")
+    trigger_pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\.(delay|apply_async)\s*\(")
+    beat_dict_pattern = re.compile(r"['\"]task['\"]\s*:\s*['\"]([^'\"]+)['\"].*?['\"]schedule['\"]\s*:\s*([^,}\n]+)", re.DOTALL)
+
+    for file_path, content in file_contents.items():
+        if "celery" not in content and "@shared_task" not in content and ".delay(" not in content and ".apply_async(" not in content:
+            continue
+
+        for match in task_pattern.finditer(content):
+            args = match.group("args") or ""
+            queue_match = queue_pattern.search(args)
+            retry_values = [
+                key
+                for key in (
+                    "autoretry_for",
+                    "max_retries",
+                    "retry_backoff",
+                    "default_retry_delay",
+                )
+                if key in args
+            ]
+            tasks.append(
+                RuntimeTask(
+                    name=match.group("name"),
+                    file_path=file_path,
+                    runtime_kind="celery",
+                    decorator=match.group("decorator"),
+                    queue=queue_match.group(1) if queue_match else "",
+                    retry_policy=", ".join(retry_values[:4]),
+                )
+            )
+
+        for trigger in trigger_pattern.finditer(content):
+            tasks.append(
+                RuntimeTask(
+                    name=trigger.group(1),
+                    file_path=file_path,
+                    runtime_kind="celery",
+                    triggers=[trigger.group(2)],
+                )
+            )
+
+        for beat_task, schedule in beat_dict_pattern.findall(content):
+            runtime_name = beat_task.split(".")[-1]
+            tasks.append(
+                RuntimeTask(
+                    name=runtime_name,
+                    file_path=file_path,
+                    runtime_kind="celery",
+                    schedule_sources=[schedule.strip()[:120]],
+                )
+            )
+            schedulers.append(
+                RuntimeScheduler(
+                    name=runtime_name,
+                    file_path=file_path,
+                    scheduler_type="beat",
+                    cron=schedule.strip()[:120],
+                    invoked_targets=[beat_task],
+                )
+            )
+
+    return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
+
+
+def _discover_schedulers(file_contents: dict[str, str]) -> list[RuntimeScheduler]:
+    schedulers: list[RuntimeScheduler] = []
+    node_cron_pattern = re.compile(r"cron\.schedule\s*\(\s*['\"]([^'\"]+)['\"]")
+    function_call_pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
+    crontab_pattern = re.compile(r"crontab\s*\(([^)]*)\)")
+
+    for file_path, content in file_contents.items():
+        if "cron.schedule" in content or "node-cron" in content:
+            for idx, match in enumerate(node_cron_pattern.finditer(content), start=1):
+                snippet = content[match.end() : match.end() + 300]
+                invoked = []
+                for call in function_call_pattern.findall(snippet):
+                    if call not in {"if", "for", "while", "switch", "setTimeout"}:
+                        invoked.append(call)
+                schedulers.append(
+                    RuntimeScheduler(
+                        name=f"node-cron-{idx}",
+                        file_path=file_path,
+                        scheduler_type="node_cron",
+                        cron=match.group(1),
+                        invoked_targets=invoked[:6],
+                    )
+                )
+        if "crontab(" in content:
+            for idx, match in enumerate(crontab_pattern.finditer(content), start=1):
+                schedulers.append(
+                    RuntimeScheduler(
+                        name=f"crontab-{idx}",
+                        file_path=file_path,
+                        scheduler_type="crontab",
+                        cron=match.group(1).strip()[:120],
+                    )
+                )
+    return _dedupe_schedulers(schedulers)
+
+
+def _discover_realtime_consumers(file_contents: dict[str, str]) -> list[RealtimeConsumer]:
+    consumers: list[RealtimeConsumer] = []
+    consumer_pattern = re.compile(r"class\s+(\w+)\((AsyncWebsocketConsumer|WebsocketConsumer)\)\s*:")
+    route_pattern = re.compile(r"re_path\s*\(\s*r?['\"]([^'\"]+)['\"]|path\s*\(\s*['\"]([^'\"]+)['\"]")
+    group_pattern = re.compile(r"group_(?:add|discard|send)\s*\(\s*['\"]([^'\"]+)['\"]")
+
+    for file_path, content in file_contents.items():
+        if "WebsocketConsumer" not in content and "AsyncWebsocketConsumer" not in content and "ProtocolTypeRouter" not in content:
+            continue
+
+        routes = []
+        for match in route_pattern.finditer(content):
+            route = match.group(1) or match.group(2)
+            if route:
+                routes.append(route)
+        groups = group_pattern.findall(content)
+        auth_hints = []
+        if "AuthMiddlewareStack" in content:
+            auth_hints.append("AuthMiddlewareStack")
+        if "scope['user']" in content or 'scope["user"]' in content:
+            auth_hints.append("scope_user")
+
+        for match in consumer_pattern.finditer(content):
+            consumers.append(
+                RealtimeConsumer(
+                    name=match.group(1),
+                    file_path=file_path,
+                    consumer_type=match.group(2),
+                    routes=sorted(set(routes))[:10],
+                    groups=sorted(set(groups))[:10],
+                    auth_hints=auth_hints,
+                )
+            )
+    return _dedupe_consumers(consumers)
+
+
+def _dedupe_runtime_tasks(tasks: list[RuntimeTask]) -> list[RuntimeTask]:
+    by_key: dict[tuple[str, str, str], RuntimeTask] = {}
+    for task in tasks:
+        key = (task.file_path, task.name, task.runtime_kind)
+        existing = by_key.get(key)
+        if not existing:
+            by_key[key] = task
+            continue
+        existing.schedule_sources = sorted(set(existing.schedule_sources + task.schedule_sources))
+        existing.triggers = sorted(set(existing.triggers + task.triggers))
+        if not existing.queue:
+            existing.queue = task.queue
+        if not existing.retry_policy:
+            existing.retry_policy = task.retry_policy
+    return list(by_key.values())
+
+
+def _dedupe_schedulers(schedulers: list[RuntimeScheduler]) -> list[RuntimeScheduler]:
+    seen: dict[tuple[str, str, str, str], RuntimeScheduler] = {}
+    for scheduler in schedulers:
+        key = (scheduler.file_path, scheduler.name, scheduler.scheduler_type, scheduler.cron)
+        seen[key] = scheduler
+    return list(seen.values())
+
+
+def _dedupe_consumers(consumers: list[RealtimeConsumer]) -> list[RealtimeConsumer]:
+    seen: dict[tuple[str, str], RealtimeConsumer] = {}
+    for consumer in consumers:
+        seen[(consumer.file_path, consumer.name)] = consumer
+    return list(seen.values())
 
 
 def fnmatch_simple(filename: str, pattern: str) -> bool:

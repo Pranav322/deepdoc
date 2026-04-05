@@ -58,6 +58,7 @@ class AssembledEvidence:
     graph_context: str  # static edges for diagram seeds
     cross_ref_context: str  # which other buckets reference this one's files
     database_context: str = ""  # database/schema info for database-type buckets
+    runtime_context: str = ""  # runtime/task/scheduler/realtime info
     plan_summary_context: str = ""  # repo-wide summary for introduction pages
     repo_docs_context: str = ""  # secondary repo-authored docs context for overview/system pages
     total_evidence_chars: int = 0
@@ -143,6 +144,7 @@ class EvidenceAssembler:
         graph_ctx = self._build_graph_context(bucket)
         cross_ref_ctx = self._build_cross_ref_context(bucket)
         database_ctx = self._build_database_context(bucket)
+        runtime_ctx = self._build_runtime_context(bucket)
         plan_summary_ctx = self._build_plan_summary_context(bucket)
         helper_ctx, helper_files = self._build_helper_context(bucket, source_ctx)
         repo_docs_ctx, repo_doc_files = self._build_repo_docs_context(bucket)
@@ -166,6 +168,7 @@ class EvidenceAssembler:
                 graph_ctx,
                 cross_ref_ctx,
                 database_ctx,
+                runtime_ctx,
                 plan_summary_ctx,
                 repo_docs_ctx,
                 helper_ctx,
@@ -185,6 +188,7 @@ class EvidenceAssembler:
             graph_context=graph_ctx,
             cross_ref_context=cross_ref_ctx,
             database_context=database_ctx,
+            runtime_context=runtime_ctx,
             plan_summary_context=plan_summary_ctx,
             repo_docs_context=repo_docs_ctx,
             total_evidence_chars=total,
@@ -1255,20 +1259,67 @@ class EvidenceAssembler:
         if artifact_scan is None:
             return ""
         db_scan = getattr(artifact_scan, "database_scan", None)
-        if db_scan is None or not db_scan.model_files:
+        if db_scan is None or not (db_scan.model_files or db_scan.schema_files or getattr(db_scan, "knex_artifacts", [])):
             return ""
 
         lines: list[str] = ["**Database Schema Information**\n"]
+        hints = bucket.generation_hints or {}
+        group_key = hints.get("database_group_key", "")
 
         # ORM framework
         if db_scan.orm_framework:
             lines.append(f"ORM Framework: **{db_scan.orm_framework}**")
             lines.append(f"Total Models Detected: **{db_scan.total_models}**\n")
 
+        # Group overview for overview pages
+        if hints.get("is_database_overview"):
+            if getattr(db_scan, "groups", None):
+                lines.append("### Database Groups\n")
+                for group in db_scan.groups:
+                    group_slug = f"database-{group.key}"
+                    lines.append(
+                        f"- [{group.label} Data Model](/{group_slug}): "
+                        f"{len(group.file_paths)} file(s), "
+                        f"{len(group.model_names)} model(s)"
+                    )
+                    if group.external_refs:
+                        lines.append(
+                            f"  External refs: {', '.join(f'`{ref}`' for ref in group.external_refs[:8])}"
+                        )
+            if db_scan.migration_files:
+                lines.append("\n### Migration Files\n")
+                for mig in db_scan.migration_files[:15]:
+                    lines.append(f"- `{mig}`")
+            if getattr(db_scan, "knex_artifacts", None):
+                lines.append("\n### Knex Artifacts\n")
+                for artifact in db_scan.knex_artifacts[:15]:
+                    descriptor = artifact.table_name or artifact.file_path
+                    lines.append(f"- `{artifact.file_path}` ({artifact.artifact_type}: {descriptor})")
+            if getattr(db_scan, "graphql_interfaces", None):
+                lines.append("\n### GraphQL Interfaces Touching The Data Layer\n")
+                for interface in db_scan.graphql_interfaces[:15]:
+                    lines.append(f"- `{interface.name}` (`{interface.file_path}`)")
+            return "\n".join(lines)
+
+        group_files = set(bucket.owned_files)
+        if hints.get("is_database_group") and group_key:
+            for group in getattr(db_scan, "groups", []) or []:
+                if group.key == group_key:
+                    group_files = set(group.file_paths)
+                    if group.external_refs:
+                        lines.append("### Cross-Group References\n")
+                        lines.extend(
+                            f"- Related group: `{ref}`"
+                            for ref in group.external_refs[:12]
+                        )
+                    break
+
         # Model files with extracted model names
         lines.append("### Model Definitions\n")
         for mf in db_scan.model_files:
             if mf.is_migration:
+                continue
+            if hints.get("is_database_group") and mf.file_path not in group_files:
                 continue
             model_list = (
                 ", ".join(mf.model_names[:20])
@@ -1298,6 +1349,26 @@ class EvidenceAssembler:
                 except Exception:
                     pass
 
+        # Knex artifacts relevant to the current page
+        page_knex = [
+            artifact
+            for artifact in getattr(db_scan, "knex_artifacts", []) or []
+            if artifact.file_path in set(bucket.owned_files)
+        ]
+        if page_knex:
+            lines.append("\n### Knex Schema & Query Evidence\n")
+            for artifact in page_knex[:20]:
+                table_display = artifact.table_name or "(unknown table)"
+                lines.append(
+                    f"- `{artifact.file_path}` [{artifact.artifact_type}] table={table_display}"
+                )
+                if artifact.columns:
+                    lines.append(f"  Columns: {', '.join(artifact.columns[:12])}")
+                if artifact.foreign_keys:
+                    lines.append(f"  Foreign keys: {', '.join(artifact.foreign_keys[:8])}")
+                if artifact.query_patterns:
+                    lines.append(f"  Query patterns: {', '.join(artifact.query_patterns[:4])}")
+
         # Migration files
         if db_scan.migration_files:
             lines.append("\n### Migrations\n")
@@ -1319,6 +1390,79 @@ class EvidenceAssembler:
                         pass
 
         return "\n".join(lines)
+
+    def _build_runtime_context(self, bucket: DocBucket) -> str:
+        hints = bucket.generation_hints or {}
+        if not hints.get("include_runtime_context"):
+            return ""
+
+        runtime_scan = getattr(self.scan, "runtime_scan", None)
+        if runtime_scan is None:
+            return ""
+
+        lines: list[str] = ["**Runtime Surface Information**\n"]
+        owned_files = set(bucket.owned_files)
+        group_kind = hints.get("runtime_group_kind", "")
+
+        tasks = list(getattr(runtime_scan, "tasks", []) or [])
+        schedulers = list(getattr(runtime_scan, "schedulers", []) or [])
+        consumers = list(getattr(runtime_scan, "realtime_consumers", []) or [])
+
+        if hints.get("is_runtime_overview"):
+            lines.append(
+                f"Tasks: **{len(tasks)}**, Schedulers: **{len(schedulers)}**, Realtime consumers: **{len(consumers)}**"
+            )
+        else:
+            if group_kind == "celery":
+                tasks = [task for task in tasks if task.file_path in owned_files]
+                schedulers = [item for item in schedulers if item.file_path in owned_files]
+                consumers = []
+            elif group_kind == "schedulers":
+                schedulers = [item for item in schedulers if item.file_path in owned_files]
+                tasks = [task for task in tasks if task.file_path in owned_files and task.schedule_sources]
+                consumers = []
+            elif group_kind == "realtime":
+                consumers = [item for item in consumers if item.file_path in owned_files]
+                tasks = []
+                schedulers = []
+
+        if tasks:
+            lines.append("\n### Tasks\n")
+            for task in tasks[:40]:
+                detail = [f"`{task.name}` (`{task.file_path}`)"]
+                if task.queue:
+                    detail.append(f"queue={task.queue}")
+                if task.retry_policy:
+                    detail.append(f"retry={task.retry_policy}")
+                if task.schedule_sources:
+                    detail.append(f"schedule={'; '.join(task.schedule_sources[:2])}")
+                if task.triggers:
+                    detail.append(f"triggers={', '.join(task.triggers[:3])}")
+                lines.append("- " + " | ".join(detail))
+
+        if schedulers:
+            lines.append("\n### Schedulers\n")
+            for scheduler in schedulers[:30]:
+                detail = [f"`{scheduler.name}` (`{scheduler.file_path}`)", scheduler.scheduler_type]
+                if scheduler.cron:
+                    detail.append(f"cron={scheduler.cron}")
+                if scheduler.invoked_targets:
+                    detail.append(f"targets={', '.join(scheduler.invoked_targets[:4])}")
+                lines.append("- " + " | ".join(detail))
+
+        if consumers:
+            lines.append("\n### Realtime Consumers\n")
+            for consumer in consumers[:30]:
+                detail = [f"`{consumer.name}` (`{consumer.file_path}`)", consumer.consumer_type]
+                if consumer.routes:
+                    detail.append(f"routes={', '.join(consumer.routes[:3])}")
+                if consumer.groups:
+                    detail.append(f"groups={', '.join(consumer.groups[:4])}")
+                if consumer.auth_hints:
+                    detail.append(f"auth={', '.join(consumer.auth_hints[:3])}")
+                lines.append("- " + " | ".join(detail))
+
+        return "\n".join(lines) if len(lines) > 1 else ""
 
     def _build_plan_summary_context(self, bucket: DocBucket) -> str:
         """Build repo-wide planning context for the landing page."""
@@ -1478,6 +1622,8 @@ class PageGenerator:
             full_source += f"\n\n## Integration Context\n{evidence.integration_context}"
         if evidence.database_context:
             full_source += f"\n\n## Database Schema\n{evidence.database_context}"
+        if evidence.runtime_context:
+            full_source += f"\n\n## Runtime & Background Jobs\n{evidence.runtime_context}"
         if evidence.artifact_context:
             full_source += f"\n\n## Artifacts\n{evidence.artifact_context}"
         if evidence.graph_context:
@@ -2249,6 +2395,11 @@ def escape_mdx_text_hazards(content: str) -> str:
                     r"`\1`",
                     part,
                 )
+                part = re.sub(
+                    r"([,(]\s*)\{([A-Za-z_][A-Za-z0-9_, ]*)\}(?=\s*[),])",
+                    lambda match: f"{match.group(1)}&#123;{match.group(2)}&#125;",
+                    part,
+                )
             part = part.replace("{...}", "&#123;...&#125;")
             return part
 
@@ -2857,6 +3008,7 @@ Re-run `deepdoc generate` to retry.
         """Build dependency links from explicit depends_on + import analysis."""
         slug_to_bucket = {b.slug: b for b in self.plan.buckets}
         related: dict[str, DocBucket] = {}
+        bucket_files = set(bucket.owned_files)
 
         # Explicit depends_on
         for dep_slug in bucket.depends_on:
@@ -2886,6 +3038,22 @@ Re-run `deepdoc generate` to retry.
                             if linked_bucket.slug != bucket.slug:
                                 related[linked_bucket.slug] = linked_bucket
                         break
+
+        # Strong overlap-based links for database/runtime/interface pages
+        for candidate in self.plan.buckets:
+            if candidate.slug == bucket.slug:
+                continue
+            hints = candidate.generation_hints or {}
+            if not (
+                hints.get("is_database_overview")
+                or hints.get("is_database_group")
+                or hints.get("is_runtime_overview")
+                or hints.get("runtime_group_kind")
+                or hints.get("prompt_style") == "graphql"
+            ):
+                continue
+            if bucket_files & set(candidate.owned_files):
+                related[candidate.slug] = candidate
 
         if not related:
             return ""

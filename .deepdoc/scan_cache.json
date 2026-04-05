@@ -1,7 +1,7 @@
 {
   "version": "v2",
-  "generated_at": "2026-04-04T07:38:39.389462+00:00",
-  "total_files": 104,
+  "generated_at": "2026-04-04T09:21:51.426475+00:00",
+  "total_files": 106,
   "languages": {
     "python": 86,
     "javascript": 2,
@@ -33,6 +33,7 @@
     "tests/fixtures/frameworks/fastify_app/package.json",
     "tests/fixtures/frameworks/vue_app/package.json",
     "tests/fixtures/frameworks/express_app/package.json",
+    ".github/workflows/github-pages.yml",
     ".github/workflows/release.yml",
     ".github/workflows/tests.yml"
   ],
@@ -45,7 +46,7 @@
     "deepdoc/benchmark_v2.py": 124,
     "deepdoc/cli.py": 1015,
     "deepdoc/config.py": 232,
-    "deepdoc/generator_v2.py": 2937,
+    "deepdoc/generator_v2.py": 2939,
     "deepdoc/manifest.py": 63,
     "deepdoc/openapi.py": 218,
     "deepdoc/persistence_v2.py": 708,
@@ -66,7 +67,7 @@
     "deepdoc/chatbot/persistence.py": 180,
     "deepdoc/chatbot/providers.py": 137,
     "deepdoc/chatbot/scaffold.py": 121,
-    "deepdoc/chatbot/service.py": 545,
+    "deepdoc/chatbot/service.py": 546,
     "deepdoc/chatbot/settings.py": 164,
     "deepdoc/chatbot/types.py": 53,
     "deepdoc/parser/__init__.py": 6,
@@ -96,14 +97,14 @@
     "deepdoc/parser/routes/registry.py": 44,
     "deepdoc/parser/routes/repo_resolver.py": 984,
     "deepdoc/site/__init__.py": 1,
-    "deepdoc/site/fumadocs_builder_v2.py": 2546,
+    "deepdoc/site/fumadocs_builder_v2.py": 2679,
     "tests/__init__.py": 0,
     "tests/conftest.py": 247,
     "tests/test_chatbot_config.py": 110,
     "tests/test_chatbot_index.py": 160,
     "tests/test_chatbot_persistence.py": 42,
     "tests/test_chatbot_providers.py": 71,
-    "tests/test_chatbot_query.py": 433,
+    "tests/test_chatbot_query.py": 434,
     "tests/test_chatbot_relationship.py": 281,
     "tests/test_chatbot_scaffold.py": 79,
     "tests/test_classify.py": 189,
@@ -111,7 +112,7 @@
     "tests/test_cli_serve.py": 89,
     "tests/test_framework_fixtures.py": 64,
     "tests/test_framework_support.py": 673,
-    "tests/test_fumadocs_builder.py": 756,
+    "tests/test_fumadocs_builder.py": 769,
     "tests/test_generation_evidence.py": 714,
     "tests/test_internal_docs_metadata.py": 268,
     "tests/test_litellm_compat.py": 38,
@@ -169,7 +170,7 @@
       "file": "deepdoc/chatbot/service.py",
       "route_file": "deepdoc/chatbot/service.py",
       "handler_file": "deepdoc/chatbot/service.py",
-      "line": 528,
+      "line": 529,
       "raw_path": "/health",
       "framework": "fastapi",
       "provenance": {},
@@ -185,7 +186,7 @@
       "file": "deepdoc/chatbot/service.py",
       "route_file": "deepdoc/chatbot/service.py",
       "handler_file": "deepdoc/chatbot/service.py",
-      "line": 532,
+      "line": 533,
       "raw_path": "/query",
       "framework": "fastapi",
       "provenance": {},
@@ -514,6 +515,7 @@
     "README.md": "docs",
     "future.txt": "product",
     "pyproject.toml": "config",
+    "trigger": "product",
     "deepdoc/__init__.py": "product",
     "deepdoc/__main__.py": "product",
     "deepdoc/_legacy_types.py": "product",
@@ -608,6 +610,7 @@
     ".claude/settings.local.json": "product",
     "scripts/fix_generated_mdx.py": "generated",
     "scripts/refresh_generated_sites.py": "generated",
+    ".github/workflows/github-pages.yml": "ops",
     ".github/workflows/release.yml": "ops",
     ".github/workflows/tests.yml": "ops"
   },
@@ -688,7 +691,7 @@
     {
       "name": "anthropic",
       "display_name": "Anthropic",
-      "description": "Anthropic LLM API integration for chat and completion tasks.",
+      "description": "Anthropic LLM API integration for chat and completion services.",
       "files": [
         "deepdoc/cli.py",
         "deepdoc/config.py",
@@ -710,8 +713,8 @@
     },
     {
       "name": "azure",
-      "display_name": "Azure AI",
-      "description": "Azure AI API integration for LLM and embedding services.",
+      "display_name": "Azure",
+      "description": "Azure API integration for LLM and embedding services.",
       "files": [
         "deepdoc/cli.py",
         "tests/test_chatbot_providers.py"
@@ -728,7 +731,6 @@
         "deepdoc/chatbot/settings.py",
         "deepdoc/cli.py",
         "deepdoc/config.py",
-        "deepdoc/llm/client.py",
         "deepdoc/scan_v2.py",
         "tests/test_chatbot_config.py"
       ],
@@ -737,17 +739,29 @@
     },
     {
       "name": "deepdoc_embed",
-      "display_name": "Deepdoc Embed API",
-      "description": "Deepdoc's internal embedding API for vector search and retrieval.",
+      "display_name": "Deepdoc Embedding API",
+      "description": "Deepdoc's internal embedding API for document vectorization.",
       "files": [
         "deepdoc/chatbot/scaffold.py",
         "deepdoc/chatbot/settings.py",
         "deepdoc/cli.py",
         "deepdoc/config.py",
+        "deepdoc/llm/client.py",
         "deepdoc/scan_v2.py",
         "tests/test_chatbot_config.py"
       ],
       "is_substantial": true,
+      "party": "third_party"
+    },
+    {
+      "name": "deepdoc_sample",
+      "display_name": "Deepdoc Sample Key",
+      "description": "Sample API key for Deepdoc CLI testing.",
+      "files": [
+        "deepdoc/chatbot/scaffold.py",
+        "tests/test_cli_generate.py"
+      ],
+      "is_substantial": false,
       "party": "third_party"
     },
     {
@@ -763,20 +777,9 @@
       "party": "third_party"
     },
     {
-      "name": "deepdoc_sample",
-      "display_name": "Deepdoc Sample Key",
-      "description": "Sample/development API key for Deepdoc features.",
-      "files": [
-        "deepdoc/chatbot/scaffold.py",
-        "tests/test_cli_generate.py"
-      ],
-      "is_substantial": false,
-      "party": "third_party"
-    },
-    {
       "name": "webhook",
       "display_name": "Webhook Integrations",
-      "description": "Generic webhook integration points for event-driven sync, external notifications, and custom integrations.",
+      "description": "Generic webhook handler and integration points for external systems.",
       "files": [
         "deepdoc/chatbot/indexer.py",
         "deepdoc/chatbot/providers.py",
@@ -803,9 +806,20 @@
       "party": "third_party"
     },
     {
+      "name": "api",
+      "display_name": "Generic API Key",
+      "description": "Generic API key for external integrations.",
+      "files": [
+        "deepdoc/prompts_v2.py",
+        "deepdoc/site/fumadocs_builder_v2.py"
+      ],
+      "is_substantial": false,
+      "party": "third_party"
+    },
+    {
       "name": "llm",
       "display_name": "LLM Client",
-      "description": "Internal LLM client abstraction for accessing language model providers.",
+      "description": "Internal LLM client for model access (may wrap OpenAI/Anthropic/Azure).",
       "files": [
         "deepdoc/chatbot/providers.py",
         "deepdoc/llm/client.py",
@@ -815,25 +829,13 @@
       "party": "third_party"
     },
     {
-      "name": "litellmchat",
-      "display_name": "LiteLLM Chat Client",
-      "description": "LiteLLM-based chat client for LLM operations.",
+      "name": "litellm",
+      "display_name": "LiteLLM",
+      "description": "LiteLLM client for chat and embedding services.",
       "files": [
         "deepdoc/chatbot/providers.py",
         "deepdoc/llm/client.py",
         "tests/test_fumadocs_builder.py"
-      ],
-      "is_substantial": false,
-      "party": "third_party"
-    },
-    {
-      "name": "litellmembedding",
-      "display_name": "LiteLLM Embedding Client",
-      "description": "LiteLLM-based embedding client for vector operations.",
-      "files": [
-        "deepdoc/chatbot/providers.py",
-        "deepdoc/llm/client.py",
-        "tests/test_planner_consolidation.py"
       ],
       "is_substantial": false,
       "party": "third_party"

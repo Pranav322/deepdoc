@@ -213,6 +213,102 @@ def test_scan_cache_preserves_source_kinds_and_frameworks(tmp_path: Path) -> Non
         source_kind_by_file={"app/main.py": "product", "tests/test_main.py": "test"},
         file_frameworks={"app/main.py": ["falcon"]},
     )
+    scan.runtime_scan = type(
+        "RuntimeScan",
+        (),
+        {
+            "tasks": [
+                type(
+                    "RuntimeTask",
+                    (),
+                    {
+                        "name": "sync_orders",
+                        "file_path": "jobs/tasks.py",
+                        "runtime_kind": "celery",
+                        "queue": "critical",
+                        "schedule_sources": ["crontab(hour=2)"],
+                    },
+                )()
+            ],
+            "schedulers": [
+                type(
+                    "RuntimeScheduler",
+                    (),
+                    {
+                        "name": "nightly-sync",
+                        "file_path": "jobs/scheduler.py",
+                        "scheduler_type": "beat",
+                        "cron": "crontab(hour=2)",
+                    },
+                )()
+            ],
+            "realtime_consumers": [
+                type(
+                    "RealtimeConsumer",
+                    (),
+                    {
+                        "name": "OrdersConsumer",
+                        "file_path": "realtime/consumers.py",
+                        "consumer_type": "AsyncWebsocketConsumer",
+                        "routes": ["ws/orders/"],
+                    },
+                )()
+            ],
+        },
+    )()
+    scan.artifact_scan = type(
+        "ArtifactScan",
+        (),
+        {
+            "database_scan": type(
+                "DatabaseScan",
+                (),
+                {
+                    "groups": [
+                        type(
+                            "DatabaseGroup",
+                            (),
+                            {
+                                "key": "orders",
+                                "label": "Orders",
+                                "file_paths": ["orders/models.py"],
+                                "model_names": ["Order"],
+                                "orm_frameworks": ["django"],
+                                "external_refs": [],
+                            },
+                        )()
+                    ]
+                },
+            )()
+        },
+    )()
+    scan.graphql_interfaces = [
+        type(
+            "GraphQLInterface",
+            (),
+            {
+                "name": "OrdersSchema",
+                "file_path": "graphql/schema.py",
+                "kind": "schema",
+                "fields": [],
+                "related_types": ["query:OrdersQuery"],
+            },
+        )()
+    ]
+    scan.knex_artifacts = [
+        type(
+            "KnexArtifact",
+            (),
+            {
+                "file_path": "db/orders.js",
+                "artifact_type": "schema",
+                "table_name": "orders",
+                "columns": ["id", "status"],
+                "foreign_keys": ["user_id"],
+                "query_patterns": [],
+            },
+        )()
+    ]
 
     save_scan_cache(scan, repo_root)
     cached = load_scan_cache(repo_root)
@@ -221,6 +317,12 @@ def test_scan_cache_preserves_source_kinds_and_frameworks(tmp_path: Path) -> Non
     assert cached["source_kind_by_file"]["app/main.py"] == "product"
     assert cached["source_kind_by_file"]["tests/test_main.py"] == "test"
     assert cached["file_frameworks"]["app/main.py"] == ["falcon"]
+    assert cached["runtime_summary"]["tasks"][0]["name"] == "sync_orders"
+    assert cached["runtime_summary"]["schedulers"][0]["scheduler_type"] == "beat"
+    assert cached["runtime_summary"]["realtime_consumers"][0]["routes"] == ["ws/orders/"]
+    assert cached["database_groups"][0]["key"] == "orders"
+    assert cached["graphql_interfaces"][0]["name"] == "OrdersSchema"
+    assert cached["knex_artifacts"][0]["table_name"] == "orders"
 
 
 def test_chatbot_prefers_core_but_can_prioritize_tests_when_explicit() -> None:

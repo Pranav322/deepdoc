@@ -22,6 +22,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "source_context_budget": 200000,  # raw-source char budget before compressed evidence cards kick in
     "decompose_threshold": 7,  # buckets with 7+ files trigger decomposition consideration
     "consolidation_similarity_threshold": 0.55,  # Jaccard threshold for merging near-duplicate buckets
+    "database_doc_mode": "overview_plus_groups",
+    "database_group_model_cap": 12,
+    "database_group_file_cap": 8,
+    "runtime_doc_mode": "dedicated_pages",
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)

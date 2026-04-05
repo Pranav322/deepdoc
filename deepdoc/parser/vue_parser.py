@@ -37,7 +37,7 @@ def parse_vue(path: Path, content: str, language: str) -> ParsedFile:
             language="vue",
             symbols=symbols,
             imports=[],
-            raw_content=content[:8000],
+            raw_content=content[:12000],
         )
 
     # Determine the effective language for the script block

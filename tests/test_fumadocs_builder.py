@@ -108,12 +108,19 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert package_json["dependencies"]["next"] == "15.3.0"
     assert package_json["dependencies"]["react"] == "19.1.0"
     assert "fumadocs-ui/provider';" in app_layout
+    assert "NEXT_PUBLIC_DEEPDOC_SITE_BASE_PATH" in app_layout
+    assert "const searchApiPath = siteBasePath ? `${siteBasePath}/search` : '/search';" in app_layout
+    assert "api: searchApiPath" in app_layout
+    assert "icon: 'favicon.svg'" in app_layout
     assert "provider/next" not in app_layout
     assert "turbopack" not in next_config
+    assert "DEEPDOC_SITE_BASE_PATH" in next_config
+    assert "normalizedExplicitBasePath" in next_config
+    assert "siteBasePath = normalizedExplicitBasePath || githubPagesBasePath" in next_config
+    assert "trailingSlash: useTrailingSlash" in next_config
     assert "GITHUB_REPOSITORY" in next_config
-    assert "basePath: githubPagesBasePath || undefined" in next_config
-    assert "assetPrefix: githubPagesBasePath || undefined" in next_config
-    assert "trailingSlash: process.env.GITHUB_PAGES === 'true'" in next_config
+    assert "basePath: siteBasePath || undefined" in next_config
+    assert "assetPrefix: siteBasePath || undefined" in next_config
     assert "APIPage" in mdx_components
     assert "ComponentType" in docs_page
     assert "TOCItemType" in docs_page
@@ -194,6 +201,53 @@ def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(tmp_path
     assert "_deepdoc_autogen_" not in index_text
     assert index_text.endswith(custom_index)
     assert auth_doc.startswith("---\n")
+
+
+def test_build_fumadocs_repairs_malformed_index_frontmatter(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+
+    overview = make_bucket(
+        "Overview",
+        "overview",
+        ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    auth = make_bucket("Auth", "auth", ["auth.py"], section="Core")
+    plan = make_plan([overview, auth])
+    plan.nav_structure = {"Core": ["auth"]}
+
+    malformed_index = """---
+# System Architecture & Overview
+
+A real-time POS backend.
+---
+
+## What This Does
+
+It runs the admin platform.
+"""
+    (output_dir / "index.mdx").write_text(malformed_index, encoding="utf-8")
+    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+
+    build_fumadocs_from_plan(
+        repo_root,
+        output_dir,
+        {"project_name": "Demo"},
+        plan,
+        has_openapi=False,
+    )
+
+    index_text = (output_dir / "index.mdx").read_text(encoding="utf-8")
+
+    assert index_text.startswith("---\n")
+    assert 'title: "System Architecture & Overview"' in index_text
+    assert "_deepdoc_autogen_" not in index_text
+    assert "# System Architecture & Overview" in index_text
+    assert "A real-time POS backend." in index_text
+    assert "## What This Does" in index_text
 
 
 def test_build_fumadocs_without_openapi_omits_api_route_scaffold(tmp_path: Path) -> None:
@@ -512,6 +566,20 @@ def test_escape_mdx_text_hazards_escapes_literal_brace_ellipsis() -> None:
     escaped = escape_mdx_text_hazards(content)
 
     assert "&#123;...&#125;" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_destructured_args_in_table_cells() -> None:
+    content = """| Symbol | Signature |
+|---|---|
+| updateHasProductReturnDetails | (details, {connection}) |
+
+Inline code: `(details, {connection})`
+"""
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "(details, &#123;connection&#125;)" in escaped
+    assert "Inline code: `(details, {connection})`" in escaped
 
 
 def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:

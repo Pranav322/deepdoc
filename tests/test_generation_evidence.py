@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.config import DEFAULT_CONFIG
-from deepdoc.generator_v2 import AssembledEvidence, EvidenceAssembler, PageValidator
+from deepdoc.generator_v2 import (
+    AssembledEvidence,
+    BucketGenerationEngine,
+    EvidenceAssembler,
+    PageValidator,
+)
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner_v2 import RepoScan
 from deepdoc.prompts_v2 import OVERVIEW_V2, get_prompt_for_bucket
@@ -712,3 +717,346 @@ and post-deploy verification so the generated page is long enough for validator 
     assert "/api/v2/health" in result.unmatched_routes
     assert "src/other.py" in result.out_of_evidence_refs
     assert "/api/v1/login" not in result.unmatched_routes
+
+
+def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    for rel_path, content in {
+        "orders/models.py": (
+            "from django.db import models\n\n"
+            "class Order(models.Model):\n"
+            "    status = models.CharField(max_length=32)\n"
+        ),
+        "catalog/models.py": (
+            "from django.db import models\n\n"
+            "class CatalogItem(models.Model):\n"
+            "    sku = models.CharField(max_length=32)\n"
+        ),
+        "db/orders.js": (
+            "exports.up = async function(knex) {\n"
+            "  await knex.schema.createTable('orders', function(table) {\n"
+            "    table.uuid('id');\n"
+            "    table.string('status');\n"
+            "  });\n"
+            "};\n"
+        ),
+        "jobs/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task(queue='critical', autoretry_for=(Exception,), retry_backoff=True)\n"
+            "def sync_orders(order_id):\n"
+            "    return order_id\n"
+        ),
+        "jobs/scheduler.py": (
+            "from celery.schedules import crontab\n"
+            "app.conf.beat_schedule = {\n"
+            "    'nightly-sync': {\n"
+            "        'task': 'jobs.tasks.sync_orders',\n"
+            "        'schedule': crontab(minute='0', hour='2'),\n"
+            "    }\n"
+            "}\n"
+        ),
+        "features/orders.py": (
+            "from orders.models import Order\n"
+            "from jobs.tasks import sync_orders\n\n"
+            "def process_order(order_id):\n"
+            "    sync_orders.delay(order_id)\n"
+            "    return Order\n"
+        ),
+    }.items():
+        path = repo_root / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+
+    parsed_files = {
+        "orders/models.py": ParsedFile(
+            path=Path("orders/models.py"),
+            language="python",
+            symbols=[Symbol(name="Order", kind="class", signature="class Order(models.Model):")],
+            imports=["catalog.models"],
+        ),
+        "catalog/models.py": ParsedFile(
+            path=Path("catalog/models.py"),
+            language="python",
+            symbols=[
+                Symbol(
+                    name="CatalogItem",
+                    kind="class",
+                    signature="class CatalogItem(models.Model):",
+                )
+            ],
+            imports=[],
+        ),
+        "jobs/tasks.py": ParsedFile(
+            path=Path("jobs/tasks.py"),
+            language="python",
+            symbols=[
+                Symbol(
+                    name="sync_orders",
+                    kind="function",
+                    signature="def sync_orders(order_id):",
+                )
+            ],
+            imports=[],
+        ),
+        "jobs/scheduler.py": ParsedFile(
+            path=Path("jobs/scheduler.py"),
+            language="python",
+            symbols=[],
+            imports=["jobs.tasks"],
+        ),
+        "features/orders.py": ParsedFile(
+            path=Path("features/orders.py"),
+            language="python",
+            symbols=[
+                Symbol(
+                    name="process_order",
+                    kind="function",
+                    signature="def process_order(order_id):",
+                )
+            ],
+            imports=["orders.models", "jobs.tasks"],
+        ),
+        "db/orders.js": ParsedFile(
+            path=Path("db/orders.js"),
+            language="javascript",
+            symbols=[],
+            imports=[],
+        ),
+    }
+    file_contents = {
+        rel_path: (repo_root / rel_path).read_text(encoding="utf-8")
+        for rel_path in parsed_files
+    }
+    scan = RepoScan(
+        file_tree={},
+        file_summaries={path: "summary" for path in file_contents},
+        api_endpoints=[],
+        languages={"python": 5, "javascript": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=len(file_contents),
+        frameworks_detected=["django", "celery"],
+        entry_points=[],
+        config_files=[],
+        file_line_counts={
+            path: len(content.splitlines()) for path, content in file_contents.items()
+        },
+        parsed_files=parsed_files,
+        file_contents=file_contents,
+    )
+    scan.artifact_scan = type(
+        "ArtifactScan",
+        (),
+        {
+            "database_scan": type(
+                "DatabaseScan",
+                (),
+                {
+                    "model_files": [
+                        type(
+                            "ModelFileInfo",
+                            (),
+                            {
+                                "file_path": "orders/models.py",
+                                "model_names": ["Order"],
+                                "orm_framework": "django",
+                                "is_migration": False,
+                            },
+                        )(),
+                        type(
+                            "ModelFileInfo",
+                            (),
+                            {
+                                "file_path": "catalog/models.py",
+                                "model_names": ["CatalogItem"],
+                                "orm_framework": "django",
+                                "is_migration": False,
+                            },
+                        )(),
+                    ],
+                    "schema_files": [],
+                    "migration_files": ["orders/migrations/0001_initial.py"],
+                    "orm_framework": "django",
+                    "orm_frameworks": ["django", "knex"],
+                    "total_models": 13,
+                    "groups": [
+                        type(
+                            "DatabaseGroup",
+                            (),
+                            {
+                                "key": "orders",
+                                "label": "Orders",
+                                "file_paths": ["orders/models.py", "db/orders.js"],
+                                "model_names": ["Order"],
+                                "orm_frameworks": ["django", "knex"],
+                                "external_refs": ["catalog"],
+                            },
+                        )(),
+                        type(
+                            "DatabaseGroup",
+                            (),
+                            {
+                                "key": "catalog",
+                                "label": "Catalog",
+                                "file_paths": ["catalog/models.py"],
+                                "model_names": ["CatalogItem"],
+                                "orm_frameworks": ["django"],
+                                "external_refs": ["orders"],
+                            },
+                        )(),
+                    ],
+                    "knex_artifacts": [
+                        type(
+                            "KnexArtifact",
+                            (),
+                            {
+                                "file_path": "db/orders.js",
+                                "artifact_type": "schema",
+                                "table_name": "orders",
+                                "columns": ["id", "status"],
+                                "foreign_keys": [],
+                                "query_patterns": [],
+                            },
+                        )()
+                    ],
+                    "graphql_interfaces": [],
+                },
+            )()
+        },
+    )()
+    scan.runtime_scan = type(
+        "RuntimeScan",
+        (),
+        {
+            "tasks": [
+                type(
+                    "RuntimeTask",
+                    (),
+                    {
+                        "name": "sync_orders",
+                        "file_path": "jobs/tasks.py",
+                        "runtime_kind": "celery",
+                        "queue": "critical",
+                        "retry_policy": "autoretry_for, retry_backoff",
+                        "schedule_sources": ["crontab(minute='0', hour='2')"],
+                        "triggers": [],
+                    },
+                )()
+            ],
+            "schedulers": [
+                type(
+                    "RuntimeScheduler",
+                    (),
+                    {
+                        "name": "nightly-sync",
+                        "file_path": "jobs/scheduler.py",
+                        "scheduler_type": "beat",
+                        "cron": "crontab(minute='0', hour='2')",
+                        "invoked_targets": ["jobs.tasks.sync_orders"],
+                    },
+                )()
+            ],
+            "realtime_consumers": [],
+        },
+    )()
+
+    database_overview = make_bucket(
+        "Database & Schema",
+        "database-schema",
+        ["orders/models.py", "catalog/models.py", "db/orders.js"],
+        bucket_type="database",
+        section="Database > Database & Schema",
+        generation_hints={
+            "include_database_context": True,
+            "prompt_style": "database_overview",
+            "is_database_overview": True,
+            "preserve_section": True,
+        },
+    )
+    database_group = make_bucket(
+        "Orders Data Model",
+        "database-orders",
+        ["orders/models.py", "db/orders.js"],
+        bucket_type="database-group",
+        section="Database > Database & Schema",
+        generation_hints={
+            "include_database_context": True,
+            "prompt_style": "database_group",
+            "is_database_group": True,
+            "database_group_key": "orders",
+            "preserve_section": True,
+        },
+    )
+    runtime_overview = make_bucket(
+        "Background Jobs & Runtime",
+        "background-jobs",
+        ["jobs/tasks.py", "jobs/scheduler.py"],
+        bucket_type="runtime",
+        section="Background Jobs > Background Jobs & Runtime",
+        generation_hints={
+            "prompt_style": "runtime_overview",
+            "include_runtime_context": True,
+            "is_runtime_overview": True,
+            "preserve_section": True,
+        },
+    )
+    runtime_tasks = make_bucket(
+        "Celery Tasks & Producers",
+        "background-jobs-celery",
+        ["jobs/tasks.py", "jobs/scheduler.py"],
+        bucket_type="runtime-group",
+        section="Background Jobs > Background Jobs & Runtime",
+        generation_hints={
+            "prompt_style": "runtime",
+            "include_runtime_context": True,
+            "runtime_group_kind": "celery",
+            "preserve_section": True,
+        },
+    )
+    feature_bucket = make_bucket(
+        "Order Processing",
+        "order-processing",
+        ["features/orders.py", "orders/models.py", "jobs/tasks.py"],
+        bucket_type="feature",
+        section="Core Flows",
+        generation_hints={"prompt_style": "feature"},
+    )
+    plan = make_plan(
+        [database_overview, database_group, runtime_overview, runtime_tasks, feature_bucket]
+    )
+
+    cfg = dict(DEFAULT_CONFIG)
+    assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
+    overview_evidence = assembler.assemble(database_overview)
+    group_evidence = assembler.assemble(database_group)
+    runtime_evidence = assembler.assemble(runtime_tasks)
+
+    assert "Database Groups" in overview_evidence.database_context
+    assert "Orders Data Model" in overview_evidence.database_context
+    assert "Knex Artifacts" in overview_evidence.database_context
+    assert "GraphQL Interfaces Touching The Data Layer" not in overview_evidence.database_context
+
+    assert "`orders/models.py` (django): Order" in group_evidence.database_context
+    assert "`catalog/models.py`" not in group_evidence.database_context
+    assert "Cross-Group References" in group_evidence.database_context
+    assert "db/orders.js" in group_evidence.database_context
+
+    assert "### Tasks" in runtime_evidence.runtime_context
+    assert "sync_orders" in runtime_evidence.runtime_context
+    assert "queue=critical" in runtime_evidence.runtime_context
+    assert "nightly-sync" in runtime_evidence.runtime_context
+
+    engine = BucketGenerationEngine(
+        repo_root=repo_root,
+        cfg=cfg,
+        llm=object(),
+        scan=scan,
+        plan=plan,
+        output_dir=repo_root / "docs",
+    )
+    dependency_links = engine._build_dependency_links_for(feature_bucket)
+
+    assert "/database-schema" in dependency_links
+    assert "/database-orders" in dependency_links
+    assert "/background-jobs" in dependency_links
+    assert "/background-jobs-celery" in dependency_links

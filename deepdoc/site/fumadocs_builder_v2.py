@@ -488,22 +488,60 @@ Welcome to the **{project_name}** developer documentation.
     index_mdx.write_text(content, encoding="utf-8")
 
 
+def _first_mdx_heading(text: str, fallback: str) -> str:
+    """Extract the first H1 title from MDX content, or fall back to the file stem."""
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return fallback
+
+
+def _split_leading_frontmatter(text: str) -> tuple[list[str], str] | None:
+    """Split a leading frontmatter block from the remaining document body."""
+    stripped = text.lstrip()
+    if not stripped.startswith("---"):
+        return None
+
+    lines = stripped.splitlines()
+    try:
+        end_idx = lines.index("---", 1)
+    except ValueError:
+        return None
+
+    return lines[1:end_idx], "\n".join(lines[end_idx + 1 :])
+
+
+def _frontmatter_has_yaml_fields(frontmatter_lines: list[str]) -> bool:
+    """Return True when the frontmatter block contains YAML-style key/value fields."""
+    return any(
+        ":" in line and not line.lstrip().startswith("#")
+        for line in frontmatter_lines
+        if line.strip()
+    )
+
+
 def _ensure_mdx_frontmatter(output_dir: Path) -> None:
-    """Add minimal frontmatter to generated MDX pages when it is missing."""
+    """Add minimal frontmatter to generated MDX pages and repair malformed blocks."""
     for mdx_path in output_dir.glob("*.mdx"):
         text = mdx_path.read_text(encoding="utf-8", errors="replace")
-        stripped = text.lstrip()
-        if stripped.startswith("---"):
-            continue
+        fallback_title = mdx_path.stem.replace("-", " ").replace("_", " ").title()
+        frontmatter_block = _split_leading_frontmatter(text)
+        body_text = text.lstrip()
 
-        lines = text.splitlines()
-        title = ""
-        for line in lines:
-            if line.startswith("# "):
-                title = line[2:].strip()
-                break
-        if not title:
-            title = mdx_path.stem.replace("-", " ").replace("_", " ").title()
+        if frontmatter_block:
+            frontmatter_lines, frontmatter_body = frontmatter_block
+            if _frontmatter_has_yaml_fields(frontmatter_lines):
+                continue
+            title = _first_mdx_heading("\n".join(frontmatter_lines) + "\n" + frontmatter_body, fallback_title)
+            repaired_intro = "\n".join(frontmatter_lines).strip()
+            if repaired_intro and frontmatter_body.lstrip():
+                body_text = repaired_intro + "\n\n" + frontmatter_body.lstrip()
+            elif repaired_intro:
+                body_text = repaired_intro
+            else:
+                body_text = frontmatter_body.lstrip()
+        else:
+            title = _first_mdx_heading(text, fallback_title)
 
         frontmatter_lines = [
             "---",
@@ -513,7 +551,7 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
         if mdx_path.name != "index.mdx":
             frontmatter_lines.append("_deepdoc_autogen_: true")
         frontmatter = "\n".join(frontmatter_lines) + "\n---\n\n"
-        mdx_path.write_text(frontmatter + text.lstrip(), encoding="utf-8")
+        mdx_path.write_text(frontmatter + body_text.lstrip(), encoding="utf-8")
 
 
 def _package_json(project_name: str) -> str:
@@ -626,6 +664,10 @@ def _next_config_mjs() -> str:
         const withMDX = createMDX({
           configPath: './source.config.mjs',
         });
+        const explicitBasePath = (process.env.DEEPDOC_SITE_BASE_PATH ?? '').trim();
+        const normalizedExplicitBasePath = explicitBasePath
+          ? `/${explicitBasePath.replace(/^\\/+|\\/+$/g, '')}`
+          : '';
         const repository = process.env.GITHUB_REPOSITORY ?? '';
         const [, repoName = ''] = repository.split('/');
         const isUserSite = repoName.endsWith('.github.io');
@@ -633,14 +675,16 @@ def _next_config_mjs() -> str:
           process.env.GITHUB_PAGES === 'true' && repoName && !isUserSite
             ? `/${repoName}`
             : '';
+        const siteBasePath = normalizedExplicitBasePath || githubPagesBasePath;
+        const useTrailingSlash = process.env.GITHUB_PAGES === 'true' || Boolean(siteBasePath);
 
         /** @type {import('next').NextConfig} */
         const config = {
           reactStrictMode: true,
           output: 'export',
-          trailingSlash: process.env.GITHUB_PAGES === 'true',
-          basePath: githubPagesBasePath || undefined,
-          assetPrefix: githubPagesBasePath || undefined,
+          trailingSlash: useTrailingSlash,
+          basePath: siteBasePath || undefined,
+          assetPrefix: siteBasePath || undefined,
           images: {
             unoptimized: true,
           },
@@ -719,6 +763,9 @@ def _app_layout_tsx(project_name: str) -> str:
           }},
         }};
 
+        const siteBasePath = (process.env.NEXT_PUBLIC_DEEPDOC_SITE_BASE_PATH ?? '').replace(/\\/+$/, '');
+        const searchApiPath = siteBasePath ? `${{siteBasePath}}/search` : '/search';
+
         export default function RootLayout({{
           children,
         }}: {{
@@ -727,14 +774,14 @@ def _app_layout_tsx(project_name: str) -> str:
           return (
             <html lang="en" suppressHydrationWarning>
               <body className="min-h-screen bg-fd-background text-fd-foreground antialiased">
-                <RootProvider
-                  search={{{{
-                    options: {{
-                      api: '/search',
-                      type: 'static',
-                    }},
-                  }}}}
-                >
+        <RootProvider
+          search={{{{
+            options: {{
+              api: searchApiPath,
+              type: 'static',
+            }},
+          }}}}
+        >
                   {{children}}
                   <ChatbotToggle />
                 </RootProvider>

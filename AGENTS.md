@@ -34,15 +34,19 @@ Guidance for coding agents working in this repository.
 - Prefer extending `_v2` modules instead of creating new parallel flows.
 - Keep `deepdoc/parser/api_detector.py` as a compatibility facade.
 - Put repo-aware route fixes in `deepdoc/parser/routes/repo_resolver.py`, not planner code.
+- Runtime/background-job, GraphQL, and data-layer extraction should flow through `deepdoc/scan_v2.py` into `RepoScan` metadata, then be consumed by `planner_v2.py` and `generator_v2.py`; avoid one-off generator-only heuristics when scan metadata can be made explicit.
+- Large database estates should stay in the overview-plus-groups model: keep `database-schema` as the overview page and use child buckets with `parent_slug="database-schema"` for deterministic subgroup coverage.
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - Preserve `source_kind` and `publication_tier` semantics consistently across planner, persistence, generation, smart update, and chatbot indexing.
 - Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`.
+- Generated Fumadocs output must stay MDX-safe and GitHub-Pages-safe: preserve explicit site base-path support in the scaffold and escape raw destructured brace args in markdown tables before writing docs.
 - If freshness/state semantics change, audit `planner_v2.py`, `generator_v2.py`, `persistence_v2.py`, and `smart_update_v2.py` together.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 
 ## Generated And Derived Files
 Treat these as generated or persisted outputs unless the task is specifically about their format:
 - `.deepdoc/` contents and legacy files like `.deepdoc_plan.json` and `.deepdoc_file_map.json`
+- `.deepdoc/scan_cache.json`, including runtime summaries, database groups, GraphQL interface summaries, and Knex artifact summaries
 - `docs/`, `site/`, `site/public/`, and `site/out/`
 - `build/`, `dist/`, `deepdoc.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
 - Test fixture apps under `tests/fixtures/` unless the scenario explicitly requires fixture changes
@@ -108,6 +112,7 @@ Single-test guidance:
 
 ## Testing Expectations
 - For route work, run route-detector coverage plus at least one `scan_repo(...)` regression.
+- For runtime/database/interface extraction work, add fixture-backed scan coverage plus planner/generator regressions so the new metadata changes page planning and page evidence, not just raw scan output.
 - For freshness or update work, run stale and smart-update tests, not just tiny helper tests.
 - For chatbot or generated-site work, run chatbot config/scaffold/relationship tests and `tests/test_fumadocs_builder.py` if scaffold output changed.
 - For non-trivial changes, prefer a focused test first, then `python3 -m pytest -q` if feasible.

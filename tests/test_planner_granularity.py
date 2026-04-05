@@ -14,6 +14,7 @@ from deepdoc.planner_v2 import (
     _apply_page_contracts,
     _auto_generate_endpoint_refs,
     _decompose_buckets,
+    _ensure_database_runtime_and_interface_buckets,
     _derive_topic_candidates,
     _inject_research_context_buckets,
     _normalize_tokens,
@@ -253,6 +254,95 @@ def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> 
         include_endpoint_pages=False,
     )
     assert not [b for b in skipped.buckets if b.generation_hints.get("is_endpoint_ref")]
+
+
+def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtime_pages() -> None:
+    scan = _make_scan(
+        file_summaries={
+            "orders/models.py": "summary",
+            "orders/schema.py": "summary",
+            "catalog/models.py": "summary",
+            "tasks.py": "summary",
+            "scheduler.py": "summary",
+        }
+    )
+    scan.artifact_scan = type(
+        "ArtifactScan",
+        (),
+        {
+            "database_scan": type(
+                "DatabaseScan",
+                (),
+                {
+                    "model_files": [
+                        type("ModelFileInfo", (), {"file_path": "orders/models.py", "model_names": ["Order", "OrderItem"], "orm_framework": "django", "is_migration": False})(),
+                        type("ModelFileInfo", (), {"file_path": "orders/schema.py", "model_names": ["Refund", "Exchange"], "orm_framework": "django", "is_migration": False})(),
+                        type("ModelFileInfo", (), {"file_path": "catalog/models.py", "model_names": ["Product"], "orm_framework": "django", "is_migration": False})(),
+                    ],
+                    "schema_files": [],
+                    "migration_files": ["orders/migrations/0001_initial.py", "orders/migrations/0002_update.py", "catalog/migrations/0001_initial.py"],
+                    "orm_framework": "django",
+                    "orm_frameworks": ["django", "knex"],
+                    "total_models": 13,
+                    "groups": [
+                        type("DatabaseGroup", (), {"key": "orders", "label": "Orders", "file_paths": ["orders/models.py", "orders/schema.py"], "model_names": ["Order", "OrderItem", "Refund", "Exchange"], "orm_frameworks": ["django"], "external_refs": ["catalog"]})(),
+                        type("DatabaseGroup", (), {"key": "catalog", "label": "Catalog", "file_paths": ["catalog/models.py"], "model_names": ["Product"], "orm_frameworks": ["django"], "external_refs": ["orders"]})(),
+                    ],
+                    "knex_artifacts": [
+                        type("KnexArtifact", (), {"file_path": "orders/query.js", "artifact_type": "query", "table_name": "orders"})(),
+                        type("KnexArtifact", (), {"file_path": "orders/query2.js", "artifact_type": "query", "table_name": "order_items"})(),
+                        type("KnexArtifact", (), {"file_path": "orders/query3.js", "artifact_type": "query", "table_name": "refunds"})(),
+                        type("KnexArtifact", (), {"file_path": "orders/query4.js", "artifact_type": "query", "table_name": "exchanges"})(),
+                    ],
+                    "graphql_interfaces": [],
+                },
+            )(),
+        },
+    )()
+    scan.runtime_scan = type(
+        "RuntimeScan",
+        (),
+        {
+            "tasks": [
+                type("RuntimeTask", (), {"name": "sync_orders", "file_path": "tasks.py", "runtime_kind": "celery"})(),
+            ],
+            "schedulers": [
+                type("RuntimeScheduler", (), {"name": "order-cron", "file_path": "scheduler.py", "scheduler_type": "node_cron"})(),
+            ],
+            "realtime_consumers": [],
+        },
+    )()
+
+    plan = DocPlan(
+        buckets=[],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+
+    expanded = _ensure_database_runtime_and_interface_buckets(
+        plan,
+        scan,
+        {
+            "database_doc_mode": "overview_plus_groups",
+            "database_group_model_cap": 12,
+            "database_group_file_cap": 8,
+            "runtime_doc_mode": "dedicated_pages",
+        },
+    )
+
+    slugs = {bucket.slug for bucket in expanded.buckets}
+    assert "database-schema" in slugs
+    assert "database-orders" in slugs
+    assert "database-catalog" in slugs
+    assert "background-jobs" in slugs
+    assert "background-jobs-celery" in slugs
+    assert "background-jobs-schedulers" in slugs
+
+    order_bucket = next(bucket for bucket in expanded.buckets if bucket.slug == "database-orders")
+    assert order_bucket.parent_slug == "database-schema"
+    assert order_bucket.generation_hints["database_group_key"] == "orders"
+    assert order_bucket.section == "Database > Database & Schema"
 
 
 def test_validate_coverage_prefers_semantic_attachment_over_module_bucket() -> None:

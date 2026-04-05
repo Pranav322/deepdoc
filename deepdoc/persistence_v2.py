@@ -372,6 +372,68 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
             }
             for b in (scan.endpoint_bundles or [])
         ],
+        "runtime_summary": {
+            "tasks": [
+                {
+                    "name": t.name,
+                    "file_path": t.file_path,
+                    "runtime_kind": t.runtime_kind,
+                    "queue": getattr(t, "queue", ""),
+                    "schedule_sources": getattr(t, "schedule_sources", []),
+                }
+                for t in getattr(getattr(scan, "runtime_scan", None), "tasks", [])[:100]
+            ],
+            "schedulers": [
+                {
+                    "name": s.name,
+                    "file_path": s.file_path,
+                    "scheduler_type": s.scheduler_type,
+                    "cron": getattr(s, "cron", ""),
+                }
+                for s in getattr(getattr(scan, "runtime_scan", None), "schedulers", [])[:100]
+            ],
+            "realtime_consumers": [
+                {
+                    "name": c.name,
+                    "file_path": c.file_path,
+                    "consumer_type": c.consumer_type,
+                    "routes": getattr(c, "routes", []),
+                }
+                for c in getattr(getattr(scan, "runtime_scan", None), "realtime_consumers", [])[:100]
+            ],
+        },
+        "database_groups": [
+            {
+                "key": g.key,
+                "label": g.label,
+                "file_paths": g.file_paths,
+                "model_names": g.model_names,
+                "orm_frameworks": g.orm_frameworks,
+                "external_refs": g.external_refs,
+            }
+            for g in getattr(getattr(scan, "artifact_scan", None), "database_scan", None).groups[:100]
+        ] if getattr(getattr(scan, "artifact_scan", None), "database_scan", None) else [],
+        "graphql_interfaces": [
+            {
+                "name": g.name,
+                "file_path": g.file_path,
+                "kind": g.kind,
+                "fields": g.fields,
+                "related_types": g.related_types,
+            }
+            for g in (getattr(scan, "graphql_interfaces", None) or [])[:100]
+        ],
+        "knex_artifacts": [
+            {
+                "file_path": k.file_path,
+                "artifact_type": k.artifact_type,
+                "table_name": k.table_name,
+                "columns": k.columns,
+                "foreign_keys": k.foreign_keys,
+                "query_patterns": k.query_patterns,
+            }
+            for k in (getattr(scan, "knex_artifacts", None) or [])[:100]
+        ],
     }
     (_state_dir(repo_root) / SCAN_CACHE_FILE).write_text(
         json.dumps(data, indent=2), encoding="utf-8"

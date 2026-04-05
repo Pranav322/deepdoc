@@ -1097,6 +1097,154 @@ Reference EVERY file path. Include actual column types and constraints from the 
 """
 
 
+DATABASE_OVERVIEW_V2 = """\
+Generate the **database overview page** for the data model layer.
+
+Page: {title}
+Description: {page_description}
+Bucket type: system (database overview)
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+ORM/Schema files and their contents:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+Write the top-level database map for the repository.
+
+# {title}
+
+## Overview
+Summarize the storage systems, ORM/schema technologies, and the overall data-model strategy.
+
+## Schema Group Index
+List every database subgroup page, what it owns, and when a developer should read it.
+
+## High-Level ER Diagram
+Include a **Mermaid erDiagram** that shows the major groups and cross-group relationships.
+
+## Cross-Group Relationships
+Explain the important foreign-key or logical relationships that cross subgroup boundaries.
+
+## Migrations & Query Patterns
+Summarize migration strategy and link to any deeper migrations/query page if present.
+
+## Configuration
+Document connection/configuration knobs that affect the data layer.
+
+## See Also
+Link to subgroup pages, architecture, runtime, and feature pages that depend on the data layer.
+
+This page is a map and index. Do not try to fully document every table here if subgroup pages exist.
+"""
+
+
+DATABASE_GROUP_V2 = """\
+Generate a **complete database subgroup page** for one bounded part of the schema.
+
+Page: {title}
+Description: {page_description}
+Bucket type: system (database group)
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+ORM/Schema files and their contents:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+Write a complete, deeply grounded page for this subgroup only.
+
+# {title}
+
+## Overview
+Explain what this schema group owns and how it fits into the larger data model.
+
+## Models / Tables
+For EACH assigned model or table, document fields, types, constraints, relationships, and indexes.
+
+## Relationship Diagram
+Include a **complete Mermaid erDiagram or classDiagram** for this subgroup.
+
+## Used By
+Explain which features, endpoints, runtime jobs, or GraphQL interfaces read/write this subgroup.
+
+## External Relationships
+List relationships to models documented on other subgroup pages and link to them.
+
+## Query Patterns & Performance
+Document notable query behavior, joins, caches, denormalisation, or hotspots visible in the evidence.
+
+## See Also
+Link back to the database overview and any related feature/runtime/interface pages.
+
+This page must be complete for its assigned subgroup; do not defer core model detail to other pages.
+"""
+
+
+RUNTIME_SYSTEM_V2 = """\
+Generate **runtime and background-jobs documentation** for asynchronous processing.
+
+Page: {title}
+Description: {page_description}
+Bucket type: system (runtime)
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+Runtime/source evidence:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+# {title}
+
+## Overview
+Explain the runtime surfaces covered here and why they matter operationally.
+
+## Runtime Surfaces
+Document the detected tasks, schedulers, queues, and realtime consumers with exact file references.
+
+## Execution Map
+Include a **Mermaid flowchart or sequence diagram** showing how requests or schedules trigger background/realtime work.
+
+## Operational Notes
+Document retries, schedules, failure modes, idempotency hints, and ownership boundaries visible in the evidence.
+
+## See Also
+Link to related feature, endpoint, database, and setup pages.
+"""
+
+
+GRAPHQL_SYSTEM_V2 = """\
+Generate **GraphQL interface documentation** grounded in schema and resolver code.
+
+Page: {title}
+Description: {page_description}
+Bucket type: interface (GraphQL)
+Required sections: {required_sections}
+Required diagrams: {required_diagrams}
+
+Source files and evidence:
+{source_context}
+""" + CROSS_LINK_SECTION + """
+
+# {title}
+
+## Overview
+Explain what GraphQL surfaces exist and how they relate to the rest of the repository.
+
+## Schema Roots
+Document query, mutation, and schema root types with exact file references.
+
+## Resolvers & Mutations
+Explain resolver or mutation behavior, linked helpers, and related data/runtime surfaces.
+
+## Data Dependencies
+Link to the database or feature pages that own the underlying models and workflows.
+
+## See Also
+Link to related API, database, runtime, and feature pages.
+"""
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Endpoint Ref (individual per-endpoint reference page)
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1415,6 +1563,11 @@ PROMPT_STYLE_TEMPLATES = {
     "endpoint_ref": ENDPOINT_REF_V2,
     "integration": INTEGRATION_BUCKET_V2,
     "database": DATABASE_SYSTEM_V2,
+    "database_overview": DATABASE_OVERVIEW_V2,
+    "database_group": DATABASE_GROUP_V2,
+    "runtime": RUNTIME_SYSTEM_V2,
+    "runtime_overview": RUNTIME_SYSTEM_V2,
+    "graphql": GRAPHQL_SYSTEM_V2,
     "training": TRAINING_BUCKET_V2,
     "architecture_component": ARCHITECTURE_COMPONENT_V2,
     "data_pipeline": DATA_PIPELINE_V2,

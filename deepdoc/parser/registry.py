@@ -45,4 +45,4 @@ def parse_file(path: Path) -> ParsedFile | None:
             content = path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             content = ""
-        return ParsedFile(path=path, language=language, raw_content=content[:5000])
+        return ParsedFile(path=path, language=language, raw_content=content[:12000])

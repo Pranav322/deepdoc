@@ -4,101 +4,74 @@
     "setup-getting-started",
     "development-notes"
   ],
-  "deepdoc/__init__.py": [
-    "architecture-overview"
-  ],
-  "deepdoc/__main__.py": [
-    "architecture-overview"
-  ],
-  "deepdoc/benchmark_v2.py": [
-    "architecture-overview"
-  ],
   "deepdoc/generator_v2.py": [
     "architecture-overview",
-    "pipeline-generation-planning"
-  ],
-  "deepdoc/manifest.py": [
-    "architecture-overview"
-  ],
-  "deepdoc/openapi.py": [
-    "architecture-overview"
-  ],
-  "deepdoc/parser/registry.py": [
-    "architecture-overview"
+    "pipeline-generation-engine"
   ],
   "deepdoc/planner_v2.py": [
     "architecture-overview",
-    "pipeline-generation-planning",
+    "pipeline-generation-engine",
     "integration-vinculum"
   ],
   "deepdoc/prompts_v2.py": [
     "architecture-overview",
-    "pipeline-generation-planning",
+    "pipeline-generation-engine",
     "integration-vinculum"
   ],
   "deepdoc/site/fumadocs_builder_v2.py": [
     "architecture-overview",
-    "frontend-docs-site-builder"
+    "site-generation-frontend",
+    "site-builder-frontend-integration"
   ],
-  "deepdoc/source_metadata.py": [
-    "architecture-overview"
+  "deepdoc/parser/__init__.py": [
+    "parsing-source-analysis"
   ],
-  "pyproject.toml": [
-    "architecture-overview",
+  "deepdoc/parser/js_parser.py": [
+    "parsing-source-analysis"
+  ],
+  "deepdoc/parser/py_parser.py": [
+    "parsing-source-analysis"
+  ],
+  "deepdoc/parser/vue_parser.py": [
+    "parsing-source-analysis"
+  ],
+  "tests/test_chatbot_providers.py": [
+    "testing-ci"
+  ],
+  "tests/test_cli_generate.py": [
+    "testing-ci"
+  ],
+  "tests/test_framework_support.py": [
+    "testing-ci"
+  ],
+  "tests/test_fumadocs_builder.py": [
+    "testing-ci"
+  ],
+  "deepdoc/chatbot/indexer.py": [
+    "integration-webhooks",
+    "runtime-services-chatbot"
+  ],
+  "deepdoc/chatbot/providers.py": [
+    "integration-webhooks",
+    "runtime-services-chatbot"
+  ],
+  "deepdoc/chatbot/settings.py": [
+    "integration-webhooks",
     "setup-getting-started",
-    "database-models-schema",
+    "integration-deepdoc-chat",
+    "integration-deepdoc-embed"
+  ],
+  "deepdoc/cli.py": [
+    "integration-webhooks",
+    "cli-commands-tooling",
     "integration-anthropic",
     "integration-deepdoc-chat",
     "integration-deepdoc-embed"
   ],
-  "deepdoc/chatbot/__init__.py": [
-    "runtime-services"
-  ],
-  "deepdoc/chatbot/indexer.py": [
-    "runtime-services",
-    "integration-webhook"
-  ],
-  "deepdoc/chatbot/providers.py": [
-    "runtime-services",
-    "integration-webhook"
-  ],
-  "deepdoc/chatbot/service.py": [
-    "runtime-services",
-    "api-family-chatbot"
-  ],
-  "deepdoc/parser/__init__.py": [
-    "parsing-analysis"
-  ],
-  "deepdoc/parser/other_parsers.py": [
-    "parsing-analysis"
-  ],
-  "deepdoc/parser/vue_parser.py": [
-    "parsing-analysis",
-    "vue-component-parsing-integration"
-  ],
-  "tests/test_chatbot_providers.py": [
-    "testing",
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_framework_support.py": [
-    "testing",
-    "framework-support-testing-strategy"
-  ],
-  "tests/test_fumadocs_builder.py": [
-    "testing",
-    "planner-builder-quality-assurance"
-  ],
-  ".github/workflows/release.yml": [
-    "setup-getting-started"
-  ],
-  ".github/workflows/tests.yml": [
-    "setup-getting-started"
-  ],
-  "deepdoc/chatbot/settings.py": [
-    "setup-getting-started",
-    "integration-deepdoc-chat",
-    "integration-deepdoc-embed",
-    "integration-webhook"
+  "deepdoc/llm/client.py": [
+    "integration-webhooks",
+    "integration-anthropic",
+    "integration-deepdoc-embed"
   ],
   "deepdoc/config.py": [
     "setup-getting-started",
@@ -106,121 +79,46 @@
     "integration-deepdoc-chat",
     "integration-deepdoc-embed"
   ],
-  "deepdoc/parser/routes/django.py": [
-    "framework-support-testing-strategy"
+  "pyproject.toml": [
+    "setup-getting-started"
   ],
-  "deepdoc/parser/routes/express.py": [
-    "framework-support-testing-strategy"
-  ],
-  "deepdoc/parser/routes/falcon.py": [
-    "framework-support-testing-strategy"
-  ],
-  "deepdoc/parser/routes/fastify.py": [
-    "framework-support-testing-strategy"
-  ],
-  "deepdoc/parser/routes/registry.py": [
-    "framework-support-testing-strategy"
-  ],
-  "deepdoc/parser/routes/repo_resolver.py": [
-    "framework-support-testing-strategy"
-  ],
-  "deepdoc/site/__init__.py": [
-    "planner-builder-quality-assurance"
-  ],
-  "scripts/refresh_generated_sites.py": [
-    "planner-builder-quality-assurance"
-  ],
-  "tests/test_chatbot_scaffold.py": [
-    "planner-builder-quality-assurance"
-  ],
-  "tests/test_planner_consolidation.py": [
-    "planner-builder-quality-assurance"
-  ],
-  "tests/test_planner_granularity.py": [
-    "planner-builder-quality-assurance"
-  ],
-  "deepdoc/pipeline_v2.py": [
-    "pipeline-generation-planning"
-  ],
-  "deepdoc/smart_update_v2.py": [
-    "pipeline-generation-planning"
-  ],
-  "deepdoc/updater_v2.py": [
-    "pipeline-generation-planning"
-  ],
-  "deepdoc/chatbot/types.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "deepdoc/llm/__init__.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_chatbot_config.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_chatbot_index.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_chatbot_persistence.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_cli_generate.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_cli_serve.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "tests/test_internal_docs_metadata.py": [
-    "cli-chatbot-provider-test-coverage"
-  ],
-  "deepdoc/_legacy_types.py": [
-    "frontend-ui",
-    "frontend-docs-site-builder"
-  ],
-  "deepdoc/chatbot/chunker.py": [
-    "frontend-ui"
-  ],
-  "deepdoc/chatbot/docs_summary.py": [
-    "frontend-ui"
+  "deepdoc/chatbot/__init__.py": [
+    "runtime-services-chatbot"
   ],
   "deepdoc/chatbot/scaffold.py": [
-    "api-family-chatbot",
+    "runtime-services-chatbot",
+    "public-api-endpoints",
     "integration-deepdoc-chat",
     "integration-deepdoc-embed"
   ],
+  "deepdoc/chatbot/service.py": [
+    "runtime-services-chatbot",
+    "public-api-endpoints"
+  ],
   "tests/fixtures/frameworks/django_app/urls.py": [
-    "api-family-chatbot"
-  ],
-  "tests/fixtures/frameworks/vue_app/src/components/UserList.vue": [
-    "vue-component-parsing-integration"
-  ],
-  "deepdoc/chatbot/persistence.py": [
-    "database-models-schema"
-  ],
-  "deepdoc/persistence_v2.py": [
-    "database-models-schema"
+    "public-api-endpoints"
   ],
   "deepdoc/scan_v2.py": [
     "database-models-schema",
     "integration-anthropic",
-    "integration-deepdoc-embed",
+    "integration-deepdoc-chat",
     "integration-vinculum"
   ],
-  "deepdoc/cli.py": [
-    "cli-commands",
-    "integration-anthropic",
-    "integration-deepdoc-chat",
-    "integration-deepdoc-embed",
-    "integration-webhook"
+  "deepdoc/_legacy_types.py": [
+    "site-generation-frontend",
+    "site-builder-frontend-integration"
   ],
-  "deepdoc/llm/client.py": [
-    "integration-anthropic",
-    "integration-deepdoc-chat",
-    "integration-webhook"
+  "deepdoc/chatbot/chunker.py": [
+    "site-generation-frontend",
+    "docs-chunking-summarization"
   ],
-  "tests/test_chatbot_query.py": [
-    "integration-deepdoc-embed"
+  "deepdoc/__main__.py": [
+    "cli-commands-tooling"
   ],
-  "tests/test_chatbot_relationship.py": [
-    "integration-deepdoc-embed"
+  "tests/test_cli_serve.py": [
+    "cli-commands-tooling"
+  ],
+  "deepdoc/chatbot/docs_summary.py": [
+    "docs-chunking-summarization"
   ]
 }

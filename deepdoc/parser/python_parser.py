@@ -45,7 +45,7 @@ def parse_python(path: Path, content: str, language: str) -> ParsedFile:
         language=language,
         symbols=symbols,
         imports=imports,
-        raw_content=content[:8000],
+        raw_content=content[:12000],
     )
 
 

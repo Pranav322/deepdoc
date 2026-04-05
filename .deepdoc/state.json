@@ -1,8 +1,6 @@
 {
-  "last_attempted_commit": "058d19f03a5b77ef75b442f6e2610d76a0a1394d",
-  "status": "success",
+  "last_attempted_commit": "c16e45efa9ebca55a87a5772b4ae0537d2b81ede",
+  "status": "partial",
   "generator_version": "v2_buckets",
-  "engine_fingerprint": "routes_repo_resolution_v1",
-  "last_synced_commit": "058d19f03a5b77ef75b442f6e2610d76a0a1394d",
-  "synced_at": "2026-04-04T07:41:49.944106+00:00"
+  "engine_fingerprint": "routes_repo_resolution_v1"
 }

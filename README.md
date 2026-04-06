@@ -271,6 +271,22 @@ deepdoc config set output_dir documentation            # Change output dir
 deepdoc config set llm.api_key_env AZURE_API_KEY       # Change API key env var
 ```
 
+### `deepdoc benchmark`
+
+Run planner benchmark cases and optionally generate a combined docs+chatbot quality scorecard.
+
+```bash
+deepdoc benchmark --catalog benchmarks/catalog.json
+deepdoc benchmark --repo /path/to/repo --gold benchmarks/gold.json
+deepdoc benchmark --catalog benchmarks/catalog.json --chatbot-eval benchmarks/chatbot_eval.json
+deepdoc benchmark --catalog benchmarks/catalog.json --chatbot-eval benchmarks/chatbot_eval.json --scorecard-out .deepdoc/quality_scorecard.json --strict-scorecard
+deepdoc benchmark --generated-root /Users/apple/autodoc/docs --scorecard-out /Users/apple/autodoc/docs/_scorecards/latest.json
+```
+
+Use `--strict-scorecard` to fail the command when completeness gates are not met.
+
+When you do not have a hand-written benchmark catalog or chatbot eval file yet, use artifact mode (`--generated-root` or `--artifact-repo`) to compute a provisional scorecard directly from persisted `.deepdoc/` outputs.
+
 ---
 
 ## LLM Provider Setup
@@ -579,7 +595,7 @@ chatbot:
     base_url: ""
     api_version: ""
     temperature: 0.1
-    max_tokens: 16000
+    max_tokens: 24000
 
   embeddings:                                 # LLM used for embedding code/docs
     provider: "azure"
@@ -604,15 +620,15 @@ chatbot:
     top_k_code: 15
     top_k_artifact: 8
     top_k_docs: 6
-    top_k_relationship: 6
+    top_k_relationship: 8
     candidate_top_k_code: 30
     candidate_top_k_artifact: 16
     candidate_top_k_docs: 12
     candidate_top_k_relationship: 12
     max_prompt_code_chunks: 12
     max_prompt_artifact_chunks: 6
-    max_prompt_doc_chunks: 4
-    max_prompt_relationship_chunks: 4
+    max_prompt_doc_chunks: 6
+    max_prompt_relationship_chunks: 6
     max_prompt_chars: 200000
     lexical_retrieval: true
     lexical_candidate_limit: 24
@@ -627,7 +643,8 @@ chatbot:
     graph_neighbor_relationship_chunks_per_file: 2
     graph_neighbor_max_docs: 4
     rerank: true
-    rerank_candidate_limit: 20
+    rerank_candidate_limit: 32
+    rerank_candidate_limit_per_kind: 8
     rerank_preview_chars: 450
     stitch_adjacent_code_chunks: true
     stitch_max_adjacent_chunks: 2
@@ -635,7 +652,8 @@ chatbot:
     live_fallback_max_files: 6
     live_fallback_max_per_file: 2
     live_fallback_context_lines: 12
-    deep_research_chunk_chars: 1600
+    deep_research_chunk_chars: 3200
+    deep_research_top_k: 10
 
   chunking:
     code_chunk_lines: 120
@@ -670,7 +688,7 @@ chatbot:
 | `chatbot.answer.base_url` | `""` | Custom endpoint (for Azure, Ollama, etc.) |
 | `chatbot.answer.api_version` | `""` | Azure API version string |
 | `chatbot.answer.temperature` | `0.1` | Sampling temperature (lower = more deterministic) |
-| `chatbot.answer.max_tokens` | `16000` | Max tokens per answer |
+| `chatbot.answer.max_tokens` | `24000` | Max tokens per answer |
 | **Embeddings LLM** | | |
 | `chatbot.embeddings.provider` | `azure` | Provider for the embedding model |
 | `chatbot.embeddings.model` | `azure/text-embedding-3-large` | Embedding model |
@@ -682,15 +700,15 @@ chatbot:
 | `chatbot.retrieval.top_k_code` | `15` | Top code chunks retrieved per query |
 | `chatbot.retrieval.top_k_artifact` | `8` | Top artifact chunks retrieved per query |
 | `chatbot.retrieval.top_k_docs` | `6` | Top generated-doc and repo-doc chunks retrieved per query |
-| `chatbot.retrieval.top_k_relationship` | `6` | Top relationship chunks retrieved per query |
+| `chatbot.retrieval.top_k_relationship` | `8` | Top relationship chunks retrieved per query |
 | `chatbot.retrieval.candidate_top_k_code` | `30` | Candidate code chunks gathered before reranking |
 | `chatbot.retrieval.candidate_top_k_artifact` | `16` | Candidate artifact chunks gathered before reranking |
 | `chatbot.retrieval.candidate_top_k_docs` | `12` | Candidate doc chunks gathered before reranking |
 | `chatbot.retrieval.candidate_top_k_relationship` | `12` | Candidate relationship chunks gathered before reranking |
 | `chatbot.retrieval.max_prompt_code_chunks` | `12` | Max code chunks included in the final prompt |
 | `chatbot.retrieval.max_prompt_artifact_chunks` | `6` | Max artifact chunks in the final prompt |
-| `chatbot.retrieval.max_prompt_doc_chunks` | `4` | Max doc chunks in the final prompt |
-| `chatbot.retrieval.max_prompt_relationship_chunks` | `4` | Max relationship chunks included in the final prompt |
+| `chatbot.retrieval.max_prompt_doc_chunks` | `6` | Max doc chunks in the final prompt |
+| `chatbot.retrieval.max_prompt_relationship_chunks` | `6` | Max relationship chunks included in the final prompt |
 | `chatbot.retrieval.max_prompt_chars` | `200000` | Total character budget for the assembled prompt |
 | `chatbot.retrieval.lexical_retrieval` | `true` | Blend exact-match retrieval with embedding retrieval |
 | `chatbot.retrieval.lexical_candidate_limit` | `24` | Max lexical candidates gathered before merge/rerank |
@@ -705,7 +723,8 @@ chatbot:
 | `chatbot.retrieval.graph_neighbor_relationship_chunks_per_file` | `2` | Relationship chunks per linked file during graph expansion |
 | `chatbot.retrieval.graph_neighbor_max_docs` | `4` | Max linked docs pulled in during graph expansion |
 | `chatbot.retrieval.rerank` | `true` | Use LLM to rerank retrieved chunks |
-| `chatbot.retrieval.rerank_candidate_limit` | `20` | Max candidates sent to the reranker |
+| `chatbot.retrieval.rerank_candidate_limit` | `32` | Max candidates sent to the reranker |
+| `chatbot.retrieval.rerank_candidate_limit_per_kind` | `8` | Per-kind candidate cap before filling the global rerank pool |
 | `chatbot.retrieval.rerank_preview_chars` | `450` | Characters of each chunk shown to the reranker |
 | `chatbot.retrieval.stitch_adjacent_code_chunks` | `true` | Expand exact-match code hits with adjacent windows from the same file |
 | `chatbot.retrieval.stitch_max_adjacent_chunks` | `2` | Max adjacent code windows stitched onto a top hit |
@@ -713,7 +732,8 @@ chatbot:
 | `chatbot.retrieval.live_fallback_max_files` | `6` | Max repo files inspected during a deep-research live fallback |
 | `chatbot.retrieval.live_fallback_max_per_file` | `2` | Max fallback snippets returned per inspected file |
 | `chatbot.retrieval.live_fallback_context_lines` | `12` | Lines per fallback snippet around each exact match |
-| `chatbot.retrieval.deep_research_chunk_chars` | `1600` | Max chars per evidence chunk passed into deep-research step answers |
+| `chatbot.retrieval.deep_research_chunk_chars` | `3200` | Max chars per evidence chunk passed into deep-research step answers |
+| `chatbot.retrieval.deep_research_top_k` | `10` | Retrieved chunks per deep-research sub-question |
 | **Chunking** | | |
 | `chatbot.chunking.code_chunk_lines` | `120` | Lines per code chunk |
 | `chatbot.chunking.code_chunk_overlap` | `20` | Overlap lines between code chunks |

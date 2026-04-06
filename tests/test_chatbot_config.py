@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.chatbot.settings import (
+    DEFAULT_CHATBOT_CONFIG,
     chatbot_allowed_origins,
     chatbot_backend_base_url,
     chatbot_backend_port,
@@ -25,6 +26,23 @@ def test_chatbot_defaults_are_present() -> None:
     assert chatbot["indexing"]["include_tests"] is False
     assert "http://localhost:3000" in chatbot["backend"]["allowed_origins"]
     assert "http://127.0.0.1:3000" in chatbot["backend"]["allowed_origins"]
+
+
+def test_chatbot_defaults_match_runtime_settings_defaults() -> None:
+    chatbot = DEFAULT_CONFIG["chatbot"]
+    runtime_defaults = DEFAULT_CHATBOT_CONFIG
+
+    assert chatbot["answer"]["max_tokens"] == runtime_defaults["answer"]["max_tokens"]
+    for key in (
+        "top_k_relationship",
+        "max_prompt_doc_chunks",
+        "max_prompt_relationship_chunks",
+        "rerank_candidate_limit",
+        "rerank_candidate_limit_per_kind",
+        "deep_research_chunk_chars",
+        "deep_research_top_k",
+    ):
+        assert chatbot["retrieval"][key] == runtime_defaults["retrieval"][key]
 
 
 def test_chatbot_config_merges_nested_values(tmp_path: Path) -> None:

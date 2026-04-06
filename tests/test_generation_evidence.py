@@ -843,6 +843,191 @@ and post-deploy verification so the generated page is long enough for validator 
     assert "/api/v1/login" not in result.unmatched_routes
 
 
+def test_page_validator_ignores_markup_noise_in_route_claim_detection(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    scan = RepoScan(
+        file_tree={"src": ["routes.py"]},
+        file_summaries={"src/routes.py": "summary"},
+        api_endpoints=[
+            {
+                "method": "GET",
+                "path": "/api/v1/health",
+                "file": "src/routes.py",
+                "publication_ready": True,
+            }
+        ],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        file_line_counts={"src/routes.py": 1},
+        parsed_files={},
+        file_contents={},
+    )
+    validator = PageValidator(repo_root, scan)
+    bucket = make_bucket(
+        "API Health",
+        "api-health",
+        ["src/routes.py"],
+        bucket_type="endpoint",
+        section="API Reference",
+        generation_hints={"include_endpoint_detail": True, "is_endpoint_ref": True},
+    )
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_file_paths={"src/routes.py"},
+        total_evidence_chars=0,
+    )
+    content = """
+# API Health
+
+Use `<Callout>` blocks for docs emphasis and `<Card>` components for layout.
+The route to call is `GET /api/v1/health`.
+""".strip()
+
+    result = validator.validate(content, bucket, evidence)
+
+    assert "/Callout>" not in result.unmatched_routes
+    assert "/Card>" not in result.unmatched_routes
+    assert "/api/v1/health" not in result.unmatched_routes
+
+
+def test_page_validator_normalizes_scheme_less_urls_in_route_claim_detection(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    scan = RepoScan(
+        file_tree={"src": ["routes.py"]},
+        file_summaries={"src/routes.py": "summary"},
+        api_endpoints=[
+            {
+                "method": "POST",
+                "path": "/api/v1/sync",
+                "file": "src/routes.py",
+                "publication_ready": True,
+            }
+        ],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        file_line_counts={"src/routes.py": 1},
+        parsed_files={},
+        file_contents={},
+    )
+    validator = PageValidator(repo_root, scan)
+    bucket = make_bucket(
+        "Sync API",
+        "sync-api",
+        ["src/routes.py"],
+        bucket_type="endpoint",
+        section="API Reference",
+        generation_hints={"include_endpoint_detail": True, "is_endpoint_family": True},
+    )
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_file_paths={"src/routes.py"},
+        total_evidence_chars=0,
+    )
+    content = """
+# Sync API
+
+Primary endpoint: `POST //api.example.com/api/v1/sync`.
+""".strip()
+
+    result = validator.validate(content, bucket, evidence)
+
+    assert "/api/v1/sync" not in result.unmatched_routes
+
+
+def test_page_validator_limits_integration_grounding_to_relevant_identity(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    scan = RepoScan(
+        file_tree={},
+        file_summaries={"integrations/vinculum.py": "summary"},
+        api_endpoints=[],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        file_line_counts={"integrations/vinculum.py": 1},
+        parsed_files={},
+        file_contents={},
+        integration_identities=[
+            SimpleNamespace(
+                name="vinculum",
+                display_name="Vinculum",
+                files=["integrations/vinculum.py"],
+            ),
+            SimpleNamespace(
+                name="freshdesk",
+                display_name="Freshdesk",
+                files=["integrations/freshdesk.py"],
+            ),
+        ],
+    )
+    validator = PageValidator(repo_root, scan)
+    bucket = make_bucket(
+        "Vinculum Integration",
+        "integration-vinculum",
+        ["integrations/vinculum.py"],
+        bucket_type="integration",
+        generation_hints={
+            "include_integration_detail": True,
+            "prompt_style": "integration",
+        },
+    )
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="**Integration: Vinculum**\n",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_file_paths={"integrations/vinculum.py"},
+        total_evidence_chars=0,
+    )
+    content = """
+# Vinculum Integration
+
+This page documents how Vinculum requests are validated, transformed, and retried.
+""".strip()
+
+    result = validator.validate(content, bucket, evidence)
+
+    assert "Freshdesk" not in result.missing_integrations
+    assert "Vinculum" not in result.missing_integrations
+
+
 def test_page_validator_flags_missing_runtime_and_config_grounding(
     tmp_path: Path,
 ) -> None:

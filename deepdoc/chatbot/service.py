@@ -282,11 +282,12 @@ class ChatbotQueryService:
             )
         )
         code_hits = self._chain_retrieve(code_hits, relationship_hits, retrieval_cfg)
-        code_hits, artifact_hits, doc_hits = self._rerank(
+        code_hits, artifact_hits, doc_hits, relationship_hits = self._rerank(
             search_question,
             code_hits,
             artifact_hits,
             doc_hits,
+            relationship_hits,
             retrieval_cfg,
         )
         code_hits = self._stitch_code_hits(search_question, code_hits, retrieval_cfg)
@@ -337,10 +338,11 @@ class ChatbotQueryService:
         """
         from .deep_research import DeepResearcher
 
+        retrieval_cfg = self.chat_cfg["retrieval"]
         researcher = DeepResearcher(
             service=self,
             llm=self._llm,
-            top_k=8,
+            top_k=max(8, retrieval_cfg.get("deep_research_top_k", 10)),
             max_rounds=max_rounds,
         )
         result = researcher.research(question, history=history or [])
@@ -912,22 +914,26 @@ class ChatbotQueryService:
         if mode == "identifier":
             budgets["code"] = max(budgets["code"], 14)
             budgets["artifact"] = max(budgets["artifact"], 6)
-            budgets["docs"] = max(2, budgets["docs"] - 1)
+            budgets["docs"] = max(4, budgets["docs"])
+            budgets["relationship"] = max(budgets["relationship"], 7)
         elif mode == "runtime":
-            budgets["relationship"] = max(budgets["relationship"], 6)
-            budgets["artifact"] = max(budgets["artifact"], 5)
-            budgets["docs"] = max(budgets["docs"], 5)
-        elif mode == "architecture":
+            budgets["code"] = max(budgets["code"], 14)
+            budgets["relationship"] = max(budgets["relationship"], 8)
+            budgets["artifact"] = max(budgets["artifact"], 6)
             budgets["docs"] = max(budgets["docs"], 6)
-            budgets["relationship"] = max(budgets["relationship"], 5)
-            budgets["code"] = max(8, budgets["code"] - 2)
+        elif mode == "architecture":
+            budgets["docs"] = max(budgets["docs"], 8)
+            budgets["relationship"] = max(budgets["relationship"], 8)
+            budgets["code"] = max(10, budgets["code"] - 1)
         elif mode == "config":
             budgets["artifact"] = max(budgets["artifact"], 8)
-            budgets["docs"] = max(budgets["docs"], 5)
-            budgets["relationship"] = max(budgets["relationship"], 5)
-        elif mode == "flow":
-            budgets["code"] = max(budgets["code"], 14)
+            budgets["docs"] = max(budgets["docs"], 6)
             budgets["relationship"] = max(budgets["relationship"], 6)
+        elif mode == "flow":
+            budgets["code"] = max(budgets["code"], 16)
+            budgets["artifact"] = max(budgets["artifact"], 6)
+            budgets["docs"] = max(budgets["docs"], 6)
+            budgets["relationship"] = max(budgets["relationship"], 8)
         return budgets
 
     def _reserve_and_fill_hits(
@@ -1454,8 +1460,14 @@ class ChatbotQueryService:
         code_hits: list[RetrievedChunk],
         artifact_hits: list[RetrievedChunk],
         doc_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk],
         retrieval_cfg: dict[str, Any],
-    ) -> tuple[list[RetrievedChunk], list[RetrievedChunk], list[RetrievedChunk]]:
+    ) -> tuple[
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+    ]:
         """LLM-based reranking of candidate chunks for better precision."""
         if not retrieval_cfg.get("rerank", False):
             profile = self._question_support_profile(question)
@@ -1463,15 +1475,27 @@ class ChatbotQueryService:
                 self._sort_hits(code_hits, profile),
                 self._sort_hits(artifact_hits, profile),
                 self._sort_hits(doc_hits, profile),
+                self._sort_hits(relationship_hits, profile),
             )
 
-        candidate_limit = retrieval_cfg.get("rerank_candidate_limit", 20)
+        candidate_limit = retrieval_cfg.get("rerank_candidate_limit", 32)
+        per_kind_limit = retrieval_cfg.get(
+            "rerank_candidate_limit_per_kind",
+            max(1, candidate_limit // 4),
+        )
         preview_chars = retrieval_cfg.get("rerank_preview_chars", 450)
-        all_hits = code_hits + artifact_hits + doc_hits
+        all_hits = code_hits + artifact_hits + doc_hits + relationship_hits
         if not all_hits:
-            return code_hits, artifact_hits, doc_hits
+            return code_hits, artifact_hits, doc_hits, relationship_hits
 
-        candidates = all_hits[:candidate_limit]
+        candidates = self._balanced_rerank_candidates(
+            candidate_limit,
+            per_kind_limit,
+            code_hits,
+            artifact_hits,
+            doc_hits,
+            relationship_hits,
+        )
 
         # Build numbered list of chunk previews for the LLM
         previews = []
@@ -1536,8 +1560,16 @@ class ChatbotQueryService:
                 for _, h in scored_hits
                 if h.record.kind in {"doc_summary", "doc_full", "repo_doc"}
             ]
+            reranked_relationship = [
+                h for _, h in scored_hits if h.record.kind == "relationship"
+            ]
 
-            return reranked_code, reranked_artifact, reranked_doc
+            return (
+                reranked_code,
+                reranked_artifact,
+                reranked_doc,
+                reranked_relationship,
+            )
 
         except Exception:
             # Fallback to original ordering if reranking fails
@@ -1546,7 +1578,48 @@ class ChatbotQueryService:
                 self._sort_hits(code_hits, profile),
                 self._sort_hits(artifact_hits, profile),
                 self._sort_hits(doc_hits, profile),
+                self._sort_hits(relationship_hits, profile),
             )
+
+    def _balanced_rerank_candidates(
+        self,
+        candidate_limit: int,
+        per_kind_limit: int,
+        code_hits: list[RetrievedChunk],
+        artifact_hits: list[RetrievedChunk],
+        doc_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk],
+    ) -> list[RetrievedChunk]:
+        groups = [
+            code_hits,
+            artifact_hits,
+            doc_hits,
+            relationship_hits,
+        ]
+        candidates: list[RetrievedChunk] = []
+        seen_ids: set[str] = set()
+
+        def append_hit(hit: RetrievedChunk) -> None:
+            if hit.record.chunk_id in seen_ids or len(candidates) >= candidate_limit:
+                return
+            candidates.append(hit)
+            seen_ids.add(hit.record.chunk_id)
+
+        for hits in groups:
+            for hit in hits[:per_kind_limit]:
+                append_hit(hit)
+
+        if len(candidates) >= candidate_limit:
+            return candidates[:candidate_limit]
+
+        max_group_len = max((len(group) for group in groups), default=0)
+        for offset in range(per_kind_limit, max_group_len):
+            for hits in groups:
+                if offset < len(hits):
+                    append_hit(hits[offset])
+                if len(candidates) >= candidate_limit:
+                    return candidates[:candidate_limit]
+        return candidates[:candidate_limit]
 
     def _sort_hits(
         self, hits: list[RetrievedChunk], profile: dict[str, Any]
@@ -1641,6 +1714,9 @@ class ChatbotQueryService:
                 "request flow",
                 "end to end",
                 "how does",
+                "walk through",
+                "step by step",
+                "trace",
             )
         ):
             query_mode = "flow"
@@ -1653,6 +1729,7 @@ class ChatbotQueryService:
                 "why",
                 "design",
                 "module",
+                "explain",
             )
         ):
             query_mode = "architecture"

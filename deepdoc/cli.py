@@ -624,12 +624,158 @@ def status():
     default=None,
     help="Gold expectation JSON for --repo mode.",
 )
-def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -> None:
+@click.option(
+    "--chatbot-eval",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional chatbot evaluation JSON used for combined quality scorecards.",
+)
+@click.option(
+    "--scorecard-out",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Optional path to write a combined docs/chatbot scorecard JSON.",
+)
+@click.option(
+    "--scorecard-label",
+    default="baseline",
+    show_default=True,
+    help="Label stored in the generated scorecard metadata.",
+)
+@click.option(
+    "--strict-scorecard",
+    is_flag=True,
+    help="Fail the command if scorecard quality gates do not pass.",
+)
+@click.option(
+    "--generated-root",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Evaluate generated repo outputs under this directory using `.deepdoc/` artifacts.",
+)
+@click.option(
+    "--artifact-repo",
+    "artifact_repos",
+    multiple=True,
+    type=click.Path(path_type=Path),
+    help="Specific generated repo output path(s) to evaluate in artifact mode.",
+)
+@click.option(
+    "--endpoint-sample-limit",
+    default=80,
+    show_default=True,
+    type=click.IntRange(1, 2000),
+    help="Maximum endpoint-derived bootstrap chatbot eval cases per repo in artifact mode.",
+)
+def benchmark(
+    catalog: Path | None,
+    repo_path: Path | None,
+    gold: Path | None,
+    chatbot_eval: Path | None,
+    scorecard_out: Path | None,
+    scorecard_label: str,
+    strict_scorecard: bool,
+    generated_root: Path | None,
+    artifact_repos: tuple[Path, ...],
+    endpoint_sample_limit: int,
+) -> None:
     """Run benchmark scoring for planner/nav quality."""
-    cfg = _load_or_exit()
     from rich.table import Table
 
-    from .benchmark_v2 import load_catalog, run_case
+    from .benchmark_v2 import (
+        build_artifact_scorecard,
+        build_quality_scorecard,
+        discover_generated_repo_roots,
+        load_catalog,
+        load_chatbot_eval_rows,
+        run_case,
+        save_quality_scorecard,
+    )
+
+    artifact_mode = generated_root is not None or bool(artifact_repos)
+    cfg = {} if artifact_mode else _load_or_exit()
+    if artifact_mode and (catalog or repo_path or gold or chatbot_eval):
+        raise click.ClickException(
+            "Artifact mode cannot be combined with --catalog/--repo/--gold/--chatbot-eval."
+        )
+
+    if artifact_mode:
+        targets = [path.expanduser().resolve() for path in artifact_repos]
+        if generated_root is not None:
+            targets.extend(
+                discover_generated_repo_roots(generated_root.expanduser().resolve())
+            )
+        dedup_targets: list[Path] = []
+        seen: set[Path] = set()
+        for path in targets:
+            if path not in seen:
+                seen.add(path)
+                dedup_targets.append(path)
+        if not dedup_targets:
+            raise click.ClickException(
+                "No generated repos found for artifact mode. Provide --generated-root or --artifact-repo."
+            )
+
+        scorecard = build_artifact_scorecard(
+            dedup_targets,
+            label=scorecard_label,
+            endpoint_sample_limit=endpoint_sample_limit,
+        )
+        out_path = scorecard_out or (
+            _find_repo_root() / ".deepdoc" / "quality_scorecard_artifact.json"
+        )
+        save_quality_scorecard(out_path, scorecard)
+
+        table = Table(
+            title="DeepDoc Artifact Scorecard", show_header=True, header_style="bold"
+        )
+        table.add_column("Repo", style="cyan")
+        table.add_column("Docs", justify="right")
+        table.add_column("Chatbot", justify="right")
+        table.add_column("Invalid", justify="right")
+        table.add_column("Failed", justify="right")
+        table.add_column("Eval cases", justify="right")
+
+        for repo_snapshot in scorecard.get("repos", []):
+            docs_payload = repo_snapshot.get("docs", {})
+            chat_payload = repo_snapshot.get("chatbot", {})
+            table.add_row(
+                repo_snapshot.get("repo", "unknown"),
+                f"{docs_payload.get('completeness_score', 0.0):.2f}",
+                f"{chat_payload.get('bootstrap_completeness_score', 0.0):.2f}",
+                str(docs_payload.get("pages_invalid", 0)),
+                str(docs_payload.get("pages_failed", 0)),
+                str(chat_payload.get("bootstrap_eval_cases", 0)),
+            )
+        console.print(table)
+
+        gates = scorecard["overall"]["gates"]
+        gate_status = "pass" if scorecard["overall"]["all_gates_pass"] else "fail"
+        failing = [name for name, passed in gates.items() if not passed]
+        console.print(
+            Panel.fit(
+                "[bold]Quality Scorecard[/bold]\n\n"
+                f"  Mode:               [cyan]{scorecard.get('mode', 'artifact_proxy')}[/cyan]\n"
+                f"  Label:              [cyan]{scorecard['label']}[/cyan]\n"
+                f"  Docs completeness:  [cyan]{scorecard['docs']['completeness_score']:.2f}[/cyan]\n"
+                f"  Chatbot completeness:[cyan]{scorecard['chatbot']['completeness_score']:.2f}[/cyan]\n"
+                f"  Overall score:      [cyan]{scorecard['overall']['completeness_score']:.2f}[/cyan]\n"
+                f"  Gates:              [cyan]{gate_status}[/cyan]\n"
+                f"  Output:             [cyan]{out_path}[/cyan]"
+                + (
+                    "\n  Failing gates:      [red]" + ", ".join(failing) + "[/red]"
+                    if failing
+                    else ""
+                ),
+                border_style="magenta",
+            )
+        )
+
+        if strict_scorecard and not scorecard["overall"]["all_gates_pass"]:
+            raise click.ClickException(
+                "Quality scorecard gates failed. Re-run after improving docs/chatbot metrics."
+            )
+        return
 
     if repo_path:
         if gold is None:
@@ -655,6 +801,8 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
     table.add_column("Score", justify="right")
     table.add_column("Notes")
 
+    planner_results = []
+
     for case in cases:
         repo = Path(case["repo_path"]).expanduser()
         if not repo.exists():
@@ -667,6 +815,7 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
             )
             continue
         result = run_case(case, cfg)
+        planner_results.append(result)
         table.add_row(
             result.name,
             result.family,
@@ -676,6 +825,56 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
         )
 
     console.print(table)
+
+    if chatbot_eval is None and scorecard_out is None and not strict_scorecard:
+        return
+
+    chatbot_rows = []
+    if chatbot_eval is not None:
+        chatbot_rows = load_chatbot_eval_rows(chatbot_eval)
+        console.print(
+            f"[dim]Loaded {len(chatbot_rows)} chatbot eval case(s) from {chatbot_eval}[/dim]"
+        )
+
+    scorecard = build_quality_scorecard(
+        planner_results=planner_results,
+        chatbot_results=chatbot_rows,
+        label=scorecard_label,
+    )
+    out_path = scorecard_out or (
+        _find_repo_root() / ".deepdoc" / "quality_scorecard.json"
+    )
+    save_quality_scorecard(out_path, scorecard)
+
+    gates = scorecard["overall"]["gates"]
+    docs_score = scorecard["docs"]["completeness_score"]
+    chatbot_score = scorecard["chatbot"]["completeness_score"]
+    overall_score = scorecard["overall"]["completeness_score"]
+    gate_status = "pass" if scorecard["overall"]["all_gates_pass"] else "fail"
+    failing = [name for name, passed in gates.items() if not passed]
+
+    console.print(
+        Panel.fit(
+            "[bold]Quality Scorecard[/bold]\n\n"
+            f"  Label:              [cyan]{scorecard['label']}[/cyan]\n"
+            f"  Docs completeness:  [cyan]{docs_score:.2f}[/cyan]\n"
+            f"  Chatbot completeness:[cyan]{chatbot_score:.2f}[/cyan]\n"
+            f"  Overall score:      [cyan]{overall_score:.2f}[/cyan]\n"
+            f"  Gates:              [cyan]{gate_status}[/cyan]\n"
+            f"  Output:             [cyan]{out_path}[/cyan]"
+            + (
+                "\n  Failing gates:      [red]" + ", ".join(failing) + "[/red]"
+                if failing
+                else ""
+            ),
+            border_style="magenta",
+        )
+    )
+
+    if strict_scorecard and not scorecard["overall"]["all_gates_pass"]:
+        raise click.ClickException(
+            "Quality scorecard gates failed. Re-run after improving docs/chatbot metrics."
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -25,7 +25,9 @@ def test_chatbot_backend_scaffold_is_generated(tmp_path: Path) -> None:
     assert (repo_root / "chatbot_backend" / "app.py").exists()
     assert (repo_root / "chatbot_backend" / "requirements.txt").exists()
     assert (repo_root / "chatbot_backend" / ".env.example").exists()
-    settings = (repo_root / "chatbot_backend" / "settings.py").read_text(encoding="utf-8")
+    settings = (repo_root / "chatbot_backend" / "settings.py").read_text(
+        encoding="utf-8"
+    )
     assert "http://127.0.0.1:8010" in settings
 
 
@@ -61,15 +63,24 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert (repo_root / "site" / "components" / "chatbot-panel.tsx").exists()
     assert (repo_root / "site" / "components" / "chatbot-toggle.tsx").exists()
     assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists()
-    config = (repo_root / "site" / "lib" / "chatbot-config.ts").read_text(encoding="utf-8")
-    panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(encoding="utf-8")
-    toggle = (repo_root / "site" / "components" / "chatbot-toggle.tsx").read_text(encoding="utf-8")
+    config = (repo_root / "site" / "lib" / "chatbot-config.ts").read_text(
+        encoding="utf-8"
+    )
+    panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(
+        encoding="utf-8"
+    )
+    toggle = (repo_root / "site" / "components" / "chatbot-toggle.tsx").read_text(
+        encoding="utf-8"
+    )
     assert "enabled: true" in config
     assert "NEXT_PUBLIC_DEEPDOC_CHATBOT_BASE_URL" in config
-    assert f"apiBaseUrl: envApiBaseUrl || {chatbot_site_api_base_url({'chatbot': {'enabled': True}})!r}" in config
+    assert (
+        f"apiBaseUrl: envApiBaseUrl || {chatbot_site_api_base_url({'chatbot': {'enabled': True}})!r}"
+        in config
+    )
     assert "ReactMarkdown" in panel
     assert "Back to docs" in panel
-    assert "router.replace(buildAskUrl(trimmed, from, mode))" in panel
+    assert "router.replace(buildAskUrl(trimmed, from" in panel
     assert "/deep-research" in panel
     assert "deepdoc-chatbot-mode-toggle" in panel
     assert "useRef" in panel

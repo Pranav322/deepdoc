@@ -728,7 +728,7 @@ def test_deep_research_uses_extended_chunk_evidence(tmp_path: Path) -> None:
     plan = make_plan([make_bucket("Payments", "payments", ["src/payments.py"])])
     save_plan(plan, repo_root)
 
-    long_text = "A" * 900 + " IMPORTANT_MARKER_AFTER_600 " + "B" * 200
+    long_text = "A" * 2200 + " IMPORTANT_MARKER_AFTER_2200 " + "B" * 200
     index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(
         index_dir,
@@ -760,7 +760,7 @@ def test_deep_research_uses_extended_chunk_evidence(tmp_path: Path) -> None:
             if "Break the given question into 2–4 focused sub-questions" in system:
                 return '["How does the payment flow work?"]'
             if "answering questions about a software codebase" in system:
-                assert "IMPORTANT_MARKER_AFTER_600" in user
+                assert "IMPORTANT_MARKER_AFTER_2200" in user
                 return "Step answer"
             if "synthesising research findings" in system:
                 return "Final answer"
@@ -774,7 +774,6 @@ def test_deep_research_uses_extended_chunk_evidence(tmp_path: Path) -> None:
                 "iterative_retrieval": False,
                 "rerank": False,
                 "graph_neighbor_expansion": False,
-                "deep_research_chunk_chars": 1600,
             },
         }
     }
@@ -906,9 +905,10 @@ def test_rerank_reorders_chunks_by_llm_score(tmp_path: Path) -> None:
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        reranked_code, _, _ = service._rerank(
+        reranked_code, _, _, _ = service._rerank(
             "Which function?",
             [RetrievedChunk(record=record, score=1.0) for record in records],
+            [],
             [],
             [],
             service.chat_cfg["retrieval"],
@@ -916,6 +916,123 @@ def test_rerank_reorders_chunks_by_llm_score(tmp_path: Path) -> None:
 
     # After reranking, c1 (score 9) should be first
     assert reranked_code[0].record.file_path == "src/f1.py"
+
+
+def test_rerank_balances_code_doc_and_relationship_candidates(tmp_path: Path) -> None:
+    """Reranking should keep non-code evidence in play even when code dominates."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py", "auth.mdx"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(index_dir, "code", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    class _BalancedRerankChatClient:
+        def __init__(self) -> None:
+            self.prompts: list[str] = []
+
+        def complete(self, system: str, user: str) -> str:
+            if "alternative search queries" in system:
+                return ""
+            if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+                self.prompts.append(user)
+                return "4\n8\n9"
+            return "Grounded answer"
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "rerank": True,
+                "query_expansion": False,
+                "rerank_candidate_limit": 3,
+                "rerank_candidate_limit_per_kind": 1,
+            },
+        }
+    }
+    chat_client = _BalancedRerankChatClient()
+
+    code_hits = [
+        RetrievedChunk(
+            record=ChunkRecord(
+                chunk_id=f"c{i}",
+                kind="code",
+                source_key=f"src/file{i}.py",
+                text=f"def code_{i}(): ...",
+                chunk_hash=f"hc{i}",
+                file_path=f"src/file{i}.py",
+                start_line=1,
+                end_line=5,
+                symbol_names=[f"code_{i}"],
+            ),
+            score=1.0 - (i * 0.01),
+        )
+        for i in range(4)
+    ]
+    doc_hits = [
+        RetrievedChunk(
+            record=ChunkRecord(
+                chunk_id="d1",
+                kind="doc_full",
+                source_key="auth.mdx",
+                text="Auth architecture explains the login flow and its dependencies.",
+                chunk_hash="hd1",
+                doc_path="auth.mdx",
+                doc_url="/auth",
+                title="Auth",
+            ),
+            score=0.75,
+        )
+    ]
+    relationship_hits = [
+        RetrievedChunk(
+            record=ChunkRecord(
+                chunk_id="r1",
+                kind="relationship",
+                source_key="src/auth.py",
+                text="# Call graph for `login`\n- `authenticate`\n- `audit_login`",
+                chunk_hash="hr1",
+                file_path="src/auth.py",
+                metadata={"chunk_subtype": "call_graph"},
+            ),
+            score=0.72,
+        )
+    ]
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        reranked_code, _, reranked_doc, reranked_relationship = service._rerank(
+            "Explain auth in detail",
+            code_hits,
+            [],
+            doc_hits,
+            relationship_hits,
+            service.chat_cfg["retrieval"],
+        )
+
+    assert reranked_code
+    assert reranked_doc[0].record.doc_path == "auth.mdx"
+    assert reranked_relationship[0].record.file_path == "src/auth.py"
+    assert chat_client.prompts
+    rerank_prompt = chat_client.prompts[-1]
+    assert "[doc_full]" in rerank_prompt
+    assert "[relationship]" in rerank_prompt
 
 
 def test_system_prompt_contains_project_name(tmp_path: Path) -> None:

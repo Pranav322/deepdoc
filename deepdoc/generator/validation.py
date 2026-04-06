@@ -104,7 +104,7 @@ class PageValidator:
         self._check_hallucinated_paths(content, result)
 
         # 4. Check references against assembled evidence when available
-        self._check_evidence_backed_refs(content, evidence, result)
+        self._check_evidence_backed_refs(content, bucket, evidence, result)
 
         # 5. Check route/path claims for API and operations-heavy pages
         self._check_route_claims(content, bucket, result)
@@ -217,6 +217,7 @@ class PageValidator:
     def _check_evidence_backed_refs(
         self,
         content: str,
+        bucket: DocBucket,
         evidence: AssembledEvidence | None,
         result: ValidationResult,
     ) -> None:
@@ -236,7 +237,18 @@ class PageValidator:
             result.warnings.append(
                 f"References files outside assembled evidence: {', '.join(violations[:4])}"
             )
-            if len(violations) >= 4:
+            hints = bucket.generation_hints or {}
+            invalid_threshold = 4
+            if hints.get("is_introduction_page") or bucket.section == "Start Here":
+                invalid_threshold = 999
+            elif bucket.bucket_type == "integration" or hints.get(
+                "include_integration_detail"
+            ):
+                invalid_threshold = 8
+            elif hints.get("is_endpoint_ref") or hints.get("is_endpoint_family"):
+                invalid_threshold = 8
+
+            if len(violations) >= invalid_threshold:
                 result.is_valid = False
 
     def _check_route_claims(
@@ -258,13 +270,27 @@ class PageValidator:
         ):
             return
 
-        candidates = {
-            self._normalize_route_path(match)
-            for match in re.findall(r"(\/[A-Za-z0-9{}_<>\-./]+)", content)
-        }
-        candidates = {
-            route for route in candidates if route and "." not in route.split("/")[-1]
-        }
+        candidate_tokens: list[str] = []
+        for inline in re.findall(r"`([^`]+)`", content):
+            candidate_tokens.extend(re.findall(r"(\/[A-Za-z0-9{}_<>\-.:/~]+)", inline))
+        candidate_tokens.extend(
+            re.findall(
+                r"\b(?:GET|POST|PUT|PATCH|DELETE|OPTIONS|HEAD)\s+(\/[A-Za-z0-9{}_<>\-.:/~]+)",
+                content,
+                flags=re.IGNORECASE,
+            )
+        )
+
+        candidates: set[str] = set()
+        for token in candidate_tokens:
+            route = self._normalize_route_path(token)
+            if not route or self._is_markup_path_noise(route):
+                continue
+            tail = route.split("/")[-1]
+            if "." in tail and "{" not in tail and "<" not in tail:
+                continue
+            candidates.add(route)
+
         unmatched = sorted(
             route for route in candidates if route not in self.known_route_paths
         )
@@ -282,12 +308,36 @@ class PageValidator:
         if not path:
             return ""
         path = re.sub(r"^https?://[^/]+", "", path)
+        if path.startswith("//"):
+            path = re.sub(r"^//[^/]+", "", path)
         path = path.split("?", 1)[0].split("#", 1)[0]
         if not path.startswith("/"):
             path = "/" + path.lstrip("/")
+        path = re.sub(r"/{2,}", "/", path)
         if path != "/" and path.endswith("/"):
             path = path[:-1]
         return path
+
+    @staticmethod
+    def _is_markup_path_noise(path: str) -> bool:
+        if not path or path == "/":
+            return True
+        first = path.split("/", 2)[1]
+        if not first:
+            return True
+        if first.endswith(">") and (
+            first.lower().startswith("callout")
+            or first.lower().startswith("card")
+            or first.lower().startswith("accordion")
+            or first.lower().startswith("steps")
+            or first.lower().startswith("tabs")
+        ):
+            return True
+        if path.count("/") == 1 and first and first[0].isupper() and "{" not in first:
+            return True
+        if first.startswith("<") and ">" not in first and ":" not in first:
+            return True
+        return False
 
     def _check_page_contract(
         self, content: str, bucket: DocBucket, result: ValidationResult
@@ -536,13 +586,53 @@ class PageValidator:
 
         hints = bucket.generation_hints or {}
         owned_files = set(bucket.owned_files)
+        bucket_text = " ".join([bucket.title, bucket.slug, bucket.description]).lower()
+
         expected: list[str] = []
+        all_identities: list[str] = []
         for identity in getattr(self.scan, "integration_identities", []) or []:
             display_name = getattr(identity, "display_name", "")
             name = getattr(identity, "name", "")
             files = set(getattr(identity, "files", []) or [])
-            if hints.get("include_integration_detail") or files & owned_files:
-                expected.append(display_name or name)
+            label = display_name or name
+            if not label:
+                continue
+            all_identities.append(label)
+
+            tokens = self._integration_name_tokens(label)
+            bucket_mentions_identity = bool(tokens) and any(
+                token in bucket_text for token in tokens
+            )
+
+            if files & owned_files:
+                expected.append(label)
+                continue
+
+            if not hints.get("include_integration_detail"):
+                continue
+
+            if bucket.bucket_type == "integration":
+                if bucket_mentions_identity:
+                    expected.append(label)
+            elif not hints.get("is_introduction_page") and bucket_mentions_identity:
+                expected.append(label)
+
+        if (
+            not expected
+            and bucket.bucket_type == "integration"
+            and hints.get("include_integration_detail")
+        ):
+            if len(all_identities) == 1:
+                expected = all_identities[:]
+            else:
+                expected = [
+                    label
+                    for label in all_identities
+                    if any(
+                        token in bucket_text
+                        for token in self._integration_name_tokens(label)
+                    )
+                ]
 
         expected = [item for item in dict.fromkeys(expected) if item]
         if not expected:
@@ -557,7 +647,20 @@ class PageValidator:
         result.warnings.append(
             f"Integration context missing named references: {', '.join(result.missing_integrations[:4])}"
         )
-        if bucket.bucket_type == "integration" or hints.get(
-            "include_integration_detail"
+        if bucket.bucket_type == "integration" and len(missing) == len(expected):
+            result.is_valid = False
+        elif (
+            hints.get("include_integration_detail")
+            and not hints.get("is_introduction_page")
+            and len(expected) <= 2
+            and len(missing) == len(expected)
         ):
             result.is_valid = False
+
+    @staticmethod
+    def _integration_name_tokens(value: str) -> list[str]:
+        return [
+            token
+            for token in re.findall(r"[a-z0-9]+", value.lower())
+            if len(token) >= 3
+        ]

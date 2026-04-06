@@ -61,7 +61,7 @@ class DeepResearcher:
     ask arbitrary questions that cut across multiple files and services.
     """
 
-    def __init__(self, service: Any, llm: Any, top_k: int = 8, max_rounds: int = 3):
+    def __init__(self, service: Any, llm: Any, top_k: int = 10, max_rounds: int = 3):
         """
         Args:
             service: ChatbotQueryService instance (has .query(question, top_k) method).
@@ -223,12 +223,12 @@ class DeepResearcher:
             return "No relevant evidence found for this sub-question."
 
         evidence_parts = []
-        chunk_chars = 1600
+        chunk_chars = 3200
         chat_cfg = getattr(self.service, "chat_cfg", {})
         if isinstance(chat_cfg, dict):
             retrieval_cfg = chat_cfg.get("retrieval", {})
             if isinstance(retrieval_cfg, dict):
-                chunk_chars = int(retrieval_cfg.get("deep_research_chunk_chars", 1600))
+                chunk_chars = int(retrieval_cfg.get("deep_research_chunk_chars", 3200))
         for i, c in enumerate(chunks[: self.top_k], 1):
             record = getattr(c, "record", c)
             source = (
@@ -244,12 +244,14 @@ class DeepResearcher:
             "You are a technical assistant answering questions about a software codebase. "
             "Answer ONLY based on the provided evidence. Be specific and cite file paths "
             "using backticks. If the evidence does not contain enough information, say so. "
-            "Do not invent function names, file paths, or behaviour not in the evidence."
+            "Do not invent function names, file paths, or behaviour not in the evidence. "
+            "Prefer a detailed, implementation-level walkthrough over a short summary."
         )
         user_msg = (
             f"Recent conversation:\n{_history_context(history)}\n\nQuestion: {question}\n\n"
             f"Evidence:\n{evidence_text}\n\n"
-            "Answer concisely (3–6 sentences). Cite source files."
+            "Answer in 6-12 sentences. Walk through concrete code paths, supporting "
+            "configuration, and connected files when present. Cite source files."
         )
         try:
             return self.llm.complete(system, user_msg)
@@ -282,14 +284,17 @@ class DeepResearcher:
             "You are a technical assistant synthesising research findings about a codebase. "
             "Write a comprehensive answer to the original question by combining the sub-answers. "
             "Be specific, cite file paths in backticks, and highlight any gaps where evidence "
-            "was insufficient. Do not invent information."
+            "was insufficient. Do not invent information. Prefer complete, end-to-end "
+            "explanations over brief summaries."
         )
         user_msg = (
             f"Recent conversation:\n{_history_context(history)}\n\n"
             f"Original question: {original_question}\n\n"
             f"Research findings:\n{sub_answers}"
             f"{sources_note}\n\n"
-            "Write a comprehensive answer (1–3 paragraphs) that directly answers the original question."
+            "Write a comprehensive answer in 2-5 paragraphs that directly answers the "
+            "original question, covering the main implementation path, important related "
+            "files, configuration, and notable gaps in evidence."
         )
         try:
             return self.llm.complete(system, user_msg)

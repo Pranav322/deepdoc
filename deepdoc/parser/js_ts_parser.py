@@ -7,15 +7,15 @@ export tracking, and decorator extraction.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+import re
 
 from .base import ParsedFile, Symbol
 
 try:
+    from tree_sitter import Language, Parser
     import tree_sitter_javascript as tsjs
     import tree_sitter_typescript as tsts
-    from tree_sitter import Language, Parser
 
     JS_LANGUAGE = Language(tsjs.language())
     TS_LANGUAGE = Language(tsts.language_typescript())
@@ -60,8 +60,14 @@ def parse_js_ts(path: Path, content: str, language: str) -> ParsedFile:
 # Tree-sitter walk
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str],
-          exported: bool = False) -> None:
+
+def _walk(
+    node,
+    lines: list[str],
+    symbols: list[Symbol],
+    imports: list[str],
+    exported: bool = False,
+) -> None:
     t = node.type
 
     # Imports
@@ -96,8 +102,11 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str],
                         msym = _method_symbol(member, lines)
                         if msym:
                             symbols.append(msym)
-                    elif member.type in ("public_field_definition", "property_definition",
-                                         "field_definition"):
+                    elif member.type in (
+                        "public_field_definition",
+                        "property_definition",
+                        "field_definition",
+                    ):
                         # Class fields/properties
                         pass
         return
@@ -108,17 +117,21 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str],
         if name_node:
             doc = _get_jsdoc(node, lines)
             fields = _extract_interface_fields(node, lines)
-            symbols.append(Symbol(
-                name=_node_text(name_node, lines),
-                kind="interface",
-                signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-                docstring=doc,
-                body_preview=_body_preview(node, lines),
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                is_exported=exported,
-                fields=fields,
-            ))
+            symbols.append(
+                Symbol(
+                    name=_node_text(name_node, lines),
+                    kind="interface",
+                    signature=lines[node.start_point[0]].strip()
+                    if node.start_point[0] < len(lines)
+                    else "",
+                    docstring=doc,
+                    body_preview=_body_preview(node, lines),
+                    start_line=node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    is_exported=exported,
+                    fields=fields,
+                )
+            )
         return
 
     # TypeScript type aliases
@@ -126,16 +139,20 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str],
         name_node = node.child_by_field_name("name")
         if name_node:
             doc = _get_jsdoc(node, lines)
-            symbols.append(Symbol(
-                name=_node_text(name_node, lines),
-                kind="type",
-                signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-                docstring=doc,
-                body_preview=_body_preview(node, lines),
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                is_exported=exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=_node_text(name_node, lines),
+                    kind="type",
+                    signature=lines[node.start_point[0]].strip()
+                    if node.start_point[0] < len(lines)
+                    else "",
+                    docstring=doc,
+                    body_preview=_body_preview(node, lines),
+                    start_line=node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    is_exported=exported,
+                )
+            )
         return
 
     # TypeScript enums
@@ -144,17 +161,21 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str],
         if name_node:
             doc = _get_jsdoc(node, lines)
             members = _extract_enum_members(node, lines)
-            symbols.append(Symbol(
-                name=_node_text(name_node, lines),
-                kind="enum",
-                signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-                docstring=doc,
-                body_preview=_body_preview(node, lines, max_lines=10),
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                is_exported=exported,
-                fields=members,
-            ))
+            symbols.append(
+                Symbol(
+                    name=_node_text(name_node, lines),
+                    kind="enum",
+                    signature=lines[node.start_point[0]].strip()
+                    if node.start_point[0] < len(lines)
+                    else "",
+                    docstring=doc,
+                    body_preview=_body_preview(node, lines, max_lines=10),
+                    start_line=node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    is_exported=exported,
+                    fields=members,
+                )
+            )
         return
 
     # Export statements — set exported flag and recurse
@@ -176,6 +197,7 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str],
 # Symbol extractors
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _fn_symbol(node, lines, kind="function", exported=False) -> Symbol | None:
     name_node = node.child_by_field_name("name")
     if not name_node:
@@ -185,7 +207,9 @@ def _fn_symbol(node, lines, kind="function", exported=False) -> Symbol | None:
     return Symbol(
         name=_node_text(name_node, lines),
         kind=kind,
-        signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
+        signature=lines[node.start_point[0]].strip()
+        if node.start_point[0] < len(lines)
+        else "",
         docstring=doc,
         body_preview=_body_preview(node, lines),
         start_line=node.start_point[0] + 1,
@@ -203,50 +227,77 @@ def _handle_declarator(node, parent_node, lines, symbols, exported=False):
 
     name = _node_text(name_node, lines)
 
-    if value_node and value_node.type in ("arrow_function", "function", "function_expression"):
+    if value_node and value_node.type in (
+        "arrow_function",
+        "function",
+        "function_expression",
+    ):
         doc = _get_jsdoc(parent_node, lines)
-        symbols.append(Symbol(
-            name=name,
-            kind="function",
-            signature=lines[parent_node.start_point[0]].strip() if parent_node.start_point[0] < len(lines) else "",
-            docstring=doc,
-            body_preview=_body_preview(value_node, lines),
-            start_line=parent_node.start_point[0] + 1,
-            end_line=node.end_point[0] + 1,
-            is_exported=exported,
-        ))
+        symbols.append(
+            Symbol(
+                name=name,
+                kind="function",
+                signature=lines[parent_node.start_point[0]].strip()
+                if parent_node.start_point[0] < len(lines)
+                else "",
+                docstring=doc,
+                body_preview=_body_preview(value_node, lines),
+                start_line=parent_node.start_point[0] + 1,
+                end_line=node.end_point[0] + 1,
+                is_exported=exported,
+            )
+        )
     elif value_node and value_node.type in ("call_expression",):
         # e.g. const router = express.Router() — detect as constant
         doc = _get_jsdoc(parent_node, lines)
-        sig = lines[parent_node.start_point[0]].strip() if parent_node.start_point[0] < len(lines) else ""
+        sig = (
+            lines[parent_node.start_point[0]].strip()
+            if parent_node.start_point[0] < len(lines)
+            else ""
+        )
         # Only record if it looks meaningful (not just a temp variable)
         if re.match(r"(?:export\s+)?const\s+", sig):
-            symbols.append(Symbol(
-                name=name,
-                kind="constant",
-                signature=sig,
-                docstring=doc,
-                start_line=parent_node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                is_exported=exported,
-            ))
-    elif value_node and value_node.type in ("string", "number", "true", "false",
-                                             "template_string", "object", "array",
-                                             "new_expression"):
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind="constant",
+                    signature=sig,
+                    docstring=doc,
+                    start_line=parent_node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    is_exported=exported,
+                )
+            )
+    elif value_node and value_node.type in (
+        "string",
+        "number",
+        "true",
+        "false",
+        "template_string",
+        "object",
+        "array",
+        "new_expression",
+    ):
         # const FOO = "bar" or const config = { ... }
-        sig = lines[parent_node.start_point[0]].strip() if parent_node.start_point[0] < len(lines) else ""
+        sig = (
+            lines[parent_node.start_point[0]].strip()
+            if parent_node.start_point[0] < len(lines)
+            else ""
+        )
         if re.match(r"(?:export\s+)?const\s+[A-Z_]", sig) or name.isupper():
             doc = _get_jsdoc(parent_node, lines)
-            symbols.append(Symbol(
-                name=name,
-                kind="constant",
-                signature=sig,
-                docstring=doc,
-                body_preview=_body_preview(parent_node, lines, max_lines=3),
-                start_line=parent_node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                is_exported=exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind="constant",
+                    signature=sig,
+                    docstring=doc,
+                    body_preview=_body_preview(parent_node, lines, max_lines=3),
+                    start_line=parent_node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    is_exported=exported,
+                )
+            )
 
 
 def _class_symbol(node, lines, exported=False) -> Symbol | None:
@@ -258,7 +309,9 @@ def _class_symbol(node, lines, exported=False) -> Symbol | None:
     return Symbol(
         name=_node_text(name_node, lines),
         kind="class",
-        signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
+        signature=lines[node.start_point[0]].strip()
+        if node.start_point[0] < len(lines)
+        else "",
         docstring=doc,
         body_preview=_body_preview(node, lines),
         start_line=node.start_point[0] + 1,
@@ -285,7 +338,9 @@ def _method_symbol(node, lines) -> Symbol | None:
     return Symbol(
         name=_node_text(name_node, lines),
         kind="method",
-        signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
+        signature=lines[node.start_point[0]].strip()
+        if node.start_point[0] < len(lines)
+        else "",
         docstring=doc,
         body_preview=_body_preview(node, lines),
         start_line=node.start_point[0] + 1,
@@ -298,6 +353,7 @@ def _method_symbol(node, lines) -> Symbol | None:
 # ─────────────────────────────────────────────────────────────────────────────
 # JSDoc / TSDoc extraction
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _get_jsdoc(node, lines: list[str]) -> str:
     """Extract JSDoc/TSDoc comment immediately preceding a node.
@@ -371,6 +427,7 @@ def _clean_jsdoc(raw: str) -> str:
 # Decorator extraction (NestJS, Angular, etc.)
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _get_decorators(node, lines: list[str]) -> list[str]:
     """Extract @Decorator annotations from preceding siblings or lines."""
     decorators = []
@@ -403,6 +460,7 @@ def _get_decorators(node, lines: list[str]) -> list[str]:
 # Enum member extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _extract_enum_members(node, lines: list[str]) -> list[str]:
     """Extract enum member names from a TS enum declaration."""
     members = []
@@ -422,6 +480,7 @@ def _extract_enum_members(node, lines: list[str]) -> list[str]:
 # Interface field extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _extract_interface_fields(node, lines: list[str]) -> list[str]:
     """Extract field names from a TS interface body."""
     fields = []
@@ -432,7 +491,11 @@ def _extract_interface_fields(node, lines: list[str]) -> list[str]:
                     name_node = member.child_by_field_name("name")
                     if name_node:
                         # Include the full signature line for context
-                        sig = lines[member.start_point[0]].strip() if member.start_point[0] < len(lines) else ""
+                        sig = (
+                            lines[member.start_point[0]].strip()
+                            if member.start_point[0] < len(lines)
+                            else ""
+                        )
                         fields.append(sig.rstrip(";,").strip())
     return fields[:30]
 
@@ -441,9 +504,14 @@ def _extract_interface_fields(node, lines: list[str]) -> list[str]:
 # React component & hook detection
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _tag_react_symbols(symbols: list[Symbol], content: str) -> None:
     """Post-process symbols to detect React components and hooks."""
-    has_react = "react" in content.lower() or "from 'react'" in content or 'from "react"' in content
+    has_react = (
+        "react" in content.lower()
+        or "from 'react'" in content
+        or 'from "react"' in content
+    )
 
     for sym in symbols:
         if sym.kind != "function":
@@ -460,15 +528,29 @@ def _tag_react_symbols(symbols: list[Symbol], content: str) -> None:
         if has_react and name[0].isupper() and not name.isupper():
             # Check body preview or signature for JSX indicators
             body = (sym.body_preview or "") + (sym.signature or "")
-            if any(indicator in body for indicator in
-                   ("<", "jsx", "tsx", "React.FC", "React.Component",
-                    "return (", "useState", "useEffect", "props")):
+            if any(
+                indicator in body
+                for indicator in (
+                    "<",
+                    "jsx",
+                    "tsx",
+                    "React.FC",
+                    "React.Component",
+                    "return (",
+                    "useState",
+                    "useEffect",
+                    "props",
+                )
+            ):
                 sym.kind = "component"
                 # Try to extract props from signature
                 props = _extract_react_props(sym.signature, content)
                 if props:
                     sym.props = props
-            elif any(indicator in content for indicator in ("React.FC", "JSX.Element", "<div", "<>")):
+            elif any(
+                indicator in content
+                for indicator in ("React.FC", "JSX.Element", "<div", "<>")
+            ):
                 # If the file is clearly React, PascalCase = component
                 sym.kind = "component"
 
@@ -491,6 +573,7 @@ def _extract_react_props(signature: str, content: str) -> list[str]:
 # Body preview
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _body_preview(node, lines: list[str], max_lines: int = 5) -> str:
     """Extract the first few lines of a node's body."""
     start = node.start_point[0]
@@ -503,6 +586,7 @@ def _body_preview(node, lines: list[str], max_lines: int = 5) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _node_text(node, lines: list[str]) -> str:
     start_row, start_col = node.start_point
@@ -521,6 +605,7 @@ def _node_text(node, lines: list[str]) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Regex fallback
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _regex_fallback(content: str, language: str):
     """Fallback parser when tree-sitter is not available."""
@@ -556,89 +641,119 @@ def _regex_fallback(content: str, language: str):
         # Function declaration
         m = re.match(r"(?:async\s+)?function\s+(\w+)\s*\(", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="function", signature=stripped,
-                docstring=pending_jsdoc,
-                body_preview="\n".join(lines[i:i + 5]),
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="function",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    body_preview="\n".join(lines[i : i + 5]),
+                    start_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 
         # Class declaration
         m = re.match(r"class\s+(\w+)", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="class", signature=stripped,
-                docstring=pending_jsdoc,
-                body_preview="\n".join(lines[i:i + 5]),
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="class",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    body_preview="\n".join(lines[i : i + 5]),
+                    start_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 
         # Arrow function / const assignment
         m = re.match(r"(?:const|let|var)\s+(\w+)\s*=\s*(?:async\s*)?\(", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="function", signature=stripped,
-                docstring=pending_jsdoc,
-                body_preview="\n".join(lines[i:i + 5]),
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="function",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    body_preview="\n".join(lines[i : i + 5]),
+                    start_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 
         # Enum
         m = re.match(r"(?:const\s+)?enum\s+(\w+)", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="enum", signature=stripped,
-                docstring=pending_jsdoc,
-                body_preview="\n".join(lines[i:i + 8]),
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="enum",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    body_preview="\n".join(lines[i : i + 8]),
+                    start_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 
         # Interface
         m = re.match(r"interface\s+(\w+)", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="interface", signature=stripped,
-                docstring=pending_jsdoc,
-                body_preview="\n".join(lines[i:i + 8]),
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="interface",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    body_preview="\n".join(lines[i : i + 8]),
+                    start_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 
         # Type alias
         m = re.match(r"type\s+(\w+)", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="type", signature=stripped,
-                docstring=pending_jsdoc,
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="type",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    start_line=i + 1,
+                    end_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 
         # UPPER_CASE constants
         m = re.match(r"(?:const|let|var)\s+([A-Z][A-Z_0-9]+)\s*=", clean)
         if m:
-            symbols.append(Symbol(
-                name=m.group(1), kind="constant", signature=stripped,
-                docstring=pending_jsdoc,
-                start_line=i + 1,
-                is_exported=is_exported,
-            ))
+            symbols.append(
+                Symbol(
+                    name=m.group(1),
+                    kind="constant",
+                    signature=stripped,
+                    docstring=pending_jsdoc,
+                    start_line=i + 1,
+                    end_line=i + 1,
+                    is_exported=is_exported,
+                )
+            )
             pending_jsdoc = ""
             continue
 

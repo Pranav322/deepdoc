@@ -15,16 +15,16 @@ the new .deepdoc/ directory.
 
 from __future__ import annotations
 
-import json
-import hashlib
-import os
+import contextlib
 from datetime import datetime, timezone
+import hashlib
+import json
 from pathlib import Path
 from typing import Any
 
-from .planner_v2 import DocBucket, DocPlan, tracked_bucket_files
-from ._legacy_types import DocPage, DocPlan as LegacyDocPlan
-
+from ._legacy_types import DocPage
+from ._legacy_types import DocPlan as LegacyDocPlan
+from .v2_models import DocBucket, DocPlan, tracked_bucket_files
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File locations
@@ -36,7 +36,8 @@ SCAN_CACHE_FILE = "scan_cache.json"
 LEDGER_FILE = "ledger.json"
 FILE_MAP_FILE = "file_map.json"
 STATE_FILE = "state.json"
-ENGINE_FINGERPRINT = "routes_repo_resolution_v1"
+SYNC_RECEIPT_FILE = "sync_receipt.json"
+ENGINE_FINGERPRINT = "routes_repo_resolution_v2_trimmed_scope"
 
 # Legacy top-level files (kept for backwards-compat)
 LEGACY_PLAN_FILE = ".deepdoc_plan.json"
@@ -53,6 +54,7 @@ def _state_dir(repo_root: Path) -> Path:
 # ─────────────────────────────────────────────────────────────────────────────
 # Sync state persistence (commit baseline tracking)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def save_sync_state(
     repo_root: Path,
@@ -79,10 +81,8 @@ def save_sync_state(
     # Load existing state to preserve fields we're not updating
     existing: dict[str, Any] = {}
     if path.exists():
-        try:
+        with contextlib.suppress(Exception):
             existing = json.loads(path.read_text(encoding="utf-8"))
-        except Exception:
-            pass
 
     data = dict(existing)
     data["last_attempted_commit"] = commit_sha
@@ -108,9 +108,27 @@ def load_sync_state(repo_root: Path) -> dict[str, Any] | None:
         return None
 
 
+def save_sync_receipt(repo_root: Path, receipt: dict[str, Any]) -> None:
+    """Write a top-level receipt for the latest generate/update sync run."""
+    path = _state_dir(repo_root) / SYNC_RECEIPT_FILE
+    path.write_text(json.dumps(receipt, indent=2), encoding="utf-8")
+
+
+def load_sync_receipt(repo_root: Path) -> dict[str, Any] | None:
+    """Read .deepdoc/sync_receipt.json. Returns None if not present or corrupt."""
+    path = _state_dir(repo_root) / SYNC_RECEIPT_FILE
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Plan persistence
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def save_plan(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
     """Serialise the doc plan to .deepdoc/plan.json.
@@ -167,7 +185,11 @@ def load_plan(repo_root: Path) -> DocPlan | LegacyDocPlan | None:
     state_file = _state_dir(repo_root) / PLAN_FILE
     legacy_file = repo_root / LEGACY_PLAN_FILE
 
-    plan_path = state_file if state_file.exists() else (legacy_file if legacy_file.exists() else None)
+    plan_path = (
+        state_file
+        if state_file.exists()
+        else (legacy_file if legacy_file.exists() else None)
+    )
     if not plan_path:
         return None
 
@@ -246,19 +268,27 @@ _LEGACY_TYPE_HINTS: dict[str, dict] = {
     "system": {"prompt_style": "system", "icon": "server"},
     "feature": {"prompt_style": "feature", "icon": "bolt"},
     "endpoint": {
-        "is_endpoint_family": True, "include_endpoint_detail": True,
-        "include_openapi": True, "prompt_style": "endpoint", "icon": "globe-alt",
+        "is_endpoint_family": True,
+        "include_endpoint_detail": True,
+        "include_openapi": True,
+        "prompt_style": "endpoint",
+        "icon": "globe-alt",
     },
     "endpoint_ref": {
-        "is_endpoint_ref": True, "include_endpoint_detail": True,
-        "include_openapi": True, "prompt_style": "endpoint_ref", "icon": "globe-alt",
+        "is_endpoint_ref": True,
+        "include_endpoint_detail": True,
+        "include_openapi": True,
+        "prompt_style": "endpoint_ref",
+        "icon": "globe-alt",
     },
     "integration": {
-        "include_integration_detail": True, "prompt_style": "integration",
+        "include_integration_detail": True,
+        "prompt_style": "integration",
         "icon": "puzzle-piece",
     },
     "database": {
-        "include_database_context": True, "prompt_style": "database",
+        "include_database_context": True,
+        "prompt_style": "database",
         "icon": "database",
     },
 }
@@ -295,6 +325,7 @@ def _dict_to_bucket(d: dict) -> DocBucket:
 # File → page map persistence
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def save_file_map(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
     """Save file → [slug, ...] mapping for the updater."""
     mapping: dict[str, list[str]] = {}
@@ -316,7 +347,11 @@ def load_file_map(repo_root: Path) -> dict[str, list[str]]:
     """Load the file → [slug] map. Returns empty dict if missing."""
     state_file = _state_dir(repo_root) / FILE_MAP_FILE
     legacy_file = repo_root / LEGACY_FILE_MAP_FILE
-    path = state_file if state_file.exists() else (legacy_file if legacy_file.exists() else None)
+    path = (
+        state_file
+        if state_file.exists()
+        else (legacy_file if legacy_file.exists() else None)
+    )
     if not path:
         return {}
     try:
@@ -329,12 +364,33 @@ def load_file_map(repo_root: Path) -> dict[str, list[str]]:
 # Scan cache persistence
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def save_scan_cache(scan: Any, repo_root: Path) -> None:
     """Save a lightweight scan snapshot to .deepdoc/scan_cache.json.
 
     We deliberately omit: parsed_files (AST objects), file_contents (raw strings),
     and giant_file_clusters (large nested objects). Those are rebuilt cheaply on demand.
     """
+
+    def _config_impact_to_dict(item: Any) -> dict[str, Any]:
+        if isinstance(item, dict):
+            return {
+                "key": item.get("key", ""),
+                "kind": item.get("kind", ""),
+                "file_path": item.get("file_path", ""),
+                "default_value": item.get("default_value", ""),
+                "related_files": list(item.get("related_files", []))[:20],
+                "related_endpoints": list(item.get("related_endpoints", []))[:20],
+            }
+        return {
+            "key": getattr(item, "key", ""),
+            "kind": getattr(item, "kind", ""),
+            "file_path": getattr(item, "file_path", ""),
+            "default_value": getattr(item, "default_value", ""),
+            "related_files": list(getattr(item, "related_files", []))[:20],
+            "related_endpoints": list(getattr(item, "related_endpoints", []))[:20],
+        }
+
     data = {
         "version": "v2",
         "generated_at": _now_iso(),
@@ -380,6 +436,9 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
                     "runtime_kind": t.runtime_kind,
                     "queue": getattr(t, "queue", ""),
                     "schedule_sources": getattr(t, "schedule_sources", []),
+                    "triggers": getattr(t, "triggers", []),
+                    "producer_files": getattr(t, "producer_files", []),
+                    "linked_endpoints": getattr(t, "linked_endpoints", []),
                 }
                 for t in getattr(getattr(scan, "runtime_scan", None), "tasks", [])[:100]
             ],
@@ -389,8 +448,12 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
                     "file_path": s.file_path,
                     "scheduler_type": s.scheduler_type,
                     "cron": getattr(s, "cron", ""),
+                    "invoked_targets": getattr(s, "invoked_targets", []),
+                    "linked_endpoints": getattr(s, "linked_endpoints", []),
                 }
-                for s in getattr(getattr(scan, "runtime_scan", None), "schedulers", [])[:100]
+                for s in getattr(getattr(scan, "runtime_scan", None), "schedulers", [])[
+                    :100
+                ]
             ],
             "realtime_consumers": [
                 {
@@ -399,7 +462,9 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
                     "consumer_type": c.consumer_type,
                     "routes": getattr(c, "routes", []),
                 }
-                for c in getattr(getattr(scan, "runtime_scan", None), "realtime_consumers", [])[:100]
+                for c in getattr(
+                    getattr(scan, "runtime_scan", None), "realtime_consumers", []
+                )[:100]
             ],
         },
         "database_groups": [
@@ -411,8 +476,16 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
                 "orm_frameworks": g.orm_frameworks,
                 "external_refs": g.external_refs,
             }
-            for g in getattr(getattr(scan, "artifact_scan", None), "database_scan", None).groups[:100]
-        ] if getattr(getattr(scan, "artifact_scan", None), "database_scan", None) else [],
+            for g in getattr(
+                getattr(scan, "artifact_scan", None), "database_scan", None
+            ).groups[:100]
+        ]
+        if getattr(getattr(scan, "artifact_scan", None), "database_scan", None)
+        else [],
+        "config_impacts": [
+            _config_impact_to_dict(item)
+            for item in (getattr(scan, "config_impacts", []) or [])[:200]
+        ],
         "graphql_interfaces": [
             {
                 "name": g.name,
@@ -458,7 +531,7 @@ def scan_cache_age_seconds(repo_root: Path) -> float | None:
         return None
     try:
         mtime = path.stat().st_mtime
-        return (datetime.now(tz=timezone.utc).timestamp() - mtime)
+        return datetime.now(tz=timezone.utc).timestamp() - mtime
     except Exception:
         return None
 
@@ -467,7 +540,10 @@ def scan_cache_age_seconds(repo_root: Path) -> float | None:
 # Generation ledger
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path) -> None:
+
+def save_generation_ledger(
+    results: list[Any], repo_root: Path, output_dir: Path
+) -> None:
     """Save a per-page generation record to .deepdoc/ledger.json.
 
     Each record contains:
@@ -511,7 +587,11 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
             "publication_tier": getattr(bucket, "publication_tier", "core"),
             "source_kind_summary": getattr(bucket, "source_kind_summary", {}),
             "generation_hints": getattr(bucket, "generation_hints", {}),
-            "doc_path": "index.mdx" if (getattr(bucket, "generation_hints", {}) or {}).get("is_introduction_page") else f"{bucket.slug}.mdx",
+            "doc_path": "index.mdx"
+            if (getattr(bucket, "generation_hints", {}) or {}).get(
+                "is_introduction_page"
+            )
+            else f"{bucket.slug}.mdx",
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),
@@ -522,7 +602,9 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
         # Word + diagram counts
         if result.content:
             record["word_count"] = len(result.content.split())
-            record["mermaid_block_count"] = len(_re.findall(r"```mermaid", result.content))
+            record["mermaid_block_count"] = len(
+                _re.findall(r"```mermaid", result.content)
+            )
         else:
             record["word_count"] = 0
             record["mermaid_block_count"] = 0
@@ -538,7 +620,9 @@ def save_generation_ledger(results: list[Any], repo_root: Path, output_dir: Path
         # File hashes at generation time (for smart invalidation)
         file_hashes: dict[str, str] = {}
         for src_file in tracked_bucket_files(bucket):
-            src_path = output_dir.parent / src_file  # output_dir is docs/, repo is parent
+            src_path = (
+                output_dir.parent / src_file
+            )  # output_dir is docs/, repo is parent
             if src_path.exists():
                 try:
                     content = src_path.read_text(encoding="utf-8", errors="replace")
@@ -594,7 +678,11 @@ def cleanup_stale_generated_files(
 
     Only files tracked in the generation ledger are eligible for deletion.
     """
-    ledger = previous_ledger if previous_ledger is not None else load_generation_ledger(repo_root)
+    ledger = (
+        previous_ledger
+        if previous_ledger is not None
+        else load_generation_ledger(repo_root)
+    )
     deleted: list[str] = []
 
     for slug, record in ledger.items():
@@ -679,7 +767,10 @@ def find_stale_buckets(
             try:
                 content = src_path.read_text(encoding="utf-8", errors="replace")
                 current_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
-                if src_file not in recorded_hashes or recorded_hashes[src_file] != current_hash:
+                if (
+                    src_file not in recorded_hashes
+                    or recorded_hashes[src_file] != current_hash
+                ):
                     changed = True
                     break
             except Exception:
@@ -722,7 +813,10 @@ def ledger_summary(repo_root: Path) -> dict[str, Any]:
 # Convenience: save everything in one call
 # ─────────────────────────────────────────────────────────────────────────────
 
-def save_all(plan: Any, scan: Any, results: list[Any], repo_root: Path, output_dir: Path) -> None:
+
+def save_all(
+    plan: Any, scan: Any, results: list[Any], repo_root: Path, output_dir: Path
+) -> None:
     """Save plan + file map + scan cache + generation ledger in one call."""
     save_plan(plan, repo_root)
     save_file_map(plan, repo_root)
@@ -738,6 +832,7 @@ def save_all(plan: Any, scan: Any, results: list[Any], repo_root: Path, output_d
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _now_iso() -> str:
     return datetime.now(tz=timezone.utc).isoformat()

@@ -4,10 +4,10 @@ from __future__ import annotations
 
 import ast
 import copy
-import os
-import re
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+import re
 
 from .base import APIEndpoint
 from .common import dedupe_endpoints, join_route_path, parse_string_arg
@@ -21,7 +21,16 @@ from .django import (
     unwrap_django_handler_expr,
 )
 from .falcon import find_falcon_responders
-from .js_shared import JS_USE_CALL, extract_js_mounts, resolve_js_prefixes
+from .js_shared import (
+    FASTIFY_REGISTER_CALL,
+    JS_USE_CALL,
+    extract_fastify_add_hook_map,
+    extract_fastify_hooks_from_args,
+    extract_fastify_mounts,
+    extract_fastify_plugin_aliases,
+    extract_js_mounts,
+    resolve_js_prefixes,
+)
 
 
 @dataclass
@@ -29,8 +38,13 @@ class JSImportIndex:
     """Minimal JS/TS module graph for mount-chain resolution."""
 
     local_mounts: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
+    local_fastify_mounts: dict[str, list[tuple[str, str]]] = field(default_factory=dict)
     imports: dict[str, str] = field(default_factory=dict)
     incoming_mounts: list[tuple[str, str, str]] = field(default_factory=list)
+    fastify_local_hooks: dict[str, list[str]] = field(default_factory=dict)
+    incoming_fastify_mounts: list[tuple[str, str, str, list[str]]] = field(
+        default_factory=list
+    )
 
 
 @dataclass
@@ -41,6 +55,15 @@ class PythonImportIndex:
     constants: dict[str, str] = field(default_factory=dict)
 
 
+@dataclass
+class GoResolverIndex:
+    """Minimal Go package/import graph for handler ownership resolution."""
+
+    file_imports: dict[str, dict[str, str]] = field(default_factory=dict)
+    package_symbols: dict[str, dict[str, str]] = field(default_factory=dict)
+    package_files: dict[str, list[str]] = field(default_factory=dict)
+
+
 def resolve_repo_endpoints(
     repo_root: Path,
     endpoints: list[APIEndpoint],
@@ -49,6 +72,7 @@ def resolve_repo_endpoints(
     """Resolve repo-level route metadata without changing the public contract."""
     js_index = _build_js_index(file_contents)
     py_index = _build_python_index(file_contents)
+    go_index = _build_go_index(repo_root, file_contents)
 
     resolved: list[APIEndpoint] = []
     has_django = False
@@ -56,16 +80,22 @@ def resolve_repo_endpoints(
         framework = (endpoint.framework or "").lower()
         if framework == "express":
             resolved.extend(_resolve_express_endpoint(repo_root, endpoint, js_index))
+        elif framework == "fastify":
+            resolved.extend(_resolve_fastify_endpoint(repo_root, endpoint, js_index))
         elif framework == "falcon":
             resolved.extend(
                 _resolve_falcon_endpoint(repo_root, endpoint, file_contents, py_index)
             )
+        elif framework == "go":
+            resolved.extend(_resolve_go_endpoint(repo_root, endpoint, go_index))
         elif framework == "django":
             has_django = True
         else:
             resolved.append(_normalize_endpoint(repo_root, endpoint))
     if has_django:
-        resolved.extend(_resolve_django_repo_endpoints(repo_root, file_contents, py_index))
+        resolved.extend(
+            _resolve_django_repo_endpoints(repo_root, file_contents, py_index)
+        )
     return dedupe_endpoints(resolved)
 
 
@@ -86,12 +116,24 @@ def _build_js_index(file_contents: dict[str, str]) -> dict[str, JSImportIndex]:
     known_files = set(file_contents)
 
     for rel_path, content in file_contents.items():
-        if Path(rel_path).suffix.lower() not in {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}:
+        if Path(rel_path).suffix.lower() not in {
+            ".js",
+            ".jsx",
+            ".ts",
+            ".tsx",
+            ".mjs",
+            ".cjs",
+        }:
             continue
         imports = _extract_js_imports(rel_path, content, known_files)
         index[rel_path] = JSImportIndex(
             local_mounts=extract_js_mounts(content),
+            local_fastify_mounts=extract_fastify_mounts(
+                content,
+                extract_fastify_plugin_aliases(content),
+            ),
             imports=imports,
+            fastify_local_hooks=extract_fastify_add_hook_map(content),
         )
 
     for rel_path, content in file_contents.items():
@@ -101,6 +143,14 @@ def _build_js_index(file_contents: dict[str, str]) -> dict[str, JSImportIndex]:
             child_file = index[rel_path].imports.get(alias)
             if child_file and child_file in index:
                 index[child_file].incoming_mounts.append((rel_path, parent_obj, prefix))
+        for parent_obj, prefix, alias, hooks in _extract_fastify_register_calls(
+            content, index[rel_path].imports
+        ):
+            child_file = index[rel_path].imports.get(alias)
+            if child_file and child_file in index:
+                index[child_file].incoming_fastify_mounts.append(
+                    (rel_path, parent_obj, prefix, hooks)
+                )
 
     return index
 
@@ -127,9 +177,7 @@ def _extract_js_imports(
     return imports
 
 
-def _resolve_js_module_path(
-    current_dir: Path, spec: str, known_files: set[str]
-) -> str:
+def _resolve_js_module_path(current_dir: Path, spec: str, known_files: set[str]) -> str:
     if not spec.startswith("."):
         return ""
 
@@ -188,7 +236,9 @@ def _resolve_express_endpoint(
         return [resolved]
 
     router_object = (resolved.provenance or {}).get("router_object", "")
-    route_path = resolved.raw_path or resolved.path
+    route_path = (
+        parse_string_arg(resolved.raw_path or "") or resolved.raw_path or resolved.path
+    )
     local_prefixes = (
         resolve_js_prefixes(router_object, info.local_mounts) if router_object else [""]
     )
@@ -206,6 +256,49 @@ def _resolve_express_endpoint(
     for path in resolved_paths:
         ep = copy.deepcopy(resolved)
         ep.path = path
+        ep.handler_file = handler_file
+        ep.file = handler_file
+        endpoints.append(ep)
+    return endpoints
+
+
+def _resolve_fastify_endpoint(
+    repo_root: Path,
+    endpoint: APIEndpoint,
+    js_index: dict[str, JSImportIndex],
+) -> list[APIEndpoint]:
+    resolved = _normalize_endpoint(repo_root, endpoint)
+    route_file = resolved.route_file
+    info = js_index.get(route_file)
+    if not info:
+        return [resolved]
+
+    router_object = (resolved.provenance or {}).get("router_object", "")
+    route_path = (
+        parse_string_arg(resolved.raw_path or "") or resolved.raw_path or resolved.path
+    )
+    local_prefixes = (
+        resolve_js_prefixes(router_object, info.local_fastify_mounts)
+        if router_object
+        else [""]
+    )
+    incoming_prefixes = _resolve_fastify_file_prefixes(route_file, js_index)
+    inherited_hooks = _resolve_fastify_hooks(route_file, router_object, js_index)
+    handler_file = _resolve_express_handler_file(resolved.handler, info, route_file)
+
+    paths: list[str] = []
+    for incoming_prefix in incoming_prefixes:
+        for local_prefix in local_prefixes or [""]:
+            paths.append(join_route_path(incoming_prefix, local_prefix, route_path))
+
+    resolved_paths = sorted(set(paths or [resolved.path]))
+    combined_hooks = _ordered_unique(inherited_hooks + list(resolved.middleware or []))
+
+    endpoints: list[APIEndpoint] = []
+    for path in resolved_paths:
+        ep = copy.deepcopy(resolved)
+        ep.path = path
+        ep.middleware = combined_hooks
         ep.handler_file = handler_file
         ep.file = handler_file
         endpoints.append(ep)
@@ -236,7 +329,7 @@ def _resolve_js_file_prefixes(
         for parent_file, parent_obj, mount_prefix in info.incoming_mounts:
             parent_info = js_index.get(parent_file)
             local_parent_prefixes = (
-                resolve_js_prefixes(parent_obj, parent_info.local_mounts)
+                resolve_js_prefixes(parent_obj, parent_info.local_fastify_mounts)
                 if parent_info
                 else [""]
             )
@@ -254,6 +347,92 @@ def _resolve_js_file_prefixes(
     return memo[rel_path]
 
 
+def _resolve_fastify_file_prefixes(
+    rel_path: str,
+    js_index: dict[str, JSImportIndex],
+    memo: dict[str, list[str]] | None = None,
+    stack: set[str] | None = None,
+) -> list[str]:
+    if memo is None:
+        memo = {}
+    if stack is None:
+        stack = set()
+    if rel_path in memo:
+        return memo[rel_path]
+    if rel_path in stack:
+        return [""]
+
+    stack.add(rel_path)
+    info = js_index.get(rel_path)
+    if not info or not info.incoming_fastify_mounts:
+        memo[rel_path] = [""]
+    else:
+        prefixes: list[str] = []
+        for (
+            parent_file,
+            parent_obj,
+            mount_prefix,
+            _hooks,
+        ) in info.incoming_fastify_mounts:
+            parent_prefixes = _resolve_fastify_file_prefixes(
+                parent_file, js_index, memo, stack
+            )
+            parent_info = js_index.get(parent_file)
+            local_parent_prefixes = (
+                resolve_js_prefixes(parent_obj, parent_info.local_mounts)
+                if parent_info
+                else [""]
+            )
+            for repo_prefix in parent_prefixes:
+                for local_prefix in local_parent_prefixes or [""]:
+                    prefixes.append(
+                        join_route_path(repo_prefix, local_prefix, mount_prefix)
+                    )
+        memo[rel_path] = sorted(set(prefixes or [""]))
+
+    stack.discard(rel_path)
+    return memo[rel_path]
+
+
+def _resolve_fastify_hooks(
+    rel_path: str,
+    router_object: str,
+    js_index: dict[str, JSImportIndex],
+    memo: dict[tuple[str, str], list[str]] | None = None,
+    stack: set[tuple[str, str]] | None = None,
+) -> list[str]:
+    if memo is None:
+        memo = {}
+    if stack is None:
+        stack = set()
+    key = (rel_path, router_object)
+    if key in memo:
+        return memo[key]
+    if key in stack:
+        return []
+
+    stack.add(key)
+    info = js_index.get(rel_path)
+    hooks: list[str] = []
+    if info:
+        for (
+            parent_file,
+            parent_obj,
+            _mount_prefix,
+            register_hooks,
+        ) in info.incoming_fastify_mounts:
+            hooks.extend(
+                _resolve_fastify_hooks(parent_file, parent_obj, js_index, memo, stack)
+            )
+            hooks.extend(register_hooks)
+    if info and router_object:
+        hooks.extend(info.fastify_local_hooks.get(router_object, []))
+    hooks = _ordered_unique(hooks)
+    memo[key] = hooks
+    stack.discard(key)
+    return hooks
+
+
 def _resolve_express_handler_file(
     handler: str, info: JSImportIndex, route_file: str
 ) -> str:
@@ -261,6 +440,210 @@ def _resolve_express_handler_file(
         return route_file
     alias = handler.split(".", 1)[0]
     return info.imports.get(alias, route_file)
+
+
+def _extract_fastify_register_calls(
+    content: str, imports: dict[str, str]
+) -> list[tuple[str, str, str, list[str]]]:
+    calls: list[tuple[str, str, str, list[str]]] = []
+    from .common import extract_balanced_segment, split_top_level_args
+
+    for match in FASTIFY_REGISTER_CALL.finditer(content):
+        parent_obj = match.group(1)
+        call_text = extract_balanced_segment(content, match.end() - 1)
+        if not call_text:
+            continue
+        args = split_top_level_args(call_text[1:-1])
+        if not args:
+            continue
+        alias_match = re.match(r"""(\w+)""", args[0].strip())
+        if not alias_match:
+            continue
+        alias = alias_match.group(1)
+        if alias not in imports:
+            continue
+        prefix = ""
+        hooks: list[str] = []
+        for arg in args[1:]:
+            prefix_match = re.search(r"""prefix\s*:\s*['\"]([^'\"]+)['\"]""", arg)
+            if prefix_match:
+                prefix = prefix_match.group(1)
+            for name in extract_fastify_hooks_from_args([arg]):
+                if name not in hooks:
+                    hooks.append(name)
+        calls.append((parent_obj, prefix, alias, hooks))
+    return calls
+
+
+def _build_go_index(repo_root: Path, file_contents: dict[str, str]) -> GoResolverIndex:
+    module_name = _read_go_module_name(file_contents.get("go.mod", ""))
+    if not module_name:
+        go_mod_path = repo_root / "go.mod"
+        if go_mod_path.exists():
+            try:
+                module_name = _read_go_module_name(
+                    go_mod_path.read_text(encoding="utf-8", errors="replace")
+                )
+            except Exception:
+                module_name = ""
+    package_symbols: dict[str, dict[str, str]] = {}
+    package_files: dict[str, list[str]] = {}
+    file_imports: dict[str, dict[str, str]] = {}
+
+    for rel_path, content in file_contents.items():
+        if Path(rel_path).suffix.lower() != ".go":
+            continue
+        package_dir = Path(rel_path).parent.as_posix()
+        package_files.setdefault(package_dir, []).append(rel_path)
+        symbols = package_symbols.setdefault(package_dir, {})
+        for symbol in _extract_go_declared_symbols(content):
+            symbols.setdefault(symbol, rel_path)
+        file_imports[rel_path] = _extract_go_imports(
+            repo_root,
+            rel_path,
+            content,
+            file_contents,
+            module_name,
+        )
+
+    for files in package_files.values():
+        files.sort()
+    return GoResolverIndex(
+        file_imports=file_imports,
+        package_symbols=package_symbols,
+        package_files=package_files,
+    )
+
+
+def _read_go_module_name(go_mod_content: str) -> str:
+    match = re.search(r"""^\s*module\s+(.+?)\s*$""", go_mod_content, re.MULTILINE)
+    return match.group(1).strip() if match else ""
+
+
+def _extract_go_declared_symbols(content: str) -> list[str]:
+    symbols: list[str] = []
+    for pattern in (
+        re.compile(r"""^\s*func\s+(\w+)\s*\(""", re.MULTILINE),
+        re.compile(r"""^\s*func\s*\([^)]*\)\s*(\w+)\s*\(""", re.MULTILINE),
+    ):
+        for match in pattern.finditer(content):
+            name = match.group(1)
+            if name not in symbols:
+                symbols.append(name)
+    return symbols
+
+
+def _extract_go_imports(
+    repo_root: Path,
+    rel_path: str,
+    content: str,
+    file_contents: dict[str, str],
+    module_name: str,
+) -> dict[str, str]:
+    imports: dict[str, str] = {}
+    current_dir = Path(rel_path).parent
+    known_files = set(file_contents)
+
+    import_specs: list[tuple[str, str]] = []
+    block_match = re.search(r"""import\s*\((.*?)\)""", content, re.DOTALL)
+    if block_match:
+        for line in block_match.group(1).splitlines():
+            parsed = _parse_go_import_line(line)
+            if parsed:
+                import_specs.append(parsed)
+    else:
+        for match in re.finditer(
+            r"""^\s*import\s+(?:(\w+)\s+)?['\"]([^'\"]+)['\"]""",
+            content,
+            re.MULTILINE,
+        ):
+            alias = match.group(1) or Path(match.group(2)).name
+            import_specs.append((alias, match.group(2)))
+
+    for alias, spec in import_specs:
+        resolved = _resolve_go_import_path(
+            repo_root, current_dir, spec, known_files, module_name
+        )
+        if resolved:
+            imports[alias] = resolved
+    return imports
+
+
+def _parse_go_import_line(line: str) -> tuple[str, str] | None:
+    stripped = line.strip()
+    if not stripped or stripped.startswith("//"):
+        return None
+    match = re.match(r"""(?:(\w+)\s+)?['\"]([^'\"]+)['\"]""", stripped)
+    if not match:
+        return None
+    alias = match.group(1) or Path(match.group(2)).name
+    return alias, match.group(2)
+
+
+def _resolve_go_import_path(
+    repo_root: Path,
+    current_dir: Path,
+    spec: str,
+    known_files: set[str],
+    module_name: str,
+) -> str:
+    if spec.startswith("."):
+        candidate_dir = (current_dir / spec).as_posix()
+    elif module_name and (spec == module_name or spec.startswith(f"{module_name}/")):
+        candidate_dir = spec[len(module_name) :].lstrip("/")
+    else:
+        return ""
+
+    normalized_dir = Path(candidate_dir).as_posix()
+    if any(
+        path.startswith(f"{normalized_dir}/") and path.endswith(".go")
+        for path in known_files
+    ):
+        return normalized_dir
+    if normalized_dir.endswith(".go") and normalized_dir in known_files:
+        return str(Path(normalized_dir).parent.as_posix())
+    return ""
+
+
+def _resolve_go_endpoint(
+    repo_root: Path,
+    endpoint: APIEndpoint,
+    go_index: GoResolverIndex,
+) -> list[APIEndpoint]:
+    resolved = _normalize_endpoint(repo_root, endpoint)
+    handler_file = _resolve_go_handler_file(
+        resolved.route_file, resolved.handler, go_index
+    )
+    resolved.handler_file = handler_file or resolved.handler_file
+    resolved.file = resolved.handler_file or resolved.file
+    return [resolved]
+
+
+def _resolve_go_handler_file(
+    route_file: str,
+    handler: str,
+    go_index: GoResolverIndex,
+) -> str:
+    if not handler:
+        return route_file
+
+    handler_symbol = handler.split(".")[-1]
+    qualifier = handler.split(".", 1)[0] if "." in handler else ""
+    imports = go_index.file_imports.get(route_file, {})
+    if qualifier and qualifier in imports:
+        package_dir = imports[qualifier]
+        symbol_file = go_index.package_symbols.get(package_dir, {}).get(handler_symbol)
+        if symbol_file:
+            return symbol_file
+        package_files = go_index.package_files.get(package_dir, [])
+        if package_files:
+            return package_files[0]
+
+    package_dir = Path(route_file).parent.as_posix()
+    symbol_file = go_index.package_symbols.get(package_dir, {}).get(handler_symbol)
+    if symbol_file:
+        return symbol_file
+    return route_file
 
 
 def _build_python_index(file_contents: dict[str, str]) -> dict[str, PythonImportIndex]:
@@ -374,14 +757,16 @@ def _resolve_falcon_endpoint(
 ) -> list[APIEndpoint]:
     resolved = _normalize_endpoint(repo_root, endpoint)
     route_file = resolved.route_file
-    route_index = py_index.get(route_file, PythonImportIndex())
-    resource_ref = (
-        (resolved.provenance or {}).get("resource_ref")
-        or re.sub(r"""\.on_[a-z]+$""", "", resolved.handler)
+    py_index.get(route_file, PythonImportIndex())
+    resource_ref = (resolved.provenance or {}).get("resource_ref") or re.sub(
+        r"""\.on_[a-z]+$""", "", resolved.handler
     )
-    resolved_path = _resolve_python_path_expr(
-        resolved.raw_path or resolved.path, route_file, py_index
-    ) or resolved.path
+    resolved_path = (
+        _resolve_python_path_expr(
+            resolved.raw_path or resolved.path, route_file, py_index
+        )
+        or resolved.path
+    )
     handler_file = _resolve_falcon_handler_file(
         route_file, resource_ref, file_contents, py_index
     )
@@ -527,14 +912,63 @@ def _resolve_falcon_handler_file(
 
     current_content = file_contents.get(route_file, "")
     class_name = resource_ref.split(".")[-1]
-    if re.search(rf"""^\s*class\s+{re.escape(class_name)}\b""", current_content, re.MULTILINE):
+    if re.search(
+        rf"""^\s*class\s+{re.escape(class_name)}\b""", current_content, re.MULTILINE
+    ):
         return route_file
 
+    imports = py_index.get(route_file, PythonImportIndex()).imports
     if "." in resource_ref:
         alias = resource_ref.split(".", 1)[0]
-        return py_index.get(route_file, PythonImportIndex()).imports.get(alias, route_file)
+        alias_file = imports.get(alias)
+        resolved = _resolve_python_class_file(
+            alias_file or "", class_name, file_contents
+        )
+        return resolved or alias_file or route_file
 
-    return py_index.get(route_file, PythonImportIndex()).imports.get(resource_ref, route_file)
+    imported_file = imports.get(resource_ref)
+    resolved = _resolve_python_class_file(
+        imported_file or "", class_name, file_contents
+    )
+    return resolved or imported_file or route_file
+
+
+def _resolve_python_class_file(
+    imported_file: str,
+    class_name: str,
+    file_contents: dict[str, str],
+) -> str:
+    if not imported_file or not class_name:
+        return ""
+
+    content = file_contents.get(imported_file, "")
+    if content and re.search(
+        rf"""^\s*class\s+{re.escape(class_name)}\b""",
+        content,
+        re.MULTILINE,
+    ):
+        return imported_file
+
+    candidate_dirs: list[str] = []
+    imported_path = Path(imported_file)
+    if imported_path.name == "__init__.py":
+        candidate_dirs.append(imported_path.parent.as_posix())
+    else:
+        candidate_dirs.append(imported_path.parent.as_posix())
+
+    for candidate_dir in candidate_dirs:
+        for rel_path in sorted(file_contents):
+            if Path(rel_path).suffix.lower() != ".py":
+                continue
+            if Path(rel_path).parent.as_posix() != candidate_dir:
+                continue
+            if re.search(
+                rf"""^\s*class\s+{re.escape(class_name)}\b""",
+                file_contents.get(rel_path, ""),
+                re.MULTILINE,
+            ):
+                return rel_path
+    return ""
 
 
 def _resolve_falcon_methods(
@@ -673,7 +1107,11 @@ def _extract_urlpattern_nodes(module: ast.Module) -> list[ast.AST]:
                     return _flatten_urlpattern_value(node.value)
         if isinstance(node, ast.AnnAssign):
             target = node.target
-            if isinstance(target, ast.Name) and target.id == "urlpatterns" and node.value:
+            if (
+                isinstance(target, ast.Name)
+                and target.id == "urlpatterns"
+                and node.value
+            ):
                 return _flatten_urlpattern_value(node.value)
     return []
 
@@ -693,7 +1131,11 @@ def _collect_python_bindings(module: ast.Module) -> dict[str, ast.AST]:
             for target in node.targets:
                 if isinstance(target, ast.Name):
                     bindings[target.id] = node.value
-        elif isinstance(node, ast.AnnAssign) and isinstance(node.target, ast.Name) and node.value:
+        elif (
+            isinstance(node, ast.AnnAssign)
+            and isinstance(node.target, ast.Name)
+            and node.value
+        ):
             bindings[node.target.id] = node.value
     return bindings
 
@@ -854,8 +1296,12 @@ def _resolve_django_ast_string(
                     return setting_value
             return _resolve_python_constant(chain, current_file, py_index)
     if isinstance(expr, ast.BinOp) and isinstance(expr.op, ast.Add):
-        left = _resolve_django_ast_string(expr.left, current_file, bindings, py_index, stack)
-        right = _resolve_django_ast_string(expr.right, current_file, bindings, py_index, stack)
+        left = _resolve_django_ast_string(
+            expr.left, current_file, bindings, py_index, stack
+        )
+        right = _resolve_django_ast_string(
+            expr.right, current_file, bindings, py_index, stack
+        )
         if left is not None and right is not None:
             return left + right
     return None
@@ -881,7 +1327,10 @@ def _extract_django_include_info(
     known_files: set[str],
     routers: dict[str, list[APIEndpoint]],
 ) -> dict[str, object]:
-    if not isinstance(handler_node, ast.Call) or _ast_call_name(handler_node.func) != "include":
+    if (
+        not isinstance(handler_node, ast.Call)
+        or _ast_call_name(handler_node.func) != "include"
+    ):
         return {"kind": "none"}
     if not handler_node.args:
         return {"kind": "none"}
@@ -955,7 +1404,9 @@ def _resolve_django_handler_file(
         if alias_file:
             return alias_file
 
-    imported_file = py_index.get(route_file, PythonImportIndex()).imports.get(handler_name)
+    imported_file = py_index.get(route_file, PythonImportIndex()).imports.get(
+        handler_name
+    )
     if imported_file:
         return imported_file
 
@@ -982,3 +1433,11 @@ def _repo_rel_path(repo_root: Path, path_str: str) -> str:
         return path.relative_to(repo_root).as_posix()
     except ValueError:
         return path.as_posix()
+
+
+def _ordered_unique(items: list[str]) -> list[str]:
+    ordered: list[str] = []
+    for item in items:
+        if item and item not in ordered:
+            ordered.append(item)
+    return ordered

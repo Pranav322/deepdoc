@@ -1,632 +1,84 @@
-"""V2 Fumadocs builder — builds a local docs site from the AI-generated plan.
-
-Generates:
-- site/                  (Next.js + Fumadocs app scaffold)
-- site/public/*          (placeholder logo + favicon assets)
-- site/lib/page-tree.generated.ts
-- docs/index.mdx         (landing page if a legacy overview page needs migration)
-
-The generated site reads MDX content from the configurable docs output directory.
-"""
-
-from __future__ import annotations
-
-import json
-import os
-from pathlib import Path
-from textwrap import dedent
-from typing import Any
-
-from ..chatbot.settings import chatbot_site_api_base_url
-from ..planner_v2 import DocPlan
-
-
-def build_fumadocs_from_plan(
-    repo_root: Path,
-    output_dir: Path,
-    cfg: dict[str, Any],
-    plan: DocPlan,
-    has_openapi: bool = False,
-) -> None:
-    """Build the generated Fumadocs site from the current doc plan."""
-    project_name = cfg.get("project_name") or repo_root.name
-    repo_url = cfg.get("site", {}).get("repo_url", "")
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    _rename_md_to_mdx(output_dir)
-    _rename_legacy_intro_to_index(output_dir)
-    _ensure_mdx_frontmatter(output_dir)
-    _ensure_landing_page(output_dir, project_name, plan)
-
-    docs_dir_relative = os.path.relpath(output_dir, repo_root / "site").replace("\\", "/")
-    page_tree = _build_page_tree_from_plan(
-        repo_root,
-        plan,
-        output_dir,
-        project_name,
-        has_openapi,
-    )
-
-    _ensure_app_scaffold(
-        repo_root,
-        project_name,
-        repo_url,
-        docs_dir_relative,
-        cfg,
-        has_openapi=has_openapi,
-    )
-    _write_page_tree(repo_root, page_tree)
-    _write_static_assets(repo_root)
-    _cleanup_legacy_artifacts(repo_root)
-
-
-def _ensure_app_scaffold(
-    repo_root: Path,
-    project_name: str,
-    repo_url: str,
-    docs_dir_relative: str,
-    cfg: dict[str, Any],
-    has_openapi: bool,
-) -> None:
-    """Write or update the DeepDoc-managed Fumadocs app scaffold."""
-    site_dir = repo_root / "site"
-    site_dir.mkdir(parents=True, exist_ok=True)
-
-    files = {
-        site_dir / "package.json": _package_json(project_name),
-        site_dir / "postcss.config.mjs": _postcss_config_mjs(),
-        site_dir / "tsconfig.json": _tsconfig_json(),
-        site_dir / "next-env.d.ts": _next_env_d_ts(),
-        site_dir / "next.config.mjs": _next_config_mjs(),
-        site_dir / "source.config.mjs": _source_config_mjs(docs_dir_relative),
-        site_dir / "mdx-components.tsx": _mdx_components_tsx(has_openapi),
-        site_dir / "app" / "layout.tsx": _app_layout_tsx(project_name),
-        site_dir / "app" / "global.css": _global_css(cfg),
-        site_dir / "app" / "ask" / "page.tsx": _chatbot_ask_page_tsx(),
-        site_dir / "app" / "search" / "route.ts": _search_route_ts(),
-        site_dir / "app" / "[[...slug]]" / "layout.tsx": _docs_layout_tsx(),
-        site_dir / "app" / "[[...slug]]" / "page.tsx": _docs_page_tsx(),
-        site_dir / "components" / "chatbot-panel.tsx": _chatbot_panel_tsx(),
-        site_dir / "components" / "chatbot-toggle.tsx": _chatbot_toggle_tsx(),
-        site_dir / "components" / "mdx" / "mermaid.tsx": _mermaid_component_tsx(),
-        site_dir / "lib" / "chatbot-config.ts": _chatbot_config_ts(repo_root, cfg),
-        site_dir / "lib" / "source.ts": _source_ts(),
-        site_dir / "lib" / "layout-options.ts": _layout_options_ts(project_name, repo_url),
-        site_dir / "openapi" / ".gitkeep": "",
-    }
-
-    if has_openapi:
-        files.update(
-            {
-                site_dir / "app" / "api" / "[[...slug]]" / "layout.tsx": _api_layout_tsx(),
-                site_dir / "app" / "api" / "[[...slug]]" / "page.tsx": _api_page_tsx(),
-                site_dir / "components" / "api-page.tsx": _api_page_component_tsx(),
-                site_dir / "components" / "api-page.client.tsx": _api_page_client_tsx(),
-                site_dir / "lib" / "openapi.ts": _openapi_ts(),
-            }
-        )
-
-    for path, content in files.items():
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(content, encoding="utf-8")
-
-    if not has_openapi:
-        stale_paths = [
-            site_dir / "app" / "api" / "[[...slug]]" / "layout.tsx",
-            site_dir / "app" / "api" / "[[...slug]]" / "page.tsx",
-            site_dir / "components" / "api-page.tsx",
-            site_dir / "components" / "api-page.client.tsx",
-            site_dir / "lib" / "openapi.ts",
-        ]
-        for path in stale_paths:
-            if path.exists():
-                path.unlink()
-
-
-def _build_page_tree_from_plan(
-    repo_root: Path,
-    plan: DocPlan,
-    output_dir: Path,
-    project_name: str,
-    has_openapi: bool,
-) -> dict[str, Any]:
-    """Create a Fumadocs page tree from the saved nav structure."""
-
-    def is_overview(page) -> bool:
-        hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
-        return hints.get("is_introduction_page") or page.page_type == "overview"
-
-    def is_endpoint_ref(page) -> bool:
-        hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
-        return hints.get("is_endpoint_ref") or page.page_type == "endpoint_ref"
-
-    def page_exists(page) -> bool:
-        if is_overview(page):
-            return (output_dir / "index.mdx").exists()
-        if has_openapi and is_endpoint_ref(page):
-            return True
-        return (output_dir / f"{page.slug}.mdx").exists()
-
-    def page_url(page) -> str:
-        if is_overview(page):
-            return "/"
-        if has_openapi and is_endpoint_ref(page):
-            return f"/api/{page.slug}"
-        return f"/{page.slug}"
-
-    def load_openapi_manifest() -> list[dict[str, str]]:
-        manifest_path = repo_root / "site" / "openapi" / "manifest.json"
-        if not manifest_path.exists():
-            return []
-        try:
-            data = json.loads(manifest_path.read_text(encoding="utf-8"))
-        except Exception:
-            return []
-        if not isinstance(data, list):
-            return []
-        out: list[dict[str, str]] = []
-        for item in data:
-            if not isinstance(item, dict):
-                continue
-            slug = str(item.get("slug") or "").strip()
-            title = str(item.get("title") or "").strip()
-            method = str(item.get("method") or "").strip().upper()
-            path = str(item.get("path") or "").strip()
-            if slug and title and method and path:
-                out.append(
-                    {
-                        "slug": slug,
-                        "title": title,
-                        "method": method,
-                        "path": path,
-                    }
-                )
-        return out
-
-    def display_openapi_path(path: str) -> str:
-        if "://" in path:
-            from urllib.parse import urlparse
-
-            parsed = urlparse(path)
-            return parsed.path or "/"
-        return path
-
-    slug_to_page = {page.slug: page for page in plan.pages if page_exists(page)}
-    root_children: list[dict[str, Any]] = []
-
-    overview_page = next((page for page in plan.pages if is_overview(page) and page_exists(page)), None)
-    if overview_page or (output_dir / "index.mdx").exists():
-        root_children.append(
-            {
-                "type": "page",
-                "name": getattr(overview_page, "title", None) or project_name,
-                "url": "/",
-            }
-        )
-
-    from collections import OrderedDict
-
-    grouped_slugs: set[str] = set()
-    nav_tree: OrderedDict[str, dict[str, Any]] = OrderedDict()
-    section_insert_order = 0
-
-    for section_name, slugs in plan.nav_structure.items():
-        pages = []
-        for slug in slugs:
-            page = slug_to_page.get(slug)
-            if not page:
-                continue
-            if has_openapi and is_endpoint_ref(page):
-                grouped_slugs.add(slug)
-                continue
-            pages.append(page)
-            grouped_slugs.add(slug)
-
-        if not pages:
-            continue
-
-        parts = [p.strip() for p in section_name.split(" > ")]
-
-        node = nav_tree
-        for i, part in enumerate(parts):
-            if part not in node:
-                node[part] = {
-                    "_pages": [],
-                    "_children": OrderedDict(),
-                    "_order": section_insert_order,
-                }
-                section_insert_order += 1
-            if i == len(parts) - 1:
-                node[part]["_pages"].extend(pages)
-            else:
-                node = node[part]["_children"]
-
-    def _tree_to_fumadocs(tree: OrderedDict[str, dict[str, Any]]) -> list[dict[str, Any]]:
-        result = []
-        for name, data in sorted(tree.items(), key=lambda item: item[1]["_order"]):
-            sub_children: list[dict[str, Any]] = []
-            for page in data["_pages"]:
-                sub_children.append(_page_tree_node(page_url(page), page.title))
-            sub_children.extend(_tree_to_fumadocs(data["_children"]))
-            if sub_children:
-                result.append(
-                    {
-                        "type": "folder",
-                        "name": name,
-                        "children": sub_children,
-                    }
-                )
-        return result
-
-    root_children.extend(_tree_to_fumadocs(nav_tree))
-
-    orphan_pages = [
-        page
-        for page in plan.pages
-        if page.slug in slug_to_page
-        and page.slug not in grouped_slugs
-        and not is_overview(page)
-        and not (has_openapi and is_endpoint_ref(page))
-    ]
-    if orphan_pages:
-        root_children.append(
-            {
-                "type": "folder",
-                "name": "Other",
-                "children": [_page_tree_node(page_url(page), page.title) for page in orphan_pages],
-            }
-        )
-
-    if has_openapi:
-        api_pages = [
-            page
-            for page in plan.pages
-            if page_exists(page) and is_endpoint_ref(page)
-        ]
-        if api_pages:
-            root_children.append(
-                {
-                    "type": "folder",
-                    "name": "API Reference",
-                    "children": [
-                        _page_tree_node(f"/api/{page.slug}", page.title) for page in api_pages
-                    ],
-                }
-            )
-        else:
-            manifest_entries = load_openapi_manifest()
-            if manifest_entries:
-                operations_folder = {
-                    "type": "folder",
-                    "name": "OpenAPI Operations",
-                    "children": [
-                        _page_tree_node(
-                            f"/api/{entry['slug']}",
-                            f"{entry['method']} {display_openapi_path(entry['path'])}",
-                        )
-                        for entry in manifest_entries
-                    ],
-                }
-
-                existing_api_folder = next(
-                    (
-                        child
-                        for child in root_children
-                        if child.get("type") == "folder" and child.get("name") == "API Reference"
-                    ),
-                    None,
-                )
-                if existing_api_folder:
-                    existing_api_folder.setdefault("children", []).append(operations_folder)
-                else:
-                    root_children.append(
-                        {
-                            "type": "folder",
-                            "name": "API Reference",
-                            "children": [operations_folder],
-                        }
-                    )
-
-    return {"name": project_name, "children": root_children}
-
-
-def _page_tree_node(url: str, name: str) -> dict[str, str]:
-    return {"type": "page", "name": name, "url": url}
-
-
-def _write_page_tree(repo_root: Path, page_tree: dict[str, Any]) -> None:
-    """Write the generated Fumadocs page tree module."""
-    site_dir = repo_root / "site"
-    site_dir.mkdir(parents=True, exist_ok=True)
-    content = dedent(
-        f"""\
-        // DeepDoc-managed file. Regenerated by `deepdoc generate`.
-        import type {{ PageTree }} from 'fumadocs-core/server';
-
-        export const pageTree = {json.dumps(page_tree, indent=2)} satisfies PageTree.Root;
-        """
-    )
-    (site_dir / "lib" / "page-tree.generated.ts").write_text(content, encoding="utf-8")
-
-
-def _write_static_assets(repo_root: Path) -> None:
-    """Create placeholder site assets under the generated Fumadocs app."""
-    public_dir = repo_root / "site" / "public"
-    public_dir.mkdir(parents=True, exist_ok=True)
-
-    light_logo = """\
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#0f766e"/>
-  <path d="M9 10h14M9 16h10M9 22h14" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-</svg>
-"""
-    dark_logo = """\
-<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" fill="none">
-  <rect width="32" height="32" rx="8" fill="#14b8a6"/>
-  <path d="M9 10h14M9 16h10M9 22h14" stroke="white" stroke-width="2.5" stroke-linecap="round"/>
-</svg>
-"""
-
-    (public_dir / "logo-light.svg").write_text(light_logo, encoding="utf-8")
-    (public_dir / "logo-dark.svg").write_text(dark_logo, encoding="utf-8")
-    (public_dir / "favicon.svg").write_text(light_logo, encoding="utf-8")
-
-
-def _cleanup_legacy_artifacts(repo_root: Path) -> None:
-    """Remove legacy root artifacts left behind by earlier site builders."""
-    for path in (
-        repo_root / "mint.json",
-        repo_root / "favicon.svg",
-    ):
-        if path.exists():
-            path.unlink()
-
-    legacy_logo_dir = repo_root / "logo"
-    if legacy_logo_dir.exists():
-        for child in legacy_logo_dir.iterdir():
-            if child.is_file():
-                child.unlink()
-        try:
-            legacy_logo_dir.rmdir()
-        except OSError:
-            pass
-
-
-def _rename_legacy_intro_to_index(output_dir: Path) -> None:
-    """Migrate legacy overview filenames to Fumadocs' index.mdx."""
-    for legacy_name in ("introduction.mdx", "intro.mdx", "index.md", "intro.md"):
-        legacy_path = output_dir / legacy_name
-        index_mdx = output_dir / "index.mdx"
-        if legacy_path.exists() and not index_mdx.exists():
-            content = legacy_path.read_text(encoding="utf-8")
-            content = _strip_docusaurus_frontmatter(content)
-            index_mdx.write_text(content, encoding="utf-8")
-        if legacy_path.exists() and legacy_path.name != "index.mdx":
-            legacy_path.unlink()
-
-
-def _rename_md_to_mdx(output_dir: Path) -> None:
-    """Rename generated Markdown pages to MDX."""
-    for md_file in list(output_dir.rglob("*.md")):
-        mdx_file = md_file.with_suffix(".mdx")
-        if not mdx_file.exists():
-            content = md_file.read_text(encoding="utf-8")
-            content = _strip_docusaurus_frontmatter(content)
-            mdx_file.write_text(content, encoding="utf-8")
-        md_file.unlink()
-
-
-def _strip_docusaurus_frontmatter(content: str) -> str:
-    """Remove legacy frontmatter fields that should not survive the migration."""
-    if not content.startswith("---"):
-        return content
-
-    lines = content.split("\n")
-    try:
-        end_idx = lines.index("---", 1)
-    except ValueError:
-        return content
-
-    docusaurus_fields = {"slug:", "sidebar_position:", "sidebar_label:"}
-    fm_lines = [
-        line for line in lines[1:end_idx]
-        if not any(line.strip().startswith(field) for field in docusaurus_fields)
-    ]
-
-    if not any(line.strip() for line in fm_lines):
-        return "\n".join(lines[end_idx + 1 :]).lstrip("\n")
-
-    return "---\n" + "\n".join(fm_lines) + "\n---\n" + "\n".join(lines[end_idx + 1 :])
-
-
-def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> None:
-    """Ensure the landing page exists as docs/index.mdx."""
-    index_mdx = output_dir / "index.mdx"
-    if index_mdx.exists():
-        existing = index_mdx.read_text(encoding="utf-8")
-        if "_deepdoc_autogen_" not in existing:
-            return
-
-    sections: dict[str, list[tuple[str, str]]] = {}
-    for page in plan.pages:
-        hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
-        if hints.get("is_introduction_page") or page.page_type == "overview":
-            continue
-        if not (output_dir / f"{page.slug}.mdx").exists():
-            continue
-        section = getattr(page, "section", None) or "Docs"
-        sections.setdefault(section, []).append((page.title, page.slug))
-
-    cards_section: list[str] = []
-    for section_name, pages in sections.items():
-        cards = []
-        for title, slug in pages:
-            cards.append(
-                f'  <Card title="{title}" href="/{slug}">\n'
-                f"    {title} documentation.\n"
-                f"  </Card>"
-            )
-        cards_section.append(
-            f"## {section_name}\n\n<Cards>\n" + "\n".join(cards) + "\n</Cards>"
-        )
-
-    body = "\n\n".join(cards_section) if cards_section else "_Documentation is being generated..._"
-    content = f"""\
----
-title: {project_name}
-description: Auto-generated developer documentation
-_deepdoc_autogen_: true
----
-
-# {project_name}
-
-Welcome to the **{project_name}** developer documentation.
-
-{body}
-"""
-    index_mdx.write_text(content, encoding="utf-8")
-
-
-def _first_mdx_heading(text: str, fallback: str) -> str:
-    """Extract the first H1 title from MDX content, or fall back to the file stem."""
-    for line in text.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return fallback
-
-
-def _split_leading_frontmatter(text: str) -> tuple[list[str], str] | None:
-    """Split a leading frontmatter block from the remaining document body."""
-    stripped = text.lstrip()
-    if not stripped.startswith("---"):
-        return None
-
-    lines = stripped.splitlines()
-    try:
-        end_idx = lines.index("---", 1)
-    except ValueError:
-        return None
-
-    return lines[1:end_idx], "\n".join(lines[end_idx + 1 :])
-
-
-def _frontmatter_has_yaml_fields(frontmatter_lines: list[str]) -> bool:
-    """Return True when the frontmatter block contains YAML-style key/value fields."""
-    return any(
-        ":" in line and not line.lstrip().startswith("#")
-        for line in frontmatter_lines
-        if line.strip()
-    )
-
-
-def _ensure_mdx_frontmatter(output_dir: Path) -> None:
-    """Add minimal frontmatter to generated MDX pages and repair malformed blocks."""
-    for mdx_path in output_dir.glob("*.mdx"):
-        text = mdx_path.read_text(encoding="utf-8", errors="replace")
-        fallback_title = mdx_path.stem.replace("-", " ").replace("_", " ").title()
-        frontmatter_block = _split_leading_frontmatter(text)
-        body_text = text.lstrip()
-
-        if frontmatter_block:
-            frontmatter_lines, frontmatter_body = frontmatter_block
-            if _frontmatter_has_yaml_fields(frontmatter_lines):
-                continue
-            title = _first_mdx_heading("\n".join(frontmatter_lines) + "\n" + frontmatter_body, fallback_title)
-            repaired_intro = "\n".join(frontmatter_lines).strip()
-            if repaired_intro and frontmatter_body.lstrip():
-                body_text = repaired_intro + "\n\n" + frontmatter_body.lstrip()
-            elif repaired_intro:
-                body_text = repaired_intro
-            else:
-                body_text = frontmatter_body.lstrip()
-        else:
-            title = _first_mdx_heading(text, fallback_title)
-
-        frontmatter_lines = [
-            "---",
-            f"title: {json.dumps(title)}",
-            "description: Auto-generated developer documentation",
-        ]
-        if mdx_path.name != "index.mdx":
-            frontmatter_lines.append("_deepdoc_autogen_: true")
-        frontmatter = "\n".join(frontmatter_lines) + "\n---\n\n"
-        mdx_path.write_text(frontmatter + body_text.lstrip(), encoding="utf-8")
-
+from .common import *
 
 def _package_json(project_name: str) -> str:
-    return json.dumps(
-        {
-            "name": f"{project_name.lower().replace(' ', '-')}-docs",
-            "private": True,
-            "type": "module",
-            "scripts": {
-                "dev": "next dev",
-                "build": "next build",
-                "start": "next dev",
+    return (
+        json.dumps(
+            {
+                "name": f"{project_name.lower().replace(' ', '-')}-docs",
+                "private": True,
+                "type": "module",
+                "scripts": {
+                    "dev": "next dev",
+                    "build": "next build",
+                    "start": "next dev",
+                },
+                "dependencies": {
+                    "@orama/orama": "^3.1.10",
+                    "@types/mdx": "^2.0.13",
+                    "fumadocs-core": "15.7.9",
+                    "fumadocs-mdx": "11.9.0",
+                    "fumadocs-openapi": "9.3.9",
+                    "fumadocs-ui": "15.7.11",
+                    "mermaid": "^11.6.0",
+                    "next": "15.3.0",
+                    "next-themes": "0.4.6",
+                    "react": "19.1.0",
+                    "react-dom": "19.1.0",
+                    "react-markdown": "^10.1.0",
+                    "tailwindcss": "^4.1.3",
+                },
+                "devDependencies": {
+                    "@tailwindcss/postcss": "^4.1.14",
+                    "@types/node": "^22.13.9",
+                    "@types/react": "^19.0.12",
+                    "@types/react-dom": "^19.0.4",
+                    "typescript": "^5.8.2",
+                },
             },
-            "dependencies": {
-                "@orama/orama": "^3.1.10",
-                "@types/mdx": "^2.0.13",
-                "fumadocs-core": "15.7.9",
-                "fumadocs-mdx": "11.9.0",
-                "fumadocs-openapi": "9.3.9",
-                "fumadocs-ui": "15.7.11",
-                "mermaid": "^11.6.0",
-                "next": "15.3.0",
-                "next-themes": "0.4.6",
-                "react": "19.1.0",
-                "react-dom": "19.1.0",
-                "react-markdown": "^10.1.0",
-                "tailwindcss": "^4.1.3",
-            },
-            "devDependencies": {
-                "@tailwindcss/postcss": "^4.1.14",
-                "@types/node": "^22.13.9",
-                "@types/react": "^19.0.12",
-                "@types/react-dom": "^19.0.4",
-                "typescript": "^5.8.2",
-            },
-        },
-        indent=2,
-    ) + "\n"
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def _tsconfig_json() -> str:
-    return json.dumps(
-        {
-            "compilerOptions": {
-                "target": "ES2022",
-                "lib": ["dom", "dom.iterable", "es2022"],
-                "allowJs": False,
-                "skipLibCheck": True,
-                "strict": True,
-                "noEmit": True,
-                "esModuleInterop": True,
-                "module": "esnext",
-                "moduleResolution": "bundler",
-                "resolveJsonModule": True,
-                "isolatedModules": True,
-                "jsx": "preserve",
-                "incremental": True,
-                "baseUrl": ".",
-                "paths": {
-                    "@/*": ["./*"],
-                    "fumadocs-mdx:collections/*": [".source/*"],
+    return (
+        json.dumps(
+            {
+                "compilerOptions": {
+                    "target": "ES2022",
+                    "lib": ["dom", "dom.iterable", "es2022"],
+                    "allowJs": False,
+                    "skipLibCheck": True,
+                    "strict": True,
+                    "noEmit": True,
+                    "esModuleInterop": True,
+                    "module": "esnext",
+                    "moduleResolution": "bundler",
+                    "resolveJsonModule": True,
+                    "isolatedModules": True,
+                    "jsx": "preserve",
+                    "incremental": True,
+                    "baseUrl": ".",
+                    "paths": {
+                        "@/*": ["./*"],
+                        "fumadocs-mdx:collections/*": [".source/*"],
+                    },
+                    "plugins": [{"name": "next"}],
                 },
-                "plugins": [{"name": "next"}],
+                "include": [
+                    "next-env.d.ts",
+                    "**/*.ts",
+                    "**/*.tsx",
+                    ".next/types/**/*.ts",
+                    ".source/**/*.ts",
+                ],
+                "exclude": ["node_modules"],
             },
-            "include": [
-                "next-env.d.ts",
-                "**/*.ts",
-                "**/*.tsx",
-                ".next/types/**/*.ts",
-                ".source/**/*.ts",
-            ],
-            "exclude": ["node_modules"],
-        },
-        indent=2,
-    ) + "\n"
+            indent=2,
+        )
+        + "\n"
+    )
 
 
 def _postcss_config_mjs() -> str:
@@ -719,7 +171,9 @@ def _source_config_mjs(docs_dir_relative: str) -> str:
 
 
 def _mdx_components_tsx(has_openapi: bool) -> str:
-    api_import = "import { APIPage } from '@/components/api-page';\n" if has_openapi else ""
+    api_import = (
+        "import { APIPage } from '@/components/api-page';\n" if has_openapi else ""
+    )
     api_component = "    APIPage,\n" if has_openapi else ""
     return dedent(
         f"""\
@@ -878,6 +332,23 @@ def _global_css(cfg: dict[str, Any]) -> str:
           font-size: 0.84rem;
           color: color-mix(in srgb, var(--color-fd-muted-foreground) 82%, transparent 18%);
           text-align: right;
+        }
+
+        .deepdoc-chatbot-mode-toggle {
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 12%, var(--color-fd-border) 88%);
+          border-radius: 999px;
+          padding: 0.45rem 0.8rem;
+          font-size: 0.84rem;
+          font-weight: 600;
+          color: var(--color-fd-muted-foreground);
+          background: color-mix(in srgb, white 90%, var(--deepdoc-brand-light) 10%);
+          transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+        }
+
+        .deepdoc-chatbot-mode-toggle--active {
+          border-color: color-mix(in srgb, var(--deepdoc-brand-primary) 42%, var(--color-fd-border) 58%);
+          color: var(--deepdoc-brand-dark);
+          background: color-mix(in srgb, white 72%, var(--deepdoc-brand-light) 28%);
         }
 
         .deepdoc-chatbot-dock__row {
@@ -1977,11 +1448,7 @@ def _source_ts() -> str:
 
 
 def _layout_options_ts(project_name: str, repo_url: str) -> str:
-    links = (
-        f"[{{ text: 'GitHub', url: '{repo_url}' }}]"
-        if repo_url
-        else "[]"
-    )
+    links = f"[{{ text: 'GitHub', url: '{repo_url}' }}]" if repo_url else "[]"
     return dedent(
         f"""\
         export const layoutOptions = {{
@@ -2095,10 +1562,11 @@ def _chatbot_toggle_tsx() -> str:
         import { usePathname, useRouter } from 'next/navigation';
         import { chatbotConfig } from '@/lib/chatbot-config';
 
-        function buildAskUrl(question: string, from: string) {
+        function buildAskUrl(question: string, from: string, mode: 'fast' | 'deep' = 'fast') {
           const params = new URLSearchParams({
             q: question,
             from: from || '/',
+            mode,
           });
           return `/ask?${params.toString()}`;
         }
@@ -2107,6 +1575,7 @@ def _chatbot_toggle_tsx() -> str:
           const pathname = usePathname();
           const router = useRouter();
           const [question, setQuestion] = useState('');
+          const [mode, setMode] = useState<'fast' | 'deep'>('fast');
 
           if (!chatbotConfig.enabled || pathname === '/ask') return null;
 
@@ -2116,7 +1585,7 @@ def _chatbot_toggle_tsx() -> str:
             if (!trimmed) return;
             setQuestion('');
             startTransition(() => {
-              router.push(buildAskUrl(trimmed, pathname || '/'));
+              router.push(buildAskUrl(trimmed, pathname || '/', mode));
             });
           }
 
@@ -2133,6 +1602,22 @@ def _chatbot_toggle_tsx() -> str:
                   <p className="deepdoc-chatbot-dock__hint">
                     Ask from any docs page and keep reading without losing context.
                   </p>
+                </div>
+                <div className="mb-3 flex items-center gap-2">
+                  <button
+                    className={`deepdoc-chatbot-mode-toggle ${mode === 'fast' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                    onClick={() => setMode('fast')}
+                    type="button"
+                  >
+                    Fast
+                  </button>
+                  <button
+                    className={`deepdoc-chatbot-mode-toggle ${mode === 'deep' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                    onClick={() => setMode('deep')}
+                    type="button"
+                  >
+                    Deep Research
+                  </button>
                 </div>
                 <div className="deepdoc-chatbot-dock__row">
                   <textarea
@@ -2192,6 +1677,9 @@ def _chatbot_panel_tsx() -> str:
             doc_path: string;
           }>;
           used_chunks: number;
+          confidence?: string;
+          research_mode?: 'deep';
+          research_sources?: string[];
         };
 
         type ChatHistoryItem = {
@@ -2199,10 +1687,11 @@ def _chatbot_panel_tsx() -> str:
           content: string;
         };
 
-        function buildAskUrl(question: string, from: string) {
+        function buildAskUrl(question: string, from: string, mode: 'fast' | 'deep' = 'fast') {
           const params = new URLSearchParams({
             q: question,
             from: from || '/',
+            mode,
           });
           return `/ask?${params.toString()}`;
         }
@@ -2400,15 +1889,22 @@ def _chatbot_panel_tsx() -> str:
           const searchParams = useSearchParams();
           const question = searchParams.get('q')?.trim() ?? '';
           const from = searchParams.get('from')?.trim() || '/';
+          const modeParam = searchParams.get('mode') === 'deep' ? 'deep' : 'fast';
           const [draft, setDraft] = useState('');
+          const [mode, setMode] = useState<'fast' | 'deep'>(modeParam);
           const [activeQuestion, setActiveQuestion] = useState(question);
           const [loading, setLoading] = useState(false);
           const [error, setError] = useState('');
           const [response, setResponse] = useState<ChatResponse | null>(null);
           const [history, setHistory] = useState<ChatHistoryItem[]>([]);
           const [loadedQuestion, setLoadedQuestion] = useState('');
+          const [loadedMode, setLoadedMode] = useState<'fast' | 'deep'>('fast');
           const [modalCitation, setModalCitation] = useState<CitationEntry | null>(null);
           const latestRequestIdRef = useRef(0);
+
+          useEffect(() => {
+            setMode(modeParam);
+          }, [modeParam]);
 
           useEffect(() => {
             if (!question) {
@@ -2421,11 +1917,15 @@ def _chatbot_panel_tsx() -> str:
               setLoadedQuestion('');
               return;
             }
-            if (question === loadedQuestion) return;
-            void askQuestion(question, []);
-          }, [question, loadedQuestion]);
+            if (question === loadedQuestion && modeParam === loadedMode) return;
+            void askQuestion(question, [], modeParam);
+          }, [question, loadedQuestion, modeParam, loadedMode]);
 
-          async function askQuestion(nextQuestion: string, nextHistory: ChatHistoryItem[]) {
+          async function askQuestion(
+            nextQuestion: string,
+            nextHistory: ChatHistoryItem[],
+            nextMode: 'fast' | 'deep',
+          ) {
             if (!nextQuestion.trim()) return;
             if (!chatbotConfig.apiBaseUrl) {
               setResponse(null);
@@ -2436,16 +1936,19 @@ def _chatbot_panel_tsx() -> str:
             const requestId = latestRequestIdRef.current + 1;
             latestRequestIdRef.current = requestId;
             setLoadedQuestion(nextQuestion);
+            setLoadedMode(nextMode);
             setLoading(true);
             setError('');
             setResponse(null);
             try {
-              const res = await fetch(`${chatbotConfig.apiBaseUrl}/query`, {
+              const endpoint = nextMode === 'deep' ? '/deep-research' : '/query';
+              const res = await fetch(`${chatbotConfig.apiBaseUrl}${endpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
                   question: nextQuestion,
                   history: nextHistory,
+                  max_rounds: nextMode === 'deep' ? 3 : undefined,
                 }),
               });
               if (!res.ok) {
@@ -2456,6 +1959,7 @@ def _chatbot_panel_tsx() -> str:
                 return;
               }
               setActiveQuestion(nextQuestion);
+              setMode(nextMode);
               setResponse(data);
               setHistory([
                 ...nextHistory,
@@ -2480,9 +1984,9 @@ def _chatbot_panel_tsx() -> str:
             if (!trimmed) return;
             const nextHistory = activeQuestion && response ? history.slice(-4) : [];
             setDraft('');
-            void askQuestion(trimmed, nextHistory);
+            void askQuestion(trimmed, nextHistory, mode);
             startTransition(() => {
-              router.replace(buildAskUrl(trimmed, from));
+              router.replace(buildAskUrl(trimmed, from, mode));
             });
           }
 
@@ -2504,7 +2008,9 @@ def _chatbot_panel_tsx() -> str:
                   </p>
                 </div>
                 {response ? (
-                  <span className="deepdoc-chatbot-page__chip">{response.used_chunks} retrieved chunks</span>
+                  <span className="deepdoc-chatbot-page__chip">
+                    {response.research_mode === 'deep' ? 'Deep Research' : 'Fast'} · {response.used_chunks} retrieved chunks{response.confidence ? ` · ${response.confidence} confidence` : ''}
+                  </span>
                 ) : null}
               </div>
 
@@ -2694,6 +2200,22 @@ def _chatbot_panel_tsx() -> str:
                       </p>
                     </div>
                   </div>
+                  <div className="mb-3 flex items-center gap-2">
+                    <button
+                      className={`deepdoc-chatbot-mode-toggle ${mode === 'fast' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                      onClick={() => setMode('fast')}
+                      type="button"
+                    >
+                      Fast
+                    </button>
+                    <button
+                      className={`deepdoc-chatbot-mode-toggle ${mode === 'deep' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                      onClick={() => setMode('deep')}
+                      type="button"
+                    >
+                      Deep Research
+                    </button>
+                  </div>
                   <div className="deepdoc-chatbot-dock__row">
                     <textarea
                       className="deepdoc-chatbot-dock__input text-sm"
@@ -2724,3 +2246,5 @@ def _chatbot_panel_tsx() -> str:
         }
         """
     )
+
+

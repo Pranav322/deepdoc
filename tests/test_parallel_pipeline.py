@@ -2,20 +2,19 @@
 
 from __future__ import annotations
 
-import time
-from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+import time
 from unittest.mock import MagicMock, patch
 
-from deepdoc.planner_v2 import (
+from deepdoc.config import DEFAULT_CONFIG
+from deepdoc.parser.base import ParsedFile, Symbol
+from deepdoc.planner import (
     DocBucket,
     DocPlan,
     RepoScan,
     _decompose_buckets,
     run_phase2_scans,
 )
-from deepdoc.parser.base import ParsedFile, Symbol
-from deepdoc.config import DEFAULT_CONFIG
 
 
 def _make_scan(
@@ -127,11 +126,11 @@ def test_giant_file_clustering_uses_thread_pool():
 
     cfg = {"giant_file_lines": 2000, "max_parallel_workers": 3}
 
-    with patch("deepdoc.scan_v2.cluster_giant_file", side_effect=fake_cluster) as mock_cluster:
+    with patch("deepdoc.scanner.cluster_giant_file", side_effect=fake_cluster):
         # We need to also mock the other scan imports
-        with patch("deepdoc.scan_v2.build_endpoint_bundles"), \
-             patch("deepdoc.scan_v2.discover_integrations"), \
-             patch("deepdoc.scan_v2.discover_artifacts") as mock_artifacts:
+        with patch("deepdoc.scanner.build_endpoint_bundles"), \
+             patch("deepdoc.scanner.discover_integrations"), \
+             patch("deepdoc.scanner.discover_artifacts") as mock_artifacts:
             # Mock artifact scan return
             mock_artifact_result = MagicMock()
             mock_artifact_result.setup_artifacts = []
@@ -231,8 +230,8 @@ def test_decompose_parallelizes_llm_calls():
 
     cfg = {"decompose_threshold": 7, "max_parallel_workers": 3}
 
-    with patch("deepdoc.planner_v2._llm_step", side_effect=fake_llm_step):
-        result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+    with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
+        _decompose_buckets(plan, scan, cfg, MagicMock(), {})
 
     # Should have called LLM 3 times (one per bucket)
     assert len(call_times) == 3
@@ -265,7 +264,7 @@ def test_decompose_no_candidates_returns_plan_unchanged():
     cfg = {"decompose_threshold": 7}
 
     # Should not call LLM at all
-    with patch("deepdoc.planner_v2._llm_step") as mock_llm:
+    with patch("deepdoc.planner.heuristics._llm_step") as mock_llm:
         result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
 
     mock_llm.assert_not_called()
@@ -279,7 +278,7 @@ def test_decompose_no_candidates_returns_plan_unchanged():
 
 def test_generator_reads_rate_limit_pause_from_config():
     """BucketGenerationEngine should read rate_limit_pause from config."""
-    from deepdoc.generator_v2 import BucketGenerationEngine, RATE_LIMIT_PAUSE
+    from deepdoc.generator import BucketGenerationEngine
 
     cfg = {
         "rate_limit_pause": 0.1,
@@ -307,7 +306,7 @@ def test_generator_reads_rate_limit_pause_from_config():
 
 def test_generator_uses_default_rate_limit_pause():
     """Without config override, should use the module-level default."""
-    from deepdoc.generator_v2 import BucketGenerationEngine, RATE_LIMIT_PAUSE
+    from deepdoc.generator.generation import RATE_LIMIT_PAUSE, BucketGenerationEngine
 
     cfg = {
         "source_context_budget": 200000,

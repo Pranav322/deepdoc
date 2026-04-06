@@ -12,7 +12,13 @@ CORPUS_FILES = {
     "code": ("code_chunks.jsonl", "code_vectors.npy", "code.faiss"),
     "artifact": ("artifact_chunks.jsonl", "artifact_vectors.npy", "artifacts.faiss"),
     "doc_summary": ("doc_chunks.jsonl", "doc_vectors.npy", "docs.faiss"),
-    "relationship": ("relationship_chunks.jsonl", "relationship_vectors.npy", "relationship.faiss"),
+    "doc_full": ("doc_full_chunks.jsonl", "doc_full_vectors.npy", "docs_full.faiss"),
+    "repo_doc": ("repo_doc_chunks.jsonl", "repo_doc_vectors.npy", "repo_docs.faiss"),
+    "relationship": (
+        "relationship_chunks.jsonl",
+        "relationship_vectors.npy",
+        "relationship.faiss",
+    ),
 }
 
 
@@ -77,7 +83,9 @@ def save_corpus(
     ensure_index_dir(index_dir)
     paths = corpus_paths(index_dir, corpus)
     lines = [json.dumps(record.to_dict(), sort_keys=True) for record in records]
-    paths["chunks"].write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
+    paths["chunks"].write_text(
+        "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
+    )
 
     try:
         import numpy as np
@@ -95,15 +103,18 @@ def save_corpus(
 
 def write_vector_index(path: Path, vectors: Any) -> None:
     try:
-        import numpy as np
         import faiss  # type: ignore
+        import numpy as np
 
         arr = np.asarray(vectors, dtype="float32")
         if arr.size == 0 or arr.ndim != 2:
             path.write_text("empty\n", encoding="utf-8")
             return
         normalized = normalize_vectors(arr)
-        index = faiss.IndexFlatIP(normalized.shape[1])
+        # FAISS IndexFlatIP performs inner product search on normalized vectors
+        # The dimension is the second dimension of the array
+        dim = normalized.shape[1] if normalized.ndim == 2 else 384
+        index = faiss.IndexFlatIP(dim)
         index.add(normalized)
         faiss.write_index(index, str(path))
     except Exception:
@@ -144,7 +155,7 @@ def similarity_search(
             scores, order = vector_index.search(query, top_k)
             return [
                 RetrievedChunk(record=records[idx], score=float(score))
-                for score, idx in zip(scores[0], order[0])
+                for score, idx in zip(scores[0], order[0], strict=False)
                 if idx >= 0 and idx < len(records)
             ]
         except Exception:
@@ -170,7 +181,7 @@ def similarity_search(
         query = normalize_vectors([query_vector])[0]
         scored = []
         for idx, row in enumerate(arr):
-            score = sum(left * right for left, right in zip(row, query))
+            score = sum(left * right for left, right in zip(row, query, strict=False))
             scored.append((score, idx))
         scored.sort(reverse=True)
         return [

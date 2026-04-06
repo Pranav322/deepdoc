@@ -12,7 +12,6 @@ from .common import (
     split_top_level_args,
 )
 
-
 FALCON_ADD_ROUTE = re.compile(r"""(?:app|api)\s*\.\s*add_route\s*\(""", re.MULTILINE)
 
 FALCON_RESPONDER = re.compile(
@@ -27,10 +26,11 @@ def detect_falcon(context: RouteResolverContext) -> list[APIEndpoint]:
         return []
 
     endpoints: list[APIEndpoint] = []
+    app_middleware = _extract_falcon_app_middleware(content)
 
     for match in FALCON_ADD_ROUTE.finditer(content):
         line_start = content.rfind("\n", 0, match.start()) + 1
-        prefix = content[line_start:match.start()]
+        prefix = content[line_start : match.start()]
         if prefix.lstrip().startswith("#"):
             continue
         call_text = extract_balanced_segment(content, match.end() - 1)
@@ -57,6 +57,7 @@ def detect_falcon(context: RouteResolverContext) -> list[APIEndpoint]:
                         route_file=str(context.path),
                         handler_file=str(context.path),
                         line=line_num,
+                        middleware=list(app_middleware),
                         raw_path=path_expr,
                         provenance={"resource_ref": resource_ref},
                     )
@@ -71,6 +72,7 @@ def detect_falcon(context: RouteResolverContext) -> list[APIEndpoint]:
                     route_file=str(context.path),
                     handler_file=str(context.path),
                     line=line_num,
+                    middleware=list(app_middleware),
                     raw_path=path_expr,
                     provenance={"resource_ref": resource_ref},
                 )
@@ -96,6 +98,7 @@ def detect_falcon(context: RouteResolverContext) -> list[APIEndpoint]:
                         route_file=str(context.path),
                         handler_file=str(context.path),
                         line=0,
+                        middleware=list(app_middleware),
                         raw_path=f"(see add_route for {class_name})",
                         provenance={"resource_ref": class_name},
                     )
@@ -126,6 +129,66 @@ def find_falcon_responders(content: str, class_name: str) -> list[str]:
             http_method = method_name.replace("on_", "").upper()
             methods.append(http_method)
     return methods
+
+
+def _extract_falcon_app_middleware(content: str) -> list[str]:
+    names: list[str] = []
+
+    app_pattern = re.compile(
+        r"""(?:app|api)\s*=\s*falcon\.(?:App|API)\s*\(""",
+        re.MULTILINE,
+    )
+    add_pattern = re.compile(
+        r"""(?:app|api)\s*\.\s*add_middleware\s*\(""", re.MULTILINE
+    )
+
+    for pattern in (app_pattern, add_pattern):
+        for match in pattern.finditer(content):
+            call_text = extract_balanced_segment(content, match.end() - 1)
+            if not call_text:
+                continue
+            names.extend(_extract_middleware_names(call_text[1:-1]))
+
+    ordered: list[str] = []
+    for name in names:
+        if name and name not in ordered:
+            ordered.append(name)
+    return ordered
+
+
+def _extract_middleware_names(arg_text: str) -> list[str]:
+    names: list[str] = []
+
+    list_match = re.search(r"""middleware\s*=\s*(\[[^\]]*\])""", arg_text)
+    if list_match:
+        names.extend(_extract_identifier_names(list_match.group(1)))
+    elif "middleware=" in arg_text:
+        tail = arg_text.split("middleware=", 1)[1]
+        names.extend(_extract_identifier_names(tail))
+    else:
+        names.extend(_extract_identifier_names(arg_text))
+
+    return names
+
+
+def _extract_identifier_names(text: str) -> list[str]:
+    if text.startswith("[") and text.endswith("]"):
+        parts = split_top_level_args(text[1:-1])
+    else:
+        parts = split_top_level_args(text)
+
+    names: list[str] = []
+    for part in parts:
+        stripped = part.strip()
+        if not stripped:
+            continue
+        match = re.search(r"""(\w+(?:\.\w+)*)""", stripped)
+        if not match:
+            continue
+        name = match.group(1)
+        if name not in names:
+            names.append(name)
+    return names
 
 
 DETECTOR = RegisteredRouteDetector(name="falcon", detect=detect_falcon)

@@ -5,23 +5,22 @@ LLM calls are never made — tests mock at the boundary where needed.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass, field
 import hashlib
 import json
-import subprocess
-from dataclasses import dataclass, field
 from pathlib import Path
+import subprocess
 from typing import Any
 
 import pytest
 
 from deepdoc.persistence_v2 import (
-    _state_dir,
-    save_sync_state,
-    save_plan,
     LEDGER_FILE,
+    _state_dir,
+    save_plan,
+    save_sync_state,
 )
-from deepdoc.planner_v2 import DocBucket, DocPlan
-
+from deepdoc.planner import DocBucket, DocPlan
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers

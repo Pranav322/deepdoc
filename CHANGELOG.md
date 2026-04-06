@@ -9,6 +9,45 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.2.0] - 2026-04-06
+
+DeepDoc 1.2.0 expands repo-grounded chatbot retrieval, broadens runtime extraction,
+adds generation quality reporting, and hardens incremental update behavior.
+
+### Added
+
+- Added package-based v2 architecture modules for planner, scanner, generator, and
+  site builder to replace large monolithic files.
+- Added a dedicated repo-doc chatbot corpus with configurable indexing guardrails so
+  selected repo-authored docs are indexed separately from generated docs.
+- Added hybrid chatbot retrieval improvements: lexical exact-match paths, graph-aware
+  relationship expansion, adjacent code-window stitching, and richer citation payloads.
+- Added `/deep-research` live repo fallback with bounded evidence collection while
+  keeping normal `/query` index-only.
+- Added runtime extraction coverage for Django commands/signals/channels, Laravel
+  jobs/events/listeners/scheduler, JS/TS worker and queue patterns, and Go workers.
+- Added persisted generation quality reporting at `.deepdoc/generation_quality.json`.
+
+### Changed
+
+- Updated planner specializations and evidence assembly so runtime, config, and
+  integration details propagate consistently into generated pages.
+- Extended generated-page validation to enforce route/runtime/config/integration
+  grounding when corresponding evidence exists.
+- Updated README and AGENTS guidance to match the current architecture and retrieval
+  behavior.
+
+### Fixed
+
+- Fixed incremental chatbot sync handling for deleted generated-doc files so stale
+  chunks are removed correctly.
+
+### Docs And Tests
+
+- Expanded tests across chatbot indexing/query behavior, runtime extraction,
+  planner granularity, generation evidence/validation, and framework fixtures.
+- Added Falcon and Go fixture coverage for framework/runtime scan and retrieval paths.
+
 ## [1.1.0] - 2026-04-04
 
 DeepDoc 1.1.0 improves generation grounding, chatbot retrieval depth, and generated

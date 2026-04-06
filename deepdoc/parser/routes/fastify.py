@@ -15,6 +15,8 @@ from .common import (
 from .js_shared import (
     FASTIFY_ROUTE_CALL,
     JS_ROUTE_CALL,
+    extract_fastify_hooks,
+    extract_fastify_hooks_from_args,
     extract_fastify_mounts,
     extract_fastify_plugin_aliases,
     extract_fastify_schema,
@@ -26,7 +28,15 @@ from .js_shared import (
 
 def detect_fastify(context: RouteResolverContext) -> list[APIEndpoint]:
     content = context.content
-    if "fastify" not in content.lower() and "Fastify" not in content:
+    if (
+        "fastify" not in content.lower()
+        and "addHook" not in content
+        and not re.search(
+            r"""\b(?:instance|server|app|fastify)\s*\.\s*(?:get|post|put|patch|delete|route)\s*\(""",
+            content,
+            re.IGNORECASE,
+        )
+    ):
         return []
 
     endpoints: list[APIEndpoint] = []
@@ -54,6 +64,7 @@ def detect_fastify(context: RouteResolverContext) -> list[APIEndpoint]:
             continue
         details = extract_js_handler_details(args[1:])
         schema = extract_fastify_schema_from_args(args[1:])
+        hooks = extract_fastify_hooks_from_args(args[1:])
         line_num = line_number_for_offset(content, match.start())
         for prefix in resolve_js_prefixes(obj, mounts):
             full_path = join_route_path(prefix, route_path)
@@ -67,10 +78,16 @@ def detect_fastify(context: RouteResolverContext) -> list[APIEndpoint]:
                     path=full_path,
                     handler=details["handler"],
                     file=str(context.path),
+                    route_file=str(context.path),
+                    handler_file=str(context.path),
                     line=line_num,
-                    middleware=details["middleware"],
+                    middleware=list(
+                        dict.fromkeys([*(details["middleware"] or []), *hooks])
+                    ),
                     request_body=schema.get("body", ""),
                     response_type=schema.get("response", ""),
+                    raw_path=args[0].strip(),
+                    provenance={"router_object": obj},
                 )
             )
 
@@ -97,6 +114,7 @@ def detect_fastify(context: RouteResolverContext) -> list[APIEndpoint]:
         route_path = url_match.group(1)
         handler_match = re.search(r"""handler\s*:\s*(\w+(?:\.\w+)*)""", body)
         schema = extract_fastify_schema(body, 0)
+        hooks = extract_fastify_hooks(body)
         line_num = line_number_for_offset(content, match.start())
         for prefix in resolve_js_prefixes(obj, mounts):
             full_path = join_route_path(prefix, route_path)
@@ -110,9 +128,14 @@ def detect_fastify(context: RouteResolverContext) -> list[APIEndpoint]:
                     path=full_path,
                     handler=handler_match.group(1) if handler_match else "route()",
                     file=str(context.path),
+                    route_file=str(context.path),
+                    handler_file=str(context.path),
                     line=line_num,
+                    middleware=hooks,
                     request_body=schema.get("body", ""),
                     response_type=schema.get("response", ""),
+                    raw_path=route_path,
+                    provenance={"router_object": obj},
                 )
             )
 

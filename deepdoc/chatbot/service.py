@@ -2,17 +2,57 @@
 
 from __future__ import annotations
 
-import re
+import fnmatch
+import hashlib
+import os
 from pathlib import Path
+import re
 from typing import Any
 
 from pydantic import BaseModel, Field
 
+from ..parser import supported_extensions
 from ..persistence_v2 import load_plan
+from ..source_metadata import classify_source_kind
 from .persistence import load_corpus, load_vector_index, similarity_search
 from .providers import build_chat_client, build_embedding_client
 from .settings import chatbot_allowed_origins, get_chatbot_cfg
-from .types import RetrievedChunk
+from .types import ChunkRecord, RetrievedChunk
+
+STOPWORD_TOKENS = {
+    "a",
+    "an",
+    "and",
+    "any",
+    "are",
+    "can",
+    "does",
+    "for",
+    "from",
+    "handle",
+    "handled",
+    "how",
+    "in",
+    "is",
+    "it",
+    "its",
+    "of",
+    "or",
+    "repo",
+    "repository",
+    "show",
+    "that",
+    "the",
+    "this",
+    "to",
+    "use",
+    "what",
+    "where",
+    "which",
+    "with",
+    "work",
+}
+DOC_SUFFIXES = {".md", ".mdx", ".txt", ".rst", ".adoc", ".ipynb"}
 
 
 class QueryRequest(BaseModel):
@@ -22,129 +62,241 @@ class QueryRequest(BaseModel):
     history: list[dict[str, str]] = Field(default_factory=list)
 
 
+class DeepResearchRequest(QueryRequest):
+    """Incoming deep-research payload."""
+
+    max_rounds: int = Field(default=3, ge=1, le=6)
+
+
 class ChatbotQueryService:
     """Query all chatbot corpora and answer with grounded citations."""
 
-    def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
+    def __init__(self, repo_root: Path, cfg: dict[str, Any], llm: Any = None) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
         self.chat_cfg = get_chatbot_cfg(cfg)
         self.project_name = cfg.get("project_name") or repo_root.name
+        self._supported_source_extensions = supported_extensions()
         self.embedding_client = build_embedding_client(cfg)
         self.chat_client = build_chat_client(cfg)
+        self._llm = llm or self.chat_client
         self.plan = load_plan(repo_root)
         from .settings import chatbot_index_dir
 
         self.index_dir = chatbot_index_dir(repo_root, cfg)
         self.code_records, self.code_vectors = load_corpus(self.index_dir, "code")
-        self.artifact_records, self.artifact_vectors = load_corpus(self.index_dir, "artifact")
-        self.doc_records, self.doc_vectors = load_corpus(self.index_dir, "doc_summary")
-        self.relationship_records, self.relationship_vectors = load_corpus(self.index_dir, "relationship")
+        self.artifact_records, self.artifact_vectors = load_corpus(
+            self.index_dir, "artifact"
+        )
+        self.doc_summary_records, self.doc_summary_vectors = load_corpus(
+            self.index_dir, "doc_summary"
+        )
+        self.doc_full_records, self.doc_full_vectors = load_corpus(
+            self.index_dir, "doc_full"
+        )
+        self.repo_doc_records, self.repo_doc_vectors = load_corpus(
+            self.index_dir, "repo_doc"
+        )
+        self.relationship_records, self.relationship_vectors = load_corpus(
+            self.index_dir, "relationship"
+        )
         self.code_index = load_vector_index(self.index_dir, "code")
         self.artifact_index = load_vector_index(self.index_dir, "artifact")
-        self.doc_index = load_vector_index(self.index_dir, "doc_summary")
+        self.doc_summary_index = load_vector_index(self.index_dir, "doc_summary")
+        self.doc_full_index = load_vector_index(self.index_dir, "doc_full")
+        self.repo_doc_index = load_vector_index(self.index_dir, "repo_doc")
         self.relationship_index = load_vector_index(self.index_dir, "relationship")
 
-        # Build code record lookup for chain-retrieval
+        # Build corpus lookups for chain and graph-neighbor expansion.
         self._code_by_file: dict[str, list[int]] = {}
         for idx, record in enumerate(self.code_records):
             self._code_by_file.setdefault(record.file_path, []).append(idx)
+        self._code_by_file_sorted: dict[str, list[int]] = {
+            file_path: sorted(
+                indices,
+                key=lambda idx: (
+                    self.code_records[idx].start_line,
+                    self.code_records[idx].end_line,
+                    self.code_records[idx].chunk_id,
+                ),
+            )
+            for file_path, indices in self._code_by_file.items()
+        }
+        self._artifact_by_file: dict[str, list[int]] = {}
+        for idx, record in enumerate(self.artifact_records):
+            self._artifact_by_file.setdefault(record.file_path, []).append(idx)
+        self._relationship_by_file: dict[str, list[int]] = {}
+        for idx, record in enumerate(self.relationship_records):
+            self._relationship_by_file.setdefault(record.file_path, []).append(idx)
+        self._docs_by_path: dict[str, list[tuple[str, int]]] = {}
+        self._docs_by_url: dict[str, list[tuple[str, int]]] = {}
+        for idx, record in enumerate(self.doc_summary_records):
+            self._index_doc_record("doc_summary", idx, record)
+        for idx, record in enumerate(self.doc_full_records):
+            self._index_doc_record("doc_full", idx, record)
+        for idx, record in enumerate(self.repo_doc_records):
+            self._index_doc_record("repo_doc", idx, record)
 
-    def query(self, question: str, history: list[dict[str, str]] | None = None) -> dict[str, Any]:
-        retrieval_cfg = self.chat_cfg["retrieval"]
-
-        # Step 1: Query expansion — generate alternative search queries
-        queries = self._expand_query(question, retrieval_cfg)
-
-        # Step 2: Embed all query variants in one batch
-        query_vectors = self.embedding_client.embed(queries)
-
-        # Step 3: Similarity search per corpus, merge results across variants
-        code_hits = self._multi_query_search(
-            self.code_records,
-            self.code_vectors,
-            query_vectors,
-            retrieval_cfg["top_k_code"],
-            vector_index=self.code_index,
+    def query(
+        self, question: str, history: list[dict[str, str]] | None = None
+    ) -> dict[str, Any]:
+        context = self.retrieve_context(question, history)
+        code_hits = context["code_hits"]
+        artifact_hits = context["artifact_hits"]
+        doc_hits = context["doc_hits"]
+        relationship_hits = context["relationship_hits"]
+        selected = self._select_prompt_hits(
+            question,
+            code_hits,
+            artifact_hits,
+            doc_hits,
+            relationship_hits,
         )
-        artifact_hits = self._multi_query_search(
-            self.artifact_records,
-            self.artifact_vectors,
-            query_vectors,
-            retrieval_cfg["top_k_artifact"],
-            vector_index=self.artifact_index,
-        )
-        doc_hits = self._multi_query_search(
-            self.doc_records,
-            self.doc_vectors,
-            query_vectors,
-            retrieval_cfg["top_k_docs"],
-            vector_index=self.doc_index,
-        )
-        relationship_hits = self._multi_query_search(
-            self.relationship_records,
-            self.relationship_vectors,
-            query_vectors,
-            retrieval_cfg.get("top_k_relationship", 6),
-            vector_index=self.relationship_index,
-        )
+        selected_code = selected["code_hits"]
+        selected_artifacts = selected["artifact_hits"]
+        selected_docs = selected["doc_hits"]
+        selected_relationships = selected["relationship_hits"]
 
-        # Step 3.5: Chain-retrieval — use relationship hits to pull in related code
-        code_hits = self._chain_retrieve(code_hits, relationship_hits, retrieval_cfg)
-
-        # Step 4: Rerank with LLM for better precision
-        code_hits, artifact_hits, doc_hits = self._rerank(
-            question, code_hits, artifact_hits, doc_hits, retrieval_cfg,
-        )
-
-        # Step 5: Apply final prompt limits
-        selected_code = code_hits[: retrieval_cfg["max_prompt_code_chunks"]]
-        selected_artifacts = artifact_hits[: retrieval_cfg["max_prompt_artifact_chunks"]]
-        selected_docs = doc_hits[: retrieval_cfg["max_prompt_doc_chunks"]]
-        selected_relationships = relationship_hits[:4]  # lightweight, always include a few
-
-        if not (selected_code or selected_artifacts or selected_docs):
+        if not (
+            selected_code
+            or selected_artifacts
+            or selected_docs
+            or selected_relationships
+        ):
             return self._no_context_result(question)
 
         # Step 6: Build prompt and generate answer
         prompt = self._build_prompt(
-            question, history or [], selected_code, selected_artifacts,
-            selected_docs, selected_relationships,
+            question,
+            history or [],
+            selected_code,
+            selected_artifacts,
+            selected_docs,
+            selected_relationships,
         )
         answer = self.chat_client.complete(self._system_prompt(), prompt)
+        all_selected_hits = (
+            selected_code + selected_artifacts + selected_docs + selected_relationships
+        )
 
         return {
             "answer": answer,
-            "code_citations": [
-                {
-                    "file_path": hit.record.file_path,
-                    "start_line": hit.record.start_line,
-                    "end_line": hit.record.end_line,
-                    "symbol_names": hit.record.symbol_names,
-                    "text": hit.record.text,
-                    "language": hit.record.language,
-                    "source_kind": hit.record.source_kind,
-                    "publication_tier": hit.record.publication_tier,
-                    "framework": hit.record.framework,
-                }
-                for hit in selected_code
-            ],
+            "code_citations": [self._citation_payload(hit) for hit in selected_code],
             "artifact_citations": [
-                {
-                    "file_path": hit.record.file_path,
-                    "start_line": hit.record.start_line,
-                    "end_line": hit.record.end_line,
-                    "artifact_type": hit.record.artifact_type,
-                    "text": hit.record.text,
-                    "language": hit.record.language,
-                    "source_kind": hit.record.source_kind,
-                    "publication_tier": hit.record.publication_tier,
-                    "framework": hit.record.framework,
-                }
-                for hit in selected_artifacts
+                self._citation_payload(hit) for hit in selected_artifacts
             ],
-            "doc_links": self._doc_links(selected_docs, selected_code + selected_artifacts),
-            "used_chunks": len(selected_code) + len(selected_artifacts) + len(selected_docs) + len(selected_relationships),
+            "doc_citations": [
+                self._citation_payload(hit)
+                for hit in selected_docs
+                if hit.record.kind in {"doc_summary", "doc_full"}
+            ],
+            "repo_doc_citations": [
+                self._citation_payload(hit)
+                for hit in selected_docs
+                if hit.record.kind == "repo_doc"
+            ],
+            "relationship_citations": [
+                self._citation_payload(hit) for hit in selected_relationships
+            ],
+            "live_fallback_citations": [
+                self._citation_payload(hit)
+                for hit in all_selected_hits
+                if (hit.record.metadata or {}).get("chunk_subtype")
+                == "live_repo_fallback"
+            ],
+            "doc_links": self._doc_links(
+                selected_docs, selected_code + selected_artifacts
+            ),
+            "used_chunks": len(selected_code)
+            + len(selected_artifacts)
+            + len(selected_docs)
+            + len(selected_relationships),
+        }
+
+    def retrieve_context(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        original_question: str | None = None,
+    ) -> dict[str, list[RetrievedChunk]]:
+        retrieval_cfg = self.chat_cfg["retrieval"]
+        search_question = original_question or question
+
+        queries = self._expand_query(question, retrieval_cfg)
+        code_hits, artifact_hits, doc_hits, relationship_hits = (
+            self._search_query_batch(
+                queries,
+                search_question,
+                retrieval_cfg,
+            )
+        )
+
+        followup_queries = self._derive_followup_queries(
+            question,
+            code_hits,
+            artifact_hits,
+            doc_hits,
+            relationship_hits,
+            retrieval_cfg,
+        )
+        if followup_queries:
+            followup_code, followup_artifact, followup_doc, followup_relationship = (
+                self._search_query_batch(
+                    followup_queries,
+                    search_question,
+                    retrieval_cfg,
+                )
+            )
+            code_hits = self._merge_hits(
+                code_hits,
+                followup_code,
+                limit=self._candidate_top_k("code", retrieval_cfg),
+            )
+            artifact_hits = self._merge_hits(
+                artifact_hits,
+                followup_artifact,
+                limit=self._candidate_top_k("artifact", retrieval_cfg),
+            )
+            doc_hits = self._merge_hits(
+                doc_hits,
+                followup_doc,
+                limit=max(
+                    self._candidate_top_k("docs", retrieval_cfg) * 2,
+                    retrieval_cfg["top_k_docs"],
+                ),
+            )
+            relationship_hits = self._merge_hits(
+                relationship_hits,
+                followup_relationship,
+                limit=self._candidate_top_k("relationship", retrieval_cfg),
+            )
+
+        code_hits, artifact_hits, doc_hits, relationship_hits = (
+            self._graph_neighbor_expand(
+                code_hits,
+                artifact_hits,
+                doc_hits,
+                relationship_hits,
+                retrieval_cfg,
+            )
+        )
+        code_hits = self._chain_retrieve(code_hits, relationship_hits, retrieval_cfg)
+        code_hits, artifact_hits, doc_hits = self._rerank(
+            search_question,
+            code_hits,
+            artifact_hits,
+            doc_hits,
+            retrieval_cfg,
+        )
+        code_hits = self._stitch_code_hits(search_question, code_hits, retrieval_cfg)
+        return {
+            "code_hits": code_hits[: retrieval_cfg["top_k_code"]],
+            "artifact_hits": artifact_hits[: retrieval_cfg["top_k_artifact"]],
+            "doc_hits": doc_hits[: retrieval_cfg["top_k_docs"]],
+            "relationship_hits": relationship_hits[
+                : retrieval_cfg.get("top_k_relationship", 6)
+            ],
         }
 
     def _no_context_result(self, question: str) -> dict[str, Any]:
@@ -157,9 +309,55 @@ class ChatbotQueryService:
             "answer": answer,
             "code_citations": [],
             "artifact_citations": [],
+            "doc_citations": [],
+            "repo_doc_citations": [],
+            "relationship_citations": [],
+            "live_fallback_citations": [],
             "doc_links": [],
             "used_chunks": 0,
         }
+
+    def deep_research(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        max_rounds: int = 3,
+    ) -> dict[str, Any]:
+        """Run a DeepResearch session: decompose → retrieve → synthesise.
+
+        Returns a ResearchResult with a comprehensive answer and source citations.
+        Requires an LLM client to be configured (llm= at construction time or via settings).
+
+        Args:
+            question: The research question to answer.
+            max_rounds: Maximum number of sub-questions to explore.
+
+        Returns:
+            ResearchResult with fields: original_question, steps, final_answer, all_sources, confidence.
+        """
+        from .deep_research import DeepResearcher
+
+        researcher = DeepResearcher(
+            service=self,
+            llm=self._llm,
+            top_k=8,
+            max_rounds=max_rounds,
+        )
+        result = researcher.research(question, history=history or [])
+        base = self.query(question, history)
+        base.update(
+            {
+                "answer": result.final_answer,
+                "used_chunks": max(
+                    base.get("used_chunks", 0),
+                    sum(step.chunks_used for step in result.steps),
+                ),
+                "confidence": result.confidence,
+                "research_mode": "deep",
+                "research_sources": result.all_sources,
+            }
+        )
+        return base
 
     def _expand_query(self, question: str, retrieval_cfg: dict[str, Any]) -> list[str]:
         """Generate alternative search queries via LLM for better recall."""
@@ -176,12 +374,616 @@ class ChatbotQueryService:
                 "file patterns, technical synonyms."
             )
             raw = self.chat_client.complete(expansion_system, question)
-            variants = [line.strip() for line in raw.strip().splitlines() if line.strip()]
+            variants = [
+                line.strip() for line in raw.strip().splitlines() if line.strip()
+            ]
             variants = variants[:max_extra]
         except Exception:
             variants = []
 
         return [question] + variants
+
+    def _search_query_batch(
+        self,
+        queries: list[str],
+        question: str,
+        retrieval_cfg: dict[str, Any],
+    ) -> tuple[
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+    ]:
+        query_vectors = self.embedding_client.embed(queries)
+        candidate_top_k_code = self._candidate_top_k("code", retrieval_cfg)
+        candidate_top_k_artifact = self._candidate_top_k("artifact", retrieval_cfg)
+        candidate_top_k_docs = self._candidate_top_k("docs", retrieval_cfg)
+        candidate_top_k_relationship = self._candidate_top_k(
+            "relationship", retrieval_cfg
+        )
+
+        semantic_code_hits = self._multi_query_search(
+            self.code_records,
+            self.code_vectors,
+            query_vectors,
+            candidate_top_k_code,
+            vector_index=self.code_index,
+            question=question,
+        )
+        semantic_artifact_hits = self._multi_query_search(
+            self.artifact_records,
+            self.artifact_vectors,
+            query_vectors,
+            candidate_top_k_artifact,
+            vector_index=self.artifact_index,
+            question=question,
+        )
+        semantic_doc_summary_hits = self._multi_query_search(
+            self.doc_summary_records,
+            self.doc_summary_vectors,
+            query_vectors,
+            candidate_top_k_docs,
+            vector_index=self.doc_summary_index,
+            question=question,
+        )
+        semantic_doc_full_hits = self._multi_query_search(
+            self.doc_full_records,
+            self.doc_full_vectors,
+            query_vectors,
+            candidate_top_k_docs,
+            vector_index=self.doc_full_index,
+            question=question,
+        )
+        semantic_repo_doc_hits = self._multi_query_search(
+            self.repo_doc_records,
+            self.repo_doc_vectors,
+            query_vectors,
+            candidate_top_k_docs,
+            vector_index=self.repo_doc_index,
+            question=question,
+        )
+        lexical_code_hits = self._lexical_search(
+            self.code_records,
+            queries,
+            question,
+            candidate_top_k_code,
+        )
+        lexical_artifact_hits = self._lexical_search(
+            self.artifact_records,
+            queries,
+            question,
+            candidate_top_k_artifact,
+        )
+        lexical_doc_summary_hits = self._lexical_search(
+            self.doc_summary_records,
+            queries,
+            question,
+            candidate_top_k_docs,
+        )
+        lexical_doc_full_hits = self._lexical_search(
+            self.doc_full_records,
+            queries,
+            question,
+            candidate_top_k_docs,
+        )
+        lexical_repo_doc_hits = self._lexical_search(
+            self.repo_doc_records,
+            queries,
+            question,
+            candidate_top_k_docs,
+        )
+        lexical_relationship_hits = self._lexical_search(
+            self.relationship_records,
+            queries,
+            question,
+            candidate_top_k_relationship,
+        )
+        code_hits = self._merge_hits(
+            semantic_code_hits,
+            lexical_code_hits,
+            limit=candidate_top_k_code,
+        )
+        artifact_hits = self._merge_hits(
+            semantic_artifact_hits,
+            lexical_artifact_hits,
+            limit=candidate_top_k_artifact,
+        )
+        doc_hits = self._merge_hits(
+            semantic_doc_summary_hits,
+            semantic_doc_full_hits,
+            semantic_repo_doc_hits,
+            lexical_doc_summary_hits,
+            lexical_doc_full_hits,
+            lexical_repo_doc_hits,
+            limit=max(candidate_top_k_docs * 2, retrieval_cfg["top_k_docs"]),
+        )
+        semantic_relationship_hits = self._multi_query_search(
+            self.relationship_records,
+            self.relationship_vectors,
+            query_vectors,
+            candidate_top_k_relationship,
+            vector_index=self.relationship_index,
+            question=question,
+        )
+        relationship_hits = self._merge_hits(
+            semantic_relationship_hits,
+            lexical_relationship_hits,
+            limit=candidate_top_k_relationship,
+        )
+        return code_hits, artifact_hits, doc_hits, relationship_hits
+
+    def _candidate_top_k(self, corpus: str, retrieval_cfg: dict[str, Any]) -> int:
+        if corpus == "code":
+            return retrieval_cfg.get(
+                "candidate_top_k_code", retrieval_cfg["top_k_code"]
+            )
+        if corpus == "artifact":
+            return retrieval_cfg.get(
+                "candidate_top_k_artifact", retrieval_cfg["top_k_artifact"]
+            )
+        if corpus == "docs":
+            return retrieval_cfg.get(
+                "candidate_top_k_docs", retrieval_cfg["top_k_docs"]
+            )
+        return retrieval_cfg.get(
+            "candidate_top_k_relationship",
+            retrieval_cfg.get("top_k_relationship", 6),
+        )
+
+    def _citation_payload(self, hit: RetrievedChunk) -> dict[str, Any]:
+        record = hit.record
+        return {
+            "kind": record.kind,
+            "file_path": record.file_path,
+            "doc_path": record.doc_path,
+            "doc_url": record.doc_url,
+            "title": record.title,
+            "section_name": record.section_name,
+            "start_line": record.start_line,
+            "end_line": record.end_line,
+            "symbol_names": record.symbol_names,
+            "artifact_type": record.artifact_type,
+            "text": record.text,
+            "language": record.language,
+            "source_kind": record.source_kind,
+            "publication_tier": record.publication_tier,
+            "framework": record.framework,
+            "metadata": record.metadata,
+            "score": hit.score,
+        }
+
+    def _index_doc_record(self, corpus: str, idx: int, record: Any) -> None:
+        if record.doc_path:
+            self._docs_by_path.setdefault(record.doc_path, []).append((corpus, idx))
+        if record.doc_url:
+            self._docs_by_url.setdefault(record.doc_url, []).append((corpus, idx))
+
+    def _graph_neighbor_expand(
+        self,
+        code_hits: list[RetrievedChunk],
+        artifact_hits: list[RetrievedChunk],
+        doc_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk],
+        retrieval_cfg: dict[str, Any],
+    ) -> tuple[
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+        list[RetrievedChunk],
+    ]:
+        if not retrieval_cfg.get("graph_neighbor_expansion", False):
+            return code_hits, artifact_hits, doc_hits, relationship_hits
+
+        candidate_files: list[str] = []
+        candidate_doc_paths: list[str] = []
+        candidate_doc_urls: list[str] = []
+        seen_files: set[str] = set()
+        seen_doc_paths: set[str] = set()
+        seen_doc_urls: set[str] = set()
+
+        for hit in code_hits + artifact_hits + doc_hits + relationship_hits:
+            record = hit.record
+            for file_path in [
+                record.file_path,
+                *record.linked_file_paths,
+                *record.owned_files,
+            ]:
+                normalized = file_path.strip()
+                if normalized and normalized not in seen_files:
+                    seen_files.add(normalized)
+                    candidate_files.append(normalized)
+            for doc_path in [record.doc_path, *record.related_doc_paths]:
+                normalized = doc_path.strip()
+                if normalized and normalized not in seen_doc_paths:
+                    seen_doc_paths.add(normalized)
+                    candidate_doc_paths.append(normalized)
+            for doc_url in [record.doc_url, *record.related_doc_urls]:
+                normalized = doc_url.strip()
+                if normalized and normalized not in seen_doc_urls:
+                    seen_doc_urls.add(normalized)
+                    candidate_doc_urls.append(normalized)
+
+        max_files = retrieval_cfg.get("graph_neighbor_max_files", 6)
+        code_hits = self._merge_hits(
+            code_hits,
+            self._expand_hits_by_file(
+                candidate_files[:max_files],
+                self._code_by_file,
+                self.code_records,
+                retrieval_cfg.get("graph_neighbor_code_chunks_per_file", 2),
+                score=0.72,
+                exclude_ids={hit.record.chunk_id for hit in code_hits},
+            ),
+            limit=self._candidate_top_k("code", retrieval_cfg),
+        )
+        artifact_hits = self._merge_hits(
+            artifact_hits,
+            self._expand_hits_by_file(
+                candidate_files[:max_files],
+                self._artifact_by_file,
+                self.artifact_records,
+                retrieval_cfg.get("graph_neighbor_artifact_chunks_per_file", 1),
+                score=0.66,
+                exclude_ids={hit.record.chunk_id for hit in artifact_hits},
+            ),
+            limit=self._candidate_top_k("artifact", retrieval_cfg),
+        )
+        relationship_hits = self._merge_hits(
+            relationship_hits,
+            self._expand_hits_by_file(
+                candidate_files[:max_files],
+                self._relationship_by_file,
+                self.relationship_records,
+                retrieval_cfg.get("graph_neighbor_relationship_chunks_per_file", 2),
+                score=0.7,
+                exclude_ids={hit.record.chunk_id for hit in relationship_hits},
+                preferred_subtypes={
+                    "graph_neighbors",
+                    "call_graph",
+                    "framework_context",
+                    "import_graph",
+                    "symbol_index",
+                },
+            ),
+            limit=self._candidate_top_k("relationship", retrieval_cfg),
+        )
+        doc_hits = self._merge_hits(
+            doc_hits,
+            self._expand_doc_hits(
+                candidate_doc_paths,
+                candidate_doc_urls,
+                max_chunks=retrieval_cfg.get("graph_neighbor_max_docs", 4),
+                exclude_ids={hit.record.chunk_id for hit in doc_hits},
+            ),
+            limit=max(
+                self._candidate_top_k("docs", retrieval_cfg) * 2,
+                retrieval_cfg["top_k_docs"],
+            ),
+        )
+        return code_hits, artifact_hits, doc_hits, relationship_hits
+
+    def _expand_hits_by_file(
+        self,
+        file_paths: list[str],
+        index_by_file: dict[str, list[int]],
+        records: list[Any],
+        per_file_limit: int,
+        *,
+        score: float,
+        exclude_ids: set[str],
+        preferred_subtypes: set[str] | None = None,
+    ) -> list[RetrievedChunk]:
+        hits: list[RetrievedChunk] = []
+        for file_path in file_paths:
+            indices = index_by_file.get(file_path, [])
+            if not indices:
+                continue
+            selected = []
+            if preferred_subtypes:
+                selected.extend(
+                    idx
+                    for idx in indices
+                    if str(
+                        (records[idx].metadata or {}).get("chunk_subtype", "")
+                    ).lower()
+                    in preferred_subtypes
+                )
+                selected.extend(idx for idx in indices if idx not in selected)
+            else:
+                selected = list(indices)
+            count = 0
+            for idx in selected:
+                record = records[idx]
+                if record.chunk_id in exclude_ids:
+                    continue
+                hits.append(RetrievedChunk(record=record, score=score))
+                exclude_ids.add(record.chunk_id)
+                count += 1
+                if count >= per_file_limit:
+                    break
+        return hits
+
+    def _expand_doc_hits(
+        self,
+        doc_paths: list[str],
+        doc_urls: list[str],
+        *,
+        max_chunks: int,
+        exclude_ids: set[str],
+    ) -> list[RetrievedChunk]:
+        hits: list[RetrievedChunk] = []
+        seen_pairs: set[tuple[str, int]] = set()
+        for corpus, mapping_keys, lookup in (
+            ("doc_path", doc_paths, self._docs_by_path),
+            ("doc_url", doc_urls, self._docs_by_url),
+        ):
+            del corpus
+            for key in mapping_keys:
+                for kind, idx in lookup.get(key, []):
+                    pair = (kind, idx)
+                    if pair in seen_pairs:
+                        continue
+                    seen_pairs.add(pair)
+                    if kind == "doc_summary":
+                        record = self.doc_summary_records[idx]
+                        score = 0.63
+                    elif kind == "doc_full":
+                        record = self.doc_full_records[idx]
+                        score = 0.69
+                    else:
+                        record = self.repo_doc_records[idx]
+                        score = 0.67
+                    if record.chunk_id in exclude_ids:
+                        continue
+                    hits.append(RetrievedChunk(record=record, score=score))
+                    exclude_ids.add(record.chunk_id)
+                    if len(hits) >= max_chunks:
+                        return hits
+        return hits
+
+    def _derive_followup_queries(
+        self,
+        question: str,
+        code_hits: list[RetrievedChunk],
+        artifact_hits: list[RetrievedChunk],
+        doc_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk],
+        retrieval_cfg: dict[str, Any],
+    ) -> list[str]:
+        if not retrieval_cfg.get("iterative_retrieval", False):
+            return []
+
+        max_queries = max(0, retrieval_cfg.get("iterative_max_followup_queries", 2))
+        if max_queries == 0:
+            return []
+
+        hints: list[str] = []
+        seen: set[str] = set()
+        for hit in (code_hits + artifact_hits + doc_hits + relationship_hits)[:10]:
+            record = hit.record
+            candidates = [
+                record.file_path,
+                Path(record.file_path).name if record.file_path else "",
+                *record.owned_files[:3],
+                *record.linked_file_paths[:4],
+            ]
+            candidates.extend(record.symbol_names[:3])
+            candidates.extend(
+                [
+                    record.title,
+                    record.section_name,
+                    record.doc_path,
+                    *record.related_doc_paths[:2],
+                    *record.related_doc_urls[:2],
+                ]
+            )
+            candidates.extend(record.related_bucket_slugs[:2])
+            for candidate in candidates:
+                normalized = candidate.strip()
+                if not normalized:
+                    continue
+                lowered = normalized.lower()
+                if lowered in seen or len(normalized) < 3:
+                    continue
+                seen.add(lowered)
+                hints.append(normalized)
+
+        queries: list[str] = []
+        for hint in hints:
+            queries.append(f"{question}\nRelated focus: {hint}")
+            if len(queries) >= max_queries:
+                break
+        return queries
+
+    def _stitch_code_hits(
+        self,
+        question: str,
+        code_hits: list[RetrievedChunk],
+        retrieval_cfg: dict[str, Any],
+    ) -> list[RetrievedChunk]:
+        if not retrieval_cfg.get("stitch_adjacent_code_chunks", True) or not code_hits:
+            return code_hits
+
+        query_signals = self._query_signals([question])
+        per_hit = max(0, retrieval_cfg.get("stitch_max_adjacent_chunks", 2))
+        if per_hit == 0:
+            return code_hits
+
+        selected_ids = {hit.record.chunk_id for hit in code_hits}
+        stitched: list[RetrievedChunk] = []
+        for position, hit in enumerate(code_hits[: min(4, len(code_hits))]):
+            if position > 0 and not self._is_exact_match_hit(hit, query_signals):
+                continue
+            stitched.extend(
+                self._adjacent_code_hits(hit, per_hit=per_hit, exclude_ids=selected_ids)
+            )
+        return self._merge_hits(
+            code_hits,
+            stitched,
+            limit=self._candidate_top_k("code", retrieval_cfg),
+        )
+
+    def _adjacent_code_hits(
+        self,
+        hit: RetrievedChunk,
+        *,
+        per_hit: int,
+        exclude_ids: set[str],
+    ) -> list[RetrievedChunk]:
+        file_path = hit.record.file_path
+        if not file_path:
+            return []
+        indices = self._code_by_file_sorted.get(file_path, [])
+        if not indices:
+            return []
+
+        current_index = None
+        for offset, idx in enumerate(indices):
+            if self.code_records[idx].chunk_id == hit.record.chunk_id:
+                current_index = offset
+                break
+        if current_index is None:
+            return []
+
+        extras: list[RetrievedChunk] = []
+        neighbor_offsets: list[int] = []
+        for step in range(1, per_hit + 1):
+            neighbor_offsets.extend([current_index - step, current_index + step])
+        for neighbor_offset in neighbor_offsets:
+            if neighbor_offset < 0 or neighbor_offset >= len(indices):
+                continue
+            record = self.code_records[indices[neighbor_offset]]
+            if record.chunk_id in exclude_ids:
+                continue
+            extras.append(
+                RetrievedChunk(record=record, score=max(0.1, hit.score - 0.05))
+            )
+            exclude_ids.add(record.chunk_id)
+        return extras
+
+    def _select_prompt_hits(
+        self,
+        question: str,
+        code_hits: list[RetrievedChunk],
+        artifact_hits: list[RetrievedChunk],
+        doc_hits: list[RetrievedChunk],
+        relationship_hits: list[RetrievedChunk],
+    ) -> dict[str, list[RetrievedChunk]]:
+        retrieval_cfg = self.chat_cfg["retrieval"]
+        profile = self._question_support_profile(question)
+        budgets = self._prompt_budgets(profile, retrieval_cfg)
+        exact_terms = set(profile.get("exact_terms", []))
+
+        return {
+            "code_hits": self._reserve_and_fill_hits(
+                code_hits,
+                budgets["code"],
+                exact_terms=exact_terms,
+            ),
+            "artifact_hits": self._reserve_and_fill_hits(
+                artifact_hits,
+                budgets["artifact"],
+                exact_terms=exact_terms,
+            ),
+            "doc_hits": self._reserve_and_fill_hits(
+                doc_hits,
+                budgets["docs"],
+                exact_terms=exact_terms,
+            ),
+            "relationship_hits": self._reserve_and_fill_hits(
+                relationship_hits,
+                budgets["relationship"],
+                exact_terms=exact_terms,
+            ),
+        }
+
+    def _prompt_budgets(
+        self,
+        profile: dict[str, Any],
+        retrieval_cfg: dict[str, Any],
+    ) -> dict[str, int]:
+        budgets = {
+            "code": retrieval_cfg["max_prompt_code_chunks"],
+            "artifact": retrieval_cfg["max_prompt_artifact_chunks"],
+            "docs": retrieval_cfg["max_prompt_doc_chunks"],
+            "relationship": retrieval_cfg.get("max_prompt_relationship_chunks", 4),
+        }
+        mode = profile.get("query_mode", "general")
+        if mode == "identifier":
+            budgets["code"] = max(budgets["code"], 14)
+            budgets["artifact"] = max(budgets["artifact"], 6)
+            budgets["docs"] = max(2, budgets["docs"] - 1)
+        elif mode == "runtime":
+            budgets["relationship"] = max(budgets["relationship"], 6)
+            budgets["artifact"] = max(budgets["artifact"], 5)
+            budgets["docs"] = max(budgets["docs"], 5)
+        elif mode == "architecture":
+            budgets["docs"] = max(budgets["docs"], 6)
+            budgets["relationship"] = max(budgets["relationship"], 5)
+            budgets["code"] = max(8, budgets["code"] - 2)
+        elif mode == "config":
+            budgets["artifact"] = max(budgets["artifact"], 8)
+            budgets["docs"] = max(budgets["docs"], 5)
+            budgets["relationship"] = max(budgets["relationship"], 5)
+        elif mode == "flow":
+            budgets["code"] = max(budgets["code"], 14)
+            budgets["relationship"] = max(budgets["relationship"], 6)
+        return budgets
+
+    def _reserve_and_fill_hits(
+        self,
+        hits: list[RetrievedChunk],
+        limit: int,
+        *,
+        exact_terms: set[str],
+    ) -> list[RetrievedChunk]:
+        if limit <= 0 or not hits:
+            return []
+
+        selected: list[RetrievedChunk] = []
+        selected_ids: set[str] = set()
+        signals = {"exact_terms": exact_terms, "tokens": []}
+        for hit in hits:
+            if hit.record.chunk_id in selected_ids:
+                continue
+            if self._is_exact_match_hit(hit, signals):
+                selected.append(hit)
+                selected_ids.add(hit.record.chunk_id)
+            if len(selected) >= min(2, limit):
+                break
+
+        for hit in hits:
+            if len(selected) >= limit:
+                break
+            if hit.record.chunk_id in selected_ids:
+                continue
+            selected.append(hit)
+            selected_ids.add(hit.record.chunk_id)
+        return selected[:limit]
+
+    def _is_exact_match_hit(
+        self,
+        hit: RetrievedChunk,
+        query_signals: dict[str, Any],
+    ) -> bool:
+        exact_terms = set(query_signals.get("exact_terms", []))
+        if not exact_terms:
+            return False
+        haystacks = self._record_haystacks(hit.record)
+        searchable = {
+            haystacks["file_path"],
+            haystacks["file_name"],
+            haystacks["title"],
+            haystacks["section"],
+        }
+        searchable.update(term for term in haystacks["symbols"].split() if term)
+        text_blob = haystacks["text"]
+        metadata_blob = haystacks["metadata"]
+        return any(
+            term in searchable or term in text_blob or term in metadata_blob
+            for term in exact_terms
+            if term
+        )
 
     def _multi_query_search(
         self,
@@ -191,6 +993,7 @@ class ChatbotQueryService:
         top_k: int,
         *,
         vector_index: Any | None = None,
+        question: str = "",
     ) -> list[RetrievedChunk]:
         """Search with multiple query vectors and merge by max score per chunk."""
         if not records:
@@ -198,7 +1001,9 @@ class ChatbotQueryService:
 
         best: dict[str, RetrievedChunk] = {}
         for qv in query_vectors:
-            hits = similarity_search(records, vectors, qv, top_k, vector_index=vector_index)
+            hits = similarity_search(
+                records, vectors, qv, top_k, vector_index=vector_index
+            )
             for hit in hits:
                 cid = hit.record.chunk_id
                 if cid not in best or hit.score > best[cid].score:
@@ -207,12 +1012,395 @@ class ChatbotQueryService:
         merged = sorted(best.values(), key=lambda h: h.score, reverse=True)
         merged.sort(
             key=lambda hit: (
-                self._evidence_priority(hit.record, self._question_support_profile("")),
+                self._evidence_priority(
+                    hit.record, self._question_support_profile(question)
+                ),
                 hit.score,
             ),
             reverse=True,
         )
         return merged[:top_k]
+
+    def _lexical_search(
+        self,
+        records: list[Any],
+        queries: list[str],
+        question: str,
+        top_k: int,
+    ) -> list[RetrievedChunk]:
+        retrieval_cfg = self.chat_cfg["retrieval"]
+        if not retrieval_cfg.get("lexical_retrieval", True) or not records:
+            return []
+
+        candidate_limit = max(top_k, retrieval_cfg.get("lexical_candidate_limit", 24))
+        query_signals = self._query_signals([question, *queries])
+        if not query_signals["tokens"] and not query_signals["exact_terms"]:
+            return []
+
+        hits: list[RetrievedChunk] = []
+        for record in records:
+            score = self._lexical_score(record, query_signals)
+            if score <= 0:
+                continue
+            hits.append(RetrievedChunk(record=record, score=score))
+
+        profile = self._question_support_profile(question)
+        hits.sort(
+            key=lambda hit: (self._evidence_priority(hit.record, profile), hit.score),
+            reverse=True,
+        )
+        return hits[:candidate_limit]
+
+    def _query_signals(self, questions: list[str]) -> dict[str, Any]:
+        token_set: set[str] = set()
+        exact_terms: set[str] = set()
+        raw_terms: set[str] = set()
+        identifier_like = False
+
+        for question in questions:
+            if not question:
+                continue
+            lowered = question.lower()
+            for match in re.findall(r"`([^`]+)`|\"([^\"]+)\"|'([^']+)'", question):
+                for candidate in match:
+                    normalized = candidate.strip().lower()
+                    if normalized:
+                        exact_terms.add(normalized)
+            for raw in re.findall(r"[A-Za-z0-9_./:-]+", question):
+                normalized = raw.strip().lower().strip("._:-/")
+                if not normalized or len(normalized) < 2:
+                    continue
+                raw_terms.add(raw.lower())
+                identifier_like = (
+                    identifier_like
+                    or any(ch in raw for ch in "._/-:")
+                    or raw.upper() == raw
+                    or any(ch.isdigit() for ch in raw)
+                )
+                if len(normalized) >= 3 and normalized not in STOPWORD_TOKENS:
+                    token_set.add(normalized)
+                if any(ch in raw for ch in "._/-:") or raw.upper() == raw:
+                    exact_terms.add(raw.lower())
+            if "/" in lowered:
+                for route in re.findall(r"/[A-Za-z0-9{}_<>{}\-./:]+", lowered):
+                    exact_terms.add(route.strip())
+
+        return {
+            "tokens": sorted(token_set),
+            "exact_terms": sorted(exact_terms),
+            "raw_terms": sorted(raw_terms),
+            "identifier_like": identifier_like,
+        }
+
+    def _lexical_score(self, record: Any, query_signals: dict[str, Any]) -> float:
+        haystacks = self._record_haystacks(record)
+        text_blob = haystacks["text"]
+        metadata_blob = haystacks["metadata"]
+        score = 0.0
+
+        for term in query_signals["exact_terms"]:
+            if len(term) < 2:
+                continue
+            if term == haystacks["file_name"] or term == haystacks["file_path"]:
+                score += 1.5
+            elif term in haystacks["file_path"]:
+                score += 1.25
+            elif term in haystacks["symbols"]:
+                score += 1.15
+            elif term in haystacks["title"] or term in haystacks["section"]:
+                score += 1.0
+            elif term in metadata_blob:
+                score += 0.9
+            elif term in text_blob:
+                score += 0.75
+
+        token_matches = 0
+        for token in query_signals["tokens"]:
+            if token in STOPWORD_TOKENS or len(token) < 3:
+                continue
+            if token in haystacks["file_path"] or token in haystacks["symbols"]:
+                token_matches += 2
+            elif token in metadata_blob:
+                token_matches += 1
+            elif token in text_blob:
+                token_matches += 1
+        if token_matches:
+            score += min(1.2, 0.12 * token_matches)
+
+        if query_signals["identifier_like"] and score > 0:
+            score += 0.2
+        return score
+
+    def _record_haystacks(self, record: Any) -> dict[str, str]:
+        file_path = (
+            getattr(record, "file_path", "") or getattr(record, "doc_path", "")
+        ).lower()
+        return {
+            "text": getattr(record, "text", "").lower(),
+            "metadata": " ".join(
+                filter(
+                    None,
+                    [
+                        getattr(record, "title", ""),
+                        getattr(record, "section_name", ""),
+                        getattr(record, "doc_path", ""),
+                        getattr(record, "doc_url", ""),
+                        getattr(record, "framework", ""),
+                        " ".join(getattr(record, "symbol_names", []) or []),
+                        " ".join(getattr(record, "imports_summary", []) or []),
+                        " ".join(getattr(record, "linked_file_paths", []) or []),
+                        " ".join(getattr(record, "related_doc_paths", []) or []),
+                        " ".join(getattr(record, "related_doc_urls", []) or []),
+                    ],
+                )
+            ).lower(),
+            "symbols": " ".join(getattr(record, "symbol_names", []) or []).lower(),
+            "file_path": file_path,
+            "file_name": Path(file_path).name.lower() if file_path else "",
+            "title": getattr(record, "title", "").lower(),
+            "section": getattr(record, "section_name", "").lower(),
+        }
+
+    def should_use_live_fallback(
+        self,
+        question: str,
+        hits: list[RetrievedChunk],
+    ) -> bool:
+        retrieval_cfg = self.chat_cfg["retrieval"]
+        if not retrieval_cfg.get("deep_research_live_fallback", True):
+            return False
+        if not hits:
+            return True
+        query_signals = self._query_signals([question])
+        if len(hits) < 2:
+            return True
+        if query_signals["identifier_like"] and not any(
+            self._lexical_score(hit.record, query_signals) >= 1.0 for hit in hits[:4]
+        ):
+            return True
+        return False
+
+    def live_research_fallback(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        original_question: str | None = None,
+        exclude_ids: set[str] | None = None,
+    ) -> list[RetrievedChunk]:
+        del history
+        retrieval_cfg = self.chat_cfg["retrieval"]
+        indexing_cfg = self.chat_cfg.get("indexing", {})
+        query_signals = self._query_signals([original_question or question, question])
+        if not query_signals["tokens"] and not query_signals["exact_terms"]:
+            return []
+
+        max_files = max(1, retrieval_cfg.get("live_fallback_max_files", 6))
+        per_file = max(1, retrieval_cfg.get("live_fallback_max_per_file", 2))
+        context_lines = max(2, retrieval_cfg.get("live_fallback_context_lines", 12))
+        max_file_bytes = int(indexing_cfg.get("max_file_bytes", 250000))
+        exclude_patterns = list(self.cfg.get("exclude", [])) + list(
+            indexing_cfg.get("exclude_globs", [])
+        )
+
+        candidates: list[tuple[float, str, str]] = []
+        for rel_path, content in self._iter_live_fallback_files(
+            max_file_bytes=max_file_bytes,
+            exclude_patterns=exclude_patterns,
+        ):
+            path_score = self._path_match_score(rel_path, query_signals)
+            content_score = self._content_match_score(content, query_signals)
+            score = path_score + content_score
+            if score <= 0:
+                continue
+            candidates.append((score, rel_path, content))
+
+        candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        hits: list[RetrievedChunk] = []
+        seen_ids = set(exclude_ids or set())
+        for score, rel_path, content in candidates[:max_files]:
+            chunks = self._build_live_fallback_chunks(
+                rel_path,
+                content,
+                query_signals,
+                base_score=score,
+                per_file=per_file,
+                context_lines=context_lines,
+            )
+            for hit in chunks:
+                if hit.record.chunk_id in seen_ids:
+                    continue
+                hits.append(hit)
+                seen_ids.add(hit.record.chunk_id)
+        return hits
+
+    def _iter_live_fallback_files(
+        self,
+        *,
+        max_file_bytes: int,
+        exclude_patterns: list[str],
+    ) -> list[tuple[str, str]]:
+        files: list[tuple[str, str]] = []
+        for root, dirs, file_names in os.walk(self.repo_root):
+            root_path = Path(root)
+            rel_dir = (
+                root_path.relative_to(self.repo_root).as_posix()
+                if root_path != self.repo_root
+                else "."
+            )
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if not self._matches_any_exclude(directory, exclude_patterns)
+                and not self._matches_any_exclude(
+                    f"{rel_dir}/{directory}" if rel_dir != "." else directory,
+                    exclude_patterns,
+                )
+            ]
+            for file_name in sorted(file_names):
+                rel_path = (
+                    (root_path / file_name).relative_to(self.repo_root).as_posix()
+                )
+                if self._matches_any_exclude(
+                    rel_path, exclude_patterns
+                ) or self._matches_any_exclude(file_name, exclude_patterns):
+                    continue
+                path = self.repo_root / rel_path
+                try:
+                    if path.stat().st_size > max_file_bytes:
+                        continue
+                    with path.open("rb") as handle:
+                        sample = handle.read(2048)
+                    if b"\x00" in sample:
+                        continue
+                    content = path.read_text(encoding="utf-8", errors="replace")
+                except OSError:
+                    continue
+                if not content.strip():
+                    continue
+                files.append((rel_path, content))
+        return files
+
+    def _matches_any_exclude(self, path: str, patterns: list[str]) -> bool:
+        normalized = path.replace("\\", "/")
+        for pattern in patterns:
+            if (
+                fnmatch.fnmatch(normalized, pattern)
+                or fnmatch.fnmatch(Path(normalized).name, pattern)
+                or pattern in normalized.split("/")
+            ):
+                return True
+        return False
+
+    def _path_match_score(self, rel_path: str, query_signals: dict[str, Any]) -> float:
+        lowered = rel_path.lower()
+        score = 0.0
+        for term in query_signals["exact_terms"]:
+            if term == lowered:
+                score += 1.8
+            elif term in lowered:
+                score += 1.1
+        for token in query_signals["tokens"]:
+            if token in lowered:
+                score += 0.2
+        return score
+
+    def _content_match_score(
+        self, content: str, query_signals: dict[str, Any]
+    ) -> float:
+        lowered = content.lower()
+        score = 0.0
+        for term in query_signals["exact_terms"]:
+            if term and term in lowered:
+                score += 0.9
+        token_matches = 0
+        for token in query_signals["tokens"]:
+            if token in lowered:
+                token_matches += 1
+        score += min(0.8, token_matches * 0.08)
+        return score
+
+    def _build_live_fallback_chunks(
+        self,
+        rel_path: str,
+        content: str,
+        query_signals: dict[str, Any],
+        *,
+        base_score: float,
+        per_file: int,
+        context_lines: int,
+    ) -> list[RetrievedChunk]:
+        lines = content.splitlines()
+        if not lines:
+            return []
+
+        line_numbers = self._matching_line_numbers(lines, query_signals)
+        if not line_numbers:
+            line_numbers = [1]
+        kind = self._live_chunk_kind(rel_path)
+        source_kind = classify_source_kind(rel_path)
+        publication_tier = (
+            "supporting"
+            if source_kind in {"test", "fixture", "example", "generated"}
+            else "core"
+        )
+        trust_score = 0.78 if kind == "code" else 0.68
+        hits: list[RetrievedChunk] = []
+        for line_number in line_numbers[:per_file]:
+            start = max(1, line_number - context_lines // 2)
+            end = min(len(lines), start + context_lines - 1)
+            snippet = "\n".join(lines[start - 1 : end]).strip()
+            heading = (
+                f"Live repo fallback: {rel_path}\n"
+                f"Lines: {start}-{end}\n"
+                f"Reason: exact-match fallback during deep research\n\n"
+            )
+            text = heading + snippet
+            chunk_hash = hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
+            record = ChunkRecord(
+                chunk_id=f"live:{rel_path}:{start}:{chunk_hash[:8]}",
+                kind=kind,
+                source_key=rel_path,
+                text=text,
+                chunk_hash=chunk_hash,
+                title=Path(rel_path).name,
+                file_path="" if kind == "repo_doc" else rel_path,
+                doc_path=rel_path if kind == "repo_doc" else "",
+                source_kind=source_kind,
+                publication_tier=publication_tier,
+                trust_score=trust_score,
+                start_line=start,
+                end_line=end,
+                metadata={
+                    "chunk_subtype": "live_repo_fallback",
+                    "doc_origin": "repo" if kind == "repo_doc" else "",
+                },
+            )
+            hits.append(
+                RetrievedChunk(record=record, score=min(2.5, base_score + 0.15))
+            )
+        return hits
+
+    def _matching_line_numbers(
+        self,
+        lines: list[str],
+        query_signals: dict[str, Any],
+    ) -> list[int]:
+        matches: list[int] = []
+        terms = [*query_signals["exact_terms"], *query_signals["tokens"]]
+        for idx, line in enumerate(lines, start=1):
+            lowered = line.lower()
+            if any(term in lowered for term in terms if term):
+                matches.append(idx)
+        return matches
+
+    def _live_chunk_kind(self, rel_path: str) -> str:
+        suffix = Path(rel_path).suffix.lower()
+        if suffix in self._supported_source_extensions:
+            return "code"
+        if suffix in DOC_SUFFIXES or classify_source_kind(rel_path) == "docs":
+            return "repo_doc"
+        return "artifact"
 
     def _chain_retrieve(
         self,
@@ -247,10 +1435,13 @@ class ChatbotQueryService:
                         for idx in indices[:2]:
                             record = self.code_records[idx]
                             if record.chunk_id not in already_seen_ids:
-                                extra_hits.append(RetrievedChunk(
-                                    record=record,
-                                    score=rel_hit.score * 0.8,  # slightly discount chain-retrieved
-                                ))
+                                extra_hits.append(
+                                    RetrievedChunk(
+                                        record=record,
+                                        score=rel_hit.score
+                                        * 0.8,  # slightly discount chain-retrieved
+                                    )
+                                )
                                 already_seen_ids.add(record.chunk_id)
                         already_seen_files.add(file_path)
 
@@ -275,6 +1466,7 @@ class ChatbotQueryService:
             )
 
         candidate_limit = retrieval_cfg.get("rerank_candidate_limit", 20)
+        preview_chars = retrieval_cfg.get("rerank_preview_chars", 450)
         all_hits = code_hits + artifact_hits + doc_hits
         if not all_hits:
             return code_hits, artifact_hits, doc_hits
@@ -284,8 +1476,15 @@ class ChatbotQueryService:
         # Build numbered list of chunk previews for the LLM
         previews = []
         for i, hit in enumerate(candidates):
-            preview = hit.record.text[:200].replace("\n", " ")
-            previews.append(f"{i + 1}. [{hit.record.kind}] {preview}")
+            metadata_bits = [
+                hit.record.file_path or hit.record.doc_path,
+                hit.record.title,
+                hit.record.section_name,
+                ", ".join(hit.record.symbol_names[:4]),
+            ]
+            preview = hit.record.text[:preview_chars].replace("\n", " ")
+            header = " | ".join(bit for bit in metadata_bits if bit)
+            previews.append(f"{i + 1}. [{hit.record.kind}] {header} :: {preview}")
 
         rerank_prompt = (
             f"Question: {question}\n\n"
@@ -319,15 +1518,24 @@ class ChatbotQueryService:
             # Re-sort candidates by LLM relevance score
             profile = self._question_support_profile(question)
             scored_hits = sorted(
-                zip(scores, candidates),
-                key=lambda item: (item[0] + self._evidence_priority(item[1].record, profile), item[1].score),
+                zip(scores, candidates, strict=False),
+                key=lambda item: (
+                    item[0] + self._evidence_priority(item[1].record, profile),
+                    item[1].score,
+                ),
                 reverse=True,
             )
 
             # Split back into kind-based buckets
             reranked_code = [h for _, h in scored_hits if h.record.kind == "code"]
-            reranked_artifact = [h for _, h in scored_hits if h.record.kind == "artifact"]
-            reranked_doc = [h for _, h in scored_hits if h.record.kind == "doc_summary"]
+            reranked_artifact = [
+                h for _, h in scored_hits if h.record.kind == "artifact"
+            ]
+            reranked_doc = [
+                h
+                for _, h in scored_hits
+                if h.record.kind in {"doc_summary", "doc_full", "repo_doc"}
+            ]
 
             return reranked_code, reranked_artifact, reranked_doc
 
@@ -340,12 +1548,27 @@ class ChatbotQueryService:
                 self._sort_hits(doc_hits, profile),
             )
 
-    def _sort_hits(self, hits: list[RetrievedChunk], profile: dict[str, Any]) -> list[RetrievedChunk]:
+    def _sort_hits(
+        self, hits: list[RetrievedChunk], profile: dict[str, Any]
+    ) -> list[RetrievedChunk]:
         return sorted(
             hits,
             key=lambda hit: (self._evidence_priority(hit.record, profile), hit.score),
             reverse=True,
         )
+
+    def _merge_hits(
+        self,
+        *hit_groups: list[RetrievedChunk],
+        limit: int,
+    ) -> list[RetrievedChunk]:
+        best: dict[str, RetrievedChunk] = {}
+        for hits in hit_groups:
+            for hit in hits:
+                chunk_id = hit.record.chunk_id
+                if chunk_id not in best or hit.score > best[chunk_id].score:
+                    best[chunk_id] = hit
+        return sorted(best.values(), key=lambda hit: hit.score, reverse=True)[:limit]
 
     def _question_support_profile(self, question: str) -> dict[str, Any]:
         lower = question.lower()
@@ -366,12 +1589,80 @@ class ChatbotQueryService:
             )
         )
         framework_mentions = re.findall(
-            r"\b(falcon|django|fastapi|flask|express|fastify|laravel|vue|go|nestjs)\b",
+            r"\b(falcon|django|express|fastify|laravel|vue|go)\b",
             lower,
         )
+        framework_focus = any(
+            token in lower
+            for token in (
+                "route",
+                "routes",
+                "router",
+                "middleware",
+                "handler",
+                "controller",
+                "viewset",
+                "store",
+                "pinia",
+                "props",
+                "emit",
+                "component",
+            )
+        )
+        query_signals = self._query_signals([question])
+        query_mode = "general"
+        if query_signals["identifier_like"]:
+            query_mode = "identifier"
+        elif any(
+            token in lower
+            for token in ("config", "env", "environment", "setting", "variable")
+        ):
+            query_mode = "config"
+        elif any(
+            token in lower
+            for token in (
+                "runtime",
+                "worker",
+                "job",
+                "queue",
+                "scheduler",
+                "cron",
+                "signal",
+                "listener",
+            )
+        ):
+            query_mode = "runtime"
+        elif any(
+            token in lower
+            for token in (
+                "flow",
+                "lifecycle",
+                "request",
+                "request flow",
+                "end to end",
+                "how does",
+            )
+        ):
+            query_mode = "flow"
+        elif any(
+            token in lower
+            for token in (
+                "architecture",
+                "overview",
+                "system",
+                "why",
+                "design",
+                "module",
+            )
+        ):
+            query_mode = "architecture"
         return {
             "supporting_requested": supporting_requested,
             "framework_mentions": set(framework_mentions),
+            "framework_focus": framework_focus,
+            "query_mode": query_mode,
+            "exact_terms": query_signals["exact_terms"],
+            "identifier_like": query_signals["identifier_like"],
         }
 
     def _evidence_priority(self, record: Any, profile: dict[str, Any]) -> float:
@@ -395,6 +1686,12 @@ class ChatbotQueryService:
         framework = (record.framework or "").lower()
         if framework and framework in profile.get("framework_mentions", set()):
             priority += 1.0
+        chunk_subtype = str((record.metadata or {}).get("chunk_subtype", "")).lower()
+        if chunk_subtype == "framework_context" and (
+            profile.get("framework_focus")
+            or framework in profile.get("framework_mentions", set())
+        ):
+            priority += 2.0
 
         priority += float(getattr(record, "trust_score", 0.0))
         return priority
@@ -409,6 +1706,7 @@ class ChatbotQueryService:
         relationship_hits: list[RetrievedChunk] | None = None,
     ) -> str:
         max_chars = self.chat_cfg["retrieval"].get("max_prompt_chars", 200000)
+        profile = self._question_support_profile(question)
 
         history_lines = []
         for item in history[-4:]:
@@ -423,12 +1721,41 @@ class ChatbotQueryService:
 
         used = sum(len(s) for s in sections)
 
-        for label, hits in [
-            ("File relationships (imports & symbols)", relationship_hits or []),
-            ("Code context", code_hits),
-            ("Artifact context", artifact_hits),
-            ("Docs summaries", doc_hits),
-        ]:
+        sections_by_mode = {
+            "identifier": [
+                ("Code context", code_hits),
+                ("Artifact context", artifact_hits),
+                ("File relationships (imports & symbols)", relationship_hits or []),
+                ("Docs context", doc_hits),
+            ],
+            "config": [
+                ("Artifact context", artifact_hits),
+                ("Code context", code_hits),
+                ("Docs context", doc_hits),
+                ("File relationships (imports & symbols)", relationship_hits or []),
+            ],
+            "architecture": [
+                ("Docs context", doc_hits),
+                ("File relationships (imports & symbols)", relationship_hits or []),
+                ("Code context", code_hits),
+                ("Artifact context", artifact_hits),
+            ],
+            "runtime": [
+                ("Code context", code_hits),
+                ("File relationships (imports & symbols)", relationship_hits or []),
+                ("Artifact context", artifact_hits),
+                ("Docs context", doc_hits),
+            ],
+        }
+        for label, hits in sections_by_mode.get(
+            profile.get("query_mode", "general"),
+            [
+                ("File relationships (imports & symbols)", relationship_hits or []),
+                ("Code context", code_hits),
+                ("Artifact context", artifact_hits),
+                ("Docs context", doc_hits),
+            ],
+        ):
             if not hits:
                 continue
             parts = [f"{label}:"]
@@ -456,9 +1783,39 @@ class ChatbotQueryService:
                     "url": hit.record.doc_url,
                     "doc_path": hit.record.doc_path,
                 }
+            for idx, url in enumerate(hit.record.related_doc_urls):
+                title = (
+                    hit.record.related_doc_titles[idx]
+                    if idx < len(hit.record.related_doc_titles)
+                    else hit.record.title or url
+                )
+                doc_path = (
+                    hit.record.related_doc_paths[idx]
+                    if idx < len(hit.record.related_doc_paths)
+                    else hit.record.doc_path
+                )
+                links.setdefault(
+                    url,
+                    {"title": title or url, "url": url, "doc_path": doc_path},
+                )
         if self.plan:
             slug_map = {page.slug: page for page in self.plan.pages}
             for hit in supporting_hits:
+                for idx, url in enumerate(hit.record.related_doc_urls):
+                    title = (
+                        hit.record.related_doc_titles[idx]
+                        if idx < len(hit.record.related_doc_titles)
+                        else url
+                    )
+                    doc_path = (
+                        hit.record.related_doc_paths[idx]
+                        if idx < len(hit.record.related_doc_paths)
+                        else ""
+                    )
+                    links.setdefault(
+                        url,
+                        {"title": title or url, "url": url, "doc_path": doc_path},
+                    )
                 for slug in hit.record.related_bucket_slugs:
                     page = slug_map.get(slug)
                     if not page:
@@ -466,7 +1823,11 @@ class ChatbotQueryService:
                     url = "/" if page.page_type == "overview" else f"/{page.slug}"
                     links.setdefault(
                         url,
-                        {"title": page.title, "url": url, "doc_path": f"{page.slug}.mdx"},
+                        {
+                            "title": page.title,
+                            "url": url,
+                            "doc_path": f"{page.slug}.mdx",
+                        },
                     )
         return list(links.values())[:5]
 
@@ -490,6 +1851,7 @@ class ChatbotQueryService:
             "2. **Relationship chunks** show import graphs and symbol indexes — use these to explain how files connect.\n"
             "3. **Artifact chunks** (config files, Dockerfiles, migrations, OpenAPI specs) are supporting evidence.\n"
             "4. **Doc summaries** provide high-level context from generated documentation pages.\n"
+            "4a. **Repo docs** provide raw authored context from README/design/runbook material when available.\n"
             "5. **Supporting material** (tests, examples, fixtures) is valid evidence when explicitly requested.\n\n"
             "## Formatting rules\n"
             "- When referencing code, always include the file path and line range: `path/to/file.py:10-20`.\n"
@@ -539,6 +1901,23 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
                 status_code=500,
                 content={
                     "error": "chatbot_query_failed",
+                    "detail": str(exc),
+                },
+            )
+
+    @app.post("/deep-research")
+    def deep_research(request: DeepResearchRequest = Body(...)) -> dict[str, Any]:
+        try:
+            return service.deep_research(
+                request.question,
+                request.history,
+                max_rounds=request.max_rounds,
+            )
+        except Exception as exc:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "chatbot_deep_research_failed",
                     "detail": str(exc),
                 },
             )

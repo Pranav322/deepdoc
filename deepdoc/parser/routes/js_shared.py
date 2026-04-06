@@ -11,7 +11,6 @@ from .common import (
     split_top_level_args,
 )
 
-
 JS_ROUTE_CALL = re.compile(
     r"""\b(\w+)\s*\.\s*"""
     r"""(get|post|put|patch|delete|all|options|head)\s*\(""",
@@ -47,6 +46,11 @@ FASTIFY_PLUGIN_ARROW = re.compile(
 
 FASTIFY_ROUTE_CALL = re.compile(
     r"""\b(\w+)\s*\.\s*route\s*\(""",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+FASTIFY_ADDHOOK_CALL = re.compile(
+    r"""\b(\w+)\s*\.\s*addHook\s*\(""",
     re.IGNORECASE | re.MULTILINE,
 )
 
@@ -178,3 +182,71 @@ def extract_fastify_schema_from_args(args: list[str]) -> dict[str, str]:
         if stripped.startswith("{"):
             return extract_fastify_schema(stripped, 0)
     return {}
+
+
+def extract_fastify_hooks(text: str) -> list[str]:
+    """Extract Fastify hook/preHandler identifiers from route options."""
+    hooks: list[str] = []
+    for field in ("preHandler", "onRequest", "preValidation", "preParsing"):
+        pattern = re.compile(rf"""{field}\s*:\s*(\[[^\]]*\]|[^,\n}}]+)""")
+        for match in pattern.finditer(text):
+            value = match.group(1).strip()
+            for name in _extract_identifier_list(value):
+                if name not in hooks:
+                    hooks.append(name)
+    return hooks
+
+
+def extract_fastify_hooks_from_args(args: list[str]) -> list[str]:
+    for arg in args:
+        stripped = arg.strip()
+        if stripped.startswith("{"):
+            return extract_fastify_hooks(stripped)
+    return []
+
+
+def extract_fastify_add_hook_map(content: str) -> dict[str, list[str]]:
+    """Extract Fastify addHook registrations keyed by instance alias."""
+    hook_map: dict[str, list[str]] = {}
+    for match in FASTIFY_ADDHOOK_CALL.finditer(content):
+        obj = match.group(1)
+        call_text = extract_balanced_segment(content, match.end() - 1)
+        if not call_text:
+            continue
+        args = split_top_level_args(call_text[1:-1])
+        if len(args) < 2:
+            continue
+        hook_name = parse_string_arg(args[0])
+        if hook_name not in {"preHandler", "onRequest", "preValidation", "preParsing"}:
+            continue
+        names = _extract_identifier_list(args[1])
+        if not names:
+            continue
+        existing = hook_map.setdefault(obj, [])
+        for name in names:
+            if name not in existing:
+                existing.append(name)
+    return hook_map
+
+
+def _extract_identifier_list(value: str) -> list[str]:
+    identifiers: list[str] = []
+    if value.startswith("[") and value.endswith("]"):
+        parts = split_top_level_args(value[1:-1])
+    else:
+        parts = [value]
+
+    for part in parts:
+        stripped = part.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("function") or "=>" in stripped:
+            name = "inline_hook"
+        else:
+            name_match = re.search(r"""(\w+(?:\.\w+)*)""", stripped)
+            if not name_match:
+                continue
+            name = name_match.group(1)
+        if name not in identifiers:
+            identifiers.append(name)
+    return identifiers

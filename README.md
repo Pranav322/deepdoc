@@ -172,7 +172,7 @@ deepdoc generate --exclude "tests/**"
 
 **What happens under the hood (5-phase pipeline):**
 
-1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, integration signals, and OpenAPI specs.
+1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
 3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; per-endpoint reference pages are derived from scan data and generated individually.
 4. **Phase 4: API Ref** — Stage OpenAPI assets for the generated Fumadocs `/api/*` pages when a spec exists.
@@ -204,22 +204,24 @@ deepdoc update --deploy           # Update + deploy
 
 **How it works:**
 
-1. Loads the saved plan and generation ledger from `.deepdoc/`.
-2. Detects changed, new, and deleted files.
+1. Loads the saved sync baseline, plan, and generation ledger from `.deepdoc/`.
+2. Diffs committed changes from the last synced commit to the current `HEAD`.
 3. Chooses a strategy automatically:
    - incremental update
    - targeted replan
    - full replan
-4. Regenerates only the affected bucket pages when safe.
-5. Rebuilds site config and nav afterward.
+4. Compares the saved scan cache with the current scan so semantic endpoint changes can refresh impacted docs even when ownership files do not line up directly.
+5. Regenerates only the affected bucket pages when safe.
+6. Incrementally refreshes the chatbot corpora from the same update run.
+7. Rebuilds site config and nav afterward.
 
-If git is unavailable, it falls back to hash-based staleness detection.
+If git is unavailable, it falls back to hash-based staleness detection for recovery.
 
 **Options:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
-| `--since` | `HEAD~1` | Git ref to diff against |
+| `--since` | last synced commit | Git ref to diff against |
 | `--replan` | off | Force a full replan even if the change set looks incremental |
 | `--deploy` | off | Deploy after updating |
 
@@ -495,7 +497,7 @@ site:
 
 ## Chatbot
 
-DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using RAG (Retrieval-Augmented Generation). The chatbot indexes your source code, config artifacts, and generated docs into a FAISS vector store, then serves a FastAPI backend that your Fumadocs site talks to.
+DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using RAG (Retrieval-Augmented Generation). The chatbot indexes your source code, config artifacts, generated docs, and selected repo-authored docs into a FAISS vector store, then serves a FastAPI backend that your Fumadocs site talks to.
 
 ### Quick Start
 
@@ -577,7 +579,7 @@ chatbot:
     base_url: ""
     api_version: ""
     temperature: 0.1
-    max_tokens: 1200
+    max_tokens: 16000
 
   embeddings:                                 # LLM used for embedding code/docs
     provider: "azure"
@@ -585,31 +587,63 @@ chatbot:
     api_key_env: "DEEPDOC_EMBED_API_KEY"
     base_url: ""
     api_version: ""
-    batch_size: 1
+    batch_size: 24
 
   vector_store:
     kind: "faiss"
 
+  indexing:
+    include_repo_docs: true
+    include_tests: false
+    repo_doc_globs: []
+    exclude_globs: []
+    max_file_bytes: 250000
+    max_repo_doc_chars: 12000
+
   retrieval:
-    top_k_code: 8
-    top_k_artifact: 4
-    top_k_docs: 3
-    max_prompt_code_chunks: 6
-    max_prompt_artifact_chunks: 3
-    max_prompt_doc_chunks: 2
+    top_k_code: 15
+    top_k_artifact: 8
+    top_k_docs: 6
+    top_k_relationship: 6
+    candidate_top_k_code: 30
+    candidate_top_k_artifact: 16
+    candidate_top_k_docs: 12
+    candidate_top_k_relationship: 12
+    max_prompt_code_chunks: 12
+    max_prompt_artifact_chunks: 6
+    max_prompt_doc_chunks: 4
+    max_prompt_relationship_chunks: 4
     max_prompt_chars: 200000
+    lexical_retrieval: true
+    lexical_candidate_limit: 24
     query_expansion: true
     expansion_max_queries: 3
+    iterative_retrieval: true
+    iterative_max_followup_queries: 2
+    graph_neighbor_expansion: true
+    graph_neighbor_max_files: 6
+    graph_neighbor_code_chunks_per_file: 2
+    graph_neighbor_artifact_chunks_per_file: 1
+    graph_neighbor_relationship_chunks_per_file: 2
+    graph_neighbor_max_docs: 4
     rerank: true
     rerank_candidate_limit: 20
+    rerank_preview_chars: 450
+    stitch_adjacent_code_chunks: true
+    stitch_max_adjacent_chunks: 2
+    deep_research_live_fallback: true
+    live_fallback_max_files: 6
+    live_fallback_max_per_file: 2
+    live_fallback_context_lines: 12
+    deep_research_chunk_chars: 1600
 
   chunking:
     code_chunk_lines: 120
     code_chunk_overlap: 20
     artifact_chunk_lines: 140
     artifact_chunk_overlap: 20
-    max_doc_summary_chunks_per_page: 2
-    max_doc_summary_chars: 1800
+    max_doc_summary_chunks_per_page: 4
+    max_doc_summary_chars: 4000
 ```
 
 ### Chatbot Configuration Reference
@@ -619,6 +653,13 @@ chatbot:
 | **General** | | |
 | `chatbot.enabled` | `false` | Enable chatbot indexing and backend |
 | `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for vector indexes and chunk data |
+| **Indexing** | | |
+| `chatbot.indexing.include_repo_docs` | `true` | Index selected repo-authored docs such as README/design notes in a separate corpus |
+| `chatbot.indexing.include_tests` | `false` | Allow test/example/fixture docs into the repo-doc corpus |
+| `chatbot.indexing.repo_doc_globs` | `[]` | Extra glob patterns for repo docs to index |
+| `chatbot.indexing.exclude_globs` | `[]` | Additional glob patterns to exclude from repo-doc indexing |
+| `chatbot.indexing.max_file_bytes` | `250000` | Skip oversized repo-doc files during indexing |
+| `chatbot.indexing.max_repo_doc_chars` | `12000` | Max chars per repo-doc section chunk |
 | **Backend** | | |
 | `chatbot.backend.base_url` | `""` | External backend URL. Leave empty for auto-assigned local port |
 | `chatbot.backend.allowed_origins` | `[localhost:3000, 127.0.0.1:3000]` | CORS origins the backend accepts |
@@ -629,33 +670,57 @@ chatbot:
 | `chatbot.answer.base_url` | `""` | Custom endpoint (for Azure, Ollama, etc.) |
 | `chatbot.answer.api_version` | `""` | Azure API version string |
 | `chatbot.answer.temperature` | `0.1` | Sampling temperature (lower = more deterministic) |
-| `chatbot.answer.max_tokens` | `1200` | Max tokens per answer |
+| `chatbot.answer.max_tokens` | `16000` | Max tokens per answer |
 | **Embeddings LLM** | | |
 | `chatbot.embeddings.provider` | `azure` | Provider for the embedding model |
 | `chatbot.embeddings.model` | `azure/text-embedding-3-large` | Embedding model |
 | `chatbot.embeddings.api_key_env` | `DEEPDOC_EMBED_API_KEY` | Env var holding the embedding API key |
 | `chatbot.embeddings.base_url` | `""` | Custom endpoint |
 | `chatbot.embeddings.api_version` | `""` | Azure API version string |
-| `chatbot.embeddings.batch_size` | `1` | Texts per embedding API call. Use `24` for OpenAI |
+| `chatbot.embeddings.batch_size` | `24` | Texts per embedding API call |
 | **Retrieval** | | |
-| `chatbot.retrieval.top_k_code` | `8` | Top code chunks retrieved per query |
-| `chatbot.retrieval.top_k_artifact` | `4` | Top artifact chunks retrieved per query |
-| `chatbot.retrieval.top_k_docs` | `3` | Top doc summary chunks retrieved per query |
-| `chatbot.retrieval.max_prompt_code_chunks` | `6` | Max code chunks included in the final prompt |
-| `chatbot.retrieval.max_prompt_artifact_chunks` | `3` | Max artifact chunks in the final prompt |
-| `chatbot.retrieval.max_prompt_doc_chunks` | `2` | Max doc chunks in the final prompt |
+| `chatbot.retrieval.top_k_code` | `15` | Top code chunks retrieved per query |
+| `chatbot.retrieval.top_k_artifact` | `8` | Top artifact chunks retrieved per query |
+| `chatbot.retrieval.top_k_docs` | `6` | Top generated-doc and repo-doc chunks retrieved per query |
+| `chatbot.retrieval.top_k_relationship` | `6` | Top relationship chunks retrieved per query |
+| `chatbot.retrieval.candidate_top_k_code` | `30` | Candidate code chunks gathered before reranking |
+| `chatbot.retrieval.candidate_top_k_artifact` | `16` | Candidate artifact chunks gathered before reranking |
+| `chatbot.retrieval.candidate_top_k_docs` | `12` | Candidate doc chunks gathered before reranking |
+| `chatbot.retrieval.candidate_top_k_relationship` | `12` | Candidate relationship chunks gathered before reranking |
+| `chatbot.retrieval.max_prompt_code_chunks` | `12` | Max code chunks included in the final prompt |
+| `chatbot.retrieval.max_prompt_artifact_chunks` | `6` | Max artifact chunks in the final prompt |
+| `chatbot.retrieval.max_prompt_doc_chunks` | `4` | Max doc chunks in the final prompt |
+| `chatbot.retrieval.max_prompt_relationship_chunks` | `4` | Max relationship chunks included in the final prompt |
 | `chatbot.retrieval.max_prompt_chars` | `200000` | Total character budget for the assembled prompt |
+| `chatbot.retrieval.lexical_retrieval` | `true` | Blend exact-match retrieval with embedding retrieval |
+| `chatbot.retrieval.lexical_candidate_limit` | `24` | Max lexical candidates gathered before merge/rerank |
 | `chatbot.retrieval.query_expansion` | `true` | Use LLM to generate alternative search queries |
 | `chatbot.retrieval.expansion_max_queries` | `3` | Number of alternative queries to generate |
+| `chatbot.retrieval.iterative_retrieval` | `true` | Derive focused follow-up searches from early hits |
+| `chatbot.retrieval.iterative_max_followup_queries` | `2` | Max follow-up queries used during iterative retrieval |
+| `chatbot.retrieval.graph_neighbor_expansion` | `true` | Pull linked files and doc neighbors into the candidate set |
+| `chatbot.retrieval.graph_neighbor_max_files` | `6` | Max linked files considered for graph-neighbor expansion |
+| `chatbot.retrieval.graph_neighbor_code_chunks_per_file` | `2` | Code chunks per linked file during graph expansion |
+| `chatbot.retrieval.graph_neighbor_artifact_chunks_per_file` | `1` | Artifact chunks per linked file during graph expansion |
+| `chatbot.retrieval.graph_neighbor_relationship_chunks_per_file` | `2` | Relationship chunks per linked file during graph expansion |
+| `chatbot.retrieval.graph_neighbor_max_docs` | `4` | Max linked docs pulled in during graph expansion |
 | `chatbot.retrieval.rerank` | `true` | Use LLM to rerank retrieved chunks |
 | `chatbot.retrieval.rerank_candidate_limit` | `20` | Max candidates sent to the reranker |
+| `chatbot.retrieval.rerank_preview_chars` | `450` | Characters of each chunk shown to the reranker |
+| `chatbot.retrieval.stitch_adjacent_code_chunks` | `true` | Expand exact-match code hits with adjacent windows from the same file |
+| `chatbot.retrieval.stitch_max_adjacent_chunks` | `2` | Max adjacent code windows stitched onto a top hit |
+| `chatbot.retrieval.deep_research_live_fallback` | `true` | Allow `/deep-research` to inspect bounded live repo files when indexed retrieval is weak |
+| `chatbot.retrieval.live_fallback_max_files` | `6` | Max repo files inspected during a deep-research live fallback |
+| `chatbot.retrieval.live_fallback_max_per_file` | `2` | Max fallback snippets returned per inspected file |
+| `chatbot.retrieval.live_fallback_context_lines` | `12` | Lines per fallback snippet around each exact match |
+| `chatbot.retrieval.deep_research_chunk_chars` | `1600` | Max chars per evidence chunk passed into deep-research step answers |
 | **Chunking** | | |
 | `chatbot.chunking.code_chunk_lines` | `120` | Lines per code chunk |
 | `chatbot.chunking.code_chunk_overlap` | `20` | Overlap lines between code chunks |
 | `chatbot.chunking.artifact_chunk_lines` | `140` | Lines per artifact chunk |
 | `chatbot.chunking.artifact_chunk_overlap` | `20` | Overlap lines between artifact chunks |
-| `chatbot.chunking.max_doc_summary_chunks_per_page` | `2` | Doc summary chunks extracted per page |
-| `chatbot.chunking.max_doc_summary_chars` | `1800` | Max chars per doc summary chunk |
+| `chatbot.chunking.max_doc_summary_chunks_per_page` | `4` | Doc summary chunks extracted per page |
+| `chatbot.chunking.max_doc_summary_chars` | `4000` | Max chars per doc summary chunk |
 
 ### Chatbot Provider Examples
 
@@ -710,15 +775,18 @@ chatbot:
 
 ### How Chatbot Indexing Works
 
-During `deepdoc generate`, three corpora are built and stored in `.deepdoc/chatbot/`:
+During `deepdoc generate`, six corpora are built and stored in `.deepdoc/chatbot/`:
 
 | Corpus | Source | Description |
 |--------|--------|-------------|
 | **Code chunks** | All parsed source files | Code split by line count with overlap, tagged with symbols and file paths |
 | **Artifact chunks** | Config files (Dockerfile, package.json, OpenAPI specs, etc.) | Non-code project files split similarly |
 | **Doc summary chunks** | Generated documentation pages | First sections extracted from each generated MDX page |
+| **Doc full chunks** | Generated documentation pages | Section-level chunks from the full generated MDX pages |
+| **Repo doc chunks** | Repo-authored docs such as `README.md`, `docs/`, design notes, and notebooks | Raw repo documentation kept separate from generated pages |
+| **Relationship chunks** | Imports, symbols, call graph, and graph-neighbor summaries | Lightweight graph-style retrieval context |
 
-`deepdoc update` incrementally syncs the chatbot indexes — only changed files and regenerated doc pages are re-indexed.
+`deepdoc update` incrementally syncs the chatbot indexes from the same commit-based update run — only changed files, repo-doc candidates, and regenerated doc pages are re-indexed.
 
 ### Chatbot Query Pipeline
 
@@ -726,10 +794,14 @@ When a user asks a question, the backend runs a multi-step retrieval pipeline:
 
 1. **Query expansion** — The LLM generates up to 3 alternative search queries to improve recall.
 2. **Embedding** — All queries are embedded using the configured embedding model.
-3. **Similarity search** — FAISS finds the top-K most similar chunks from each corpus.
-4. **Reranking** — The LLM scores and reranks the retrieved chunks for relevance.
-5. **Prompt assembly** — The best chunks are packed into a prompt within the character budget.
-6. **Answer generation** — The answer LLM produces a grounded response with code citations and doc links.
+3. **Hybrid retrieval** — FAISS similarity search and exact-match lexical search both gather candidates from each corpus.
+4. **Follow-up retrieval** — The backend can derive focused second-pass searches and pull linked files/docs via graph-neighbor expansion.
+5. **Chunk stitching** — Exact-match code hits can pull adjacent code windows from the same file so larger implementations survive chunk boundaries.
+6. **Reranking** — The LLM scores and reranks the retrieved chunks for relevance.
+7. **Prompt assembly** — Query-type-aware budgets reserve space for the most important evidence types within the character budget.
+8. **Answer generation** — The answer LLM produces a grounded response with code, artifact, doc, repo-doc, relationship, and live-fallback citations when used.
+
+`POST /deep-research` uses the same indexed corpora first, but it can also inspect a small bounded set of live repo files when exact-match evidence is missing from the index. This fallback respects the repo's exclude rules, skips oversized/binary files, and is only used in deep research mode.
 
 ### Chatbot API Endpoints
 
@@ -789,22 +861,29 @@ deepdoc clean --yes    # Skip confirmation prompt
 
 | Framework | Language | Proven patterns |
 |-----------|----------|-----------------|
-| FastAPI | Python | `@app.get()`, `@router.post()`, docstrings, `response_model` |
-| Flask | Python | `@app.route()` with method expansion |
 | Laravel | PHP | `Route::get()`, grouped prefixes, middleware, resource expansion |
 | Django / DRF | Python | `path()`, `re_path()`, `@api_view`, `as_view()`, DRF routers, `@action` |
 | Express | JS/TS | Mounted routers via `app.use()`, nested prefixes, chained `route()` calls |
 | Fastify | JS/TS | Plugin `register(..., { prefix })`, shorthand methods, `route({ ... })`, schema hints |
+| Falcon | Python | `app.add_route()`, responder classes, imported resources, app middleware |
 | Vue | Vue SFC | Component detection, `defineProps`, `defineEmits`, `defineModel`, `defineSlots`, router/store signals |
 
 **Supported but not headline-high-confidence yet:**
 
 | Framework | Language | Current coverage |
 |-----------|----------|------------------|
-| NestJS | TS | `@Controller` + `@Get/@Post` decorators |
-| Falcon | Python | `app.add_route()` + `on_get/on_post` responders |
 | Gin / Echo / Fiber | Go | Common route helpers (`GET`, `POST`, `HandleFunc`) |
-| Next.js / Nuxt | JS/TS | Repo-level framework detection and planning hints |
+
+**Runtime/background surface extraction:**
+
+| Surface | Current coverage |
+|---------|------------------|
+| Celery | Tasks, retry/queue hints, beat schedules, producers |
+| Django | Management commands, signal receivers, Channels websocket consumers |
+| Laravel | Queued jobs, listeners, events, scheduler registrations |
+| JS/TS | `node-cron`, queue workers, agenda jobs, Socket.IO / websocket consumers |
+| Go | Goroutine workers, `AddFunc` cron registrations, scheduler `.Every(...).Do(...)` patterns |
+| Generic cron | Python `crontab(...)` style schedule declarations |
 
 ---
 
@@ -827,17 +906,19 @@ The current system is bucket-based.
 
 1. **Repository scan/indexing**
    - Parse supported source files
-   - Detect endpoints, config files, setup artifacts, OpenAPI specs
-   - Record file sizes, symbols, imports, and raw scan summaries
+   - Detect endpoints, config files, setup artifacts, runtime surfaces, integrations, and OpenAPI specs
+   - Record file sizes, symbols, imports, config impacts, and raw scan summaries
 2. **Multi-step planning**
    - Classify repo artifacts
    - Propose system/feature/endpoint/integration/database buckets
    - Assign files, symbols, and artifacts into the final plan
 3. **Generation engine**
-   - Build evidence packs for buckets
-   - Generate pages in batches with parallel workers
-   - Create nested endpoint reference pages under endpoint families
-   - Validate output and degrade gracefully on failures
+    - Build evidence packs for buckets
+    - Generate pages in batches with parallel workers
+    - Create nested endpoint reference pages under endpoint families
+    - Validate output for file, route, runtime, config, and integration grounding
+    - Degrade gracefully on failures
+    - Persist quality status so invalid/degraded pages are visible after a run
 4. **Persistence**
    - Persist plan, file map, scan cache, and generation ledger in `.deepdoc/`
    - Keep enough state for updates, staleness detection, and cleanup
@@ -860,7 +941,8 @@ your-repo/
 │   ├── scan_cache.json         # Lightweight scan snapshot
 │   ├── ledger.json             # Generated-page ledger
 │   ├── file_map.json           # file → bucket/page mapping
-│   └── state.json              # last synced commit + update status
+│   ├── state.json              # last synced commit + update status
+│   └── sync_receipt.json       # latest update/generate sync receipt
 ├── .deepdoc_manifest.json     # Legacy source hash manifest
 ├── .deepdoc_plan.json         # Legacy compatibility plan file
 ├── .deepdoc_file_map.json     # Legacy compatibility file map
@@ -1004,9 +1086,10 @@ If that version does not already have a matching Git tag like `v0.1.1`, GitHub A
 ### Your release flow
 
 1. Update `version = "..."` in `pyproject.toml`
-2. Add a matching section to `CHANGELOG.md`
-3. Commit your changes
-4. Push to `main`
+2. Update `__version__ = "..."` in `deepdoc/__init__.py`
+3. Add a matching section to `CHANGELOG.md`
+4. Commit your changes
+5. Push to `main`
 
 That is it. You do not need to manually create tags or GitHub Releases anymore.
 

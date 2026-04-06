@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import os
-import zlib
 from copy import deepcopy
+import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
-
+import zlib
 
 DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
     "enabled": False,
@@ -30,28 +29,63 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "max_tokens": 16000,
     },
     "embeddings": {
+        "backend": "litellm",  # default: use configured litellm model (text-embedding-3-small, Azure, etc.)
+        "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",  # only use if backend="fastembed"; 8192-token context, 768-dim
+        "fastembed_batch_size": 4,
         "provider": "azure",
         "model": "azure/text-embedding-3-large",
         "api_key_env": "DEEPDOC_EMBED_API_KEY",
         "base_url": "",
         "api_version": "",
-        "batch_size": 1,
+        "batch_size": 24,
     },
     "vector_store": {
         "kind": "faiss",
+    },
+    "indexing": {
+        "include_repo_docs": True,
+        "include_tests": False,
+        "repo_doc_globs": [],
+        "exclude_globs": [],
+        "max_file_bytes": 250000,
+        "max_repo_doc_chars": 12000,
     },
     "retrieval": {
         "top_k_code": 15,
         "top_k_artifact": 8,
         "top_k_docs": 6,
+        "top_k_relationship": 6,
+        "candidate_top_k_code": 30,
+        "candidate_top_k_artifact": 16,
+        "candidate_top_k_docs": 12,
+        "candidate_top_k_relationship": 12,
         "max_prompt_code_chunks": 12,
         "max_prompt_artifact_chunks": 6,
         "max_prompt_doc_chunks": 4,
+        "max_prompt_relationship_chunks": 4,
         "max_prompt_chars": 200000,
+        "lexical_retrieval": True,
+        "lexical_candidate_limit": 24,
         "query_expansion": True,
         "expansion_max_queries": 3,
+        "iterative_retrieval": True,
+        "iterative_max_followup_queries": 2,
+        "graph_neighbor_expansion": True,
+        "graph_neighbor_max_files": 6,
+        "graph_neighbor_code_chunks_per_file": 2,
+        "graph_neighbor_artifact_chunks_per_file": 1,
+        "graph_neighbor_relationship_chunks_per_file": 2,
+        "graph_neighbor_max_docs": 4,
         "rerank": True,
         "rerank_candidate_limit": 20,
+        "rerank_preview_chars": 450,
+        "stitch_adjacent_code_chunks": True,
+        "stitch_max_adjacent_chunks": 2,
+        "deep_research_live_fallback": True,
+        "live_fallback_max_files": 6,
+        "live_fallback_max_per_file": 2,
+        "live_fallback_context_lines": 12,
+        "deep_research_chunk_chars": 1600,
     },
     "chunking": {
         "code_chunk_lines": 120,
@@ -143,10 +177,15 @@ def resolve_service_api_key(service_cfg: dict[str, Any]) -> str | None:
 
 
 def service_model_identity(service_cfg: dict[str, Any]) -> str:
+    backend = service_cfg.get("backend", "")
+    model = service_cfg.get("model", "")
+    if backend == "fastembed":
+        model = service_cfg.get("fastembed_model", model)
     return "|".join(
         [
+            backend,
             service_cfg.get("provider", ""),
-            service_cfg.get("model", ""),
+            model,
             service_cfg.get("base_url", ""),
             service_cfg.get("api_version", ""),
         ]

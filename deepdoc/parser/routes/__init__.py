@@ -2,8 +2,8 @@
 
 from .base import APIEndpoint, RegisteredRouteDetector, RouteResolverContext
 from .detector import detect_endpoints
-from .repo_resolver import resolve_repo_endpoints
 from .registry import ROUTE_DETECTOR_REGISTRY, get_detectors
+from .repo_resolver import resolve_repo_endpoints
 
 __all__ = [
     "APIEndpoint",

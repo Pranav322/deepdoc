@@ -15,8 +15,8 @@ Supports both <script setup> (Composition API) and <script> (Options API) blocks
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+import re
 
 from .base import ParsedFile, Symbol
 from .js_ts_parser import parse_js_ts
@@ -166,7 +166,7 @@ def _extract_script_setup_constructs(script: str, symbols: list[Symbol]) -> None
                 Symbol(
                     name=props_var,
                     kind="constant",
-                    signature=f"defineProps()",
+                    signature="defineProps()",
                     docstring=f"Component props: {', '.join(prop_names)}"
                     if prop_names
                     else "Component props",
@@ -193,7 +193,7 @@ def _extract_script_setup_constructs(script: str, symbols: list[Symbol]) -> None
                 Symbol(
                     name=emits_var,
                     kind="constant",
-                    signature=f"defineEmits()",
+                    signature="defineEmits()",
                     docstring=f"Emitted events: {', '.join(events)}"
                     if events
                     else "Component emits",

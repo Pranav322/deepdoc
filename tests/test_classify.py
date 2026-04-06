@@ -4,9 +4,13 @@ from __future__ import annotations
 
 import git as _git
 
-from deepdoc.smart_update_v2 import SmartUpdater, ChangeSet, REPLAN_THRESHOLD, UpdateRunResult
+from deepdoc.smart_update_v2 import (
+    ChangeSet,
+    SmartUpdater,
+    UpdateRunResult,
+)
 
-from .conftest import _run_git, make_bucket, make_plan
+from .conftest import _run_git
 
 
 def _make_updater(root):
@@ -52,20 +56,49 @@ def test_new_file_after_commits(tmp_repo_with_plan):
     assert cs.strategy == "full_replan"
 
 
-def test_untracked_file_triggers_targeted_replan(tmp_repo_with_plan):
-    """A new untracked source file should still be discovered for update."""
+def test_committed_new_file_triggers_targeted_replan(tmp_repo_with_plan):
+    """A committed new source file should trigger targeted replan."""
+    root, plan = tmp_repo_with_plan
+
+    (root / "draft_feature.py").write_text("# committed feature\n")
+    _run_git(root, "add", ".")
+    _run_git(root, "commit", "-m", "add draft feature")
+
+    updater = _make_updater(root)
+    cs = updater._classify_changes(plan, "HEAD~1")
+
+    assert "draft_feature.py" in cs.new_files
+    assert cs.strategy == "targeted_replan"
+
+
+def test_untracked_file_is_ignored_by_commit_based_update(tmp_repo_with_plan):
+    """Untracked files should not affect commit-based update classification."""
     root, plan = tmp_repo_with_plan
 
     (root / "draft_feature.py").write_text("# not committed yet\n")
 
     updater = _make_updater(root)
-    import git as _git
-
     repo = _git.Repo(root)
     cs = updater._classify_changes(plan, repo.head.commit.hexsha)
 
-    assert "draft_feature.py" in cs.new_files
-    assert cs.strategy == "targeted_replan"
+    assert "draft_feature.py" not in cs.new_files
+    assert cs.strategy == "noop"
+
+
+def test_staged_change_is_ignored_by_commit_based_update(tmp_repo_with_plan):
+    """Staged but uncommitted changes should not affect update classification."""
+    root, plan = tmp_repo_with_plan
+
+    (root / "auth.py").write_text("# staged change only\n")
+    _run_git(root, "add", "auth.py")
+
+    updater = _make_updater(root)
+    repo = _git.Repo(root)
+    cs = updater._classify_changes(plan, repo.head.commit.hexsha)
+
+    assert cs.changed_files == []
+    assert cs.stale_bucket_slugs == []
+    assert cs.strategy == "noop"
 
 
 def test_untracked_generated_site_files_are_ignored(tmp_repo_with_plan):
@@ -74,7 +107,9 @@ def test_untracked_generated_site_files_are_ignored(tmp_repo_with_plan):
 
     site_dir = root / "site" / "app"
     site_dir.mkdir(parents=True)
-    (site_dir / "page.tsx").write_text("export default function Page() { return null }\n")
+    (site_dir / "page.tsx").write_text(
+        "export default function Page() { return null }\n"
+    )
     (root / "site" / "package.json").write_text('{"name":"generated-site"}\n')
 
     updater = _make_updater(root)
@@ -161,7 +196,9 @@ def test_noop_when_nothing_changed(tmp_repo_with_plan):
     assert cs.strategy == "noop"
 
 
-def test_update_recovers_chatbot_index_even_when_repo_changes_are_noop(tmp_repo_with_plan, monkeypatch):
+def test_update_recovers_chatbot_index_even_when_repo_changes_are_noop(
+    tmp_repo_with_plan, monkeypatch
+):
     root, _plan = tmp_repo_with_plan
 
     updater = SmartUpdater(
@@ -177,7 +214,9 @@ def test_update_recovers_chatbot_index_even_when_repo_changes_are_noop(tmp_repo_
 
     def _fake_incremental(plan, change_set):
         called["incremental"] += 1
-        return UpdateRunResult(strategy="incremental", pages_updated=0, pages_failed=0, pages_skipped=0)
+        return UpdateRunResult(
+            strategy="incremental", pages_updated=0, pages_failed=0, pages_skipped=0
+        )
 
     monkeypatch.setattr(updater, "_incremental_update", _fake_incremental)
     monkeypatch.setattr(updater, "_save_update_sync_state", lambda **kwargs: None)

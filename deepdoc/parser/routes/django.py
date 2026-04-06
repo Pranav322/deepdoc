@@ -13,7 +13,6 @@ from .common import (
     split_top_level_args,
 )
 
-
 DJANGO_PATH = re.compile(
     r"""\b(path|re_path)\s*\(""",
     re.MULTILINE,

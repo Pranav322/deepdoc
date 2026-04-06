@@ -4,7 +4,7 @@ from pathlib import Path
 
 from deepdoc.chatbot.scaffold import scaffold_chatbot_backend
 from deepdoc.chatbot.settings import chatbot_site_api_base_url
-from deepdoc.site.fumadocs_builder_v2 import build_fumadocs_from_plan
+from deepdoc.site.builder import build_fumadocs_from_plan
 from tests.conftest import make_bucket, make_plan
 
 
@@ -69,11 +69,14 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert f"apiBaseUrl: envApiBaseUrl || {chatbot_site_api_base_url({'chatbot': {'enabled': True}})!r}" in config
     assert "ReactMarkdown" in panel
     assert "Back to docs" in panel
-    assert "router.replace(buildAskUrl(trimmed, from))" in panel
+    assert "router.replace(buildAskUrl(trimmed, from, mode))" in panel
+    assert "/deep-research" in panel
+    assert "deepdoc-chatbot-mode-toggle" in panel
     assert "useRef" in panel
     assert "latestRequestIdRef" in panel
     assert "const [loading, setLoading] = useState(false);" in panel
     assert "usePathname" in toggle
+    assert "buildAskUrl(trimmed, pathname || '/', mode)" in toggle
     assert "Chatbot backend URL is not configured." in panel
     assert "setResponse(null);" in panel
     assert "setLoading(false);" in panel

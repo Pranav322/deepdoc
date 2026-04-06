@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from deepdoc.config import DEFAULT_CONFIG, load_config, save_config
 from deepdoc.chatbot.settings import (
     chatbot_allowed_origins,
     chatbot_backend_base_url,
@@ -10,6 +9,7 @@ from deepdoc.chatbot.settings import (
     chatbot_should_start_local_backend,
     chatbot_site_api_base_url,
 )
+from deepdoc.config import DEFAULT_CONFIG, load_config, save_config
 
 
 def test_chatbot_defaults_are_present() -> None:
@@ -20,6 +20,9 @@ def test_chatbot_defaults_are_present() -> None:
     assert chatbot["retrieval"]["top_k_code"] == 15
     assert chatbot["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
     assert chatbot["embeddings"]["api_key_env"] == "DEEPDOC_EMBED_API_KEY"
+    assert chatbot["embeddings"]["fastembed_batch_size"] == 4
+    assert chatbot["indexing"]["include_repo_docs"] is True
+    assert chatbot["indexing"]["include_tests"] is False
     assert "http://localhost:3000" in chatbot["backend"]["allowed_origins"]
     assert "http://127.0.0.1:3000" in chatbot["backend"]["allowed_origins"]
 
@@ -33,6 +36,7 @@ def test_chatbot_config_merges_nested_values(tmp_path: Path) -> None:
                 "enabled": True,
                 "backend": {"base_url": "http://internal-chat:9000"},
                 "embeddings": {"api_key_env": "ALT_EMBED_KEY"},
+                "indexing": {"repo_doc_globs": ["handbook/**/*.md"]},
             },
         },
         cfg_path,
@@ -47,6 +51,8 @@ def test_chatbot_config_merges_nested_values(tmp_path: Path) -> None:
         "http://127.0.0.1:3000",
     ]
     assert cfg["chatbot"]["embeddings"]["api_key_env"] == "ALT_EMBED_KEY"
+    assert cfg["chatbot"]["indexing"]["include_repo_docs"] is True
+    assert cfg["chatbot"]["indexing"]["repo_doc_globs"] == ["handbook/**/*.md"]
     assert cfg["chatbot"]["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
 
 
@@ -84,7 +90,9 @@ def test_chatbot_backend_explicit_loopback_port_is_respected(tmp_path: Path) -> 
     assert chatbot_site_api_base_url(cfg) == "http://127.0.0.1:8001"
 
 
-def test_chatbot_external_backend_is_not_reused_as_local_preview_port(tmp_path: Path) -> None:
+def test_chatbot_external_backend_is_not_reused_as_local_preview_port(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 

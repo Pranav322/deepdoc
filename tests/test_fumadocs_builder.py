@@ -3,18 +3,27 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from deepdoc.generator_v2 import (
+from deepdoc.generator import (
     _fix_mermaid_diagram,
+    build_internal_doc_link_maps,
     escape_mdx_route_params,
     escape_mdx_text_hazards,
+    normalize_code_fence_languages,
     normalize_html_code_blocks,
     normalize_mdx_steps,
-    normalize_code_fence_languages,
+    repair_internal_doc_links,
 )
-from deepdoc.pipeline_v2 import stage_openapi_assets
-from deepdoc.pipeline_v2 import _endpoint_ref_slug
-from deepdoc.prompts_v2 import ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2, SYSTEM_V2
-from deepdoc.site.fumadocs_builder_v2 import build_fumadocs_from_plan
+from deepdoc.pipeline_v2 import _endpoint_ref_slug, stage_openapi_assets
+from deepdoc.prompts_v2 import (
+    DEBUG_RUNBOOK_V2,
+    DOMAIN_GLOSSARY_V2,
+    ENDPOINT_BUCKET_V2,
+    ENDPOINT_REF_V2,
+    START_HERE_INDEX_V2,
+    START_HERE_SETUP_V2,
+    SYSTEM_V2,
+)
+from deepdoc.site.builder import _ensure_mdx_frontmatter, build_fumadocs_from_plan
 from tests.conftest import make_bucket, make_plan
 
 
@@ -111,6 +120,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "NEXT_PUBLIC_DEEPDOC_SITE_BASE_PATH" in app_layout
     assert "const searchApiPath = siteBasePath ? `${siteBasePath}/search` : '/search';" in app_layout
     assert "api: searchApiPath" in app_layout
+    assert 'title: "Demo"' in (output_dir / "index.mdx").read_text(encoding="utf-8")
     assert "icon: 'favicon.svg'" in app_layout
     assert "provider/next" not in app_layout
     assert "turbopack" not in next_config
@@ -128,6 +138,10 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "Suspense" in ask_page
     assert "<ChatbotPanel />" in ask_page
     assert "!content.includes('\\n')" in chatbot_panel
+    assert "/deep-research" in chatbot_panel
+    assert "deepdoc-chatbot-mode-toggle" in chatbot_panel
+    assert "mode=fast|deep" not in chatbot_panel  # URL state is runtime-built, not hardcoded
+    assert "mode," in chatbot_panel
     assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
     assert "satisfies PageTree.Root" in page_tree
     assert "APIPage as FumadocsAPIPage" in api_page_component
@@ -163,6 +177,22 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     )
 
     assert (repo_root / "site" / "package.json").exists()
+
+
+def test_start_here_prompts_include_generation_placeholders() -> None:
+    prompts = [
+        START_HERE_INDEX_V2,
+        START_HERE_SETUP_V2,
+        DOMAIN_GLOSSARY_V2,
+        DEBUG_RUNBOOK_V2,
+    ]
+
+    for prompt in prompts:
+        assert "{source_context}" in prompt
+        assert "{required_sections}" in prompt
+        assert "{required_diagrams}" in prompt
+        assert "{sitemap_context}" in prompt
+        assert "{dependency_links}" in prompt
 
 
 def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(tmp_path: Path) -> None:
@@ -656,6 +686,25 @@ cd app
     assert normalized == "```bash\ngit clone &lt;repo-url&gt;\ncd app\n```"
 
 
+def test_normalize_html_code_blocks_converts_multiline_code_tags_to_fences() -> None:
+    content = """<Step>
+  <br/>
+  <code>
+  await Product.updateOne(
+    { id: 12345 },
+    { $set: productData },
+    { upsert: true }
+  );
+  </code>
+</Step>"""
+
+    normalized = normalize_html_code_blocks(content)
+
+    assert "```javascript" in normalized
+    assert "await Product.updateOne(" in normalized
+    assert "<code>" not in normalized
+
+
 def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> None:
     content = """<Steps>
   <Step>
@@ -707,6 +756,73 @@ def test_normalize_mdx_steps_converts_html_headings_inside_step_blocks() -> None
 
     assert "<h3>Install dependencies</h3>" not in normalized
     assert "**Install dependencies**" in normalized
+
+
+def test_repair_internal_doc_links_rewrites_aliases_using_page_titles() -> None:
+    valid_urls, title_to_url, alias_map = build_internal_doc_link_maps(
+        [
+            ("System Architecture & Overview", "/"),
+            ("Database & Schema", "/database-schema"),
+            ("Setup & Configuration", "/setup"),
+        ]
+    )
+    content = """
+See [Database & Schema](/database-src) for details.
+See [System Architecture & Overview](/architecture) first.
+<Card title="Database & Schema" href="/database-src">
+  Database docs
+</Card>
+"""
+
+    repaired = repair_internal_doc_links(content, valid_urls, title_to_url, alias_map)
+
+    assert "[Database & Schema](/database-schema)" in repaired
+    assert "[System Architecture & Overview](/)" in repaired
+    assert 'title="Database & Schema" href="/database-schema"' in repaired
+
+
+def test_repair_internal_doc_links_strips_unresolvable_markdown_links() -> None:
+    valid_urls, title_to_url, alias_map = build_internal_doc_link_maps(
+        [("Overview", "/"), ("Setup", "/setup")]
+    )
+    content = "Read [Unknown Page](/missing-page) before setup."
+
+    repaired = repair_internal_doc_links(content, valid_urls, title_to_url, alias_map)
+
+    assert repaired == "Read Unknown Page before setup."
+
+
+def test_repair_internal_doc_links_preserves_api_routes() -> None:
+    valid_urls, title_to_url, alias_map = build_internal_doc_link_maps(
+        [("Overview", "/"), ("Users API", "/api/get-users")]
+    )
+    content = "Use [GET /users](/api/get-users) for details."
+
+    repaired = repair_internal_doc_links(content, valid_urls, title_to_url, alias_map)
+
+    assert repaired == content
+
+
+def test_ensure_mdx_frontmatter_normalizes_existing_yaml_scalars(tmp_path: Path) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    mdx_path = docs_dir / "start-here.mdx"
+    mdx_path.write_text(
+        """---
+title: Start Here
+description: Orientation for new developers: what this service does, who uses it.
+---
+
+# Start Here
+""",
+        encoding="utf-8",
+    )
+
+    _ensure_mdx_frontmatter(docs_dir)
+
+    updated = mdx_path.read_text(encoding="utf-8")
+    assert 'title: "Start Here"' in updated
+    assert 'description: "Orientation for new developers: what this service does, who uses it."' in updated
 
 
 def test_endpoint_ref_slug_strips_angle_bracket_path_converters() -> None:
@@ -815,6 +931,7 @@ def test_fix_mermaid_diagram_strips_erdiagram_placeholders_and_rewrites_comments
   PRODUCTSV2 {
     int id PK
     ... "Flexible fields"
+    Any    ... "Flexible fields (non-strict schema)"
   }
 """
 
@@ -822,6 +939,7 @@ def test_fix_mermaid_diagram_strips_erdiagram_placeholders_and_rewrites_comments
 
     assert "\n    ...\n" not in fixed
     assert '... "Flexible fields"' not in fixed
+    assert 'Any    ... "Flexible fields (non-strict schema)"' not in fixed
     assert "%% MongoDB (denormalized, flexible)" in fixed
 
 

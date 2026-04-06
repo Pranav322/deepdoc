@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from .routes import (
-    APIEndpoint,
     ROUTE_DETECTOR_REGISTRY,
+    APIEndpoint,
     RegisteredRouteDetector,
     RouteResolverContext,
     detect_endpoints,

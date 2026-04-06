@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
-import hashlib
-import shutil
+from pathlib import Path
 import shlex
+import shutil
 import socket
 import subprocess
 import sys
 import time
-from pathlib import Path
 
 import click
 from rich.console import Console
@@ -19,7 +19,7 @@ from rich.panel import Panel
 from rich.table import Table
 
 from . import __version__
-from .config import DEFAULT_CONFIG, CONFIG_FILE, find_config, load_config, save_config
+from .config import CONFIG_FILE, DEFAULT_CONFIG, find_config, load_config, save_config
 
 console = Console()
 CONTEXT_SETTINGS = {
@@ -31,6 +31,7 @@ CONTEXT_SETTINGS = {
 # ─────────────────────────────────────────────────────────────────────────────
 # CLI group
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @click.group(context_settings=CONTEXT_SETTINGS, invoke_without_command=True)
 @click.version_option(__version__, prog_name="deepdoc")
@@ -87,7 +88,11 @@ def _parse_env_assignment(line: str) -> tuple[str, str] | None:
     except ValueError:
         pass
 
-    if len(raw_value) >= 2 and raw_value[0] == raw_value[-1] and raw_value[0] in {"'", '"'}:
+    if (
+        len(raw_value) >= 2
+        and raw_value[0] == raw_value[-1]
+        and raw_value[0] in {"'", '"'}
+    ):
         return key, raw_value[1:-1]
     return key, raw_value
 
@@ -114,20 +119,44 @@ def _autoload_repo_env(start: Path) -> Path | None:
 # init
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Create .deepdoc.yaml for the current repository.")
-@click.option("--name", default="", show_default=False,
-              help="Project name shown in the generated docs. Defaults to the current directory name.")
-@click.option("--description", default="", show_default=False,
-              help="Short project description used in config and site metadata.")
-@click.option("--provider", default="anthropic", show_default=True,
-              type=click.Choice(["anthropic", "openai", "ollama", "azure"], case_sensitive=False),
-              help="LLM provider to configure for the first run.")
-@click.option("--model", default="", show_default=False,
-              help="Model name to store in config. If omitted, DeepDoc picks a provider-specific default.")
-@click.option("--output-dir", default="docs", show_default=True,
-              help="Directory where generated Markdown docs will be written.")
-@click.option("--with-chatbot", is_flag=True,
-              help="Enable code-and-artifact chatbot scaffolding and indexing in generated repos.")
+@click.option(
+    "--name",
+    default="",
+    show_default=False,
+    help="Project name shown in the generated docs. Defaults to the current directory name.",
+)
+@click.option(
+    "--description",
+    default="",
+    show_default=False,
+    help="Short project description used in config and site metadata.",
+)
+@click.option(
+    "--provider",
+    default="anthropic",
+    show_default=True,
+    type=click.Choice(["anthropic", "openai", "ollama", "azure"], case_sensitive=False),
+    help="LLM provider to configure for the first run.",
+)
+@click.option(
+    "--model",
+    default="",
+    show_default=False,
+    help="Model name to store in config. If omitted, DeepDoc picks a provider-specific default.",
+)
+@click.option(
+    "--output-dir",
+    default="docs",
+    show_default=True,
+    help="Directory where generated Markdown docs will be written.",
+)
+@click.option(
+    "--with-chatbot",
+    is_flag=True,
+    help="Enable code-and-artifact chatbot scaffolding and indexing in generated repos.",
+)
 def init(name, description, provider, model, output_dir, with_chatbot):
     """Initialize DeepDoc in the current repository.
 
@@ -143,7 +172,10 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     cwd = Path.cwd()
 
     if (cwd / CONFIG_FILE).exists():
-        console.print(f"[yellow]⚠ {CONFIG_FILE} already exists. Overwrite?[/yellow] (y/N) ", end="")
+        console.print(
+            f"[yellow]⚠ {CONFIG_FILE} already exists. Overwrite?[/yellow] (y/N) ",
+            end="",
+        )
         if input().strip().lower() != "y":
             console.print("[dim]Aborted.[/dim]")
             return
@@ -171,6 +203,7 @@ def init(name, description, provider, model, output_dir, with_chatbot):
         cfg["llm"]["api_key_env"] = ""
     if with_chatbot:
         from .chatbot.settings import DEFAULT_CHATBOT_CONFIG
+
         cfg["chatbot"] = {**DEFAULT_CHATBOT_CONFIG, "enabled": True}
 
     save_config(cfg, cwd / CONFIG_FILE)
@@ -191,7 +224,7 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     )
 
     next_steps = [
-        f"  1. Review config:     [bold]deepdoc config show[/bold]",
+        "  1. Review config:     [bold]deepdoc config show[/bold]",
     ]
     if cfg["llm"]["api_key_env"]:
         next_steps.append(
@@ -208,42 +241,90 @@ def init(name, description, provider, model, output_dir, with_chatbot):
             "  5. Set chatbot keys:  [bold]export DEEPDOC_CHAT_API_KEY=... DEEPDOC_EMBED_API_KEY=...[/bold]"
         )
 
-    console.print(Panel.fit(
-        f"[bold green]✓ DeepDoc initialized![/bold green]\n\n"
-        f"Config saved to [cyan]{CONFIG_FILE}[/cyan]\n"
-        f"Docs will be generated to [cyan]{output_dir}/[/cyan]\n\n"
-        f"[dim]Next steps:[/dim]\n" + "\n".join(next_steps),
-        title="DeepDoc",
-        border_style="green",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold green]✓ DeepDoc initialized![/bold green]\n\n"
+            f"Config saved to [cyan]{CONFIG_FILE}[/cyan]\n"
+            f"Docs will be generated to [cyan]{output_dir}/[/cyan]\n\n"
+            f"[dim]Next steps:[/dim]\n" + "\n".join(next_steps),
+            title="DeepDoc",
+            border_style="green",
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # generate
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Create docs for the current repository.")
-@click.option("--force", is_flag=True,
-              help="Fully refresh existing DeepDoc-managed docs instead of refusing to overwrite them.")
-@click.option("--clean", is_flag=True,
-              help="Delete generated docs and saved DeepDoc state, then rebuild from scratch.")
-@click.option("--yes", is_flag=True,
-              help="Skip the confirmation prompt used by destructive actions such as --clean.")
-@click.option("--include", multiple=True,
-              help="Restrict scanning to these glob patterns. Repeat the flag to include multiple roots.")
-@click.option("--exclude", multiple=True,
-              help="Add extra glob patterns to exclude for this run. Repeat the flag as needed.")
-@click.option("--api/--skip-api", "include_api", default=None,
-              help="Include detected API endpoint pages for this run. Use --skip-api to omit API buckets and per-endpoint docs.")
-@click.option("--deploy", is_flag=True,
-              help="Run `deepdoc deploy` automatically after a successful generation.")
-@click.option("--batch-size", default=10, show_default=True,
-              help="How many pages to generate per batch before pausing briefly for rate limits.")
-@click.option("--max-parallel-workers", default=None, type=int,
-              help="Max concurrent LLM calls for generation, clustering, and decompose. Default: 6.")
-@click.option("--rate-limit-pause", default=None, type=float,
-              help="Seconds to pause between generation batches. 0 = no pause. Default: 0.5.")
-def generate(force, clean, yes, include, exclude, include_api, deploy, batch_size, max_parallel_workers, rate_limit_pause):
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Fully refresh existing DeepDoc-managed docs instead of refusing to overwrite them.",
+)
+@click.option(
+    "--clean",
+    is_flag=True,
+    help="Delete generated docs and saved DeepDoc state, then rebuild from scratch.",
+)
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Skip the confirmation prompt used by destructive actions such as --clean.",
+)
+@click.option(
+    "--include",
+    multiple=True,
+    help="Restrict scanning to these glob patterns. Repeat the flag to include multiple roots.",
+)
+@click.option(
+    "--exclude",
+    multiple=True,
+    help="Add extra glob patterns to exclude for this run. Repeat the flag as needed.",
+)
+@click.option(
+    "--api/--skip-api",
+    "include_api",
+    default=None,
+    help="Include detected API endpoint pages for this run. Use --skip-api to omit API buckets and per-endpoint docs.",
+)
+@click.option(
+    "--deploy",
+    is_flag=True,
+    help="Run `deepdoc deploy` automatically after a successful generation.",
+)
+@click.option(
+    "--batch-size",
+    default=10,
+    show_default=True,
+    help="How many pages to generate per batch before pausing briefly for rate limits.",
+)
+@click.option(
+    "--max-parallel-workers",
+    default=None,
+    type=int,
+    help="Max concurrent LLM calls for generation, clustering, and decompose. Default: 6.",
+)
+@click.option(
+    "--rate-limit-pause",
+    default=None,
+    type=float,
+    help="Seconds to pause between generation batches. 0 = no pause. Default: 0.5.",
+)
+def generate(
+    force,
+    clean,
+    yes,
+    include,
+    exclude,
+    include_api,
+    deploy,
+    batch_size,
+    max_parallel_workers,
+    rate_limit_pause,
+):
     """Generate documentation for the entire codebase.
 
     \b
@@ -298,13 +379,16 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
     if rate_limit_pause is not None:
         cfg["rate_limit_pause"] = rate_limit_pause
 
-    console.print(Panel.fit(
-        f"[bold]Generating docs for [cyan]{cfg.get('project_name') or repo_root.name}[/cyan][/bold]\n"
-        f"Provider: [dim]{cfg['llm']['provider']}[/dim]  Model: [dim]{cfg['llm']['model']}[/dim]",
-        border_style="blue",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Generating docs for [cyan]{cfg.get('project_name') or repo_root.name}[/cyan][/bold]\n"
+            f"Provider: [dim]{cfg['llm']['provider']}[/dim]  Model: [dim]{cfg['llm']['model']}[/dim]",
+            border_style="blue",
+        )
+    )
 
     from .pipeline_v2 import PipelineV2
+
     pipeline = PipelineV2(repo_root, cfg)
     pipeline.run(force=effective_force, reconcile=force and not clean)
 
@@ -317,9 +401,13 @@ def generate(force, clean, yes, include, exclude, include_api, deploy, batch_siz
 # clean
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Remove DeepDoc config, generated output, and saved state.")
-@click.option("--yes", is_flag=True,
-              help="Skip the confirmation prompt before deleting DeepDoc artifacts.")
+@click.option(
+    "--yes",
+    is_flag=True,
+    help="Skip the confirmation prompt before deleting DeepDoc artifacts.",
+)
 def clean(yes):
     """Reset the current repository to a pre-DeepDoc state.
 
@@ -338,29 +426,43 @@ def clean(yes):
     targets = _cleanup_targets(repo_root, output_dir, include_config=True)
 
     if not targets:
-        console.print("[dim]No DeepDoc config, output, or saved state found to remove.[/dim]")
+        console.print(
+            "[dim]No DeepDoc config, output, or saved state found to remove.[/dim]"
+        )
         return
 
     _confirm_clean(repo_root, output_dir, yes, include_config=True)
     _wipe_deepdoc_output(repo_root, output_dir, include_config=True)
 
-    console.print("[green]✓ Removed DeepDoc config, generated output, and saved state.[/green]")
+    console.print(
+        "[green]✓ Removed DeepDoc config, generated output, and saved state.[/green]"
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # update
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Refresh docs after source code changes.")
-@click.option("--since", default=None,
-              help="Git ref to diff against (e.g. HEAD~3, main). "
-                   "Defaults to the last synced commit, or HEAD~1 if none.")
-@click.option("--deploy", is_flag=True,
-              help="Run `deepdoc deploy` automatically after a successful update.")
-@click.option("--replan", is_flag=True,
-              help="Force a full replan even if DeepDoc thinks an incremental update would be enough.")
+@click.option(
+    "--since",
+    default=None,
+    help="Git ref to diff against (e.g. HEAD~3, main). "
+    "Defaults to the last synced commit.",
+)
+@click.option(
+    "--deploy",
+    is_flag=True,
+    help="Run `deepdoc deploy` automatically after a successful update.",
+)
+@click.option(
+    "--replan",
+    is_flag=True,
+    help="Force a full replan even if DeepDoc thinks an incremental update would be enough.",
+)
 def update(since, deploy, replan):
-    """Incrementally update docs for files changed since last sync.
+    """Incrementally update docs for commits newer than the last sync.
 
     Run `deepdoc generate` once before using this command.
 
@@ -370,18 +472,19 @@ def update(since, deploy, replan):
       targeted      Replan when new integrations or structures appear
       full replan   Used for large structural changes or when --replan is set
 
-    The strategy is chosen automatically based on what changed.
+    The strategy is chosen automatically based on the commit diff.
     If no --since is provided, DeepDoc diffs from the commit where docs
     were last fully synced (stored in .deepdoc/state.json).
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
 
-    # Resolve --since: explicit override > saved baseline > HEAD~1 fallback
+    # Resolve --since: explicit override > saved baseline
     if since is not None:
         console.print(f"[dim]Using explicit --since: {since}[/dim]")
     else:
         from .persistence_v2 import load_sync_state
+
         sync_state = load_sync_state(repo_root)
         if sync_state and sync_state.get("last_synced_commit"):
             since = sync_state["last_synced_commit"]
@@ -391,24 +494,26 @@ def update(since, deploy, replan):
                 f"(synced at {synced_at})[/dim]"
             )
         else:
-            since = "HEAD~1"
-            console.print(
-                "[dim]No sync baseline found — using HEAD~1. "
-                "Run [bold]deepdoc generate[/bold] to establish a baseline.[/dim]"
+            raise click.ClickException(
+                "No sync baseline found. Run `deepdoc generate` first, or pass `--since <git-ref>`."
             )
 
     mode = cfg.get("generation_mode", "feature_buckets")
     if mode == "feature_buckets":
         from .smart_update_v2 import SmartUpdater
+
         updater = SmartUpdater(repo_root, cfg)
         stats = updater.update(since=since, force_replan=replan)
         count = stats.get("pages_updated", 0)
     else:
-        console.print(Panel.fit(
-            f"[bold]Updating docs[/bold] since [cyan]{since}[/cyan]",
-            border_style="blue",
-        ))
+        console.print(
+            Panel.fit(
+                f"[bold]Updating docs[/bold] since [cyan]{since}[/cyan]",
+                border_style="blue",
+            )
+        )
         from .updater_v2 import UpdaterV2
+
         updater = UpdaterV2(repo_root, cfg)
         count = updater.update(since=since)
         if count > 0:
@@ -425,6 +530,7 @@ def update(since, deploy, replan):
 # status
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Show what DeepDoc has generated and what is stale.")
 def status():
     """Show documentation generation status and stale buckets.
@@ -434,26 +540,37 @@ def status():
     whether any buckets now look out of date.
     """
     from rich.table import Table
+
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
 
-    from .persistence_v2 import load_plan, ledger_summary, find_stale_buckets, load_generation_ledger
+    from .persistence_v2 import (
+        find_stale_buckets,
+        ledger_summary,
+        load_generation_ledger,
+        load_plan,
+    )
+
     plan = load_plan(repo_root)
     if plan is None or not hasattr(plan, "buckets"):
-        console.print("[yellow]No v2 bucket plan found. Run [bold]deepdoc generate[/bold] first.[/yellow]")
+        console.print(
+            "[yellow]No v2 bucket plan found. Run [bold]deepdoc generate[/bold] first.[/yellow]"
+        )
         return
 
     summary = ledger_summary(repo_root)
-    console.print(Panel.fit(
-        f"[bold]Documentation Status[/bold]\n\n"
-        f"  Buckets planned:   [cyan]{len(plan.buckets)}[/cyan]\n"
-        f"  Pages generated:   [cyan]{summary.get('successful', 0)}[/cyan]\n"
-        f"  Pages failed:      [cyan]{summary.get('failed', 0)}[/cyan]\n"
-        f"  Total words:       [cyan]{summary.get('total_words', 0):,}[/cyan]\n"
-        f"  Total diagrams:    [cyan]{summary.get('total_diagrams', 0)}[/cyan]\n"
-        f"  By type:           [cyan]{summary.get('by_bucket_type', {})}[/cyan]",
-        border_style="blue",
-    ))
+    console.print(
+        Panel.fit(
+            f"[bold]Documentation Status[/bold]\n\n"
+            f"  Buckets planned:   [cyan]{len(plan.buckets)}[/cyan]\n"
+            f"  Pages generated:   [cyan]{summary.get('successful', 0)}[/cyan]\n"
+            f"  Pages failed:      [cyan]{summary.get('failed', 0)}[/cyan]\n"
+            f"  Total words:       [cyan]{summary.get('total_words', 0):,}[/cyan]\n"
+            f"  Total diagrams:    [cyan]{summary.get('total_diagrams', 0)}[/cyan]\n"
+            f"  By type:           [cyan]{summary.get('by_bucket_type', {})}[/cyan]",
+            border_style="blue",
+        )
+    )
 
     output_dir = repo_root / cfg.get("output_dir", "docs")
     stale = find_stale_buckets(plan, repo_root, output_dir=output_dir)
@@ -475,7 +592,9 @@ def status():
                 str(rec.get("word_count", 0)) if rec else "0",
             )
         console.print(t)
-        console.print("\n[dim]Run [bold]deepdoc update[/bold] to refresh stale pages.[/dim]")
+        console.print(
+            "\n[dim]Run [bold]deepdoc update[/bold] to refresh stale pages.[/dim]"
+        )
     else:
         console.print("[green]✓ All pages are up-to-date.[/green]")
 
@@ -484,13 +603,27 @@ def status():
 # benchmark
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Benchmark planner quality against a gold manifest catalog.")
-@click.option("--catalog", type=click.Path(path_type=Path), default=None,
-              help="JSON catalog containing benchmark cases with repo paths and gold expectations.")
-@click.option("--repo", "repo_path", type=click.Path(path_type=Path), default=None,
-              help="Run a single benchmark case against this local repository path.")
-@click.option("--gold", type=click.Path(path_type=Path), default=None,
-              help="Gold expectation JSON for --repo mode.")
+@click.option(
+    "--catalog",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="JSON catalog containing benchmark cases with repo paths and gold expectations.",
+)
+@click.option(
+    "--repo",
+    "repo_path",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Run a single benchmark case against this local repository path.",
+)
+@click.option(
+    "--gold",
+    type=click.Path(path_type=Path),
+    default=None,
+    help="Gold expectation JSON for --repo mode.",
+)
 def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -> None:
     """Run benchmark scoring for planner/nav quality."""
     cfg = _load_or_exit()
@@ -501,13 +634,15 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
     if repo_path:
         if gold is None:
             raise click.ClickException("--gold is required when using --repo.")
-        cases = [{
-            "name": repo_path.name,
-            "family": "ad_hoc",
-            "repo_path": str(repo_path),
-            "holdout": False,
-            "gold": json.loads(gold.read_text(encoding="utf-8")),
-        }]
+        cases = [
+            {
+                "name": repo_path.name,
+                "family": "ad_hoc",
+                "repo_path": str(repo_path),
+                "holdout": False,
+                "gold": json.loads(gold.read_text(encoding="utf-8")),
+            }
+        ]
     else:
         if catalog is None:
             raise click.ClickException("Provide --catalog or use --repo with --gold.")
@@ -523,7 +658,13 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
     for case in cases:
         repo = Path(case["repo_path"]).expanduser()
         if not repo.exists():
-            table.add_row(case["name"], case.get("family", "other"), "yes" if case.get("holdout") else "no", "SKIP", "repo missing")
+            table.add_row(
+                case["name"],
+                case.get("family", "other"),
+                "yes" if case.get("holdout") else "no",
+                "SKIP",
+                "repo missing",
+            )
             continue
         result = run_case(case, cfg)
         table.add_row(
@@ -541,9 +682,14 @@ def benchmark(catalog: Path | None, repo_path: Path | None, gold: Path | None) -
 # serve
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 @main.command(short_help="Serve the generated docs locally with live reload.")
-@click.option("--port", default=3000, show_default=True,
-              help="Port to bind the local Fumadocs development server to.")
+@click.option(
+    "--port",
+    default=3000,
+    show_default=True,
+    help="Port to bind the local Fumadocs development server to.",
+)
 def serve(port):
     """Preview the generated docs locally with live reload.
 
@@ -558,11 +704,15 @@ def serve(port):
 
     package_json = site_dir / "package.json"
     if not package_json.exists():
-        console.print("[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]")
+        console.print(
+            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+        )
         sys.exit(1)
 
     preview_url = f"http://localhost:{port}"
-    console.print(f"[bold]Serving docs at [link={preview_url}]{preview_url}[/link][/bold]")
+    console.print(
+        f"[bold]Serving docs at [link={preview_url}]{preview_url}[/link][/bold]"
+    )
     console.print("[dim]Press Ctrl+C to stop.[/dim]\n")
 
     try:
@@ -574,18 +724,24 @@ def serve(port):
                 next_env["NEXT_PUBLIC_DEEPDOC_CHATBOT_BASE_URL"] = backend_url
         if _site_dependencies_need_install(site_dir):
             console.print("[dim]Installing site dependencies...[/dim]")
-            install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
+            install = subprocess.run(
+                ["npm", "install"], cwd=str(site_dir), capture_output=False
+            )
             if install.returncode != 0:
                 console.print("[red]npm install failed.[/red]")
                 sys.exit(1)
             _record_site_dependencies_synced(site_dir)
 
         # Auto-open browser after a short delay to let Next.js start
-        import threading, webbrowser
+        import threading
+        import webbrowser
+
         def _open_browser():
             import time
+
             time.sleep(3)
             webbrowser.open(preview_url)
+
         threading.Thread(target=_open_browser, daemon=True).start()
 
         subprocess.run(
@@ -596,7 +752,9 @@ def serve(port):
     except KeyboardInterrupt:
         pass
     except FileNotFoundError:
-        console.print("[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
+        console.print(
+            "[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]"
+        )
         sys.exit(1)
     finally:
         if "backend_proc" in locals() and backend_proc is not None:
@@ -610,6 +768,7 @@ def serve(port):
 # ─────────────────────────────────────────────────────────────────────────────
 # deploy
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 @main.command("deploy", short_help="Deploy the generated docs.")
 def _deploy():
@@ -626,19 +785,23 @@ def _deploy():
 
     package_json = site_dir / "package.json"
     if not package_json.exists():
-        console.print("[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]")
+        console.print(
+            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+        )
         sys.exit(1)
 
-    console.print(Panel.fit(
-        "[bold]Fumadocs Deployment:[/bold]\n\n"
-        "1. [bold cyan]Static export:[/bold cyan]\n"
-        "   Run: [bold]deepdoc deploy[/bold]\n"
-        "   Publish [bold]site/out/[/bold] to any static host\n\n"
-        "2. [bold cyan]Suggested hosts:[/bold cyan]\n"
-        "   Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any CDN/static server",
-        title="Deploy",
-        border_style="green",
-    ))
+    console.print(
+        Panel.fit(
+            "[bold]Fumadocs Deployment:[/bold]\n\n"
+            "1. [bold cyan]Static export:[/bold cyan]\n"
+            "   Run: [bold]deepdoc deploy[/bold]\n"
+            "   Publish [bold]site/out/[/bold] to any static host\n\n"
+            "2. [bold cyan]Suggested hosts:[/bold cyan]\n"
+            "   Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any CDN/static server",
+            title="Deploy",
+            border_style="green",
+        )
+    )
     cfg = _load_or_exit()
     if cfg.get("chatbot", {}).get("enabled"):
         console.print(
@@ -651,7 +814,9 @@ def _deploy():
     try:
         if _site_dependencies_need_install(site_dir):
             console.print("[dim]Installing site dependencies...[/dim]")
-            install = subprocess.run(["npm", "install"], cwd=str(site_dir), capture_output=False)
+            install = subprocess.run(
+                ["npm", "install"], cwd=str(site_dir), capture_output=False
+            )
             if install.returncode != 0:
                 console.print("[red]npm install failed.[/red]")
                 sys.exit(1)
@@ -663,11 +828,15 @@ def _deploy():
             capture_output=False,
         )
         if build_result.returncode == 0:
-            console.print("[bold green]✓ Build complete! Static files are in site/out/[/bold green]")
+            console.print(
+                "[bold green]✓ Build complete! Static files are in site/out/[/bold green]"
+            )
         else:
             console.print("[red]Build failed.[/red]")
     except FileNotFoundError:
-        console.print("[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]")
+        console.print(
+            "[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]"
+        )
         sys.exit(1)
 
 
@@ -724,7 +893,13 @@ def _record_site_dependencies_synced(site_dir: Path) -> None:
 # config show
 # ─────────────────────────────────────────────────────────────────────────────
 
-@main.group("config", context_settings=CONTEXT_SETTINGS, invoke_without_command=True, short_help="Show or edit `.deepdoc.yaml` values.")
+
+@main.group(
+    "config",
+    context_settings=CONTEXT_SETTINGS,
+    invoke_without_command=True,
+    short_help="Show or edit `.deepdoc.yaml` values.",
+)
 @click.pass_context
 def config_cmd(ctx: click.Context) -> None:
     """Inspect or update `.deepdoc.yaml` without opening the file manually.
@@ -745,7 +920,9 @@ def config_show() -> None:
     """Print the current DeepDoc config in a readable table."""
     cfg_path = find_config()
     if cfg_path is None:
-        console.print("[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]")
+        console.print(
+            "[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]"
+        )
         sys.exit(1)
 
     cfg = load_config(cfg_path)
@@ -776,7 +953,9 @@ def config_set(key_path: str, value: tuple[str, ...]) -> None:
 
     cfg_path = find_config()
     if cfg_path is None:
-        console.print("[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]")
+        console.print(
+            "[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]"
+        )
         sys.exit(1)
 
     cfg = load_config(cfg_path)
@@ -790,10 +969,13 @@ def config_set(key_path: str, value: tuple[str, ...]) -> None:
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _load_or_exit() -> dict:
     cfg_path = find_config()
     if cfg_path is None:
-        console.print("[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]")
+        console.print(
+            "[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]"
+        )
         sys.exit(1)
     return load_config(cfg_path)
 
@@ -819,7 +1001,9 @@ def _inspect_output_state(repo_root: Path, output_dir: Path) -> dict[str, bool]:
     }
 
 
-def _cleanup_targets(repo_root: Path, output_dir: Path, include_config: bool = False) -> list[Path]:
+def _cleanup_targets(
+    repo_root: Path, output_dir: Path, include_config: bool = False
+) -> list[Path]:
     targets: list[Path] = []
     if output_dir.exists():
         targets.append(output_dir)
@@ -851,7 +1035,12 @@ def _confirm_clean(
     if yes:
         return
 
-    targets = [str(path) for path in _cleanup_targets(repo_root, output_dir, include_config=include_config)]
+    targets = [
+        str(path)
+        for path in _cleanup_targets(
+            repo_root, output_dir, include_config=include_config
+        )
+    ]
     target_text = ", ".join(targets) if targets else str(output_dir)
     if not click.confirm(
         f"This will permanently delete DeepDoc output/state in {target_text}. Continue?",
@@ -902,14 +1091,18 @@ def _start_chatbot_backend(
 
     configured_url = configured_chatbot_backend_base_url(cfg)
     if configured_url and not chatbot_should_start_local_backend(cfg):
-        console.print(f"[dim]Using configured chatbot backend at {configured_url}[/dim]")
+        console.print(
+            f"[dim]Using configured chatbot backend at {configured_url}[/dim]"
+        )
         return None, configured_url
 
     scaffold_chatbot_backend(repo_root, cfg)
 
     backend_dir = repo_root / "chatbot_backend"
     if not (backend_dir / "app.py").exists():
-        console.print("[yellow]⚠ Chatbot backend scaffold missing; continuing without chat.[/yellow]")
+        console.print(
+            "[yellow]⚠ Chatbot backend scaffold missing; continuing without chat.[/yellow]"
+        )
         return None, configured_url
 
     preferred_port = chatbot_backend_port(cfg, repo_root)
@@ -959,7 +1152,9 @@ def _start_chatbot_backend(
 
     time.sleep(2)
     if proc.poll() is not None:
-        console.print("[yellow]⚠ Chatbot backend failed to start; docs will still serve.[/yellow]")
+        console.print(
+            "[yellow]⚠ Chatbot backend failed to start; docs will still serve.[/yellow]"
+        )
         return None, configured_url
     return proc, backend_url
 

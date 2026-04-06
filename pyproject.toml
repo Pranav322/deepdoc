@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepdoc"
-version = "1.1.0"
+version = "1.2.0"
 description = "Auto-generate beautiful docs from any codebase"
 readme = "README.md"
 authors = [
@@ -42,6 +42,7 @@ chatbot = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "httpx>=0.27",
+    "fastembed>=0.3.0",
 ]
 
 [project.scripts]

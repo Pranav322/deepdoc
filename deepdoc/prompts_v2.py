@@ -1555,6 +1555,317 @@ Reference EVERY file path. Do not invent history or experiments that are not pre
 """
 
 
+# ═════════════════════════════════════════════════════════════════════════════
+# Start Here — new-joiner landing pages
+# ═════════════════════════════════════════════════════════════════════════════
+
+START_HERE_INDEX_V2 = """
+You are writing the **"Start Here"** landing page for a developer who has just joined the team
+and is opening this documentation for the very first time.
+
+They have ZERO prior knowledge of this codebase. Your job is to give them a confident
+orientation in 5 minutes of reading so they can navigate the rest of the docs on their own.
+
+Repository evidence:
+{source_context}
+
+Sitemap context:
+{sitemap_context}
+
+Dependency and sibling links:
+{dependency_links}
+
+Required sections from the planner:
+{required_sections}
+
+Required diagrams from the planner:
+{required_diagrams}
+
+Coverage targets:
+{coverage_targets}
+
+## Required sections (write all of them)
+
+### What This Service Does
+One plain-English paragraph. What problem does this service solve? Who depends on it?
+What would break if it went down?
+
+### Who Uses This Service
+Bullet list: other internal services, frontend clients, external APIs, and human operators.
+Link each to its documentation page if it appears in the sitemap.
+
+### Technology At a Glance
+A brief table: Language, Framework, Primary DB, Cache/Queue, Key integrations.
+Derive only from evidence — no invented entries.
+
+### How to Get Running Locally
+Reference the Setup page with a `<Callout>`:
+```mdx
+<Callout type="info">
+  See [Local Setup](/local-development-setup) for the complete step-by-step guide, including all required
+  environment variables and service dependencies.
+</Callout>
+```
+
+### Reading Order for Different Roles
+A `<Tabs>` block with tabs for at least: Backend Developer, DevOps/Infra, and New Tech Lead.
+Each tab lists 4–6 documentation pages in the order they should be read, with brief (one-line)
+explanations of why each page matters for that role.
+
+### Architecture in One Diagram
+A Mermaid flowchart showing the top-level components (HTTP layer → business layer → data layer)
+and the 2–3 most important external integrations. Keep it readable — max 12 nodes.
+
+### The 5 Files Every Developer Must Know
+List exactly 5 files (use real paths from evidence). For each file: what it does, why it matters,
+and what will go wrong if you touch it carelessly.
+
+### Day-1 Questions to Ask Your Team
+A short bullet list (5–8 items) of questions that are NOT answerable from code alone:
+deployment topology, on-call rotation, external credentials, data retention policies, etc.
+
+## Hard rules
+- Never invent file paths, endpoint URLs, or integration names not present in evidence.
+- All file references must use backtick paths.
+- Every concept that has a documentation page must be linked the first time it appears.
+- Do NOT duplicate setup instructions — link to the Setup page instead.
+- Write in second person ("you will", "your first step").
+- Tone: warm, direct, practical. Not corporate.
+"""
+
+DOMAIN_GLOSSARY_V2 = """
+You are writing the **Domain Glossary** — a reference page that translates the codebase's
+internal vocabulary into plain English for developers who are new to this business domain.
+
+This page is one of the most valuable pages in the entire documentation set. A new engineer
+who does not know what "Vinculum", "soul_artist", "exclusive_user", or "TSS money" means will
+be blocked from understanding any other page until they read this one.
+
+Repository evidence:
+{source_context}
+
+OpenAPI and interface context:
+{openapi_context}
+
+Sitemap context:
+{sitemap_context}
+
+Dependency and sibling links:
+{dependency_links}
+
+Required sections from the planner:
+{required_sections}
+
+Required diagrams from the planner:
+{required_diagrams}
+
+Coverage targets:
+{coverage_targets}
+
+## Required sections (write all of them)
+
+### How to Use This Glossary
+Two sentences: what this page covers and how it relates to the rest of the docs.
+
+### Domain Terms (A–Z or grouped by domain)
+For EVERY non-obvious term found in the evidence — model names, field names that carry
+business meaning, status codes, enum values, feature-flag names, integration names,
+internal system names — write an entry in this format:
+
+**`TermName`** *(source: `path/to/file.py` line N)*
+> Plain-English definition. What does this term mean in this business context?
+> How does it relate to other terms? Link to the documentation page where it is most
+> relevant.
+
+Group entries by domain if there are more than 15 terms (e.g., Orders, Users, Inventory,
+Payments, Integrations).
+
+### Status Codes and State Machines
+For every status field (order_status, refund_status, return_status, etc.) found in evidence:
+- Table with columns: Status Value | Meaning | Next Valid Statuses | Triggering Event
+- A Mermaid state diagram if the state machine has more than 3 states.
+
+### Integration Name Map
+A table mapping internal code names to their real-world counterparts:
+| Code Name | Real System | What It Does |
+Link each to its integration documentation page.
+
+### Abbreviations and Acronyms
+Any abbreviations used in the codebase that are NOT self-evident.
+
+## Hard rules
+- ONLY document terms that appear in the evidence (code, models, constants, config).
+- Do not invent definitions — derive everything from field names, docstrings, comments, and usage context.
+- If a term's meaning is unclear from evidence, say so explicitly: *"Exact meaning unclear from static analysis — ask the team."*
+- Every term should link to its most relevant documentation page.
+- File references must use backtick paths.
+"""
+
+DEBUG_RUNBOOK_V2 = """
+You are writing the **Debugging & Observability** runbook — a practical guide for when
+things go wrong in production or development.
+
+This page is for developers who need to diagnose a live issue RIGHT NOW. Write it like
+a runbook, not a tutorial. Be direct, specific, and operational.
+
+Repository evidence:
+{source_context}
+
+OpenAPI and interface context:
+{openapi_context}
+
+Sitemap context:
+{sitemap_context}
+
+Dependency and sibling links:
+{dependency_links}
+
+Required sections from the planner:
+{required_sections}
+
+Required diagrams from the planner:
+{required_diagrams}
+
+Coverage targets:
+{coverage_targets}
+
+## Required sections (write all of them)
+
+### Quick Diagnostic Checklist
+A numbered checklist of the first 5–8 things to check when something is broken.
+Base this entirely on the observability signals in the evidence (health endpoints,
+log levels, queue state, Redis keys, monitoring hooks).
+
+### Health Endpoints
+For every health/readiness endpoint found in evidence:
+- Path, what it checks, expected response, what a failure means.
+- Example curl command.
+
+### Log Locations and What to Look For
+For each major subsystem (API layer, background tasks, database, cache):
+- Where logs are written (from evidence — don't invent).
+- Log level used for errors vs. warnings vs. info.
+- Key log message patterns to grep for when debugging that subsystem.
+- Any structured fields logged (request_id, user_id, order_id, etc.).
+
+### Background Task Debugging
+For each Celery queue or Node.js scheduler found in evidence:
+- Queue name and what tasks it processes.
+- How to check if a task is stuck (e.g., Flower URL, Redis queue key).
+- How to manually retry or cancel a task.
+- Common failure reasons for this queue.
+
+### Cache and Redis Key Reference
+For every Redis key pattern found in evidence:
+- Key pattern (with variable parts noted as `{{variable}}`).
+- What it stores, TTL if detectable.
+- When it is set/invalidated.
+- How to inspect or flush it for debugging.
+
+### Common Failure Modes
+For each major feature area documented in evidence, describe:
+- The most common failure mode.
+- Its symptom (what the user sees, what the logs show).
+- The root cause pattern.
+- The fix.
+
+Format as a `<Accordions>` component, one accordion per failure mode.
+
+### Exception Handling Map
+For each distinct exception type handled in the codebase (from evidence):
+- Where it is raised and where it is caught.
+- What HTTP status / user-facing response it produces.
+- Whether it is retried or logged.
+
+### Monitoring and Metrics
+If monitoring hooks (Prometheus, NewRelic, Sentry, etc.) are found in evidence:
+- What metrics/events are instrumented.
+- Where to find dashboards (if config files reveal URLs or endpoint names).
+- Key alerts and what they mean.
+
+## Hard rules
+- Every command, path, key, and endpoint must come from evidence. Never invent.
+- If something cannot be determined from static analysis (e.g., dashboard URLs),
+  say: *"Check with the team — not determinable from source."*
+- Use `<Callout type="warn">` for anything that could cause data loss if done wrong.
+- Write in imperative second person ("Run this", "Check this key", "If you see X, do Y").
+- Include at least one Mermaid sequence or flowchart diagram showing the debug flow for
+  the most common production issue.
+"""
+
+START_HERE_SETUP_V2 = """
+You are writing the **Local Development Setup** guide — the definitive step-by-step
+guide for getting this service running on a new developer machine.
+
+This page must be complete enough that a developer with no prior context can follow it
+from a clean machine to a running local environment WITHOUT asking anyone for help.
+
+Repository evidence:
+{source_context}
+
+OpenAPI and interface context:
+{openapi_context}
+
+Sitemap context:
+{sitemap_context}
+
+Dependency and sibling links:
+{dependency_links}
+
+Required sections from the planner:
+{required_sections}
+
+Required diagrams from the planner:
+{required_diagrams}
+
+Coverage targets:
+{coverage_targets}
+
+## Required sections (write all of them)
+
+### Prerequisites
+Table: Tool | Required Version | Install Command. Include only tools evidenced in the codebase.
+
+### Clone and Install
+Exact commands for cloning, installing dependencies, and setting up the virtual environment
+or node_modules. Use `<Steps>` component.
+
+### Environment Variables
+For EVERY environment variable referenced in the codebase (from .env.example, os.environ,
+process.env, settings files):
+
+A table with columns: Variable | Required | Default | Description | Example Value
+
+Then a full `.env.example` block the developer can copy-paste and fill in.
+
+### Database Setup
+Step-by-step: create DB, run migrations, load fixtures/seeds if applicable.
+Include exact commands from evidence.
+
+### External Service Dependencies
+For each integration (from evidence): what it needs locally (mock, local instance, or real
+credentials), and how to set it up. Be honest if something requires real credentials.
+
+### Starting the Service
+Exact command(s) to start the server, background workers, and any required sidecars.
+Use `<Steps>` and note expected output so the developer knows it worked.
+
+### Verifying It Works
+2–3 test requests or health checks to confirm the service is running correctly.
+Include exact curl or browser instructions.
+
+### Troubleshooting Common Setup Issues
+`<Accordions>` with the top 5 setup failure modes and their fixes.
+Derive from evidence: missing env vars, migration failures, dependency conflicts, port conflicts.
+
+## Hard rules
+- ONLY include commands and variables that are evidenced.
+- Never invent env var names, migration commands, or service names.
+- If an exact command is not determinable, write a placeholder and note: *"Confirm with team."*
+- All file references use backtick paths.
+"""
+
+
 # Prompt style templates — keyed by prompt_style hint, NOT by bucket_type
 PROMPT_STYLE_TEMPLATES = {
     "system": SYSTEM_BUCKET_V2,
@@ -1572,6 +1883,10 @@ PROMPT_STYLE_TEMPLATES = {
     "architecture_component": ARCHITECTURE_COMPONENT_V2,
     "data_pipeline": DATA_PIPELINE_V2,
     "research_context": RESEARCH_CONTEXT_V2,
+    "start_here_index": START_HERE_INDEX_V2,
+    "domain_glossary": DOMAIN_GLOSSARY_V2,
+    "debug_runbook": DEBUG_RUNBOOK_V2,
+    "start_here_setup": START_HERE_SETUP_V2,
     "general": GUIDE_V2,
 }
 

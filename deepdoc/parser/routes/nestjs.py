@@ -7,7 +7,6 @@ import re
 from .base import APIEndpoint, RegisteredRouteDetector, RouteResolverContext
 from .common import line_number_for_offset
 
-
 NESTJS_CONTROLLER = re.compile(r"@Controller\s*\(\s*['\"](.*?)['\"]\s*\)")
 NESTJS_METHOD = re.compile(
     r"@(Get|Post|Put|Patch|Delete|All|Options|Head)\s*\(\s*(?:['\"](.*?)['\"])?\s*\)"

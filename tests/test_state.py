@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-import git as _git
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
-from deepdoc.persistence_v2 import save_sync_state, load_sync_state
+import git as _git
+
+from deepdoc.persistence_v2 import load_sync_state, save_sync_state
 from deepdoc.pipeline_v2 import PipelineV2
 
 from .conftest import FakeResult, _run_git, make_bucket, make_plan

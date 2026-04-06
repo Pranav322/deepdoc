@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-import json
 from dataclasses import dataclass
+import json
 from pathlib import Path
 from typing import Any
 
 from .llm import LLMClient
-from .planner_v2 import DocPlan, plan_docs, scan_repo
+from .planner import plan_docs, scan_repo
+from .v2_models import DocPlan
 
 
 @dataclass
@@ -44,13 +45,19 @@ def run_case(case: dict[str, Any], cfg: dict[str, Any]) -> BenchmarkResult:
     )
 
 
-def score_plan(plan: DocPlan, gold: dict[str, Any]) -> tuple[float, dict[str, float], list[str]]:
+def score_plan(
+    plan: DocPlan, gold: dict[str, Any]
+) -> tuple[float, dict[str, float], list[str]]:
     details: dict[str, float] = {}
     notes: list[str] = []
 
-    primary_type = plan.classification.get("repo_profile", {}).get("primary_type", "other")
+    primary_type = plan.classification.get("repo_profile", {}).get(
+        "primary_type", "other"
+    )
     expected_type = gold.get("expected_primary_type")
-    details["profile_match"] = 1.0 if not expected_type or primary_type == expected_type else 0.0
+    details["profile_match"] = (
+        1.0 if not expected_type or primary_type == expected_type else 0.0
+    )
     if expected_type and primary_type != expected_type:
         notes.append(f"profile mismatch: expected {expected_type}, got {primary_type}")
 
@@ -71,7 +78,10 @@ def score_plan(plan: DocPlan, gold: dict[str, Any]) -> tuple[float, dict[str, fl
         matched_titles = 0
         for title_group in required_titles:
             if isinstance(title_group, list):
-                if any(any(candidate.lower() in title.lower() for title in titles) for candidate in title_group):
+                if any(
+                    any(candidate.lower() in title.lower() for title in titles)
+                    for candidate in title_group
+                ):
                     matched_titles += 1
             else:
                 if any(title_group.lower() in title.lower() for title in titles):
@@ -87,7 +97,9 @@ def score_plan(plan: DocPlan, gold: dict[str, Any]) -> tuple[float, dict[str, fl
             for title in titles
             if any(forbidden.lower() in title.lower() for forbidden in forbidden_titles)
         ]
-        details["noise_suppression"] = max(0.0, 1.0 - (len(violations) / max(len(titles), 1)))
+        details["noise_suppression"] = max(
+            0.0, 1.0 - (len(violations) / max(len(titles), 1))
+        )
         if violations:
             notes.append(f"forbidden titles present: {', '.join(violations[:5])}")
     else:
@@ -96,17 +108,31 @@ def score_plan(plan: DocPlan, gold: dict[str, Any]) -> tuple[float, dict[str, fl
     orphaned = len(plan.orphaned_files)
     max_orphaned = gold.get("max_orphaned")
     if max_orphaned is not None:
-        details["orphan_score"] = 1.0 if orphaned <= max_orphaned else max(0.0, 1 - ((orphaned - max_orphaned) / max(1, max_orphaned + 1)))
+        details["orphan_score"] = (
+            1.0
+            if orphaned <= max_orphaned
+            else max(0.0, 1 - ((orphaned - max_orphaned) / max(1, max_orphaned + 1)))
+        )
         if orphaned > max_orphaned:
             notes.append(f"too many orphaned files: {orphaned} > {max_orphaned}")
     else:
         details["orphan_score"] = 1.0
 
     overview_limit = gold.get("max_overview_files")
-    overview_buckets = [bucket for bucket in plan.buckets if (bucket.generation_hints or {}).get("is_introduction_page")]
+    overview_buckets = [
+        bucket
+        for bucket in plan.buckets
+        if (bucket.generation_hints or {}).get("is_introduction_page")
+    ]
     if overview_limit is not None and overview_buckets:
         overview_files = max(len(bucket.owned_files) for bucket in overview_buckets)
-        details["overview_focus"] = 1.0 if overview_files <= overview_limit else max(0.0, 1 - ((overview_files - overview_limit) / max(1, overview_limit)))
+        details["overview_focus"] = (
+            1.0
+            if overview_files <= overview_limit
+            else max(
+                0.0, 1 - ((overview_files - overview_limit) / max(1, overview_limit))
+            )
+        )
         if overview_files > overview_limit:
             notes.append(f"overview bucket too large: {overview_files} files")
     else:

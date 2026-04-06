@@ -30,13 +30,13 @@ from rich.progress import (
     TaskProgressColumn,
 )
 
-from .llm import LLMClient
-from .parser import parse_file, supported_extensions
-from .parser.base import ParsedFile, Symbol
-from .planner_v2 import DocBucket, DocPlan, RepoScan, _BucketAsPage, tracked_bucket_files
-from .prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
-from .scan_v2 import _classify_file_role
-from .openapi import parse_openapi_spec, spec_to_context_string
+from ..llm import LLMClient
+from ..parser import parse_file, supported_extensions
+from ..parser.base import ParsedFile, Symbol
+from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
+from ..prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
+from ..scanner import _classify_file_role
+from ..openapi import parse_openapi_spec, spec_to_context_string
 
 console = Console()
 
@@ -60,7 +60,9 @@ class AssembledEvidence:
     database_context: str = ""  # database/schema info for database-type buckets
     runtime_context: str = ""  # runtime/task/scheduler/realtime info
     plan_summary_context: str = ""  # repo-wide summary for introduction pages
-    repo_docs_context: str = ""  # secondary repo-authored docs context for overview/system pages
+    repo_docs_context: str = (
+        ""  # secondary repo-authored docs context for overview/system pages
+    )
     total_evidence_chars: int = 0
     compressed_cards_context: str = ""
     files_included_raw: int = 0
@@ -134,9 +136,13 @@ class EvidenceAssembler:
 
     def assemble(self, bucket: DocBucket) -> AssembledEvidence:
         """Build the complete evidence package for one bucket."""
-        source_ctx, compressed_cards_ctx, files_included_raw, files_compressed, coverage_total = (
-            self._build_source_context(bucket)
-        )
+        (
+            source_ctx,
+            compressed_cards_ctx,
+            files_included_raw,
+            files_compressed,
+            coverage_total,
+        ) = self._build_source_context(bucket)
         endpoints_detail = self._build_endpoints_detail(bucket)
         integration_ctx = self._build_integration_context(bucket)
         cluster_ctx = self._build_cluster_context(bucket)
@@ -202,7 +208,9 @@ class EvidenceAssembler:
 
     # ── Source context (tiered + compressed coverage) ───────────────────
 
-    def _build_source_context(self, bucket: DocBucket) -> tuple[str, str, int, int, int]:
+    def _build_source_context(
+        self, bucket: DocBucket
+    ) -> tuple[str, str, int, int, int]:
         """Build raw-source context plus compressed evidence cards for tracked files.
 
         Tier 1 (≤large_file_lines): full source
@@ -240,7 +248,9 @@ class EvidenceAssembler:
         ranked_files = sorted(
             files_data,
             key=lambda item: (
-                -self._source_priority(bucket, item[0], item[2], item[3], owned_symbols_set),
+                -self._source_priority(
+                    bucket, item[0], item[2], item[3], owned_symbols_set
+                ),
                 item[2],
                 item[0],
             ),
@@ -350,7 +360,10 @@ class EvidenceAssembler:
                 for symbol in candidates:
                     if symbol.name in self._builtin_helper_skip_names():
                         continue
-                    if imported_symbols.get(imported_file) and symbol.name not in imported_symbols[imported_file]:
+                    if (
+                        imported_symbols.get(imported_file)
+                        and symbol.name not in imported_symbols[imported_file]
+                    ):
                         continue
                     if called_names and symbol.name not in called_names:
                         continue
@@ -362,7 +375,8 @@ class EvidenceAssembler:
                         continue
                     if total_chars + len(section) > helper_budget:
                         return (
-                            "## Resolved Helper Functions\n" + "\n".join(helper_sections)
+                            "## Resolved Helper Functions\n"
+                            + "\n".join(helper_sections)
                             if helper_sections
                             else "",
                             helper_files,
@@ -374,7 +388,9 @@ class EvidenceAssembler:
 
         if not helper_sections:
             return "", set()
-        return "## Resolved Helper Functions\n" + "\n".join(helper_sections), helper_files
+        return "## Resolved Helper Functions\n" + "\n".join(
+            helper_sections
+        ), helper_files
 
     def _should_follow_helpers(self, bucket: DocBucket) -> bool:
         hints = bucket.generation_hints or {}
@@ -402,7 +418,9 @@ class EvidenceAssembler:
         """Build secondary context from repo-authored docs for overview/system pages."""
         hints = bucket.generation_hints or {}
         style = hints.get("prompt_style", "")
-        title_tokens = {token.lower() for token in re.findall(r"[A-Za-z0-9]+", bucket.title)}
+        title_tokens = {
+            token.lower() for token in re.findall(r"[A-Za-z0-9]+", bucket.title)
+        }
         if not (
             hints.get("is_introduction_page")
             or style == "architecture_component"
@@ -444,13 +462,54 @@ class EvidenceAssembler:
 
     def _builtin_helper_skip_names(self) -> set[str]:
         return {
-            "print", "len", "str", "int", "float", "dict", "list", "set", "tuple",
-            "range", "enumerate", "zip", "map", "filter", "sorted", "reversed",
-            "isinstance", "issubclass", "hasattr", "getattr", "setattr", "delattr",
-            "super", "property", "staticmethod", "classmethod", "type", "object",
-            "open", "round", "abs", "max", "min", "sum", "any", "all", "format",
-            "json", "os", "sys", "re", "logging", "datetime", "time", "self",
-            "__init__", "__str__", "__repr__",
+            "print",
+            "len",
+            "str",
+            "int",
+            "float",
+            "dict",
+            "list",
+            "set",
+            "tuple",
+            "range",
+            "enumerate",
+            "zip",
+            "map",
+            "filter",
+            "sorted",
+            "reversed",
+            "isinstance",
+            "issubclass",
+            "hasattr",
+            "getattr",
+            "setattr",
+            "delattr",
+            "super",
+            "property",
+            "staticmethod",
+            "classmethod",
+            "type",
+            "object",
+            "open",
+            "round",
+            "abs",
+            "max",
+            "min",
+            "sum",
+            "any",
+            "all",
+            "format",
+            "json",
+            "os",
+            "sys",
+            "re",
+            "logging",
+            "datetime",
+            "time",
+            "self",
+            "__init__",
+            "__str__",
+            "__repr__",
         }
 
     def _build_module_file_index(self) -> dict[str, set[str]]:
@@ -478,7 +537,9 @@ class EvidenceAssembler:
             if not parsed or not parsed.symbols:
                 continue
             index[file_path] = [
-                sym for sym in parsed.symbols if sym.kind in {"function", "method", "class"}
+                sym
+                for sym in parsed.symbols
+                if sym.kind in {"function", "method", "class"}
             ]
         return index
 
@@ -527,7 +588,9 @@ class EvidenceAssembler:
         self, content: str
     ) -> list[tuple[str, set[str]]]:
         results: list[tuple[str, set[str]]] = []
-        for match in re.finditer(r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\s+(.+)$", content, re.MULTILINE):
+        for match in re.finditer(
+            r"^\s*from\s+([A-Za-z0-9_./]+)\s+import\s+(.+)$", content, re.MULTILINE
+        ):
             module_name = match.group(1).strip()
             raw_symbols = match.group(2).split(",")
             names = set()
@@ -554,7 +617,9 @@ class EvidenceAssembler:
         end = len(file_lines)
         if parsed and parsed.symbols:
             for idx, candidate in enumerate(parsed.symbols):
-                if candidate.start_line == symbol.start_line and idx + 1 < len(parsed.symbols):
+                if candidate.start_line == symbol.start_line and idx + 1 < len(
+                    parsed.symbols
+                ):
                     end = parsed.symbols[idx + 1].start_line - 1
                     break
 
@@ -591,11 +656,18 @@ class EvidenceAssembler:
             score += 80
         if src_file in self._file_to_integrations:
             score += 60
-        if any(token in path_lower for token in ("middleware", "auth", "config", "settings")):
+        if any(
+            token in path_lower
+            for token in ("middleware", "auth", "config", "settings")
+        ):
             score += 45
         if any(token in path_lower for token in ("route", "controller", "handler")):
             score += 40
-        if owned_symbols and parsed and any(s.name in owned_symbols for s in parsed.symbols):
+        if (
+            owned_symbols
+            and parsed
+            and any(s.name in owned_symbols for s in parsed.symbols)
+        ):
             score += 70
         if parsed and parsed.imports:
             score += min(len(parsed.imports), 10)
@@ -625,13 +697,20 @@ class EvidenceAssembler:
             }
         )[:6]
         key_symbols = (
-            [f"{symbol.kind}:{symbol.name}" for symbol in (parsed.symbols[:8] if parsed else [])]
+            [
+                f"{symbol.kind}:{symbol.name}"
+                for symbol in (parsed.symbols[:8] if parsed else [])
+            ]
             if parsed
             else []
         )
         imports = parsed.imports[:8] if parsed and parsed.imports else []
-        integration_signals = sorted(set(self._file_to_integrations.get(src_file, [])))[:5]
-        config_signals = self._build_config_signals(bucket, src_file, content, endpoint_refs)
+        integration_signals = sorted(set(self._file_to_integrations.get(src_file, [])))[
+            :5
+        ]
+        config_signals = self._build_config_signals(
+            bucket, src_file, content, endpoint_refs
+        )
         database_signals = self._build_database_signals(src_file)
         summary = self._summarize_file_for_card(
             src_file,
@@ -670,7 +749,10 @@ class EvidenceAssembler:
         if src_file in bucket.artifact_refs:
             signals.append("artifact_ref")
         lowered = src_file.lower()
-        if any(token in lowered for token in ("config", "settings", ".env", "docker", "compose")):
+        if any(
+            token in lowered
+            for token in ("config", "settings", ".env", "docker", "compose")
+        ):
             signals.append("config_root")
         if any(ep.get("route_file") == src_file for ep in endpoint_refs):
             signals.append("route_registration")
@@ -723,12 +805,17 @@ class EvidenceAssembler:
 
     def _build_database_signals(self, src_file: str) -> list[str]:
         artifact_scan = getattr(self.scan, "artifact_scan", None)
-        db_scan = getattr(artifact_scan, "database_scan", None) if artifact_scan else None
+        db_scan = (
+            getattr(artifact_scan, "database_scan", None) if artifact_scan else None
+        )
         if not db_scan:
             return []
 
         signals: list[str] = []
-        if any(getattr(model_file, "file_path", "") == src_file for model_file in db_scan.model_files):
+        if any(
+            getattr(model_file, "file_path", "") == src_file
+            for model_file in db_scan.model_files
+        ):
             signals.append("model_file")
         if src_file in getattr(db_scan, "migration_files", []):
             signals.append("migration_file")
@@ -772,7 +859,11 @@ class EvidenceAssembler:
             preview = self._extract_signatures(parsed, content).strip()
             return preview[:350]
         if key_routes:
-            lines = [line for line in content.splitlines() if any(route.split(" ", 1)[-1] in line for route in key_routes)]
+            lines = [
+                line
+                for line in content.splitlines()
+                if any(route.split(" ", 1)[-1] in line for route in key_routes)
+            ]
             if lines:
                 return "\n".join(lines[:6])[:350]
         non_empty = [line for line in content.splitlines() if line.strip()]
@@ -803,9 +894,7 @@ class EvidenceAssembler:
             if card.config_signals:
                 block.append(f"- Config signals: {', '.join(card.config_signals)}")
             if card.database_signals:
-                block.append(
-                    f"- Database signals: {', '.join(card.database_signals)}"
-                )
+                block.append(f"- Database signals: {', '.join(card.database_signals)}")
             if card.targeted_snippet:
                 block.append("```")
                 block.append(card.targeted_snippet)
@@ -824,7 +913,9 @@ class EvidenceAssembler:
             if card.key_routes:
                 details.append(f"routes={', '.join(card.key_routes[:3])}")
             if card.integration_signals:
-                details.append(f"integrations={', '.join(card.integration_signals[:2])}")
+                details.append(
+                    f"integrations={', '.join(card.integration_signals[:2])}"
+                )
             if card.config_signals:
                 details.append(f"signals={', '.join(card.config_signals[:2])}")
             if card.database_signals:
@@ -873,7 +964,9 @@ class EvidenceAssembler:
                     result.append(content_lines[i])
                     seen.add(i)
             if end < actual_end and end not in seen:
-                result.append(f"    ... [{actual_end - end} more lines in {symbol.name}]")
+                result.append(
+                    f"    ... [{actual_end - end} more lines in {symbol.name}]"
+                )
 
         return "\n".join(result)
 
@@ -899,8 +992,14 @@ class EvidenceAssembler:
         # If we have owned_symbols AND this is a giant file with clusters,
         # prioritize showing those symbols
         if owned_symbols:
-            priority = [(i, s) for i, s in enumerate(parsed.symbols) if s.name in owned_symbols]
-            others = [(i, s) for i, s in enumerate(parsed.symbols) if s.name not in owned_symbols]
+            priority = [
+                (i, s) for i, s in enumerate(parsed.symbols) if s.name in owned_symbols
+            ]
+            others = [
+                (i, s)
+                for i, s in enumerate(parsed.symbols)
+                if s.name not in owned_symbols
+            ]
             # Show priority symbols first, then fill with others up to 40
             indexed_symbols = priority + others[: max(0, 40 - len(priority))]
         else:
@@ -1259,7 +1358,11 @@ class EvidenceAssembler:
         if artifact_scan is None:
             return ""
         db_scan = getattr(artifact_scan, "database_scan", None)
-        if db_scan is None or not (db_scan.model_files or db_scan.schema_files or getattr(db_scan, "knex_artifacts", [])):
+        if db_scan is None or not (
+            db_scan.model_files
+            or db_scan.schema_files
+            or getattr(db_scan, "knex_artifacts", [])
+        ):
             return ""
 
         lines: list[str] = ["**Database Schema Information**\n"]
@@ -1294,7 +1397,9 @@ class EvidenceAssembler:
                 lines.append("\n### Knex Artifacts\n")
                 for artifact in db_scan.knex_artifacts[:15]:
                     descriptor = artifact.table_name or artifact.file_path
-                    lines.append(f"- `{artifact.file_path}` ({artifact.artifact_type}: {descriptor})")
+                    lines.append(
+                        f"- `{artifact.file_path}` ({artifact.artifact_type}: {descriptor})"
+                    )
             if getattr(db_scan, "graphql_interfaces", None):
                 lines.append("\n### GraphQL Interfaces Touching The Data Layer\n")
                 for interface in db_scan.graphql_interfaces[:15]:
@@ -1365,9 +1470,13 @@ class EvidenceAssembler:
                 if artifact.columns:
                     lines.append(f"  Columns: {', '.join(artifact.columns[:12])}")
                 if artifact.foreign_keys:
-                    lines.append(f"  Foreign keys: {', '.join(artifact.foreign_keys[:8])}")
+                    lines.append(
+                        f"  Foreign keys: {', '.join(artifact.foreign_keys[:8])}"
+                    )
                 if artifact.query_patterns:
-                    lines.append(f"  Query patterns: {', '.join(artifact.query_patterns[:4])}")
+                    lines.append(
+                        f"  Query patterns: {', '.join(artifact.query_patterns[:4])}"
+                    )
 
         # Migration files
         if db_scan.migration_files:
@@ -1414,15 +1523,70 @@ class EvidenceAssembler:
             )
         else:
             if group_kind == "celery":
-                tasks = [task for task in tasks if task.file_path in owned_files]
-                schedulers = [item for item in schedulers if item.file_path in owned_files]
+                tasks = [
+                    task
+                    for task in tasks
+                    if task.file_path in owned_files and task.runtime_kind == "celery"
+                ]
+                schedulers = [
+                    item
+                    for item in schedulers
+                    if item.file_path in owned_files
+                    or item.scheduler_type in {"beat", "crontab"}
+                ]
                 consumers = []
+            elif group_kind == "django":
+                tasks = [
+                    task
+                    for task in tasks
+                    if task.file_path in owned_files
+                    and task.runtime_kind in {"django_command", "django_signal"}
+                ]
+                schedulers = []
+                consumers = []
+            elif group_kind == "laravel":
+                tasks = [
+                    task
+                    for task in tasks
+                    if task.file_path in owned_files
+                    and task.runtime_kind.startswith("laravel_")
+                ]
+                schedulers = [
+                    item
+                    for item in schedulers
+                    if item.file_path in owned_files
+                    and item.scheduler_type == "laravel_schedule"
+                ]
+                consumers = []
+            elif group_kind == "workers":
+                tasks = [
+                    task
+                    for task in tasks
+                    if task.file_path in owned_files
+                    and task.runtime_kind
+                    not in {"celery", "django_command", "django_signal"}
+                    and not task.runtime_kind.startswith("laravel_")
+                ]
+                schedulers = [
+                    item for item in schedulers if item.file_path in owned_files
+                ]
+                consumers = [
+                    item for item in consumers if item.file_path in owned_files
+                ]
             elif group_kind == "schedulers":
-                schedulers = [item for item in schedulers if item.file_path in owned_files]
-                tasks = [task for task in tasks if task.file_path in owned_files and task.schedule_sources]
+                schedulers = [
+                    item for item in schedulers if item.file_path in owned_files
+                ]
+                tasks = [
+                    task
+                    for task in tasks
+                    if task.file_path in owned_files and task.schedule_sources
+                ]
                 consumers = []
             elif group_kind == "realtime":
-                consumers = [item for item in consumers if item.file_path in owned_files]
+                consumers = [
+                    item for item in consumers if item.file_path in owned_files
+                ]
                 tasks = []
                 schedulers = []
 
@@ -1434,26 +1598,45 @@ class EvidenceAssembler:
                     detail.append(f"queue={task.queue}")
                 if task.retry_policy:
                     detail.append(f"retry={task.retry_policy}")
-                if task.schedule_sources:
+                runtime_kind = getattr(task, "runtime_kind", "")
+                if runtime_kind and runtime_kind != "celery":
+                    detail.append(f"kind={runtime_kind}")
+                if getattr(task, "decorator", ""):
+                    detail.append(f"source={task.decorator}")
+                if getattr(task, "schedule_sources", []):
                     detail.append(f"schedule={'; '.join(task.schedule_sources[:2])}")
-                if task.triggers:
+                if getattr(task, "triggers", []):
                     detail.append(f"triggers={', '.join(task.triggers[:3])}")
+                if getattr(task, "producer_files", []):
+                    detail.append(f"producers={', '.join(task.producer_files[:3])}")
+                if getattr(task, "linked_endpoints", []):
+                    detail.append(f"endpoints={', '.join(task.linked_endpoints[:3])}")
                 lines.append("- " + " | ".join(detail))
 
         if schedulers:
             lines.append("\n### Schedulers\n")
             for scheduler in schedulers[:30]:
-                detail = [f"`{scheduler.name}` (`{scheduler.file_path}`)", scheduler.scheduler_type]
+                detail = [
+                    f"`{scheduler.name}` (`{scheduler.file_path}`)",
+                    scheduler.scheduler_type,
+                ]
                 if scheduler.cron:
                     detail.append(f"cron={scheduler.cron}")
-                if scheduler.invoked_targets:
+                if getattr(scheduler, "invoked_targets", []):
                     detail.append(f"targets={', '.join(scheduler.invoked_targets[:4])}")
+                if getattr(scheduler, "linked_endpoints", []):
+                    detail.append(
+                        f"endpoints={', '.join(scheduler.linked_endpoints[:3])}"
+                    )
                 lines.append("- " + " | ".join(detail))
 
         if consumers:
             lines.append("\n### Realtime Consumers\n")
             for consumer in consumers[:30]:
-                detail = [f"`{consumer.name}` (`{consumer.file_path}`)", consumer.consumer_type]
+                detail = [
+                    f"`{consumer.name}` (`{consumer.file_path}`)",
+                    consumer.consumer_type,
+                ]
                 if consumer.routes:
                     detail.append(f"routes={', '.join(consumer.routes[:3])}")
                 if consumer.groups:
@@ -1476,7 +1659,8 @@ class EvidenceAssembler:
 
         if self.scan.languages:
             languages = ", ".join(
-                f"{name} ({count})" for name, count in sorted(self.scan.languages.items())
+                f"{name} ({count})"
+                for name, count in sorted(self.scan.languages.items())
             )
             lines.append(f"Languages detected: {languages}")
         if self.scan.frameworks_detected:
@@ -1578,1530 +1762,3 @@ class EvidenceAssembler:
                     break
 
         return "\n\n".join(snippets)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 3.2  Single-Pass Page Generation
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-class PageGenerator:
-    """Generates a single doc page from assembled evidence in one LLM pass."""
-
-    def __init__(self, llm: LLMClient, cfg: dict[str, Any], repo_root: Path):
-        self.llm = llm
-        self.cfg = cfg
-        self.repo_root = repo_root
-
-    def generate(
-        self,
-        evidence: AssembledEvidence,
-        sitemap_context: str,
-        dependency_links: str,
-        openapi_context: str = "",
-        quality_feedback: str = "",
-    ) -> str:
-        """Generate the complete page from evidence. Returns markdown string."""
-        bucket = evidence.bucket
-
-        # Select prompt template via generation_hints.prompt_style
-        prompt_template = get_prompt_for_bucket(bucket)
-
-        # Compose the enriched source context
-        full_source = evidence.source_context
-        if evidence.compressed_cards_context:
-            full_source += (
-                "\n\n## Compressed File Coverage\n"
-                "These files were not dropped. They are represented by derived evidence "
-                "cards and still count as authoritative coverage inputs.\n\n"
-                f"{evidence.compressed_cards_context}"
-            )
-        if evidence.cluster_context:
-            full_source += f"\n\n## Giant File Clusters\n{evidence.cluster_context}"
-        if evidence.integration_context:
-            full_source += f"\n\n## Integration Context\n{evidence.integration_context}"
-        if evidence.database_context:
-            full_source += f"\n\n## Database Schema\n{evidence.database_context}"
-        if evidence.runtime_context:
-            full_source += f"\n\n## Runtime & Background Jobs\n{evidence.runtime_context}"
-        if evidence.artifact_context:
-            full_source += f"\n\n## Artifacts\n{evidence.artifact_context}"
-        if evidence.graph_context:
-            full_source += f"\n\n## Dependency Graph\n{evidence.graph_context}"
-        if evidence.cross_ref_context:
-            full_source += f"\n\n{evidence.cross_ref_context}"
-        if evidence.plan_summary_context:
-            full_source += f"\n\n## Repository Map\n{evidence.plan_summary_context}"
-        if evidence.repo_docs_context:
-            full_source += f"\n\n{evidence.repo_docs_context}"
-        if evidence.helper_context:
-            full_source += f"\n\n{evidence.helper_context}"
-        if evidence.config_env_context:
-            full_source += f"\n\n## Config & Environment Evidence\n{evidence.config_env_context}"
-        page_contract = (bucket.generation_hints or {}).get("page_contract", {})
-        if page_contract:
-            contract_lines = [
-                f"Intent: {page_contract.get('intent', bucket.description or bucket.title)}"
-            ]
-            must_cover = page_contract.get("must_cover_concepts", [])
-            if must_cover:
-                contract_lines.append(f"Must cover: {', '.join(must_cover)}")
-            sibling_links = page_contract.get("required_sibling_links", [])
-            if sibling_links:
-                contract_lines.append(f"Required sibling links: {', '.join(sibling_links)}")
-            forbidden = page_contract.get("forbidden_filler", [])
-            if forbidden:
-                contract_lines.append(f"Forbidden filler: {', '.join(forbidden)}")
-            full_source += "\n\n## Page Contract\n" + "\n".join(f"- {line}" for line in contract_lines)
-
-        # Format required sections/diagrams/coverage
-        required_sections = (
-            ", ".join(bucket.required_sections)
-            if bucket.required_sections
-            else "default"
-        )
-        required_diagrams = (
-            ", ".join(bucket.required_diagrams)
-            if bucket.required_diagrams
-            else "architecture_flow"
-        )
-        coverage_targets = (
-            ", ".join(bucket.coverage_targets) if bucket.coverage_targets else ""
-        )
-
-        # Resource group for endpoint pages
-        resource_group = bucket.slug.replace("-api", "").replace("-", " ").title()
-
-        user_prompt = prompt_template.format(
-            title=bucket.title,
-            project_name=self.cfg.get("project_name", self.repo_root.name),
-            description=self.cfg.get("description", ""),
-            page_description=bucket.description,
-            languages=", ".join(
-                k for k in (self.cfg.get("languages") or ["python", "javascript"])
-            ),
-            frameworks=", ".join(self.cfg.get("frameworks") or []),
-            source_context=full_source,
-            endpoints_detail=evidence.endpoints_detail,
-            openapi_context=openapi_context,
-            resource_group=resource_group,
-            required_sections=required_sections,
-            required_diagrams=required_diagrams,
-            coverage_targets=coverage_targets,
-            sitemap_context=sitemap_context,
-            dependency_links=dependency_links,
-        )
-
-        if quality_feedback:
-            user_prompt += (
-                "\n\n## Quality Feedback From Previous Draft\n"
-                "Revise the page to address these issues while staying grounded in the same evidence:\n"
-                f"{quality_feedback}\n"
-            )
-
-        return self.llm.complete(SYSTEM_V2, user_prompt)
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 3.3  Validation
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-@dataclass
-class ValidationResult:
-    """Result of validating a generated page against bucket requirements."""
-
-    is_valid: bool
-    missing_sections: list[str] = field(default_factory=list)
-    missing_file_refs: list[str] = field(default_factory=list)
-    hallucinated_paths: list[str] = field(default_factory=list)
-    mermaid_block_count: int = 0
-    word_count: int = 0
-    warnings: list[str] = field(default_factory=list)
-    missing_sibling_links: list[str] = field(default_factory=list)
-    missing_contract_concepts: list[str] = field(default_factory=list)
-    unmatched_routes: list[str] = field(default_factory=list)
-    out_of_evidence_refs: list[str] = field(default_factory=list)
-
-
-class PageValidator:
-    """Validates generated markdown against bucket requirements."""
-
-    def __init__(self, repo_root: Path, scan: RepoScan):
-        self.repo_root = repo_root
-        self.scan = scan
-        self.known_files = set(scan.file_summaries.keys())
-        self.known_route_paths = {
-            self._normalize_route_path(ep.get("path", ""))
-            for ep in scan.published_api_endpoints
-            if ep.get("path")
-        }
-
-    def validate(
-        self,
-        content: str,
-        bucket: DocBucket,
-        evidence: AssembledEvidence | None = None,
-    ) -> ValidationResult:
-        """Run all validation checks on generated content."""
-        result = ValidationResult(is_valid=True)
-        result.word_count = len(content.split())
-
-        # 1. Check required sections appear as headings
-        self._check_sections(content, bucket, result)
-
-        # 2. Check that owned files are referenced
-        self._check_file_refs(content, bucket, result)
-
-        # 3. Check for hallucinated file paths
-        self._check_hallucinated_paths(content, result)
-
-        # 4. Check references against assembled evidence when available
-        self._check_evidence_backed_refs(content, evidence, result)
-
-        # 5. Check route/path claims for API and operations-heavy pages
-        self._check_route_claims(content, bucket, result)
-
-        # 6. Count mermaid diagrams
-        result.mermaid_block_count = len(re.findall(r"```mermaid", content))
-
-        # 7. Minimum content check
-        if result.word_count < 100:
-            result.warnings.append("Very short page (<100 words) — may be incomplete")
-            result.is_valid = False
-
-        # 8. Check for required diagrams
-        if bucket.required_diagrams and result.mermaid_block_count == 0:
-            result.warnings.append(
-                f"No Mermaid diagrams found but required: {', '.join(bucket.required_diagrams)}"
-            )
-
-        # 9. Check page contract
-        self._check_page_contract(content, bucket, result)
-
-        # 10. Check overview grounding depth
-        self._check_overview_grounding(content, bucket, result)
-
-        return result
-
-    def _check_sections(
-        self, content: str, bucket: DocBucket, result: ValidationResult
-    ):
-        """Check that required sections appear as markdown headings."""
-        if not bucket.required_sections:
-            return
-
-        # Extract all headings from the content
-        headings = set()
-        for match in re.finditer(r"^#{1,4}\s+(.+)$", content, re.MULTILINE):
-            headings.add(match.group(1).strip().lower())
-
-        for section in bucket.required_sections:
-            section_lower = section.lower()
-            # Fuzzy match: check if any heading contains the key words
-            found = any(
-                section_lower in h or all(word in h for word in section_lower.split())
-                for h in headings
-            )
-            if not found:
-                result.missing_sections.append(section)
-
-        if result.missing_sections:
-            result.warnings.append(
-                f"Missing sections: {', '.join(result.missing_sections)}"
-            )
-
-    def _check_file_refs(
-        self, content: str, bucket: DocBucket, result: ValidationResult
-    ):
-        """Check that at least some of the bucket's owned files are referenced."""
-        if not bucket.owned_files:
-            return
-
-        content_lower = content.lower()
-        referenced = 0
-        for f in bucket.owned_files:
-            # Check if file path appears in the content (case-insensitive)
-            if f.lower() in content_lower:
-                referenced += 1
-
-        # At least 30% of files should be referenced
-        coverage = referenced / len(bucket.owned_files) if bucket.owned_files else 1.0
-        unreferenced = [f for f in bucket.owned_files if f.lower() not in content_lower]
-
-        if coverage < 0.3 and len(unreferenced) > 2:
-            result.missing_file_refs = unreferenced[:5]
-            result.warnings.append(
-                f"Low file coverage: {referenced}/{len(bucket.owned_files)} files referenced "
-                f"({coverage:.0%})"
-            )
-
-    def _check_hallucinated_paths(self, content: str, result: ValidationResult):
-        """Find file paths in backticks that don't exist in the repo."""
-        # Match `path/to/file.ext` or `path/to/file.ext:123`
-        refs = re.findall(
-            r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8})(?::\d+)?`", content
-        )
-        hallucinated = []
-        for ref in refs:
-            # Skip common non-path patterns
-            if ref.startswith("http") or ref.startswith("www."):
-                continue
-            if "." not in ref.split("/")[-1]:
-                continue
-            # Check if it looks like a file path and doesn't exist
-            if "/" in ref and ref not in self.known_files:
-                if not (self.repo_root / ref).exists():
-                    hallucinated.append(ref)
-
-        # Only flag if there are many — some may be examples in code blocks
-        if len(hallucinated) > 5:
-            result.hallucinated_paths = hallucinated[:10]
-            result.warnings.append(
-                f"{len(hallucinated)} potentially hallucinated file paths found"
-            )
-            result.is_valid = False
-
-    def _check_evidence_backed_refs(
-        self,
-        content: str,
-        evidence: AssembledEvidence | None,
-        result: ValidationResult,
-    ) -> None:
-        if evidence is None or not evidence.evidence_file_paths:
-            return
-
-        referenced_files = set(
-            re.findall(r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8})(?::\d+)?`", content)
-        )
-        violations = sorted(
-            ref
-            for ref in referenced_files
-            if ref in self.known_files and ref not in evidence.evidence_file_paths
-        )
-        if violations:
-            result.out_of_evidence_refs = violations[:10]
-            result.warnings.append(
-                f"References files outside assembled evidence: {', '.join(violations[:4])}"
-            )
-            if len(violations) >= 4:
-                result.is_valid = False
-
-    def _check_route_claims(
-        self, content: str, bucket: DocBucket, result: ValidationResult
-    ) -> None:
-        if not self.known_route_paths:
-            return
-
-        hints = bucket.generation_hints or {}
-        title_lower = bucket.title.lower()
-        if not (
-            hints.get("include_endpoint_detail")
-            or hints.get("is_endpoint_ref")
-            or hints.get("is_endpoint_family")
-            or bucket.section == "API Reference"
-            or "health" in title_lower
-            or "deployment" in title_lower
-            or "api" in title_lower
-        ):
-            return
-
-        candidates = {
-            self._normalize_route_path(match)
-            for match in re.findall(r"(\/[A-Za-z0-9{}_<>\-./]+)", content)
-        }
-        candidates = {
-            route for route in candidates
-            if route and "." not in route.split("/")[-1]
-        }
-        unmatched = sorted(
-            route for route in candidates
-            if route not in self.known_route_paths
-        )
-        if unmatched:
-            result.unmatched_routes = unmatched[:10]
-            result.warnings.append(
-                f"Unmatched route/path claims: {', '.join(unmatched[:4])}"
-            )
-            if len(unmatched) >= 2 or any("health" in route for route in unmatched):
-                result.is_valid = False
-
-    @staticmethod
-    def _normalize_route_path(path: str) -> str:
-        path = path.strip()
-        if not path:
-            return ""
-        path = re.sub(r"^https?://[^/]+", "", path)
-        path = path.split("?", 1)[0].split("#", 1)[0]
-        if not path.startswith("/"):
-            path = "/" + path.lstrip("/")
-        if path != "/" and path.endswith("/"):
-            path = path[:-1]
-        return path
-
-    def _check_page_contract(
-        self, content: str, bucket: DocBucket, result: ValidationResult
-    ) -> None:
-        contract = (bucket.generation_hints or {}).get("page_contract", {})
-        if not contract:
-            return
-
-        content_lower = content.lower()
-        for concept in contract.get("must_cover_concepts", []):
-            concept_lower = concept.lower()
-            concept_tokens = [token for token in re.findall(r"[a-z0-9]+", concept_lower) if len(token) > 2]
-            if not concept_tokens:
-                continue
-            if not all(token in content_lower for token in concept_tokens[:2]):
-                result.missing_contract_concepts.append(concept)
-
-        for sibling_slug in contract.get("required_sibling_links", []):
-            if f"/{sibling_slug}" not in content and sibling_slug not in content:
-                result.missing_sibling_links.append(sibling_slug)
-
-        generic_headings = {
-            "details",
-            "diagrams",
-            "implementation",
-            "summary",
-        }
-        headings = {
-            match.group(1).strip().lower()
-            for match in re.finditer(r"^#{1,4}\s+(.+)$", content, re.MULTILINE)
-        }
-        if len(headings & generic_headings) >= 2:
-            result.warnings.append("Too many generic section headings")
-
-        if result.missing_contract_concepts:
-            result.warnings.append(
-                f"Missing contract concepts: {', '.join(result.missing_contract_concepts)}"
-            )
-            result.is_valid = False
-        if result.missing_sibling_links:
-            result.warnings.append(
-                f"Missing sibling links: {', '.join(result.missing_sibling_links[:4])}"
-            )
-
-    def _check_overview_grounding(
-        self, content: str, bucket: DocBucket, result: ValidationResult
-    ) -> None:
-        """Warn if overview/landing pages lack key structural elements."""
-        hints = bucket.generation_hints or {}
-        if not hints.get("is_introduction_page"):
-            return
-
-        content_lower = content.lower()
-        headings = {
-            match.group(1).strip().lower()
-            for match in re.finditer(r"^#{1,4}\s+(.+)$", content, re.MULTILINE)
-        }
-
-        # Check for key structural elements
-        has_flow = any(
-            token in content_lower
-            for token in ("runtime flow", "request lifecycle", "end-to-end", "sequence")
-        )
-        has_subsystem = any(
-            token in content_lower
-            for token in ("subsystem", "major component", "key component", "architecture")
-        )
-        has_key_files = any(
-            "key file" in h or "files to know" in h for h in headings
-        )
-        has_mermaid = "```mermaid" in content
-
-        if not has_flow:
-            result.warnings.append(
-                "Overview page lacks runtime flow explanation"
-            )
-        if not has_subsystem:
-            result.warnings.append(
-                "Overview page lacks subsystem or component map"
-            )
-        if not has_key_files:
-            result.warnings.append(
-                "Overview page missing Key Files section"
-            )
-        if not has_mermaid:
-            result.warnings.append(
-                "Overview page has no Mermaid diagrams"
-            )
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 3.4  Mermaid Post-Processing
-# ═════════════════════════════════════════════════════════════════════════════
-
-
-def fix_mermaid_diagrams(content: str) -> str:
-    """Find and fix common LLM Mermaid syntax errors in generated markdown."""
-
-    def fix_block(match: re.Match) -> str:
-        diagram = match.group(1)
-        fixed = _fix_mermaid_diagram(diagram)
-        return f"```mermaid\n{fixed}\n```"
-
-    return re.sub(r"```mermaid\n(.*?)\n```", fix_block, content, flags=re.DOTALL)
-
-
-def _fix_mermaid_diagram(diagram: str) -> str:
-    """Fix the most common Mermaid mistakes LLMs make."""
-    def sanitize_edge_label(label: str) -> str:
-        cleaned = re.sub(r"<br\s*/?>", " ", label, flags=re.IGNORECASE)
-        cleaned = cleaned.replace("(", " ").replace(")", " ")
-        cleaned = cleaned.replace("/", " ")
-        cleaned = re.sub(r"[^A-Za-z0-9 _:-]+", " ", cleaned)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        return cleaned or "link"
-
-    lines = diagram.splitlines()
-    fixed: list[str] = []
-    diagram_type = ""
-
-    for line in lines:
-        stripped = line.strip().lower()
-
-        if not diagram_type and stripped:
-            for dtype in (
-                "flowchart",
-                "graph",
-                "sequencediagram",
-                "classdiagram",
-                "erdiagram",
-                "gantt",
-                "pie",
-                "statediagram",
-            ):
-                if stripped.startswith(dtype):
-                    diagram_type = dtype
-                    break
-
-        # Fix: Unquoted labels with parentheses in flowchart
-        if diagram_type in ("flowchart", "graph", ""):
-            line = re.sub(
-                r"\b(\w[\w-]*)\(([^()]*\([^()]*\)[^()]*)\)",
-                lambda m: f'{m.group(1)}["{m.group(2)}"]',
-                line,
-            )
-            line = re.sub(
-                r'\b([A-Za-z][\w-]*)\[([^\]"]*(?:<br\s*/?>|\(|\))[^\]"]*)\]',
-                lambda m: f'{m.group(1)}["{m.group(2)}"]',
-                line,
-            )
-            line = re.sub(
-                r'(-->|---|-.->|==>)\s*"([^"]+)"',
-                lambda m: (
-                    f'{m.group(1)} '
-                    f'{re.sub(r"[^A-Za-z0-9]+", "", m.group(2)).strip() or "Node"}["{m.group(2)}"]'
-                ),
-                line,
-            )
-            line = re.sub(
-                r'^(\s*)([A-Za-z][\w-]*)\s*--\s*"([^"]+)"\s*-->\s*([A-Za-z][\w-]*)\s*$',
-                lambda m: f"{m.group(1)}{m.group(2)} -->|{m.group(3)}| {m.group(4)}",
-                line,
-            )
-            line = re.sub(
-                r'^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$',
-                lambda m: f"{m.group(1)}{m.group(3)} --> {m.group(2)}",
-                line,
-            )
-            line = re.sub(
-                r'^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$',
-                lambda m: (
-                    f"{m.group(1)}{m.group(2)} --> {m.group(3)}\n"
-                    f"{m.group(1)}{m.group(3)} --> {m.group(2)}"
-                ),
-                line,
-            )
-            line = re.sub(
-                r"\|([^|]+)\|",
-                lambda m: f"|{sanitize_edge_label(m.group(1))}|",
-                line,
-            )
-
-        # Fix: Node labels with colons not in quotes
-        line = re.sub(
-            r'\[([^\]"]*:[^\]"]*)\]',
-            lambda m: (
-                f'["{m.group(1)}"]'
-                if ":" in m.group(1) and not m.group(1).startswith('"')
-                else f"[{m.group(1)}]"
-            ),
-            line,
-        )
-
-        # Fix: classDiagram -> instead of --
-        if diagram_type == "classdiagram":
-            line = re.sub(r"\s+->\s+", " --> ", line)
-            line = re.sub(
-                r'(-->\s+)([A-Za-z][\w-]*)\["[^"]+"\]',
-                r"\1\2",
-                line,
-            )
-            line = re.sub(
-                r'(-->\s+)"([A-Za-z][A-Za-z0-9_]*)"',
-                r"\1\2",
-                line,
-            )
-            line = re.sub(
-                r'^(\s*)([A-Za-z][\w-]*)\["[^"]+"\]\s*$',
-                r"\1class \2",
-                line,
-            )
-
-        # Fix: sequenceDiagram participants accidentally emitted with flowchart syntax
-        if diagram_type == "sequencediagram":
-            line = re.sub(
-                r'^(\s*participant\s+)([A-Za-z][\w-]*)\["([^"]+)"\]\s*$',
-                lambda m: f"{m.group(1)}{m.group(2)} as {m.group(3)}",
-                line,
-            )
-
-        if diagram_type in ("statediagram", "statediagram-v2"):
-            line = re.sub(
-                r'"([A-Za-z][A-Za-z0-9_]*)"',
-                r"\1",
-                line,
-            )
-
-        if diagram_type == "erdiagram":
-            if stripped == "...":
-                continue
-            if re.match(r"^\s*\.\.\.\s*(\"[^\"]+\")?\s*$", line):
-                continue
-            line = re.sub(r"^(\s*)--\s+", r"\1%% ", line)
-
-        fixed.append(line)
-
-    result = "\n".join(fixed)
-
-    # Warn about duplicate node IDs
-    if diagram_type in ("flowchart", "graph"):
-        node_ids = re.findall(r"\b([A-Za-z][\w-]*)\s*[\[({\|]", result)
-        seen: set[str] = set()
-        dupes: list[str] = []
-        for nid in node_ids:
-            if nid in seen:
-                dupes.append(nid)
-            seen.add(nid)
-        if dupes:
-            result = (
-                f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n"
-                + result
-            )
-
-    return result
-
-
-def fix_file_references(
-    content: str, repo_root: Path, known_files: set[str], page_files: list[str]
-) -> str:
-    """Remove hallucinated file:line refs, fix out-of-range line numbers."""
-    file_line_counts: dict[str, int] = {}
-
-    def get_line_count(path: str) -> int:
-        if path not in file_line_counts:
-            try:
-                text = (repo_root / path).read_text(encoding="utf-8", errors="replace")
-                file_line_counts[path] = len(text.splitlines())
-            except Exception:
-                file_line_counts[path] = 0
-        return file_line_counts[path]
-
-    def fix_ref(match: re.Match) -> str:
-        path = match.group(1)
-        line_str = match.group(2)
-
-        if path not in known_files and not (repo_root / path).exists():
-            return f"`{path}`"
-
-        if line_str:
-            try:
-                line_num = int(line_str)
-                total = get_line_count(path)
-                if total > 0 and line_num > total:
-                    return f"`{path}`"
-            except ValueError:
-                pass
-
-        return match.group(0)
-
-    return re.sub(
-        r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8}):(\d+)`",
-        fix_ref,
-        content,
-    )
-
-
-def escape_mdx_route_params(content: str) -> str:
-    """Escape route params like `/users/{id}` in MDX text without touching code fences.
-
-    MDX treats `{id}` as a JavaScript expression in normal text and JSX props, so
-    endpoint paths must be escaped to render as literal braces.
-    """
-
-    def escape_segment(segment: str) -> str:
-        return re.sub(
-            r"(?<=/)\{([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)\}",
-            lambda match: f"&#123;{match.group(1)}&#125;",
-            segment,
-        )
-
-    lines: list[str] = []
-    in_fence = False
-    for line in content.splitlines():
-        if line.startswith("```"):
-            in_fence = not in_fence
-            lines.append(line)
-            continue
-
-        if in_fence:
-            lines.append(line)
-            continue
-
-        parts = re.split(r"(`[^`]*`)", line)
-        escaped = "".join(
-            part if part.startswith("`") and part.endswith("`") else escape_segment(part)
-            for part in parts
-        )
-        if "|" in line:
-            escaped = re.sub(
-                r"`([A-Za-z_][A-Za-z0-9_]*)&lt;([^`]+)&gt;`",
-                r"`\1<\2>`",
-                escaped,
-            )
-            escaped = re.sub(
-                r"`([A-Za-z_][A-Za-z0-9_]*)<([^`\n]+)>`",
-                lambda match: f"`{match.group(1)}&lt;{match.group(2)}&gt;`",
-                escaped,
-            )
-        lines.append(escaped)
-
-    return "\n".join(lines)
-
-
-def escape_mdx_text_hazards(content: str) -> str:
-    """Escape plain-text MDX hazards like bare `<5s` outside fenced code.
-
-    A raw `<` followed by a digit, placeholder syntax like `<model>`, or generic
-    type syntax like `array<object>` is parsed as invalid JSX in MDX prose and
-    markdown tables.
-    Also repairs malformed inline HTML where the opening tag is real but the
-    closing tag was escaped by the model, e.g. `<code>path&lt;/code&gt;`.
-    """
-
-    lines: list[str] = []
-    in_fence = False
-    safe_html_tags = {
-        "a",
-        "b",
-        "body",
-        "br",
-        "code",
-        "details",
-        "div",
-        "em",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "head",
-        "header",
-        "hr",
-        "html",
-        "i",
-        "img",
-        "kbd",
-        "li",
-        "main",
-        "meta",
-        "ol",
-        "p",
-        "pre",
-        "section",
-        "small",
-        "span",
-        "strong",
-        "sub",
-        "summary",
-        "sup",
-        "table",
-        "tbody",
-        "td",
-        "th",
-        "thead",
-        "title",
-        "tr",
-        "u",
-        "ul",
-    }
-
-    for line in content.splitlines():
-        if line.startswith("```"):
-            in_fence = not in_fence
-            lines.append(line)
-            continue
-
-        if in_fence:
-            lines.append(line)
-            continue
-
-        parts = re.split(r"(`[^`]*`)", line)
-
-        def normalize_code_span(part: str) -> str:
-            if "|" not in line:
-                return part
-            return re.sub(
-                r"`([A-Za-z_][A-Za-z0-9_]*)<([^`\n]+)>`",
-                lambda match: f"`{match.group(1)}&lt;{match.group(2)}&gt;`",
-                part,
-            )
-
-        def escape_segment(part: str) -> str:
-            part = re.sub(
-                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)&gt;",
-                lambda match: f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>",
-                part,
-            )
-            if "|" in line:
-                part = re.sub(r"<br\s*/?>", " / ", part, flags=re.IGNORECASE)
-            part = re.sub(r"<(?=\d)", "&lt;", part)
-            part = re.sub(
-                r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, .|/&;<>-]*)>",
-                lambda match: f"{match.group(1)}&lt;{match.group(2)}&gt;",
-                part,
-            )
-            part = re.sub(
-                r"<([A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*)>",
-                lambda match: f"&lt;{match.group(1)}&gt;",
-                part,
-            )
-            part = re.sub(
-                r"<([a-z_][a-z0-9_-]*)>",
-                lambda match: (
-                    match.group(0)
-                    if match.group(1) in safe_html_tags
-                    else f"&lt;{match.group(1)}&gt;"
-                ),
-                part,
-            )
-            part = part.replace("<=", "&lt;=")
-            if "|" in line:
-                part = re.sub(
-                    r"(?<!`)(\[\{[^`\n]*\}\])(?!`)",
-                    r"`\1`",
-                    part,
-                )
-                part = re.sub(
-                    r"([,(]\s*)\{([A-Za-z_][A-Za-z0-9_, ]*)\}(?=\s*[),])",
-                    lambda match: f"{match.group(1)}&#123;{match.group(2)}&#125;",
-                    part,
-                )
-            part = part.replace("{...}", "&#123;...&#125;")
-            return part
-
-        escaped = "".join(
-            normalize_code_span(part)
-            if part.startswith("`") and part.endswith("`")
-            else escape_segment(part)
-            for part in parts
-        )
-        lines.append(escaped)
-
-    return "\n".join(lines)
-
-
-def normalize_code_fence_languages(content: str) -> str:
-    """Normalize unsupported or inconsistent fence labels to safe Shiki languages."""
-
-    alias_map = {
-        "env": "bash",
-        "dotenv": "bash",
-        "shell": "bash",
-        "sh": "bash",
-    }
-
-    def replace(match: re.Match) -> str:
-        indent = match.group(1) or ""
-        lang = match.group(2)
-        rest = match.group(3) or ""
-        normalized = alias_map.get(lang.lower(), lang)
-        return f"{indent}```{normalized}{rest}"
-
-    return re.sub(r"^([ \t]*)```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE)
-
-
-def normalize_html_code_blocks(content: str) -> str:
-    """Convert raw <pre><code>...</code></pre> HTML blocks into fenced code blocks."""
-
-    def replace(match: re.Match) -> str:
-        body = match.group("body")
-        normalized = body.strip("\n")
-        return f"```bash\n{normalized}\n```"
-
-    return re.sub(
-        r"<pre><code>(?P<body>.*?)</code></pre>",
-        replace,
-        content,
-        flags=re.DOTALL,
-    )
-
-
-def normalize_mdx_steps(content: str) -> str:
-    """Rewrite heading-like content inside <Step> blocks into safe markdown text.
-
-    MDX can choke on ATX headings such as `### Title` when they appear directly
-    inside JSX flow components like <Step>. Also, raw heading tags such as
-    `<h3>Title</h3>` can end up nested inside `<p>` during hydration. Convert
-    both forms into simple bold lines while leaving headings outside steps and
-    fenced code alone.
-    """
-
-    def replace_step(match: re.Match) -> str:
-        lead = match.group("lead")
-        body = match.group("body")
-        tail = match.group("tail")
-        lines: list[str] = []
-        in_fence = False
-
-        for line in body.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith("```"):
-                in_fence = not in_fence
-                lines.append(line)
-                continue
-
-            if not in_fence:
-                heading = re.match(r"^(\s*)(#{1,6})\s+(.+?)\s*$", line)
-                if heading:
-                    indent, _hashes, title = heading.groups()
-                    lines.append(f"{indent}**{title.strip()}**")
-                    continue
-
-                html_heading = re.match(r"^(\s*)<h[1-6]>(.+?)</h[1-6]>\s*$", line)
-                if html_heading:
-                    indent, title = html_heading.groups()
-                    lines.append(f"{indent}**{title.strip()}**")
-                    continue
-
-            lines.append(line)
-
-        normalized_body = "\n".join(lines)
-        return f"{match.group('open')}{lead}{normalized_body}{tail}</Step>"
-
-    return re.sub(
-        r"(?P<open><Step(?:\s[^>]*)?>)(?P<lead>\s*)(?P<body>.*?)(?P<tail>\s*)</Step>",
-        replace_step,
-        content,
-        flags=re.DOTALL,
-    )
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# 3.5  Parallel Generation Orchestrator
-# ═════════════════════════════════════════════════════════════════════════════
-
-# Rate limiting constants — tuned for provisioned providers (Azure PTU, etc.)
-# Override via .deepdoc.yaml: batch_size, max_parallel_workers
-BATCH_SIZE = 10
-RATE_LIMIT_PAUSE = 0.5  # seconds between batches (Azure rarely 429s within quota)
-RATE_LIMIT_BACKOFF = 3.0  # initial backoff on 429; doubles each retry
-MAX_RETRIES = 5
-MAX_PARALLEL_WORKERS = 6  # LLM concurrency — safe for most Azure/OpenAI deployments
-
-
-@dataclass
-class GenerationResult:
-    """Result of generating a single page."""
-
-    bucket: DocBucket
-    content: str | None = None
-    validation: ValidationResult | None = None
-    error: str | None = None
-    elapsed_seconds: float = 0.0
-    retries: int = 0
-
-
-@dataclass
-class GenerationSummary:
-    """Aggregate summary for a generation run."""
-
-    attempted: int = 0
-    succeeded: int = 0
-    failed: int = 0
-    skipped: int = 0
-
-    @property
-    def status(self) -> str:
-        if self.failed == 0:
-            return "success"
-        return "partial" if self.succeeded > 0 else "failed"
-
-
-def summarize_generation_results(results: list[GenerationResult]) -> GenerationSummary:
-    """Summarize successful, failed, and skipped generation results."""
-
-    summary = GenerationSummary(attempted=len(results))
-    for result in results:
-        if result.error:
-            summary.failed += 1
-        elif result.content:
-            summary.succeeded += 1
-        else:
-            summary.skipped += 1
-    return summary
-
-
-class BucketGenerationEngine:
-    """Orchestrates parallel generation of all bucket pages with evidence assembly,
-    single-pass generation, validation, post-processing, and graceful degradation.
-    """
-
-    def __init__(
-        self,
-        repo_root: Path,
-        cfg: dict[str, Any],
-        llm: LLMClient,
-        scan: RepoScan,
-        plan: DocPlan,
-        output_dir: Path,
-    ):
-        self.repo_root = repo_root
-        self.cfg = cfg
-        self.llm = llm
-        self.scan = scan
-        self.plan = plan
-        self.output_dir = output_dir
-        self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
-        self.generator = PageGenerator(llm, cfg, repo_root)
-        self.validator = PageValidator(repo_root, scan)
-        self.max_workers = cfg.get("max_parallel_workers", MAX_PARALLEL_WORKERS)
-        self.batch_size = cfg.get("batch_size", BATCH_SIZE)
-        self.rate_limit_pause = cfg.get("rate_limit_pause", RATE_LIMIT_PAUSE)
-        self._repo_file_paths = set(self.scan.file_summaries.keys())
-        self._openapi_context = self._precompute_openapi_context()
-
-    def _precompute_openapi_context(self) -> str:
-        """Parse the first available OpenAPI spec once per run."""
-        if not self.scan.has_openapi:
-            return ""
-        for spec_path in self.scan.openapi_paths:
-            spec = parse_openapi_spec(self.repo_root / spec_path)
-            if spec:
-                return (
-                    f"\n## OpenAPI Spec ({spec_path}):\n"
-                    f"{spec_to_context_string(spec)[:4000]}"
-                )
-        return ""
-
-    def generate_all(self, force: bool = False) -> list[GenerationResult]:
-        """Generate all pages. Returns results for each bucket.
-
-        Strategy:
-        - Sort buckets by priority
-        - Within each priority group, generate pages in parallel
-        - Apply rate limiting between batches
-        - Validate and post-process each result
-        """
-        results: list[GenerationResult] = []
-        buckets = sorted(self.plan.buckets, key=lambda b: b.priority)
-
-        # Pre-build sitemap context (shared across all pages)
-        sitemap_by_slug = self._precompute_sitemaps()
-
-        total = len(buckets)
-        generated_count = 0
-        failed_count = 0
-
-        with Progress(
-            SpinnerColumn(),
-            TextColumn("[progress.description]{task.description}"),
-            BarColumn(),
-            TaskProgressColumn(),
-            console=console,
-        ) as progress:
-            task = progress.add_task("Generating pages...", total=total)
-
-            # Process in batches for rate limiting
-            for batch_start in range(0, total, self.batch_size):
-                batch = buckets[batch_start : batch_start + self.batch_size]
-
-                # Use thread pool for parallel LLM calls within batch
-                with ThreadPoolExecutor(
-                    max_workers=min(self.max_workers, len(batch))
-                ) as executor:
-                    futures = {}
-                    for bucket in batch:
-                        progress.update(
-                            task, description=f"[dim]Queuing {bucket.title}...[/dim]"
-                        )
-
-                        # Check staleness
-                        if not force and not self._bucket_is_stale(bucket):
-                            results.append(
-                                GenerationResult(bucket=bucket, content=None)
-                            )
-                            progress.advance(task)
-                            continue
-
-                        future = executor.submit(
-                            self._generate_one,
-                            bucket,
-                            sitemap_by_slug.get(bucket.slug, ("", "")),
-                        )
-                        futures[future] = bucket
-
-                    # Collect results as they complete
-                    for future in as_completed(futures):
-                        bucket = futures[future]
-                        try:
-                            result = future.result()
-                            results.append(result)
-
-                            if result.error:
-                                failed_count += 1
-                                console.print(
-                                    f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {result.error}"
-                                )
-                            elif result.content:
-                                generated_count += 1
-                                word_count = len(result.content.split())
-                                v = result.validation
-                                warnings = ""
-                                if v and v.warnings:
-                                    warnings = f" [yellow]⚠ {len(v.warnings)} warning(s)[/yellow]"
-                                diagrams = f" {v.mermaid_block_count}🔀" if v else ""
-                                console.print(
-                                    f"  [green]✓[/green] [bold]{bucket.title}[/bold] "
-                                    f"[dim]({bucket.bucket_type} · "
-                                    f"{len(bucket.owned_files)} files · "
-                                    f"~{word_count} words{diagrams} · "
-                                    f"{result.elapsed_seconds:.1f}s)[/dim]{warnings}"
-                                )
-                        except Exception as e:
-                            failed_count += 1
-                            results.append(
-                                GenerationResult(bucket=bucket, error=str(e))
-                            )
-                            console.print(
-                                f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}"
-                            )
-
-                        progress.advance(task)
-
-                # Rate limit between batches
-                if batch_start + self.batch_size < total and self.rate_limit_pause > 0:
-                    time.sleep(self.rate_limit_pause)
-
-        if failed_count > 0:
-            console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")
-
-        console.print(f"[green]✓ Generated {generated_count}/{total} pages[/green]")
-
-        return results
-
-    def _generate_one(
-        self,
-        bucket: DocBucket,
-        sitemap_deps: tuple[str, str],
-    ) -> GenerationResult:
-        """Generate, validate, and post-process a single bucket page.
-
-        This runs in a thread pool worker.
-        """
-        start = time.time()
-        sitemap_context, dependency_links = sitemap_deps
-
-        try:
-            # Step 1: Assemble evidence
-            evidence = self.assembler.assemble(bucket)
-
-            if evidence.files_compressed > 0:
-                total_files = evidence.coverage_files_total
-                console.print(
-                    f"[yellow]⚠ bucket \"{bucket.title}\": "
-                    f"{evidence.files_compressed} of {total_files} tracked files "
-                    f"compressed into derived evidence cards[/yellow]"
-                )
-
-            # Step 2: Build OpenAPI context for endpoint pages
-            openapi_context = ""
-            hints = bucket.generation_hints or {}
-            if hints.get("include_openapi") and self.scan.has_openapi:
-                openapi_context = self._openapi_context
-
-            # Step 3: Generate with retry
-            content = self._call_with_retry(
-                evidence, sitemap_context, dependency_links, openapi_context
-            )
-
-            # Step 4: Post-process
-            content = fix_mermaid_diagrams(content)
-            content = fix_file_references(
-                content,
-                self.repo_root,
-                self._repo_file_paths,
-                bucket.owned_files,
-            )
-            content = normalize_html_code_blocks(content)
-            content = normalize_code_fence_languages(content)
-            content = normalize_mdx_steps(content)
-            content = escape_mdx_route_params(content)
-            content = escape_mdx_text_hazards(content)
-
-            # Step 5: Validate
-            validation = self.validator.validate(content, bucket, evidence)
-
-            # Step 6: Retry once on weak quality before degrading.
-            if not validation.is_valid:
-                quality_feedback = "\n".join(f"- {warning}" for warning in validation.warnings[:8])
-                try:
-                    content = self._call_with_retry(
-                        evidence,
-                        sitemap_context,
-                        dependency_links,
-                        openapi_context,
-                        quality_feedback=quality_feedback,
-                    )
-                    content = fix_mermaid_diagrams(content)
-                    content = fix_file_references(
-                        content,
-                        self.repo_root,
-                        self._repo_file_paths,
-                        bucket.owned_files,
-                    )
-                    content = normalize_html_code_blocks(content)
-                    content = normalize_code_fence_languages(content)
-                    content = normalize_mdx_steps(content)
-                    content = escape_mdx_route_params(content)
-                    content = escape_mdx_text_hazards(content)
-                    validation = self.validator.validate(content, bucket, evidence)
-                except Exception:
-                    pass
-
-            # Step 7: If validation fails badly, try graceful degradation
-            if not validation.is_valid:
-                content = self._apply_degradation_fixes(content, bucket, validation)
-                # Re-validate after fixes
-                validation = self.validator.validate(content, bucket, evidence)
-
-            elapsed = time.time() - start
-
-            # Step 8: Write to disk
-            bucket_hints = bucket.generation_hints or {}
-            filename = (
-                "index.mdx"
-                if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.mdx"
-            )
-            doc_path = self.output_dir / filename
-            doc_path.parent.mkdir(parents=True, exist_ok=True)
-            doc_path.write_text(content, encoding="utf-8")
-
-            return GenerationResult(
-                bucket=bucket,
-                content=content,
-                validation=validation,
-                elapsed_seconds=elapsed,
-            )
-
-        except Exception as e:
-            elapsed = time.time() - start
-            # Graceful degradation: generate a stub page
-            stub = self._generate_stub_page(bucket)
-            bucket_hints = bucket.generation_hints or {}
-            filename = (
-                "index.mdx"
-                if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.mdx"
-            )
-            doc_path = self.output_dir / filename
-            doc_path.parent.mkdir(parents=True, exist_ok=True)
-            doc_path.write_text(stub, encoding="utf-8")
-
-            return GenerationResult(
-                bucket=bucket,
-                content=stub,
-                error=f"LLM failed, wrote stub: {e}",
-                elapsed_seconds=elapsed,
-            )
-
-    @staticmethod
-    def _is_retryable(err_str: str) -> bool:
-        """Check if an error is transient and worth retrying."""
-        markers = (
-            "rate",
-            "429",
-            "overloaded",
-            "timeout",
-            "timed out",
-            "502",
-            "503",
-            "504",
-            "bad gateway",
-            "service unavailable",
-            "connection",
-            "temporary",
-            "throttl",
-            "capacity",
-            "server_error",
-            "internal_error",
-        )
-        lower = err_str.lower()
-        return any(m in lower for m in markers)
-
-    def _call_with_retry(
-        self,
-        evidence: AssembledEvidence,
-        sitemap_context: str,
-        dependency_links: str,
-        openapi_context: str,
-        quality_feedback: str = "",
-    ) -> str:
-        """Call LLM with exponential backoff + jitter on transient errors."""
-        import random
-
-        for attempt in range(MAX_RETRIES):
-            try:
-                return self.generator.generate(
-                    evidence,
-                    sitemap_context,
-                    dependency_links,
-                    openapi_context,
-                    quality_feedback=quality_feedback,
-                )
-            except Exception as e:
-                err = str(e)
-                is_last = attempt == MAX_RETRIES - 1
-
-                if self._is_retryable(err):
-                    if is_last:
-                        raise
-                    # Exponential backoff with jitter to avoid thundering herd
-                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
-                    console.print(
-                        f"    [yellow]⏳ Transient error ({evidence.bucket.title}) — "
-                        f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"
-                    )
-                    time.sleep(wait)
-                elif is_last:
-                    raise
-                else:
-                    # Non-rate-limit error — short pause and retry once more
-                    console.print(
-                        f"    [yellow]⚠ LLM error for {evidence.bucket.title} "
-                        f"(attempt {attempt + 1}/{MAX_RETRIES}): {e}[/yellow]"
-                    )
-                    time.sleep(1 + random.uniform(0, 0.5))
-        raise RuntimeError(f"Max retries exceeded for {evidence.bucket.title}")
-
-    # ── Graceful degradation ─────────────────────────────────────────────
-
-    def _apply_degradation_fixes(
-        self,
-        content: str,
-        bucket: DocBucket,
-        validation: ValidationResult,
-    ) -> str:
-        """Attempt to fix validation failures without re-calling the LLM.
-
-        Strategies:
-        - Append missing sections as empty stubs
-        - Remove hallucinated paths
-        - Add a notice if page is very short
-        """
-        # Fix 1: Append stub sections for missing required sections
-        if validation.missing_sections:
-            content += "\n\n---\n\n"
-            for section in validation.missing_sections:
-                content += f"## {section}\n\n"
-                content += f"*TODO: This section ({section}) needs to be filled in with details "
-                content += f"from the source files listed above.*\n\n"
-
-        # Fix 2: Remove hallucinated file paths (replace with just path, no line num)
-        for path in validation.hallucinated_paths:
-            content = content.replace(f"`{path}", "`[path-not-found]")
-
-        # Fix 3: Add a notice for very short pages
-        if validation.word_count < 100:
-            notice = (
-                "\n\n<Callout type=\"warn\">\n"
-                "This page was auto-generated with limited evidence. "
-                "Some sections may be incomplete.\n"
-                "</Callout>\n"
-            )
-            content = notice + content
-
-        return content
-
-    def _generate_stub_page(self, bucket: DocBucket) -> str:
-        """Generate a minimal stub page when LLM generation completely fails."""
-        files_list = "\n".join(f"- `{f}`" for f in bucket.owned_files[:20])
-        more = (
-            f"\n- ... and {len(bucket.owned_files) - 20} more"
-            if len(bucket.owned_files) > 20
-            else ""
-        )
-
-        deps = ""
-        if bucket.depends_on:
-            deps = "\n## Related Pages\n" + "\n".join(
-                f"- [{slug}](/{slug})" for slug in bucket.depends_on
-            )
-
-        return f"""# {bucket.title}
-
-<Callout type="warn">
-This page could not be fully generated. It contains a file listing only.
-Re-run `deepdoc generate` to retry.
-</Callout>
-
-## Description
-
-{bucket.description}
-
-## Source Files
-
-{files_list}{more}
-{deps}
-"""
-
-    # ── Helpers ──────────────────────────────────────────────────────────
-
-    def _precompute_sitemaps(self) -> dict[str, tuple[str, str]]:
-        """Pre-build sitemap + dependency context for each bucket slug."""
-        result: dict[str, tuple[str, str]] = {}
-
-        # Build sitemap by section
-        for bucket in self.plan.buckets:
-            sitemap = self._build_sitemap_for(bucket.slug)
-            deps = self._build_dependency_links_for(bucket)
-            result[bucket.slug] = (sitemap, deps)
-
-        return result
-
-    def _build_sitemap_for(self, current_slug: str) -> str:
-        """Build formatted sitemap excluding current page."""
-        by_section: dict[str, list[DocBucket]] = defaultdict(list)
-        for b in self.plan.buckets:
-            if b.slug != current_slug:
-                by_section[b.section or "Other"].append(b)
-
-        lines: list[str] = []
-        for section, buckets in by_section.items():
-            lines.append(f"**{section}**")
-            for b in buckets:
-                page_path = f"/{b.slug}"
-                key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
-                if len(b.owned_files) > 4:
-                    key_files += f" +{len(b.owned_files) - 4} more"
-                lines.append(f"- [{b.title}]({page_path}) — {b.description}")
-                if key_files:
-                    lines.append(f"  *Covers: {key_files}*")
-
-        return "\n".join(lines) if lines else "(no other pages)"
-
-    def _build_dependency_links_for(self, bucket: DocBucket) -> str:
-        """Build dependency links from explicit depends_on + import analysis."""
-        slug_to_bucket = {b.slug: b for b in self.plan.buckets}
-        related: dict[str, DocBucket] = {}
-        bucket_files = set(bucket.owned_files)
-
-        # Explicit depends_on
-        for dep_slug in bucket.depends_on:
-            if dep_slug in slug_to_bucket and dep_slug != bucket.slug:
-                related[dep_slug] = slug_to_bucket[dep_slug]
-
-        # Import-based: find buckets whose files are imported by this bucket's files
-        file_to_buckets: dict[str, list[DocBucket]] = defaultdict(list)
-        for b in self.plan.buckets:
-            for f in b.owned_files:
-                file_to_buckets[f].append(b)
-
-        for src_file in bucket.owned_files[:15]:
-            parsed = self.scan.parsed_files.get(src_file)
-            if not parsed or not parsed.imports:
-                continue
-            for imp in parsed.imports:
-                # Simple suffix match against known files
-                for known_file in self.scan.file_summaries:
-                    stem = (
-                        known_file.rsplit(".", 1)[0]
-                        .replace("/", ".")
-                        .replace("\\", ".")
-                    )
-                    if stem and stem in imp.replace("/", "."):
-                        for linked_bucket in file_to_buckets.get(known_file, []):
-                            if linked_bucket.slug != bucket.slug:
-                                related[linked_bucket.slug] = linked_bucket
-                        break
-
-        # Strong overlap-based links for database/runtime/interface pages
-        for candidate in self.plan.buckets:
-            if candidate.slug == bucket.slug:
-                continue
-            hints = candidate.generation_hints or {}
-            if not (
-                hints.get("is_database_overview")
-                or hints.get("is_database_group")
-                or hints.get("is_runtime_overview")
-                or hints.get("runtime_group_kind")
-                or hints.get("prompt_style") == "graphql"
-            ):
-                continue
-            if bucket_files & set(candidate.owned_files):
-                related[candidate.slug] = candidate
-
-        if not related:
-            return ""
-
-        lines = [
-            "**Dependency Links** (pages this module imports from — MUST link to these):"
-        ]
-        for b in related.values():
-            lines.append(f"- [{b.title}](/{b.slug}) — {b.description}")
-
-        return "\n".join(lines)
-
-    def _bucket_is_stale(self, bucket: DocBucket) -> bool:
-        """Check if any source file for this bucket has changed since last generation."""
-        from .manifest import Manifest, file_hash as compute_hash
-
-        manifest = Manifest(self.output_dir)
-
-        for src_file in tracked_bucket_files(bucket):
-            src_path = self.repo_root / src_file
-            if not src_path.exists():
-                continue
-            try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
-                if manifest.is_stale(src_file, content):
-                    return True
-            except Exception:
-                return True
-        return False
-
-    def update_manifest(self, results: list[GenerationResult]):
-        """Update the manifest with new file hashes for all successfully generated pages."""
-        from .manifest import Manifest, file_hash as compute_hash
-
-        manifest = Manifest(self.output_dir)
-
-        for result in results:
-            if result.content and not result.error:
-                for src_file in tracked_bucket_files(result.bucket):
-                    src_path = self.repo_root / src_file
-                    if src_path.exists():
-                        try:
-                            content = src_path.read_text(
-                                encoding="utf-8", errors="replace"
-                            )
-                            manifest.update(
-                                src_file, compute_hash(content), result.bucket.slug
-                            )
-                        except Exception:
-                            pass
-        manifest.save()

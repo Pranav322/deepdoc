@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from deepdoc.planner_v2 import (
+from deepdoc.parser.base import ParsedFile, Symbol
+from deepdoc.planner import (
     DocBucket,
     DocPlan,
     RepoScan,
     _consolidate_similar_buckets,
     _should_decompose,
 )
-from deepdoc.parser.base import ParsedFile, Symbol
 
 
 def _make_scan(
@@ -405,7 +405,7 @@ def test_consolidate_nav_structure_cleaned():
 
     # Vinculum buckets should merge, Juspay stays
     remaining_slugs = {b.slug for b in result.buckets}
-    for section, slugs in result.nav_structure.items():
+    for _section, slugs in result.nav_structure.items():
         for slug in slugs:
             assert slug in remaining_slugs, f"Dangling slug '{slug}' in nav_structure"
 

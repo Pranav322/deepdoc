@@ -7,14 +7,14 @@ and visibility tracking (public vs _private vs __dunder__).
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+import re
 
 from .base import ParsedFile, Symbol
 
 try:
-    import tree_sitter_python as tspython
     from tree_sitter import Language, Parser
+    import tree_sitter_python as tspython
 
     PY_LANGUAGE = Language(tspython.language())
     _TS_AVAILABLE = True
@@ -49,7 +49,9 @@ def parse_python(path: Path, content: str, language: str) -> ParsedFile:
     )
 
 
-def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str], depth: int = 0) -> None:
+def _walk(
+    node, lines: list[str], symbols: list[Symbol], imports: list[str], depth: int = 0
+) -> None:
     if node.type in ("import_statement", "import_from_statement"):
         imports.append(_node_text(node, lines))
         return
@@ -67,8 +69,11 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str], dep
         # Recurse into class body for methods
         for child in node.children:
             if child.type == "block":
-                for method_node in child.children: 
-                    if method_node.type in ("function_definition", "async_function_definition"):
+                for method_node in child.children:
+                    if method_node.type in (
+                        "function_definition",
+                        "async_function_definition",
+                    ):
                         msym = _extract_function(method_node, lines, kind="method")
                         if msym:
                             symbols.append(msym)
@@ -133,6 +138,7 @@ def _extract_class(node, lines: list[str]) -> Symbol | None:
 # Decorator extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _get_decorators(node, lines: list[str]) -> list[str]:
     """Extract @decorator annotations from a function or class node."""
     decorators = []
@@ -167,6 +173,7 @@ def _get_decorators(node, lines: list[str]) -> list[str]:
 # Class field extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _extract_class_fields(node, lines: list[str]) -> list[str]:
     """Extract class-level attributes from class body and __init__."""
     fields = []
@@ -175,9 +182,15 @@ def _extract_class_fields(node, lines: list[str]) -> list[str]:
             for stmt in child.children:
                 # Class-level assignments: name: type = value (dataclass fields, etc.)
                 if stmt.type in ("expression_statement", "assignment"):
-                    line = lines[stmt.start_point[0]].strip() if stmt.start_point[0] < len(lines) else ""
+                    line = (
+                        lines[stmt.start_point[0]].strip()
+                        if stmt.start_point[0] < len(lines)
+                        else ""
+                    )
                     # Match patterns like: name: str = "default" or name = value
-                    if re.match(r"\w+\s*[:=]", line) and not line.startswith(("def ", "class ", "@", "#")):
+                    if re.match(r"\w+\s*[:=]", line) and not line.startswith(
+                        ("def ", "class ", "@", "#")
+                    ):
                         fields.append(line.rstrip())
 
                 # Look inside __init__ for self.x = assignments
@@ -187,7 +200,11 @@ def _extract_class_fields(node, lines: list[str]) -> list[str]:
                         for bchild in stmt.children:
                             if bchild.type == "block":
                                 for bstmt in bchild.children:
-                                    bline = lines[bstmt.start_point[0]].strip() if bstmt.start_point[0] < len(lines) else ""
+                                    bline = (
+                                        lines[bstmt.start_point[0]].strip()
+                                        if bstmt.start_point[0] < len(lines)
+                                        else ""
+                                    )
                                     m = re.match(r"self\.(\w+)\s*[:=]", bline)
                                     if m:
                                         fields.append(bline.rstrip())
@@ -197,6 +214,7 @@ def _extract_class_fields(node, lines: list[str]) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Enum and special class detection
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _tag_special_classes(symbols: list[Symbol], content: str) -> None:
     """Post-process to detect Enum subclasses and dataclasses."""
@@ -231,6 +249,7 @@ def _tag_special_classes(symbols: list[Symbol], content: str) -> None:
 # Module-level constant extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _extract_module_constants(content: str, symbols: list[Symbol]) -> None:
     """Extract module-level UPPER_CASE constants."""
     existing_names = {s.name for s in symbols}
@@ -239,24 +258,30 @@ def _extract_module_constants(content: str, symbols: list[Symbol]) -> None:
     for i, line in enumerate(lines):
         stripped = line.strip()
         # Match UPPER_CASE = value (module-level only, no leading whitespace)
-        if not line[0:1].isspace() and not stripped.startswith(("#", "def ", "class ", "@", "import ", "from ")):
+        if not line[0:1].isspace() and not stripped.startswith(
+            ("#", "def ", "class ", "@", "import ", "from ")
+        ):
             m = re.match(r"([A-Z][A-Z_0-9]+)\s*[:=]\s*(.+)", stripped)
             if m and m.group(1) not in existing_names:
                 name = m.group(1)
-                symbols.append(Symbol(
-                    name=name,
-                    kind="constant",
-                    signature=stripped,
-                    start_line=i + 1,
-                    visibility="public",
-                    is_exported=True,
-                ))
+                symbols.append(
+                    Symbol(
+                        name=name,
+                        kind="constant",
+                        signature=stripped,
+                        start_line=i + 1,
+                        end_line=i + 1,
+                        visibility="public",
+                        is_exported=True,
+                    )
+                )
                 existing_names.add(name)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Visibility
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _python_visibility(name: str) -> str:
     """Determine Python visibility by naming convention."""
@@ -273,6 +298,7 @@ def _python_visibility(name: str) -> str:
 # Docstring extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _get_docstring(node, lines: list[str]) -> str:
     """Extract docstring from a function/class node."""
     for child in node.children:
@@ -282,7 +308,11 @@ def _get_docstring(node, lines: list[str]) -> str:
                     for s in stmt.children:
                         if s.type == "string":
                             raw = _node_text(s, lines)
-                            return raw.strip("\"'` \n").replace('"""', "").replace("'''", "")[:300]
+                            return (
+                                raw.strip("\"'` \n")
+                                .replace('"""', "")
+                                .replace("'''", "")[:300]
+                            )
     return ""
 
 
@@ -308,6 +338,7 @@ def _node_text(node, lines: list[str]) -> str:
 
 def _regex_fallback(content: str):
     import re
+
     symbols = []
     imports = []
     lines = content.splitlines()
@@ -330,15 +361,17 @@ def _regex_fallback(content: str):
             m = re.match(r"(?:async )?def (\w+)\(", stripped)
             if m:
                 name = m.group(1)
-                symbols.append(Symbol(
-                    name=name,
-                    kind="function",
-                    signature=stripped,
-                    body_preview="\n".join(lines[i:i + 5]),
-                    start_line=i + 1,
-                    decorators=pending_decorators,
-                    visibility=_python_visibility(name),
-                ))
+                symbols.append(
+                    Symbol(
+                        name=name,
+                        kind="function",
+                        signature=stripped,
+                        body_preview="\n".join(lines[i : i + 5]),
+                        start_line=i + 1,
+                        decorators=pending_decorators,
+                        visibility=_python_visibility(name),
+                    )
+                )
             pending_decorators = []
             continue
 
@@ -350,15 +383,17 @@ def _regex_fallback(content: str):
                 # Check for Enum
                 if re.search(r"\(\s*(?:\w+\.)?(?:Enum|IntEnum|StrEnum)\s*\)", stripped):
                     kind = "enum"
-                symbols.append(Symbol(
-                    name=name,
-                    kind=kind,
-                    signature=stripped,
-                    body_preview="\n".join(lines[i:i + 8]),
-                    start_line=i + 1,
-                    decorators=pending_decorators,
-                    visibility=_python_visibility(name),
-                ))
+                symbols.append(
+                    Symbol(
+                        name=name,
+                        kind=kind,
+                        signature=stripped,
+                        body_preview="\n".join(lines[i : i + 8]),
+                        start_line=i + 1,
+                        decorators=pending_decorators,
+                        visibility=_python_visibility(name),
+                    )
+                )
             pending_decorators = []
             continue
 
@@ -366,14 +401,17 @@ def _regex_fallback(content: str):
         if not line[0:1].isspace() and not stripped.startswith(("#", "@")):
             m = re.match(r"([A-Z][A-Z_0-9]+)\s*[:=]\s*(.+)", stripped)
             if m:
-                symbols.append(Symbol(
-                    name=m.group(1),
-                    kind="constant",
-                    signature=stripped,
-                    start_line=i + 1,
-                    visibility="public",
-                    is_exported=True,
-                ))
+                symbols.append(
+                    Symbol(
+                        name=m.group(1),
+                        kind="constant",
+                        signature=stripped,
+                        start_line=i + 1,
+                        end_line=i + 1,
+                        visibility="public",
+                        is_exported=True,
+                    )
+                )
 
         # Reset decorators on non-decorator non-blank lines
         if stripped and not stripped.startswith(("@", "#")):

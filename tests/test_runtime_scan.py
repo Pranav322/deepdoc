@@ -3,7 +3,12 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.parser.base import ParsedFile, Symbol
-from deepdoc.scan_v2 import discover_database_schema, discover_runtime_surfaces
+from deepdoc.scanner import (
+    discover_config_impacts,
+    discover_database_schema,
+    discover_debug_signals,
+    discover_runtime_surfaces,
+)
 
 
 def _parsed_file(
@@ -21,13 +26,17 @@ def _parsed_file(
     )
 
 
-def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfaces() -> None:
+def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfaces() -> (
+    None
+):
     parsed_files = {
         "orders/models.py": _parsed_file(
             "orders/models.py",
             imports=["import catalog.models"],
             symbols=[
-                Symbol(name="Order", kind="class", signature="class Order(models.Model):"),
+                Symbol(
+                    name="Order", kind="class", signature="class Order(models.Model):"
+                ),
                 Symbol(
                     name="OrderItem",
                     kind="class",
@@ -46,7 +55,9 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
             ],
         ),
         "orders/tasks.py": _parsed_file("orders/tasks.py"),
-        "orders/scheduler.js": _parsed_file("orders/scheduler.js", language="javascript"),
+        "orders/scheduler.js": _parsed_file(
+            "orders/scheduler.js", language="javascript"
+        ),
         "realtime/consumers.py": _parsed_file("realtime/consumers.py"),
         "graphql/schema.py": _parsed_file("graphql/schema.py"),
         "db/orders.js": _parsed_file("db/orders.js", language="javascript"),
@@ -127,7 +138,19 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
         ),
     }
 
-    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+    runtime = discover_runtime_surfaces(
+        parsed_files,
+        file_contents,
+        api_endpoints=[
+            {
+                "method": "POST",
+                "path": "/api/orders/sync",
+                "file": "orders/tasks.py",
+                "handler_file": "orders/tasks.py",
+                "route_file": "orders/tasks.py",
+            }
+        ],
+    )
 
     task_names = {task.name for task in runtime.tasks}
     scheduler_types = {scheduler.scheduler_type for scheduler in runtime.schedulers}
@@ -142,6 +165,15 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
 
     triggered_task = next(task for task in runtime.tasks if task.name == "send_invoice")
     assert triggered_task.triggers == ["delay"]
+    assert triggered_task.producer_files == ["orders/tasks.py"]
+    assert triggered_task.linked_endpoints == ["POST /api/orders/sync"]
+
+    beat_scheduler = next(
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "beat"
+    )
+    assert beat_scheduler.invoked_targets == ["orders.tasks.sync_orders"]
 
     consumer = runtime.realtime_consumers[0]
     assert consumer.name == "OrdersConsumer"
@@ -182,3 +214,189 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
     )
     assert query_artifact.table_name == "orders"
     assert "leftJoin" in query_artifact.query_patterns[0]
+
+
+def test_discover_config_impacts_maps_keys_to_files_and_endpoints() -> None:
+    file_contents = {
+        "settings.py": "API_PREFIX = '/api/v2'\nPAYMENTS_HOST = os.getenv('PAYMENTS_HOST', 'https://pay.example')\n",
+        "routes.py": "from django.conf import settings\nAPI_ROOT = settings.API_PREFIX\n",
+        "payments/client.py": "url = os.getenv('PAYMENTS_HOST')\n",
+    }
+    api_endpoints = [
+        {
+            "method": "POST",
+            "path": "/api/v2/payments",
+            "file": "routes.py",
+            "route_file": "routes.py",
+            "handler_file": "payments/client.py",
+        }
+    ]
+
+    impacts = discover_config_impacts(file_contents, api_endpoints)
+
+    by_key = {(impact.key, impact.kind): impact for impact in impacts}
+    assert ("PAYMENTS_HOST", "env_var") in by_key
+    assert by_key[("PAYMENTS_HOST", "env_var")].default_value == "'https://pay.example'"
+    assert by_key[("PAYMENTS_HOST", "env_var")].related_endpoints == [
+        "POST /api/v2/payments"
+    ]
+    assert ("API_PREFIX", "setting") in by_key
+
+
+def test_runtime_discovery_extracts_django_and_laravel_surfaces() -> None:
+    parsed_files = {
+        "orders/management/commands/sync_orders.py": _parsed_file(
+            "orders/management/commands/sync_orders.py"
+        ),
+        "orders/signals.py": _parsed_file("orders/signals.py"),
+        "app/Jobs/SyncOrders.php": _parsed_file(
+            "app/Jobs/SyncOrders.php", language="php"
+        ),
+        "app/Listeners/SendShipmentWebhook.php": _parsed_file(
+            "app/Listeners/SendShipmentWebhook.php", language="php"
+        ),
+        "app/Events/OrderShipped.php": _parsed_file(
+            "app/Events/OrderShipped.php", language="php"
+        ),
+        "app/Console/Kernel.php": _parsed_file(
+            "app/Console/Kernel.php", language="php"
+        ),
+    }
+    file_contents = {
+        "orders/management/commands/sync_orders.py": (
+            "from django.core.management.base import BaseCommand\n\n"
+            "class Command(BaseCommand):\n"
+            "    help = 'Sync orders'\n\n"
+            "    def handle(self, *args, **options):\n"
+            "        return None\n"
+        ),
+        "orders/signals.py": (
+            "from django.dispatch import receiver\n"
+            "from django.db.models.signals import post_save\n\n"
+            "@receiver(post_save, sender=Order)\n"
+            "def publish_order_update(sender, instance, **kwargs):\n"
+            "    return None\n"
+        ),
+        "app/Jobs/SyncOrders.php": (
+            "<?php\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class SyncOrders implements ShouldQueue\n"
+            "{\n"
+            "    public $queue = 'critical';\n"
+            "}\n"
+        ),
+        "app/Listeners/SendShipmentWebhook.php": (
+            "<?php\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class SendShipmentWebhook implements ShouldQueue\n"
+            "{\n"
+            "    public function handle(OrderShipped $event) {}\n"
+            "}\n"
+        ),
+        "app/Events/OrderShipped.php": ("<?php\nclass OrderShipped\n{\n}\n"),
+        "app/Console/Kernel.php": (
+            "<?php\n"
+            "$schedule->command('orders:sync')->dailyAt('02:00');\n"
+            "$schedule->job(new SyncOrders)->everyFiveMinutes();\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    by_name = {task.name: task for task in runtime.tasks}
+    assert by_name["sync-orders"].runtime_kind == "django_command"
+    assert by_name["sync-orders"].triggers == ["manage.py"]
+    assert by_name["publish_order_update"].runtime_kind == "django_signal"
+    assert by_name["publish_order_update"].triggers == ["post_save"]
+    assert by_name["SyncOrders"].runtime_kind == "laravel_job"
+    assert by_name["SyncOrders"].queue == "critical"
+    assert by_name["SendShipmentWebhook"].runtime_kind == "laravel_listener"
+    assert by_name["SendShipmentWebhook"].triggers == ["OrderShipped"]
+    assert by_name["OrderShipped"].runtime_kind == "laravel_event"
+
+    laravel_schedulers = [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ]
+    assert len(laravel_schedulers) == 2
+    assert any(
+        scheduler.invoked_targets == ["orders:sync"] for scheduler in laravel_schedulers
+    )
+    assert any(
+        scheduler.invoked_targets == ["SyncOrders"] for scheduler in laravel_schedulers
+    )
+
+
+def test_runtime_discovery_extracts_js_and_go_workers() -> None:
+    parsed_files = {
+        "workers/orders.js": _parsed_file("workers/orders.js", language="javascript"),
+        "cmd/worker/main.go": _parsed_file("cmd/worker/main.go", language="go"),
+    }
+    file_contents = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "const agenda = new Agenda();\n"
+            "new Worker('orders-sync', async job => syncOrders(job));\n"
+            "queue.process('inventory-refresh', async refreshInventory);\n"
+            "agenda.define('nightly-report', async () => {});\n"
+            "agenda.every('5 minutes', 'nightly-report');\n"
+        ),
+        "cmd/worker/main.go": (
+            'package main\n\nimport "time"\n\n'
+            "func syncLoop() {}\nfunc cleanup() {}\n\n"
+            "func main() {\n"
+            "    go syncLoop()\n"
+            '    c.AddFunc("@every 5m", cleanup)\n'
+            "    scheduler.Every(10 * time.Minute).Do(syncLoop)\n"
+            "}\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    js_workers = {
+        task.name: task for task in runtime.tasks if task.runtime_kind == "js_worker"
+    }
+    assert "orders-sync" in js_workers
+    assert js_workers["orders-sync"].queue == "orders-sync"
+    assert "inventory-refresh" in js_workers
+    assert "nightly-report" in js_workers
+
+    go_workers = {
+        task.name: task for task in runtime.tasks if task.runtime_kind == "go_worker"
+    }
+    assert "syncLoop" in go_workers
+    assert "cleanup" in go_workers
+    assert "@every 5m" in go_workers["cleanup"].schedule_sources
+
+    scheduler_types = {scheduler.scheduler_type for scheduler in runtime.schedulers}
+    assert "agenda" in scheduler_types
+    assert "go_cron" in scheduler_types
+    assert "go_schedule" in scheduler_types
+
+
+def test_discover_debug_signals_reads_dict_endpoints() -> None:
+    signals = discover_debug_signals(
+        {},
+        {},
+        api_endpoints=[
+            {
+                "path": "/health",
+                "handler_file": "src/health.py",
+                "file": "src/health.py",
+            },
+            {
+                "path": "/ready",
+                "handler_file": "src/readiness.py",
+                "file": "src/readiness.py",
+            },
+        ],
+    )
+
+    health = next(
+        signal for signal in signals if signal.signal_type == "health_endpoint"
+    )
+    assert health.file_path == "src/health.py"
+    assert "/health" in health.patterns
+    assert "src/readiness.py" in health.files

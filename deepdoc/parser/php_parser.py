@@ -7,14 +7,14 @@ PHP 8 attribute extraction, visibility modifiers, and Laravel route detection.
 
 from __future__ import annotations
 
-import re
 from pathlib import Path
+import re
 
 from .base import ParsedFile, Symbol
 
 try:
-    import tree_sitter_php as tsphp
     from tree_sitter import Language, Parser
+    import tree_sitter_php as tsphp
 
     PHP_LANGUAGE = Language(tsphp.language_php())
     _TS_AVAILABLE = True
@@ -52,6 +52,7 @@ def parse_php(path: Path, content: str, language: str) -> ParsedFile:
 # Tree-sitter walk
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str]) -> None:
     t = node.type
 
@@ -65,17 +66,21 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str]) -> 
             name = _node_text(name_node, lines)
             doc = _get_phpdoc(node, lines)
             attrs = _get_php_attributes(node, lines)
-            symbols.append(Symbol(
-                name=name,
-                kind="function",
-                signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-                docstring=doc,
-                body_preview=_body_preview(node, lines),
-                start_line=node.start_point[0] + 1,
-                end_line=node.end_point[0] + 1,
-                decorators=attrs,
-                is_exported=True,  # PHP functions are always accessible
-            ))
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind="function",
+                    signature=lines[node.start_point[0]].strip()
+                    if node.start_point[0] < len(lines)
+                    else "",
+                    docstring=doc,
+                    body_preview=_body_preview(node, lines),
+                    start_line=node.start_point[0] + 1,
+                    end_line=node.end_point[0] + 1,
+                    decorators=attrs,
+                    is_exported=True,  # PHP functions are always accessible
+                )
+            )
         return
 
     if t in ("class_declaration", "trait_declaration", "interface_declaration"):
@@ -100,7 +105,10 @@ def _walk(node, lines: list[str], symbols: list[Symbol], imports: list[str]) -> 
 # Class / Trait / Interface extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_class_like(node, node_type: str, lines: list[str], symbols: list[Symbol]) -> None:
+
+def _extract_class_like(
+    node, node_type: str, lines: list[str], symbols: list[Symbol]
+) -> None:
     name_node = node.child_by_field_name("name")
     if not name_node:
         return
@@ -122,22 +130,30 @@ def _extract_class_like(node, node_type: str, lines: list[str], symbols: list[Sy
         if child.type == "declaration_list":
             for member in child.children:
                 if member.type == "property_declaration":
-                    prop_line = lines[member.start_point[0]].strip() if member.start_point[0] < len(lines) else ""
+                    prop_line = (
+                        lines[member.start_point[0]].strip()
+                        if member.start_point[0] < len(lines)
+                        else ""
+                    )
                     if prop_line:
                         class_fields.append(prop_line.rstrip(";"))
 
-    symbols.append(Symbol(
-        name=name,
-        kind=kind,
-        signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-        docstring=doc,
-        body_preview=_body_preview(node, lines, max_lines=8),
-        start_line=node.start_point[0] + 1,
-        end_line=node.end_point[0] + 1,
-        decorators=attrs,
-        is_exported=True,
-        fields=class_fields[:20],
-    ))
+    symbols.append(
+        Symbol(
+            name=name,
+            kind=kind,
+            signature=lines[node.start_point[0]].strip()
+            if node.start_point[0] < len(lines)
+            else "",
+            docstring=doc,
+            body_preview=_body_preview(node, lines, max_lines=8),
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            decorators=attrs,
+            is_exported=True,
+            fields=class_fields[:20],
+        )
+    )
 
     # Extract methods, constants, and properties within the class
     for child in node.children:
@@ -159,22 +175,27 @@ def _extract_method(node, lines: list[str], symbols: list[Symbol]) -> None:
     attrs = _get_php_attributes(node, lines)
     visibility = _get_visibility(node, lines)
 
-    symbols.append(Symbol(
-        name=name,
-        kind="method",
-        signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-        docstring=doc,
-        body_preview=_body_preview(node, lines),
-        start_line=node.start_point[0] + 1,
-        end_line=node.end_point[0] + 1,
-        decorators=attrs,
-        visibility=visibility,
-    ))
+    symbols.append(
+        Symbol(
+            name=name,
+            kind="method",
+            signature=lines[node.start_point[0]].strip()
+            if node.start_point[0] < len(lines)
+            else "",
+            docstring=doc,
+            body_preview=_body_preview(node, lines),
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            decorators=attrs,
+            visibility=visibility,
+        )
+    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Enum extraction (PHP 8.1+)
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _extract_enum(node, lines: list[str], symbols: list[Symbol]) -> None:
     name_node = node.child_by_field_name("name")
@@ -193,21 +214,29 @@ def _extract_enum(node, lines: list[str], symbols: list[Symbol]) -> None:
                 if member.type == "enum_case":
                     case_name_node = member.child_by_field_name("name")
                     if case_name_node:
-                        case_line = lines[member.start_point[0]].strip() if member.start_point[0] < len(lines) else ""
+                        case_line = (
+                            lines[member.start_point[0]].strip()
+                            if member.start_point[0] < len(lines)
+                            else ""
+                        )
                         cases.append(case_line.rstrip(";"))
 
-    symbols.append(Symbol(
-        name=name,
-        kind="enum",
-        signature=lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else "",
-        docstring=doc,
-        body_preview=_body_preview(node, lines, max_lines=min(len(cases) + 3, 15)),
-        start_line=node.start_point[0] + 1,
-        end_line=node.end_point[0] + 1,
-        decorators=attrs,
-        is_exported=True,
-        fields=cases[:30],
-    ))
+    symbols.append(
+        Symbol(
+            name=name,
+            kind="enum",
+            signature=lines[node.start_point[0]].strip()
+            if node.start_point[0] < len(lines)
+            else "",
+            docstring=doc,
+            body_preview=_body_preview(node, lines, max_lines=min(len(cases) + 3, 15)),
+            start_line=node.start_point[0] + 1,
+            end_line=node.end_point[0] + 1,
+            decorators=attrs,
+            is_exported=True,
+            fields=cases[:30],
+        )
+    )
 
     # Also extract methods inside the enum
     for child in node.children:
@@ -221,8 +250,10 @@ def _extract_enum(node, lines: list[str], symbols: list[Symbol]) -> None:
 # Constant extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _extract_const_declaration(node, lines: list[str], symbols: list[Symbol],
-                                visibility: str = "") -> None:
+
+def _extract_const_declaration(
+    node, lines: list[str], symbols: list[Symbol], visibility: str = ""
+) -> None:
     """Extract class constants or global constants."""
     doc = _get_phpdoc(node, lines)
     if not visibility:
@@ -233,22 +264,29 @@ def _extract_const_declaration(node, lines: list[str], symbols: list[Symbol],
             name_node = child.child_by_field_name("name")
             if name_node:
                 name = _node_text(name_node, lines)
-                sig = lines[node.start_point[0]].strip() if node.start_point[0] < len(lines) else ""
-                symbols.append(Symbol(
-                    name=name,
-                    kind="constant",
-                    signature=sig.rstrip(";"),
-                    docstring=doc,
-                    start_line=node.start_point[0] + 1,
-                    end_line=node.end_point[0] + 1,
-                    visibility=visibility or "public",
-                    is_exported=True,
-                ))
+                sig = (
+                    lines[node.start_point[0]].strip()
+                    if node.start_point[0] < len(lines)
+                    else ""
+                )
+                symbols.append(
+                    Symbol(
+                        name=name,
+                        kind="constant",
+                        signature=sig.rstrip(";"),
+                        docstring=doc,
+                        start_line=node.start_point[0] + 1,
+                        end_line=node.end_point[0] + 1,
+                        visibility=visibility or "public",
+                        is_exported=True,
+                    )
+                )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # PHPDoc extraction
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _get_phpdoc(node, lines: list[str]) -> str:
     """Extract PHPDoc comment block (/** ... */) preceding a declaration."""
@@ -313,6 +351,7 @@ def _clean_phpdoc(raw: str) -> str:
 # PHP 8 Attribute extraction (#[Route('/path')], #[Middleware('auth')])
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _get_php_attributes(node, lines: list[str]) -> list[str]:
     """Extract PHP 8 attributes (#[...]) preceding a declaration."""
     attrs = []
@@ -333,7 +372,12 @@ def _get_php_attributes(node, lines: list[str]) -> list[str]:
             line = lines[i].strip()
             if line.startswith("#["):
                 attrs.insert(0, line)
-            elif line == "" or line.startswith("*") or line.startswith("/**") or line.endswith("*/"):
+            elif (
+                line == ""
+                or line.startswith("*")
+                or line.startswith("/**")
+                or line.endswith("*/")
+            ):
                 continue
             else:
                 break
@@ -344,6 +388,7 @@ def _get_php_attributes(node, lines: list[str]) -> list[str]:
 # ─────────────────────────────────────────────────────────────────────────────
 # Visibility extraction
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _get_visibility(node, lines: list[str]) -> str:
     """Extract visibility modifier (public/protected/private) from a declaration."""
@@ -363,6 +408,7 @@ def _get_visibility(node, lines: list[str]) -> str:
 # Laravel route detection
 # ─────────────────────────────────────────────────────────────────────────────
 
+
 def _is_route_file(path: Path, content: str) -> bool:
     """Detect Laravel route files."""
     return "routes" in str(path).lower() and "Route::" in content
@@ -375,31 +421,37 @@ def _extract_laravel_routes(content: str) -> list[Symbol]:
         r"Route::(get|post|put|patch|delete|any)\s*\(\s*['\"]([^'\"]+)['\"]",
         re.IGNORECASE,
     )
-    lines = content.splitlines()
+    content.splitlines()
     for m in pattern.finditer(content):
         method, uri = m.group(1).upper(), m.group(2)
-        line_num = content[:m.start()].count("\n") + 1
+        line_num = content[: m.start()].count("\n") + 1
 
         # Try to extract middleware from chained ->middleware() call
         middleware = []
-        region = content[m.start():m.start() + 500]
+        region = content[m.start() : m.start() + 500]
         mw_match = re.search(r"->middleware\s*\(\s*\[?([^\])\n]+)", region)
         if mw_match:
-            middleware = [mw.strip().strip("'\"") for mw in mw_match.group(1).split(",")]
+            middleware = [
+                mw.strip().strip("'\"") for mw in mw_match.group(1).split(",")
+            ]
 
-        routes.append(Symbol(
-            name=f"{method} {uri}",
-            kind="route",
-            signature=m.group(0),
-            start_line=line_num,
-            decorators=middleware,  # Store middleware as "decorators" for display
-        ))
+        routes.append(
+            Symbol(
+                name=f"{method} {uri}",
+                kind="route",
+                signature=m.group(0),
+                start_line=line_num,
+                end_line=line_num,
+                decorators=middleware,  # Store middleware as "decorators" for display
+            )
+        )
     return routes
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Body preview
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _body_preview(node, lines: list[str], max_lines: int = 5) -> str:
     """Extract the first few lines of a node's body."""
@@ -413,6 +465,7 @@ def _body_preview(node, lines: list[str], max_lines: int = 5) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _node_text(node, lines: list[str]) -> str:
     start_row, start_col = node.start_point
@@ -431,6 +484,7 @@ def _node_text(node, lines: list[str]) -> str:
 # ─────────────────────────────────────────────────────────────────────────────
 # Regex fallback
 # ─────────────────────────────────────────────────────────────────────────────
+
 
 def _regex_fallback(content: str):
     """Fallback parser when tree-sitter is not available."""
@@ -480,33 +534,47 @@ def _regex_fallback(content: str):
                 cm = re.match(r"case\s+(\w+)", cline)
                 if cm:
                     cases.append(cline.rstrip(";"))
-            symbols.append(Symbol(
-                name=name, kind="enum", signature=stripped,
-                docstring=pending_doc,
-                body_preview="\n".join(lines[i:i + min(len(cases) + 3, 15)]),
-                start_line=i + 1,
-                decorators=pending_attrs,
-                fields=cases[:20],
-                is_exported=True,
-            ))
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind="enum",
+                    signature=stripped,
+                    docstring=pending_doc,
+                    body_preview="\n".join(lines[i : i + min(len(cases) + 3, 15)]),
+                    start_line=i + 1,
+                    decorators=pending_attrs,
+                    fields=cases[:20],
+                    is_exported=True,
+                )
+            )
             pending_doc = ""
             pending_attrs = []
             continue
 
         # Class / trait / interface
-        m = re.match(r"(?:abstract\s+)?(?:final\s+)?(class|trait|interface)\s+(\w+)", stripped)
+        m = re.match(
+            r"(?:abstract\s+)?(?:final\s+)?(class|trait|interface)\s+(\w+)", stripped
+        )
         if m:
             kind_str = m.group(1)
             name = m.group(2)
-            kind = "class" if kind_str == "class" else ("interface" if kind_str == "interface" else "type")
-            symbols.append(Symbol(
-                name=name, kind=kind, signature=stripped,
-                docstring=pending_doc,
-                body_preview="\n".join(lines[i:i + 5]),
-                start_line=i + 1,
-                decorators=pending_attrs,
-                is_exported=True,
-            ))
+            kind = (
+                "class"
+                if kind_str == "class"
+                else ("interface" if kind_str == "interface" else "type")
+            )
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind=kind,
+                    signature=stripped,
+                    docstring=pending_doc,
+                    body_preview="\n".join(lines[i : i + 5]),
+                    start_line=i + 1,
+                    decorators=pending_attrs,
+                    is_exported=True,
+                )
+            )
             in_class = True
             pending_doc = ""
             pending_attrs = []
@@ -521,14 +589,18 @@ def _regex_fallback(content: str):
             visibility = m.group(1) or ""
             name = m.group(2)
             kind = "method" if in_class else "function"
-            symbols.append(Symbol(
-                name=name, kind=kind, signature=stripped,
-                docstring=pending_doc,
-                body_preview="\n".join(lines[i:i + 5]),
-                start_line=i + 1,
-                decorators=pending_attrs,
-                visibility=visibility,
-            ))
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind=kind,
+                    signature=stripped,
+                    docstring=pending_doc,
+                    body_preview="\n".join(lines[i : i + 5]),
+                    start_line=i + 1,
+                    decorators=pending_attrs,
+                    visibility=visibility,
+                )
+            )
             pending_doc = ""
             pending_attrs = []
             continue
@@ -537,12 +609,17 @@ def _regex_fallback(content: str):
         m = re.match(r"(?:public|protected|private)?\s*const\s+(\w+)\s*=", stripped)
         if m and in_class:
             name = m.group(1)
-            symbols.append(Symbol(
-                name=name, kind="constant", signature=stripped.rstrip(";"),
-                docstring=pending_doc,
-                start_line=i + 1,
-                is_exported=True,
-            ))
+            symbols.append(
+                Symbol(
+                    name=name,
+                    kind="constant",
+                    signature=stripped.rstrip(";"),
+                    docstring=pending_doc,
+                    start_line=i + 1,
+                    end_line=i + 1,
+                    is_exported=True,
+                )
+            )
             pending_doc = ""
             pending_attrs = []
             continue

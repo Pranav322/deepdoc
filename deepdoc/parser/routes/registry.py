@@ -6,13 +6,10 @@ from .base import RegisteredRouteDetector
 from .django import DETECTOR as DJANGO_DETECTOR
 from .express import DETECTOR as EXPRESS_DETECTOR
 from .falcon import DETECTOR as FALCON_DETECTOR
-from .fastapi import DETECTOR as FASTAPI_DETECTOR
 from .fastify import DETECTOR as FASTIFY_DETECTOR
-from .flask import DETECTOR as FLASK_DETECTOR
 from .go import DETECTOR as GO_DETECTOR
 from .laravel import DETECTOR as LARAVEL_DETECTOR
 from .nestjs import DETECTOR as NESTJS_DETECTOR
-
 
 ROUTE_DETECTOR_REGISTRY: dict[str, tuple[RegisteredRouteDetector, ...]] = {
     "javascript": (
@@ -30,8 +27,6 @@ ROUTE_DETECTOR_REGISTRY: dict[str, tuple[RegisteredRouteDetector, ...]] = {
         FASTIFY_DETECTOR,
     ),
     "python": (
-        FASTAPI_DETECTOR,
-        FLASK_DETECTOR,
         FALCON_DETECTOR,
         DJANGO_DETECTOR,
     ),

@@ -5,7 +5,7 @@ from pathlib import Path
 from deepdoc.chatbot.service import ChatbotQueryService
 from deepdoc.chatbot.types import ChunkRecord, RetrievedChunk
 from deepdoc.persistence_v2 import load_plan, load_scan_cache, save_plan, save_scan_cache
-from deepdoc.planner_v2 import (
+from deepdoc.planner import (
     DocBucket,
     DocPlan,
     RepoScan,

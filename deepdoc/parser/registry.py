@@ -5,10 +5,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from .base import ParsedFile
-from .python_parser import parse_python
-from .js_ts_parser import parse_js_ts
 from .go_parser import parse_go
+from .js_ts_parser import parse_js_ts
 from .php_parser import parse_php
+from .python_parser import parse_python
 from .vue_parser import parse_vue
 
 # extension → (language_name, parser_function)

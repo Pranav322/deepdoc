@@ -3,9 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.benchmark_v2 import score_plan
-from deepdoc.generator_v2 import PageValidator
+from deepdoc.generator import PageValidator
+from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.persistence_v2 import load_plan, save_plan
-from deepdoc.planner_v2 import (
+from deepdoc.planner import (
     CLASSIFY_PROMPT,
     PROPOSE_PROMPT,
     DocBucket,
@@ -14,9 +15,10 @@ from deepdoc.planner_v2 import (
     _apply_page_contracts,
     _auto_generate_endpoint_refs,
     _decompose_buckets,
-    _ensure_database_runtime_and_interface_buckets,
     _derive_topic_candidates,
+    _ensure_database_runtime_and_interface_buckets,
     _inject_research_context_buckets,
+    _inject_start_here_and_debug_buckets,
     _normalize_tokens,
     _refine_bucket_ownership,
     _refine_proposal,
@@ -24,9 +26,8 @@ from deepdoc.planner_v2 import (
     _validate_coverage,
     scan_repo,
 )
-from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.prompts_v2 import PROMPT_STYLE_TEMPLATES
-from deepdoc.site.fumadocs_builder_v2 import build_fumadocs_from_plan
+from deepdoc.site.builder import build_fumadocs_from_plan
 
 
 def _make_scan(
@@ -57,10 +58,14 @@ def _make_scan(
 
 
 def _parsed_file(path: str, *, imports: list[str], symbols: list[Symbol]) -> ParsedFile:
-    return ParsedFile(path=Path(path), language="python", imports=imports, symbols=symbols)
+    return ParsedFile(
+        path=Path(path), language="python", imports=imports, symbols=symbols
+    )
 
 
-def test_save_and_load_plan_preserve_parent_slug_and_classification(tmp_path: Path) -> None:
+def test_save_and_load_plan_preserve_parent_slug_and_classification(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
@@ -96,7 +101,9 @@ def test_save_and_load_plan_preserve_parent_slug_and_classification(tmp_path: Pa
     assert loaded.buckets[0].parent_slug == "transformer"
 
 
-def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(monkeypatch) -> None:
+def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(
+    monkeypatch,
+) -> None:
     bucket = DocBucket(
         bucket_type="training",
         title="Training Core",
@@ -124,7 +131,9 @@ def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(monkeypat
             "train.py": _parsed_file(
                 "train.py",
                 imports=["torch", "optim"],
-                symbols=[Symbol(name="train", kind="function", signature="def train():")],
+                symbols=[
+                    Symbol(name="train", kind="function", signature="def train():")
+                ],
             ),
             "optim.py": _parsed_file(
                 "optim.py",
@@ -174,7 +183,7 @@ def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(monkeypat
             "keep_parent_overview": True,
         }
 
-    monkeypatch.setattr("deepdoc.planner_v2._llm_step", _fake_llm_step)
+    monkeypatch.setattr("deepdoc.planner.heuristics._llm_step", _fake_llm_step)
 
     result = _decompose_buckets(
         plan,
@@ -188,7 +197,11 @@ def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(monkeypat
     assert result.nav_structure["Training > Base Training"][0] == "training-core"
     assert any(b.title == "Training Core Overview" for b in result.buckets)
     assert len({b.slug for b in result.buckets}) == 3
-    assert any(b.parent_slug == "training-core" for b in result.buckets if b.slug != "training-core")
+    assert any(
+        b.parent_slug == "training-core"
+        for b in result.buckets
+        if b.slug != "training-core"
+    )
 
 
 def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> None:
@@ -200,9 +213,24 @@ def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> 
     )
     scan = _make_scan(
         api_endpoints=[
-            {"method": "GET", "path": "/health", "handler": "health", "file": "serve.py"},
-            {"method": "GET", "path": "/logo.svg", "handler": "logo", "file": "serve.py"},
-            {"method": "POST", "path": "/predict", "handler": "predict", "file": "serve.py"},
+            {
+                "method": "GET",
+                "path": "/health",
+                "handler": "health",
+                "file": "serve.py",
+            },
+            {
+                "method": "GET",
+                "path": "/logo.svg",
+                "handler": "logo",
+                "file": "serve.py",
+            },
+            {
+                "method": "POST",
+                "path": "/predict",
+                "handler": "predict",
+                "file": "serve.py",
+            },
         ]
     )
 
@@ -225,7 +253,12 @@ def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> 
     )
     backend_scan = _make_scan(
         api_endpoints=[
-            {"method": "GET", "path": "/health", "handler": "health", "file": "routes.py"},
+            {
+                "method": "GET",
+                "path": "/health",
+                "handler": "health",
+                "file": "routes.py",
+            },
             {
                 "method": "GET",
                 "path": "/orders/{id}",
@@ -256,7 +289,46 @@ def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> 
     assert not [b for b in skipped.buckets if b.generation_hints.get("is_endpoint_ref")]
 
 
-def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtime_pages() -> None:
+def test_start_here_setup_slug_and_section_are_preserved() -> None:
+    plan = DocPlan(
+        buckets=[],
+        nav_structure={"Start Here": []},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_api"}},
+    )
+    scan = _make_scan(
+        file_summaries={
+            "README.md": "overview",
+            "settings.py": "config",
+            "docker-compose.yml": "docker",
+        }
+    )
+    scan.config_files = ["settings.py"]
+
+    injected = _inject_start_here_and_debug_buckets(plan, scan, {})
+    shaped = _shape_plan_nav(
+        injected,
+        {"repo_profile": {"primary_type": "backend_api"}},
+    )
+
+    start_here_slugs = shaped.nav_structure["Start Here"]
+    assert "local-development-setup" in start_here_slugs
+    assert "setup" not in start_here_slugs
+    assert start_here_slugs[:3] == [
+        "start-here",
+        "local-development-setup",
+        "domain-glossary",
+    ]
+    start_here_bucket = next(
+        bucket for bucket in shaped.buckets if bucket.slug == "local-development-setup"
+    )
+    assert start_here_bucket.section == "Start Here"
+    assert start_here_bucket.generation_hints["preserve_section"] is True
+
+
+def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtime_pages() -> (
+    None
+):
     scan = _make_scan(
         file_summaries={
             "orders/models.py": "summary",
@@ -275,24 +347,114 @@ def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtim
                 (),
                 {
                     "model_files": [
-                        type("ModelFileInfo", (), {"file_path": "orders/models.py", "model_names": ["Order", "OrderItem"], "orm_framework": "django", "is_migration": False})(),
-                        type("ModelFileInfo", (), {"file_path": "orders/schema.py", "model_names": ["Refund", "Exchange"], "orm_framework": "django", "is_migration": False})(),
-                        type("ModelFileInfo", (), {"file_path": "catalog/models.py", "model_names": ["Product"], "orm_framework": "django", "is_migration": False})(),
+                        type(
+                            "ModelFileInfo",
+                            (),
+                            {
+                                "file_path": "orders/models.py",
+                                "model_names": ["Order", "OrderItem"],
+                                "orm_framework": "django",
+                                "is_migration": False,
+                            },
+                        )(),
+                        type(
+                            "ModelFileInfo",
+                            (),
+                            {
+                                "file_path": "orders/schema.py",
+                                "model_names": ["Refund", "Exchange"],
+                                "orm_framework": "django",
+                                "is_migration": False,
+                            },
+                        )(),
+                        type(
+                            "ModelFileInfo",
+                            (),
+                            {
+                                "file_path": "catalog/models.py",
+                                "model_names": ["Product"],
+                                "orm_framework": "django",
+                                "is_migration": False,
+                            },
+                        )(),
                     ],
                     "schema_files": [],
-                    "migration_files": ["orders/migrations/0001_initial.py", "orders/migrations/0002_update.py", "catalog/migrations/0001_initial.py"],
+                    "migration_files": [
+                        "orders/migrations/0001_initial.py",
+                        "orders/migrations/0002_update.py",
+                        "catalog/migrations/0001_initial.py",
+                    ],
                     "orm_framework": "django",
                     "orm_frameworks": ["django", "knex"],
                     "total_models": 13,
                     "groups": [
-                        type("DatabaseGroup", (), {"key": "orders", "label": "Orders", "file_paths": ["orders/models.py", "orders/schema.py"], "model_names": ["Order", "OrderItem", "Refund", "Exchange"], "orm_frameworks": ["django"], "external_refs": ["catalog"]})(),
-                        type("DatabaseGroup", (), {"key": "catalog", "label": "Catalog", "file_paths": ["catalog/models.py"], "model_names": ["Product"], "orm_frameworks": ["django"], "external_refs": ["orders"]})(),
+                        type(
+                            "DatabaseGroup",
+                            (),
+                            {
+                                "key": "orders",
+                                "label": "Orders",
+                                "file_paths": ["orders/models.py", "orders/schema.py"],
+                                "model_names": [
+                                    "Order",
+                                    "OrderItem",
+                                    "Refund",
+                                    "Exchange",
+                                ],
+                                "orm_frameworks": ["django"],
+                                "external_refs": ["catalog"],
+                            },
+                        )(),
+                        type(
+                            "DatabaseGroup",
+                            (),
+                            {
+                                "key": "catalog",
+                                "label": "Catalog",
+                                "file_paths": ["catalog/models.py"],
+                                "model_names": ["Product"],
+                                "orm_frameworks": ["django"],
+                                "external_refs": ["orders"],
+                            },
+                        )(),
                     ],
                     "knex_artifacts": [
-                        type("KnexArtifact", (), {"file_path": "orders/query.js", "artifact_type": "query", "table_name": "orders"})(),
-                        type("KnexArtifact", (), {"file_path": "orders/query2.js", "artifact_type": "query", "table_name": "order_items"})(),
-                        type("KnexArtifact", (), {"file_path": "orders/query3.js", "artifact_type": "query", "table_name": "refunds"})(),
-                        type("KnexArtifact", (), {"file_path": "orders/query4.js", "artifact_type": "query", "table_name": "exchanges"})(),
+                        type(
+                            "KnexArtifact",
+                            (),
+                            {
+                                "file_path": "orders/query.js",
+                                "artifact_type": "query",
+                                "table_name": "orders",
+                            },
+                        )(),
+                        type(
+                            "KnexArtifact",
+                            (),
+                            {
+                                "file_path": "orders/query2.js",
+                                "artifact_type": "query",
+                                "table_name": "order_items",
+                            },
+                        )(),
+                        type(
+                            "KnexArtifact",
+                            (),
+                            {
+                                "file_path": "orders/query3.js",
+                                "artifact_type": "query",
+                                "table_name": "refunds",
+                            },
+                        )(),
+                        type(
+                            "KnexArtifact",
+                            (),
+                            {
+                                "file_path": "orders/query4.js",
+                                "artifact_type": "query",
+                                "table_name": "exchanges",
+                            },
+                        )(),
                     ],
                     "graphql_interfaces": [],
                 },
@@ -304,10 +466,26 @@ def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtim
         (),
         {
             "tasks": [
-                type("RuntimeTask", (), {"name": "sync_orders", "file_path": "tasks.py", "runtime_kind": "celery"})(),
+                type(
+                    "RuntimeTask",
+                    (),
+                    {
+                        "name": "sync_orders",
+                        "file_path": "tasks.py",
+                        "runtime_kind": "celery",
+                    },
+                )(),
             ],
             "schedulers": [
-                type("RuntimeScheduler", (), {"name": "order-cron", "file_path": "scheduler.py", "scheduler_type": "node_cron"})(),
+                type(
+                    "RuntimeScheduler",
+                    (),
+                    {
+                        "name": "order-cron",
+                        "file_path": "scheduler.py",
+                        "scheduler_type": "node_cron",
+                    },
+                )(),
             ],
             "realtime_consumers": [],
         },
@@ -339,10 +517,98 @@ def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtim
     assert "background-jobs-celery" in slugs
     assert "background-jobs-schedulers" in slugs
 
-    order_bucket = next(bucket for bucket in expanded.buckets if bucket.slug == "database-orders")
+    order_bucket = next(
+        bucket for bucket in expanded.buckets if bucket.slug == "database-orders"
+    )
     assert order_bucket.parent_slug == "database-schema"
     assert order_bucket.generation_hints["database_group_key"] == "orders"
     assert order_bucket.section == "Database > Database & Schema"
+
+
+def test_specialized_bucket_injection_adds_django_and_laravel_runtime_groups() -> None:
+    scan = _make_scan(file_summaries={"signals.py": "summary", "Kernel.php": "summary"})
+    scan.runtime_scan = type(
+        "RuntimeScan",
+        (),
+        {
+            "tasks": [
+                type(
+                    "RuntimeTask",
+                    (),
+                    {
+                        "name": "publish_order_update",
+                        "file_path": "signals.py",
+                        "runtime_kind": "django_signal",
+                    },
+                )(),
+                type(
+                    "RuntimeTask",
+                    (),
+                    {
+                        "name": "SyncOrders",
+                        "file_path": "app/Jobs/SyncOrders.php",
+                        "runtime_kind": "laravel_job",
+                    },
+                )(),
+            ],
+            "schedulers": [
+                type(
+                    "RuntimeScheduler",
+                    (),
+                    {
+                        "name": "laravel-command-1",
+                        "file_path": "app/Console/Kernel.php",
+                        "scheduler_type": "laravel_schedule",
+                    },
+                )(),
+            ],
+            "realtime_consumers": [],
+        },
+    )()
+    plan = DocPlan(buckets=[], nav_structure={}, skipped_files=[])
+
+    expanded = _ensure_database_runtime_and_interface_buckets(
+        plan,
+        scan,
+        {"runtime_doc_mode": "dedicated_pages"},
+    )
+
+    slugs = {bucket.slug for bucket in expanded.buckets}
+    assert "background-jobs-django" in slugs
+    assert "background-jobs-laravel" in slugs
+
+
+def test_specialized_bucket_injection_adds_generic_worker_runtime_group() -> None:
+    scan = _make_scan(file_summaries={"cmd/worker/main.go": "summary"})
+    scan.runtime_scan = type(
+        "RuntimeScan",
+        (),
+        {
+            "tasks": [
+                type(
+                    "RuntimeTask",
+                    (),
+                    {
+                        "name": "syncLoop",
+                        "file_path": "cmd/worker/main.go",
+                        "runtime_kind": "go_worker",
+                    },
+                )(),
+            ],
+            "schedulers": [],
+            "realtime_consumers": [],
+        },
+    )()
+    plan = DocPlan(buckets=[], nav_structure={}, skipped_files=[])
+
+    expanded = _ensure_database_runtime_and_interface_buckets(
+        plan,
+        scan,
+        {"runtime_doc_mode": "dedicated_pages"},
+    )
+
+    slugs = {bucket.slug for bucket in expanded.buckets}
+    assert "background-jobs-workers" in slugs
 
 
 def test_validate_coverage_prefers_semantic_attachment_over_module_bucket() -> None:
@@ -354,14 +620,20 @@ def test_validate_coverage_prefers_semantic_attachment_over_module_bucket() -> N
         description="Database internals",
         owned_files=["service.py"],
     )
-    plan = DocPlan(buckets=[bucket], nav_structure={"Architecture": ["database-layer"]}, skipped_files=[])
+    plan = DocPlan(
+        buckets=[bucket],
+        nav_structure={"Architecture": ["database-layer"]},
+        skipped_files=[],
+    )
     scan = _make_scan(
         file_summaries={"service.py": "service", "db_helpers.py": "helpers"},
         parsed_files={
             "service.py": _parsed_file(
                 "service.py",
                 imports=["sqlalchemy", "common.db", "infra.cache"],
-                symbols=[Symbol(name="Service", kind="class", signature="class Service:")],
+                symbols=[
+                    Symbol(name="Service", kind="class", signature="class Service:")
+                ],
             ),
             "db_helpers.py": _parsed_file(
                 "db_helpers.py",
@@ -380,7 +652,9 @@ def test_validate_coverage_prefers_semantic_attachment_over_module_bucket() -> N
     result = _validate_coverage(plan, scan)
 
     assert "db_helpers.py" in result.buckets[0].owned_files
-    assert not any(b.bucket_type == "module" and b.slug == "root-module" for b in result.buckets)
+    assert not any(
+        b.bucket_type == "module" and b.slug == "root-module" for b in result.buckets
+    )
 
 
 def test_recursive_nav_builder_supports_three_levels(tmp_path: Path) -> None:
@@ -406,11 +680,15 @@ def test_recursive_nav_builder_supports_three_levels(tmp_path: Path) -> None:
     )
     plan = DocPlan(
         buckets=[overview, flash],
-        nav_structure={"Model Architecture > Attention > Flash Attention": ["flash-attention"]},
+        nav_structure={
+            "Model Architecture > Attention > Flash Attention": ["flash-attention"]
+        },
         skipped_files=[],
     )
 
-    (output_dir / "flash-attention.mdx").write_text("# Flash Attention\n", encoding="utf-8")
+    (output_dir / "flash-attention.mdx").write_text(
+        "# Flash Attention\n", encoding="utf-8"
+    )
 
     build_fumadocs_from_plan(
         repo_root,
@@ -466,12 +744,22 @@ def test_topic_candidates_use_code_and_doc_context() -> None:
             "train.py": _parsed_file(
                 "train.py",
                 imports=["torch.optim", "dataset"],
-                symbols=[Symbol(name="train_loop", kind="function", signature="def train_loop():")],
+                symbols=[
+                    Symbol(
+                        name="train_loop",
+                        kind="function",
+                        signature="def train_loop():",
+                    )
+                ],
             ),
             "model.py": _parsed_file(
                 "model.py",
                 imports=["torch.nn"],
-                symbols=[Symbol(name="Transformer", kind="class", signature="class Transformer:")],
+                symbols=[
+                    Symbol(
+                        name="Transformer", kind="class", signature="class Transformer:"
+                    )
+                ],
             ),
         },
     )
@@ -602,14 +890,18 @@ def test_refine_bucket_ownership_trims_overview_bucket() -> None:
         f"src/file_{idx}.py": _parsed_file(
             f"src/file_{idx}.py",
             imports=["shared"],
-            symbols=[Symbol(name=f"helper_{idx}", kind="function", signature="def helper():")],
+            symbols=[
+                Symbol(name=f"helper_{idx}", kind="function", signature="def helper():")
+            ],
         )
         for idx in range(12)
     }
     parsed_files["src/train.py"] = _parsed_file(
         "src/train.py",
         imports=["torch", "dataset"],
-        symbols=[Symbol(name="train_loop", kind="function", signature="def train_loop():")],
+        symbols=[
+            Symbol(name="train_loop", kind="function", signature="def train_loop():")
+        ],
     )
     scan = _make_scan(
         file_summaries={path: "summary" for path in parsed_files},
@@ -622,7 +914,9 @@ def test_refine_bucket_ownership_trims_overview_bucket() -> None:
         {"repo_profile": {"primary_type": "research_training"}},
     )
 
-    overview_bucket = next(bucket for bucket in refined.buckets if bucket.slug == "system-overview")
+    overview_bucket = next(
+        bucket for bucket in refined.buckets if bucket.slug == "system-overview"
+    )
     assert len(overview_bucket.owned_files) <= 8
 
 
@@ -646,7 +940,10 @@ def test_inject_research_context_buckets_and_shape_nav() -> None:
                 owned_files=["random.py"],
             ),
         ],
-        nav_structure={"Overview": ["system-overview"], "Utilities": ["randomness-utilities"]},
+        nav_structure={
+            "Overview": ["system-overview"],
+            "Utilities": ["randomness-utilities"],
+        },
         skipped_files=[],
         classification={"repo_profile": {"primary_type": "research_training"}},
     )
@@ -666,7 +963,9 @@ def test_inject_research_context_buckets_and_shape_nav() -> None:
         scan,
         {"repo_profile": {"primary_type": "research_training"}},
     )
-    shaped = _shape_plan_nav(with_context, {"repo_profile": {"primary_type": "research_training"}})
+    shaped = _shape_plan_nav(
+        with_context, {"repo_profile": {"primary_type": "research_training"}}
+    )
 
     sections = set(shaped.nav_structure.keys())
     assert "Research Context" in sections
@@ -682,23 +981,38 @@ def test_page_contracts_drive_validator_checks() -> None:
         description="Training flow",
         owned_files=["train.py"],
     )
-    plan = DocPlan(buckets=[bucket], nav_structure={"Training": ["training-loop"]}, skipped_files=[])
+    plan = DocPlan(
+        buckets=[bucket],
+        nav_structure={"Training": ["training-loop"]},
+        skipped_files=[],
+    )
     scan = _make_scan(
         file_summaries={"train.py": "summary"},
         parsed_files={
             "train.py": _parsed_file(
                 "train.py",
                 imports=["torch"],
-                symbols=[Symbol(name="train_loop", kind="function", signature="def train_loop():")],
+                symbols=[
+                    Symbol(
+                        name="train_loop",
+                        kind="function",
+                        signature="def train_loop():",
+                    )
+                ],
             )
         },
     )
-    _apply_page_contracts(plan, scan, {"repo_profile": {"primary_type": "research_training"}})
+    _apply_page_contracts(
+        plan, scan, {"repo_profile": {"primary_type": "research_training"}}
+    )
     validator = PageValidator(Path("."), scan)
     content = "# Training Loop\n\n## Overview\nMentions train.py but not the expected details."
     result = validator.validate(content, bucket)
 
-    assert "training loop" in ", ".join(result.missing_contract_concepts).lower() or result.missing_contract_concepts
+    assert (
+        "training loop" in ", ".join(result.missing_contract_concepts).lower()
+        or result.missing_contract_concepts
+    )
 
 
 def test_benchmark_score_plan_flags_noise_and_orphans() -> None:
@@ -720,7 +1034,10 @@ def test_benchmark_score_plan_flags_noise_and_orphans() -> None:
     )
     plan = DocPlan(
         buckets=[overview, utility],
-        nav_structure={"Overview": ["system-overview"], "Operations": ["randomness-utilities"]},
+        nav_structure={
+            "Overview": ["system-overview"],
+            "Operations": ["randomness-utilities"],
+        },
         skipped_files=[],
         orphaned_files=["x.py", "y.py"],
         classification={"repo_profile": {"primary_type": "research_training"}},

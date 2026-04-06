@@ -7,7 +7,6 @@ import re
 from .base import APIEndpoint, RegisteredRouteDetector, RouteResolverContext
 from .common import line_number_for_offset
 
-
 LARAVEL_ROUTE = re.compile(
     r"""Route\s*::\s*(get|post|put|patch|delete|any|match|options)\s*\(\s*"""
     r"""['"]([^'"]+)['"]""",

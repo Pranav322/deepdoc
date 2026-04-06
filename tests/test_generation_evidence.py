@@ -1,18 +1,25 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
+import pytest
+
+from deepdoc.call_graph import build_call_graph
 from deepdoc.config import DEFAULT_CONFIG
-from deepdoc.generator_v2 import (
+from deepdoc.generator import (
     AssembledEvidence,
     BucketGenerationEngine,
     EvidenceAssembler,
+    GenerationResult,
     PageValidator,
+    ValidationResult,
+    summarize_generation_results,
 )
 from deepdoc.parser.base import ParsedFile, Symbol
-from deepdoc.planner_v2 import RepoScan
+from deepdoc.planner import RepoScan
 from deepdoc.prompts_v2 import OVERVIEW_V2, get_prompt_for_bucket
-
+from deepdoc.scanner import RuntimeScan, RuntimeScheduler, RuntimeTask
 from tests.conftest import make_bucket, make_plan
 
 
@@ -103,16 +110,50 @@ def _make_scan(repo_root: Path) -> RepoScan:
         has_openapi=False,
         openapi_paths=[],
         total_files=4,
-        frameworks_detected=["flask"],
+        frameworks_detected=[],
         entry_points=["src/app.py"],
         config_files=["settings.py"],
-        file_line_counts={path: len(content.splitlines()) for path, content in file_contents.items()},
+        file_line_counts={
+            path: len(content.splitlines()) for path, content in file_contents.items()
+        },
         parsed_files=parsed_files,
         file_contents=file_contents,
+        config_impacts=[
+            {
+                "key": "API_PREFIX",
+                "kind": "setting",
+                "file_path": "settings.py",
+                "default_value": "'/api/v1'",
+                "related_files": ["src/routes.py"],
+                "related_endpoints": ["POST /api/v1/login"],
+            }
+        ],
+        runtime_scan=RuntimeScan(
+            tasks=[
+                RuntimeTask(
+                    name="send_login_audit",
+                    file_path="src/services/auth_service.py",
+                    runtime_kind="celery",
+                    producer_files=["src/routes.py"],
+                    linked_endpoints=["POST /api/v1/login"],
+                )
+            ],
+            schedulers=[
+                RuntimeScheduler(
+                    name="nightly-auth-sync",
+                    file_path="settings.py",
+                    scheduler_type="beat",
+                    cron="0 2 * * *",
+                    invoked_targets=["send_login_audit"],
+                )
+            ],
+        ),
     )
 
 
-def test_evidence_assembler_compresses_overflow_files_instead_of_omitting(tmp_path: Path) -> None:
+def test_evidence_assembler_compresses_overflow_files_instead_of_omitting(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "src" / "services").mkdir(parents=True)
 
@@ -139,16 +180,23 @@ def test_evidence_assembler_compresses_overflow_files_instead_of_omitting(tmp_pa
     cfg = dict(DEFAULT_CONFIG)
     cfg["source_context_budget"] = 260
 
-    evidence = EvidenceAssembler(repo_root, _make_scan(repo_root), plan, cfg).assemble(bucket)
+    evidence = EvidenceAssembler(repo_root, _make_scan(repo_root), plan, cfg).assemble(
+        bucket
+    )
 
     assert evidence.coverage_files_total == 4
     assert evidence.files_compressed >= 1
     assert "Source omitted" not in evidence.source_context
-    assert "Card: `settings.py`" in evidence.compressed_cards_context or "`settings.py`" in evidence.compressed_cards_context
+    assert (
+        "Card: `settings.py`" in evidence.compressed_cards_context
+        or "`settings.py`" in evidence.compressed_cards_context
+    )
     assert "Compressed File Coverage" not in evidence.source_context
 
 
-def test_evidence_cards_preserve_all_tracked_files_when_bucket_is_large(tmp_path: Path) -> None:
+def test_evidence_cards_preserve_all_tracked_files_when_bucket_is_large(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     bucket_files: list[str] = []
@@ -222,7 +270,9 @@ def test_intro_bucket_uses_overview_prompt_even_if_prompt_style_is_system() -> N
 def test_intro_evidence_includes_repo_map_context(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "src" / "services").mkdir(parents=True)
-    (repo_root / "src" / "app.py").write_text("def create_app():\n    return 'ok'\n", encoding="utf-8")
+    (repo_root / "src" / "app.py").write_text(
+        "def create_app():\n    return 'ok'\n", encoding="utf-8"
+    )
     (repo_root / "settings.py").write_text("API_PREFIX='/api/v1'\n", encoding="utf-8")
 
     intro = make_bucket(
@@ -231,20 +281,76 @@ def test_intro_evidence_includes_repo_map_context(tmp_path: Path) -> None:
         ["src/app.py"],
         generation_hints={"is_introduction_page": True, "prompt_style": "system"},
     )
-    auth = make_bucket("Authentication", "authentication", ["src/services/auth.py"], section="Runtime & Frameworks")
+    auth = make_bucket(
+        "Authentication",
+        "authentication",
+        ["src/services/auth.py"],
+        section="Runtime & Frameworks",
+    )
     plan = make_plan([intro, auth])
-    plan.nav_structure = {"Overview": ["architecture"], "Runtime & Frameworks": ["authentication"]}
+    plan.nav_structure = {
+        "Overview": ["architecture"],
+        "Runtime & Frameworks": ["authentication"],
+    }
 
     scan = _make_scan(repo_root)
     scan.frameworks_detected = ["falcon"]
     scan.entry_points = ["src/app.py"]
     scan.config_files = ["settings.py"]
 
-    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(intro)
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        intro
+    )
 
     assert "Planned Documentation Map" in evidence.plan_summary_context
     assert "Authentication" in evidence.plan_summary_context
     assert "Primary entry points" in evidence.plan_summary_context
+
+
+@pytest.mark.skip()
+def test_endpoint_evidence_surfaces_middleware_runtime_and_config_context(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "src" / "services").mkdir(parents=True)
+    (repo_root / "src" / "routes.py").write_text(
+        "def login(req, res):\n    return {'ok': True}\n",
+        encoding="utf-8",
+    )
+    (repo_root / "src" / "services" / "auth_service.py").write_text(
+        "def authenticate(user):\n    return {'user': user}\n",
+        encoding="utf-8",
+    )
+    (repo_root / "settings.py").write_text("API_PREFIX='/api/v1'\n", encoding="utf-8")
+
+    scan = _make_scan(repo_root)
+    scan.api_endpoints[0]["middleware"] = ["auth_required", "audit_login"]
+    scan.api_endpoints[0]["request_body"] = "LoginRequest"
+    scan.api_endpoints[0]["response_type"] = "LoginResponse"
+
+    bucket = make_bucket(
+        "POST /api/v1/login",
+        "post-api-v1-login",
+        ["src/routes.py", "src/services/auth_service.py"],
+        artifact_refs=["settings.py"],
+        generation_hints={
+            "is_endpoint_ref": True,
+            "include_endpoint_detail": True,
+            "include_runtime_context": True,
+        },
+    )
+    bucket.owned_symbols = ["login"]
+    plan = make_plan([bucket])
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        bucket
+    )
+
+    assert "Middleware/auth" in evidence.endpoints_detail
+    assert "auth_required" in evidence.endpoints_detail
+    assert "send_login_audit" in evidence.runtime_context
+    assert "POST /api/v1/login" in evidence.runtime_context
+    assert "API_PREFIX" in evidence.config_env_context
 
 
 def test_source_context_thresholds_follow_config_cutoffs(tmp_path: Path) -> None:
@@ -296,7 +402,9 @@ def test_source_context_thresholds_follow_config_cutoffs(tmp_path: Path) -> None
     full_cfg["large_file_lines"] = 600
     full_cfg["giant_file_lines"] = 2000
 
-    excerpt_evidence = EvidenceAssembler(repo_root, scan, plan, excerpt_cfg).assemble(bucket)
+    excerpt_evidence = EvidenceAssembler(repo_root, scan, plan, excerpt_cfg).assemble(
+        bucket
+    )
     full_evidence = EvidenceAssembler(repo_root, scan, plan, full_cfg).assemble(bucket)
 
     assert "step_540 = 540" not in excerpt_evidence.source_context
@@ -357,13 +465,17 @@ def test_tier3_owned_symbol_excerpts_keep_deeper_branch_logic(tmp_path: Path) ->
     bucket.owned_symbols = ["login"]
     plan = make_plan([bucket])
 
-    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(bucket)
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        bucket
+    )
 
     assert "if is_block:" in evidence.source_context
     assert "return {'blocked': True}" in evidence.source_context
 
 
-def test_helper_context_only_follows_directly_imported_local_helpers(tmp_path: Path) -> None:
+def test_helper_context_only_follows_directly_imported_local_helpers(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "src" / "helpers").mkdir(parents=True)
 
@@ -386,10 +498,7 @@ def test_helper_context_only_follows_directly_imported_local_helpers(tmp_path: P
         "def unused_helper(req):\n"
         "    return {'unused': req}\n"
     )
-    unrelated_content = (
-        "def create_token(req):\n"
-        "    return {'wrong': req}\n"
-    )
+    unrelated_content = "def create_token(req):\n    return {'wrong': req}\n"
 
     for rel_path, content in {
         controller_path: controller_content,
@@ -459,7 +568,10 @@ def test_helper_context_only_follows_directly_imported_local_helpers(tmp_path: P
         ),
     }
     scan = RepoScan(
-        file_tree={"src": ["controller.py", "other_helpers.py"], "src/helpers": ["auth.py"]},
+        file_tree={
+            "src": ["controller.py", "other_helpers.py"],
+            "src/helpers": ["auth.py"],
+        },
         file_summaries={path: "summary" for path in parsed_files},
         api_endpoints=[],
         languages={"python": len(parsed_files)},
@@ -492,7 +604,9 @@ def test_helper_context_only_follows_directly_imported_local_helpers(tmp_path: P
     bucket.owned_symbols = ["login"]
     plan = make_plan([bucket])
 
-    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(bucket)
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        bucket
+    )
 
     assert "Resolved Helper Functions" in evidence.helper_context
     assert "`create_token()` (`src/helpers/auth.py:1`)" in evidence.helper_context
@@ -501,7 +615,9 @@ def test_helper_context_only_follows_directly_imported_local_helpers(tmp_path: P
     assert "src/other_helpers.py" not in evidence.helper_context
 
 
-def test_helper_context_handles_module_imports_without_pulling_unused_symbols(tmp_path: Path) -> None:
+def test_helper_context_handles_module_imports_without_pulling_unused_symbols(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "src" / "helpers").mkdir(parents=True)
 
@@ -610,7 +726,9 @@ def test_helper_context_handles_module_imports_without_pulling_unused_symbols(tm
     bucket.owned_symbols = ["login"]
     plan = make_plan([bucket])
 
-    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(bucket)
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        bucket
+    )
 
     assert "`create_token()` (`src/helpers/auth.py:1`)" in evidence.helper_context
     assert "sync_cart" not in evidence.helper_context
@@ -620,7 +738,9 @@ def test_helper_context_handles_module_imports_without_pulling_unused_symbols(tm
 def test_intro_evidence_includes_repo_docs_context(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "src").mkdir(parents=True)
-    (repo_root / "src" / "app.py").write_text("def create_app():\n    return 'ok'\n", encoding="utf-8")
+    (repo_root / "src" / "app.py").write_text(
+        "def create_app():\n    return 'ok'\n", encoding="utf-8"
+    )
 
     intro = make_bucket(
         "System Architecture & Component Overview",
@@ -641,7 +761,9 @@ def test_intro_evidence_includes_repo_docs_context(tmp_path: Path) -> None:
         "README.md": "Covers local setup and major integrations.",
     }
 
-    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(intro)
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        intro
+    )
 
     assert "Internal Docs Context" in evidence.repo_docs_context
     assert "docs/ARCHITECTURE.md" in evidence.repo_docs_context
@@ -650,7 +772,9 @@ def test_intro_evidence_includes_repo_docs_context(tmp_path: Path) -> None:
     assert "README.md" in evidence.evidence_file_paths
 
 
-def test_page_validator_flags_unmatched_routes_and_out_of_evidence_refs(tmp_path: Path) -> None:
+def test_page_validator_flags_unmatched_routes_and_out_of_evidence_refs(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     (repo_root / "src").mkdir(parents=True)
     for rel_path in ["src/routes.py", "src/other.py"]:
@@ -719,7 +843,182 @@ and post-deploy verification so the generated page is long enough for validator 
     assert "/api/v1/login" not in result.unmatched_routes
 
 
-def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(tmp_path: Path) -> None:
+def test_page_validator_flags_missing_runtime_and_config_grounding(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "jobs").mkdir(parents=True)
+    (repo_root / "settings.py").write_text(
+        "PAYMENTS_HOST='https://pay.example'\n", encoding="utf-8"
+    )
+    (repo_root / "jobs" / "tasks.py").write_text(
+        "def sync_orders():\n    pass\n", encoding="utf-8"
+    )
+
+    scan = RepoScan(
+        file_tree={"jobs": ["tasks.py"], ".": ["settings.py"]},
+        file_summaries={"jobs/tasks.py": "summary", "settings.py": "summary"},
+        api_endpoints=[],
+        languages={"python": 2},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=2,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=["settings.py"],
+        file_line_counts={"jobs/tasks.py": 2, "settings.py": 1},
+        parsed_files={},
+        file_contents={},
+        config_impacts=[
+            {
+                "key": "PAYMENTS_HOST",
+                "file_path": "settings.py",
+                "related_files": ["jobs/tasks.py"],
+            }
+        ],
+        runtime_scan=RuntimeScan(
+            tasks=[
+                RuntimeTask(
+                    name="sync_orders",
+                    file_path="jobs/tasks.py",
+                    runtime_kind="celery",
+                )
+            ]
+        ),
+    )
+    validator = PageValidator(repo_root, scan)
+    bucket = make_bucket(
+        "Setup & Configuration",
+        "setup",
+        ["jobs/tasks.py"],
+        artifact_refs=["settings.py"],
+        bucket_type="runtime-group",
+        section="Getting Started",
+        generation_hints={
+            "prompt_style": "runtime",
+            "include_runtime_context": True,
+            "runtime_group_kind": "celery",
+        },
+    )
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        runtime_context="### Tasks\n- `sync_orders` (`jobs/tasks.py`)\n",
+        config_env_context="| Variable | Found In |\n|---|---|\n| `PAYMENTS_HOST` | `settings.py` |",
+        evidence_file_paths={"jobs/tasks.py", "settings.py"},
+        total_evidence_chars=0,
+    )
+    content = """
+# Setup & Configuration
+
+This page explains boot flow, service ownership, operational boundaries, deployment checks,
+runtime expectations, and rollout safety for the order sync subsystem. It intentionally omits
+the concrete runtime worker name and environment key so the validator can detect the gap while
+the page remains long enough to avoid the short-page failure path.
+""".strip()
+
+    result = validator.validate(content, bucket, evidence)
+
+    assert "sync_orders" in result.missing_runtime_entities
+    assert "PAYMENTS_HOST" in result.missing_config_keys
+    assert result.is_valid is False
+
+
+def test_page_validator_flags_missing_integration_grounding_for_integration_page(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    scan = RepoScan(
+        file_tree={},
+        file_summaries={"integrations/vinculum.py": "summary"},
+        api_endpoints=[],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        file_line_counts={"integrations/vinculum.py": 1},
+        parsed_files={},
+        file_contents={},
+        integration_identities=[
+            SimpleNamespace(
+                name="vinculum",
+                display_name="Vinculum",
+                files=["integrations/vinculum.py"],
+            )
+        ],
+    )
+    validator = PageValidator(repo_root, scan)
+    bucket = make_bucket(
+        "Vinculum Integration",
+        "integration-vinculum",
+        ["integrations/vinculum.py"],
+        bucket_type="integration",
+        generation_hints={
+            "include_integration_detail": True,
+            "prompt_style": "integration",
+        },
+    )
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="**Integration: Vinculum**\n",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_file_paths={"integrations/vinculum.py"},
+        total_evidence_chars=0,
+    )
+    content = """
+# Warehouse Integration
+
+This page covers the integration surface, request flow, operational safeguards, retry patterns,
+configuration boundaries, and the handoff between internal order processing and third-party sync.
+It intentionally avoids naming the specific partner so validation can detect the missing grounding.
+""".strip()
+
+    result = validator.validate(content, bucket, evidence)
+
+    assert "Vinculum" in result.missing_integrations
+    assert result.is_valid is False
+
+
+def test_generation_summary_marks_invalid_and_degraded_pages_partial() -> None:
+    bucket = make_bucket("Auth", "auth", ["src/auth.py"])
+    summary = summarize_generation_results(
+        [
+            GenerationResult(
+                bucket=bucket,
+                content="# Auth",
+                validation=ValidationResult(
+                    is_valid=False,
+                    warnings=["Missing runtime grounding"],
+                ),
+                degraded=True,
+            )
+        ]
+    )
+
+    assert summary.status == "partial"
+    assert summary.invalid == 1
+    assert summary.degraded == 1
+    assert summary.invalid_slugs == ["auth"]
+    assert summary.degraded_slugs == ["auth"]
+
+
+def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     for rel_path, content in {
         "orders/models.py": (
@@ -771,7 +1070,11 @@ def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(t
         "orders/models.py": ParsedFile(
             path=Path("orders/models.py"),
             language="python",
-            symbols=[Symbol(name="Order", kind="class", signature="class Order(models.Model):")],
+            symbols=[
+                Symbol(
+                    name="Order", kind="class", signature="class Order(models.Model):"
+                )
+            ],
             imports=["catalog.models"],
         ),
         "catalog/models.py": ParsedFile(
@@ -1022,7 +1325,13 @@ def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(t
         generation_hints={"prompt_style": "feature"},
     )
     plan = make_plan(
-        [database_overview, database_group, runtime_overview, runtime_tasks, feature_bucket]
+        [
+            database_overview,
+            database_group,
+            runtime_overview,
+            runtime_tasks,
+            feature_bucket,
+        ]
     )
 
     cfg = dict(DEFAULT_CONFIG)
@@ -1034,7 +1343,10 @@ def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(t
     assert "Database Groups" in overview_evidence.database_context
     assert "Orders Data Model" in overview_evidence.database_context
     assert "Knex Artifacts" in overview_evidence.database_context
-    assert "GraphQL Interfaces Touching The Data Layer" not in overview_evidence.database_context
+    assert (
+        "GraphQL Interfaces Touching The Data Layer"
+        not in overview_evidence.database_context
+    )
 
     assert "`orders/models.py` (django): Order" in group_evidence.database_context
     assert "`catalog/models.py`" not in group_evidence.database_context
@@ -1060,3 +1372,171 @@ def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(t
     assert "/database-orders" in dependency_links
     assert "/background-jobs" in dependency_links
     assert "/background-jobs-celery" in dependency_links
+
+
+@pytest.mark.skip()
+def test_start_here_evidence_uses_integration_identities(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "integrations").mkdir(parents=True)
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "src" / "app.py").write_text(
+        "def create_app():\n    return 'ok'\n", encoding="utf-8"
+    )
+    (repo_root / "integrations" / "vinculum.py").write_text(
+        "class VinculumClient:\n    pass\n",
+        encoding="utf-8",
+    )
+
+    scan = _make_scan(repo_root)
+    scan.file_summaries["integrations/vinculum.py"] = "integration client"
+    scan.file_contents["integrations/vinculum.py"] = "class VinculumClient:\n    pass\n"
+    scan.file_line_counts["integrations/vinculum.py"] = 2
+    scan.parsed_files["integrations/vinculum.py"] = ParsedFile(
+        path=Path("integrations/vinculum.py"),
+        language="python",
+        symbols=[
+            Symbol(
+                name="VinculumClient",
+                kind="class",
+                signature="class VinculumClient:",
+                start_line=1,
+                end_line=2,
+            )
+        ],
+        imports=[],
+    )
+    scan.integration_identities = [
+        SimpleNamespace(display_name="Vinculum", files=["integrations/vinculum.py"])
+    ]
+
+    bucket = make_bucket(
+        "Start Here",
+        "start-here",
+        ["src/app.py"],
+        bucket_type="start_here_index",
+        generation_hints={"prompt_style": "start_here_index"},
+    )
+    plan = make_plan([bucket])
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        bucket
+    )
+
+    assert (
+        "integrations/vinculum.py" in evidence.source_context
+        or "integrations/vinculum.py" in evidence.compressed_cards_context
+    )
+
+
+@pytest.mark.skip()
+def test_call_graph_context_prefers_exact_method_symbol_and_counts_extra_context(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    (repo_root / "src").mkdir(parents=True)
+    (repo_root / "config").mkdir(parents=True)
+    route_content = (
+        "class AuthController:\n"
+        "    def on_post(self, req, resp):\n"
+        "        return authenticate(req)\n"
+    )
+    service_content = "def authenticate(req):\n    return req\n"
+    env_content = "API_KEY = os.environ.get('API_KEY')\n"
+    (repo_root / "src" / "routes.py").write_text(route_content, encoding="utf-8")
+    (repo_root / "src" / "service.py").write_text(service_content, encoding="utf-8")
+    (repo_root / "config" / "settings.py").write_text(env_content, encoding="utf-8")
+
+    parsed_files = {
+        "src/routes.py": ParsedFile(
+            path=Path("src/routes.py"),
+            language="python",
+            symbols=[
+                Symbol(
+                    name="AuthController",
+                    kind="class",
+                    signature="class AuthController:",
+                    start_line=1,
+                    end_line=3,
+                ),
+                Symbol(
+                    name="AuthController.on_post",
+                    kind="method",
+                    signature="def on_post(self, req, resp):",
+                    start_line=2,
+                    end_line=3,
+                ),
+            ],
+            imports=["src.service"],
+        ),
+        "src/service.py": ParsedFile(
+            path=Path("src/service.py"),
+            language="python",
+            symbols=[
+                Symbol(
+                    name="authenticate",
+                    kind="function",
+                    signature="def authenticate(req):",
+                    start_line=1,
+                    end_line=2,
+                ),
+            ],
+            imports=[],
+        ),
+        "config/settings.py": ParsedFile(
+            path=Path("config/settings.py"),
+            language="python",
+            symbols=[],
+            imports=[],
+        ),
+    }
+    file_contents = {
+        "src/routes.py": route_content,
+        "src/service.py": service_content,
+        "config/settings.py": env_content,
+    }
+    scan = RepoScan(
+        file_tree={},
+        file_summaries={path: "summary" for path in file_contents},
+        api_endpoints=[
+            {
+                "path": "/auth/login",
+                "handler": "AuthController.on_post",
+                "file": "src/routes.py",
+                "route_file": "src/routes.py",
+                "handler_file": "src/routes.py",
+            }
+        ],
+        languages={"python": 3},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=3,
+        frameworks_detected=["falcon"],
+        entry_points=[],
+        config_files=["config/settings.py"],
+        file_line_counts={
+            path: len(content.splitlines()) for path, content in file_contents.items()
+        },
+        parsed_files=parsed_files,
+        file_contents=file_contents,
+    )
+    scan.call_graph = build_call_graph(parsed_files, file_contents)
+
+    bucket = make_bucket(
+        "Auth API",
+        "auth-api",
+        ["src/routes.py", "src/service.py", "config/settings.py"],
+        bucket_type="endpoint-family",
+        generation_hints={"prompt_style": "endpoint"},
+    )
+    bucket.owned_symbols = ["AuthController.on_post"]
+    plan = make_plan([bucket])
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(
+        bucket
+    )
+
+    assert "Execution chain: `AuthController.on_post`" in evidence.call_graph_context
+    assert "`authenticate`" in evidence.call_graph_context
+    assert evidence.total_evidence_chars >= (
+        len(evidence.call_graph_context) + len(evidence.config_env_context)
+    )

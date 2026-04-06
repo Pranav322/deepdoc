@@ -171,7 +171,7 @@ def _extract_request_body(details: dict, spec: dict) -> str:
         return ""
     rb = _resolve_ref(rb, spec)
     content = rb.get("content", {})
-    for media_type, schema_info in content.items():
+    for _media_type, schema_info in content.items():
         schema = _resolve_ref(schema_info.get("schema", {}), spec)
         return json.dumps(schema, indent=2)[:500]
     return ""
@@ -184,7 +184,7 @@ def _extract_responses(details: dict, spec: dict) -> dict[str, str]:
         desc = resp.get("description", "")
         content = resp.get("content", {})
         if content:
-            for media_type, schema_info in content.items():
+            for _media_type, schema_info in content.items():
                 schema = _resolve_ref(schema_info.get("schema", {}), spec)
                 desc += f" | schema: {json.dumps(schema)[:200]}"
                 break

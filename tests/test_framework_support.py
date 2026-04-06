@@ -7,7 +7,7 @@ from pathlib import Path
 
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.parser.api_detector import detect_endpoints
-from deepdoc.planner_v2 import scan_repo
+from deepdoc.planner import scan_repo
 
 
 def test_django_detects_class_views_and_drf_router_actions():
@@ -185,6 +185,84 @@ fastify.register(apiRoutes, { prefix: '/api/v1' })
     assert by_key[("POST", "/api/v1/users")].handler == "createUser"
 
 
+def test_fastify_detects_route_hooks_as_middleware():
+    content = """
+const fastify = require('fastify')()
+
+async function apiRoutes(instance) {
+  instance.get('/users', {
+    preHandler: [auth, audit],
+    schema: {
+      body: { type: 'object' },
+      response: { 200: { type: 'object' } },
+    },
+  }, listUsers)
+
+  instance.route({
+    method: 'POST',
+    url: '/users',
+    onRequest: [auth],
+    preValidation: validateUser,
+    handler: createUser,
+  })
+}
+
+fastify.register(apiRoutes, { prefix: '/api/v1' })
+"""
+
+    endpoints = detect_endpoints(Path("server.js"), content, "javascript")
+    by_key = {(ep.method, ep.path): ep for ep in endpoints}
+
+    assert by_key[("GET", "/api/v1/users")].middleware == ["auth", "audit"]
+    assert by_key[("POST", "/api/v1/users")].middleware == ["auth", "validateUser"]
+
+
+def test_go_detects_grouped_routes_and_middleware():
+    content = """
+package main
+
+func main() {
+    router := gin.New()
+    api := router.Group("/api", auth)
+    v1 := api.Group("/v1")
+    admin := v1.Group("/admin", audit)
+
+    router.GET("/health", healthHandler)
+    admin.GET("/users", listUsers)
+    admin.POST("/users", createUser)
+}
+"""
+
+    endpoints = detect_endpoints(Path("main.go"), content, "go")
+    by_key = {(ep.method, ep.path): ep for ep in endpoints}
+
+    assert by_key[("GET", "/health")].handler == "healthHandler"
+    assert by_key[("GET", "/api/v1/admin/users")].handler == "listUsers"
+    assert by_key[("GET", "/api/v1/admin/users")].middleware == ["auth", "audit"]
+    assert by_key[("POST", "/api/v1/admin/users")].handler == "createUser"
+
+
+def test_falcon_detects_app_middleware_on_routes():
+    content = """
+import falcon
+
+app = falcon.App(middleware=[AuthMiddleware(), TraceMiddleware()])
+
+class Login:
+    def on_post(self, req, res):
+        pass
+
+app.add_route('/login', Login())
+"""
+
+    endpoints = detect_endpoints(Path("app.py"), content, "python")
+    endpoint = next(
+        ep for ep in endpoints if ep.path == "/login" and ep.method == "POST"
+    )
+
+    assert endpoint.middleware == ["AuthMiddleware", "TraceMiddleware"]
+
+
 def test_scan_repo_detects_vue_projects_and_sfc_signals(tmp_path):
     repo_root = tmp_path / "vue-app"
     component_dir = repo_root / "src" / "components"
@@ -292,7 +370,9 @@ exports.handleOrderStatus = (req, res) => res.json({ ok: true });
 
     scan = scan_repo(repo_root, deepcopy(DEFAULT_CONFIG))
     endpoint = next(
-        ep for ep in scan.api_endpoints if ep["handler"] == "webhookController.handleOrderStatus"
+        ep
+        for ep in scan.api_endpoints
+        if ep["handler"] == "webhookController.handleOrderStatus"
     )
 
     assert endpoint["method"] == "POST"
@@ -345,7 +425,8 @@ class RecaptchaLogin:
 
     scan = scan_repo(repo_root, deepcopy(DEFAULT_CONFIG))
     method_paths = {
-        (ep["method"], ep["path"], ep["handler"], ep["handler_file"]) for ep in scan.api_endpoints
+        (ep["method"], ep["path"], ep["handler"], ep["handler_file"])
+        for ep in scan.api_endpoints
     }
 
     assert (
@@ -366,6 +447,130 @@ class RecaptchaLogin:
         "AuthController.RecaptchaLogin.on_post",
         "controllers/AuthController.py",
     ) in method_paths
+
+
+def test_scan_repo_resolves_falcon_package_exported_resources(tmp_path):
+    repo_root = tmp_path / "falcon-export"
+    controllers_dir = repo_root / "controllers"
+    controllers_dir.mkdir(parents=True)
+
+    (repo_root / "main.py").write_text(
+        """
+import falcon
+from controllers import LoginResource
+
+app = falcon.App()
+app.add_route('/login', LoginResource())
+""",
+        encoding="utf-8",
+    )
+    (controllers_dir / "__init__.py").write_text(
+        "from .auth import LoginResource\n",
+        encoding="utf-8",
+    )
+    (controllers_dir / "auth.py").write_text(
+        """
+class LoginResource:
+    def on_post(self, req, res):
+        pass
+""",
+        encoding="utf-8",
+    )
+
+    scan = scan_repo(repo_root, deepcopy(DEFAULT_CONFIG))
+    endpoint = next(ep for ep in scan.api_endpoints if ep["path"] == "/login")
+
+    assert endpoint["handler"] == "LoginResource.on_post"
+    assert endpoint["handler_file"] == "controllers/auth.py"
+
+
+def test_scan_repo_resolves_fastify_imported_plugin_prefixes_hooks_and_handler_files(
+    tmp_path,
+):
+    repo_root = tmp_path / "fastify-app"
+    routes_dir = repo_root / "routes"
+    controllers_dir = repo_root / "controllers"
+    routes_dir.mkdir(parents=True)
+    controllers_dir.mkdir(parents=True)
+
+    (repo_root / "server.js").write_text(
+        """
+const fastify = require('fastify')()
+const usersRoutes = require('./routes/users')
+
+fastify.addHook('onRequest', trace)
+fastify.register(usersRoutes, { prefix: '/api/v1', preHandler: [auth] })
+""",
+        encoding="utf-8",
+    )
+    (routes_dir / "users.js").write_text(
+        """
+const usersController = require('../controllers/usersController')
+
+async function usersRoutes(instance) {
+  instance.addHook('preHandler', audit)
+  instance.get('/users', usersController.listUsers)
+}
+
+module.exports = usersRoutes
+""",
+        encoding="utf-8",
+    )
+    (controllers_dir / "usersController.js").write_text(
+        "exports.listUsers = async (req, reply) => reply.send([])\n",
+        encoding="utf-8",
+    )
+
+    scan = scan_repo(repo_root, deepcopy(DEFAULT_CONFIG))
+    endpoint = next(ep for ep in scan.api_endpoints if ep["path"] == "/api/v1/users")
+
+    assert endpoint["handler"] == "usersController.listUsers"
+    assert endpoint["handler_file"] == "controllers/usersController.js"
+    assert endpoint["middleware"] == ["trace", "auth", "audit"]
+
+
+def test_scan_repo_resolves_go_imported_handler_files(tmp_path):
+    repo_root = tmp_path / "go-app"
+    handlers_dir = repo_root / "internal" / "handlers"
+    handlers_dir.mkdir(parents=True)
+
+    (repo_root / "go.mod").write_text(
+        "module example.com/go-app\n\ngo 1.22\n",
+        encoding="utf-8",
+    )
+    (repo_root / "main.go").write_text(
+        """
+package main
+
+import (
+    handlers "example.com/go-app/internal/handlers"
+    "github.com/gin-gonic/gin"
+)
+
+func main() {
+    router := gin.New()
+    api := router.Group("/api", auth)
+    api.GET("/users", handlers.ListUsers)
+}
+""",
+        encoding="utf-8",
+    )
+    (handlers_dir / "users.go").write_text(
+        """
+package handlers
+
+import "github.com/gin-gonic/gin"
+
+func ListUsers(c *gin.Context) {}
+""",
+        encoding="utf-8",
+    )
+
+    scan = scan_repo(repo_root, deepcopy(DEFAULT_CONFIG))
+    endpoint = next(ep for ep in scan.api_endpoints if ep["path"] == "/api/users")
+
+    assert endpoint["handler"] == "handlers.ListUsers"
+    assert endpoint["handler_file"] == "internal/handlers/users.go"
 
 
 def test_scan_repo_ignores_commented_falcon_routes(tmp_path):
@@ -492,7 +697,9 @@ def return_status_update(request):
     )
 
     scan = scan_repo(repo_root, deepcopy(DEFAULT_CONFIG))
-    endpoints = {(ep["path"], ep["handler"], ep["handler_file"]) for ep in scan.api_endpoints}
+    endpoints = {
+        (ep["path"], ep["handler"], ep["handler_file"]) for ep in scan.api_endpoints
+    }
     paths = {ep["path"] for ep in scan.api_endpoints}
 
     assert (

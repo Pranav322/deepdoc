@@ -40,12 +40,16 @@ class LiteLLMChatClient:
             response = litellm.completion(**kwargs)
             return response.choices[0].message.content or ""
         except ImportError as exc:
-            raise RuntimeError("litellm not installed. Install deepdoc[chatbot].") from exc
+            raise RuntimeError(
+                "litellm not installed. Install deepdoc[chatbot]."
+            ) from exc
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")
             hint = f" Check env var {key_env}." if key_env else ""
-            raise RuntimeError(f"Chat completion failed (model={model}).{hint} {exc}") from exc
+            raise RuntimeError(
+                f"Chat completion failed (model={model}).{hint} {exc}"
+            ) from exc
 
 
 class LiteLLMEmbeddingClient:
@@ -69,12 +73,16 @@ class LiteLLMEmbeddingClient:
                 vectors.extend(self._embed_batch(litellm, batch))
             return vectors
         except ImportError as exc:
-            raise RuntimeError("litellm not installed. Install deepdoc[chatbot].") from exc
+            raise RuntimeError(
+                "litellm not installed. Install deepdoc[chatbot]."
+            ) from exc
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")
             hint = f" Check env var {key_env}." if key_env else ""
-            raise RuntimeError(f"Embedding request failed (model={model}).{hint} {exc}") from exc
+            raise RuntimeError(
+                f"Embedding request failed (model={model}).{hint} {exc}"
+            ) from exc
 
     def _embed_batch(self, litellm: Any, batch: list[str]) -> list[list[float]]:
         try:
@@ -84,7 +92,9 @@ class LiteLLMEmbeddingClient:
             if self._is_context_window_error(exc):
                 if len(batch) > 1:
                     mid = max(len(batch) // 2, 1)
-                    return self._embed_batch(litellm, batch[:mid]) + self._embed_batch(litellm, batch[mid:])
+                    return self._embed_batch(litellm, batch[:mid]) + self._embed_batch(
+                        litellm, batch[mid:]
+                    )
                 trimmed = self._trim_text_for_retry(batch[0])
                 if trimmed != batch[0]:
                     return self._embed_batch(litellm, [trimmed])
@@ -111,7 +121,8 @@ class LiteLLMEmbeddingClient:
         return (
             "contextwindow" in message
             or "maximum context length" in message
-            or "requested" in message and "tokens" in message
+            or "requested" in message
+            and "tokens" in message
         )
 
     def _trim_text_for_retry(self, text: str) -> str:
@@ -133,5 +144,50 @@ def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:
     return LiteLLMChatClient(get_chatbot_cfg(cfg).get("answer", {}))
 
 
-def build_embedding_client(cfg: dict[str, Any]) -> LiteLLMEmbeddingClient:
-    return LiteLLMEmbeddingClient(get_chatbot_cfg(cfg).get("embeddings", {}))
+def build_embedding_client(
+    cfg: dict[str, Any],
+) -> LiteLLMEmbeddingClient | FastembedEmbeddingClient:
+    """Build embedding client: fastembed (local) or litellm (cloud)."""
+    chatbot_cfg = get_chatbot_cfg(cfg)
+    embeddings_cfg = chatbot_cfg.get("embeddings", {})
+    backend = embeddings_cfg.get("backend", "fastembed")
+
+    if backend == "fastembed":
+        return FastembedEmbeddingClient(embeddings_cfg)
+    else:
+        return LiteLLMEmbeddingClient(embeddings_cfg)
+
+
+class FastembedEmbeddingClient:
+    """Local embedding client using fastembed (no API keys, zero cloud calls)."""
+
+    def __init__(self, service_cfg: dict[str, Any]) -> None:
+        self.service_cfg = service_cfg
+        self.model = service_cfg.get(
+            "fastembed_model", "nomic-ai/nomic-embed-text-v1.5"
+        )
+        self.batch_size = service_cfg.get("fastembed_batch_size", 4)
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        """Embed texts using fastembed. Returns shape (N, embedding_dim)."""
+        if not texts:
+            return []
+        try:
+            from .embeddings import get_embeddings
+
+            vecs = get_embeddings(
+                texts,
+                backend="fastembed",
+                model=self.model,
+                batch_size=self.batch_size,
+            )
+            if hasattr(vecs, "tolist"):
+                return vecs.tolist()
+            return list(vecs)
+        except ImportError as exc:
+            raise RuntimeError(
+                "fastembed not installed. Run: pip install fastembed\n"
+                "Or set embeddings.backend='litellm' to use cloud embeddings."
+            ) from exc
+        except Exception as exc:
+            raise RuntimeError(f"fastembed embedding failed: {exc}") from exc

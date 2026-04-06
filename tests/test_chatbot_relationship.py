@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 from unittest.mock import patch
 
-from deepdoc.chatbot.chunker import build_relationship_chunks
+from deepdoc.call_graph import build_call_graph
+from deepdoc.chatbot.chunker import build_graph_relation_chunks, build_relationship_chunks
 from deepdoc.chatbot.persistence import save_corpus
 from deepdoc.chatbot.service import ChatbotQueryService
 from deepdoc.chatbot.types import ChunkRecord
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.persistence_v2 import save_plan
-from deepdoc.planner_v2 import RepoScan
+from deepdoc.planner import RepoScan
 from tests.conftest import make_bucket, make_plan
 
 
@@ -112,6 +113,65 @@ def test_relationship_chunks_for_file_with_both_imports_and_symbols() -> None:
     assert len(chunks) == 2
     kinds_in_text = {c.text.split("Type: ")[1].split("\n")[0] for c in chunks}
     assert kinds_in_text == {"import_graph", "symbol_index"}
+
+
+def test_graph_relation_chunks_surface_routes_and_component_signals() -> None:
+    parsed_files = {
+        "src/routes/users.js": ParsedFile(
+            path=Path("src/routes/users.js"),
+            language="javascript",
+            imports=["const express = require('express')"],
+            symbols=[Symbol(name="listUsers", kind="function", signature="function listUsers(req, res)", start_line=1, end_line=3)],
+        ),
+        "src/components/UserList.vue": ParsedFile(
+            path=Path("src/components/UserList.vue"),
+            language="vue",
+            imports=["from 'vue-router'", "from 'pinia'"],
+            symbols=[
+                Symbol(name="UserList", kind="component", signature="defineOptions({ name: 'UserList' })"),
+                Symbol(name="props", kind="constant", signature="defineProps()", props=["teamId"]),
+                Symbol(name="emit", kind="constant", signature="defineEmits()", fields=["select"]),
+                Symbol(name="pinia", kind="constant", signature="storeToRefs()"),
+            ],
+        ),
+    }
+    file_contents = {
+        "src/routes/users.js": "function listUsers(req, res) {\n  return []\n}\n",
+        "src/components/UserList.vue": "<script setup></script>\n",
+    }
+    api_endpoints = [
+        {
+            "method": "GET",
+            "path": "/api/users",
+            "handler": "listUsers",
+            "route_file": "src/routes/users.js",
+            "handler_file": "src/routes/users.js",
+            "file": "src/routes/users.js",
+            "middleware": ["auth"],
+            "framework": "express",
+        }
+    ]
+    scan = _make_scan_with_parsed_files(parsed_files, file_contents)
+    scan.api_endpoints = api_endpoints
+    scan.file_frameworks = {
+        "src/routes/users.js": ["express"],
+        "src/components/UserList.vue": ["vue"],
+    }
+    plan = make_plan(
+        [make_bucket("App", "app", ["src/routes/users.js", "src/components/UserList.vue"])]
+    )
+    graph = build_call_graph(parsed_files, file_contents, api_endpoints)
+
+    chunks = build_graph_relation_chunks(graph, plan=plan)
+
+    routes_chunk = next(chunk for chunk in chunks if chunk.file_path == "src/routes/users.js")
+    vue_chunk = next(chunk for chunk in chunks if chunk.file_path == "src/components/UserList.vue")
+
+    assert "GET /api/users -> listUsers [middleware: auth]" in routes_chunk.text
+    assert "teamId" in vue_chunk.text
+    assert "select" in vue_chunk.text
+    assert "pinia" in vue_chunk.text
+    assert (routes_chunk.metadata or {}).get("chunk_subtype") == "graph_neighbors"
 
 
 def test_relationship_chunks_empty_for_unparsed_files() -> None:

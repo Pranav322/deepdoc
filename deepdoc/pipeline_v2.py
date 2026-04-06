@@ -14,56 +14,54 @@ So `deepdoc update` can diff changed files → find affected pages → regenerat
 from __future__ import annotations
 
 import json
-import os
+from pathlib import Path
 import shutil
 import time
-from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
+    BarColumn,
     Progress,
     SpinnerColumn,
-    TextColumn,
-    BarColumn,
     TaskProgressColumn,
+    TextColumn,
 )
 
-from .config import load_config
+from .chatbot.settings import chatbot_enabled
+from .generator import (
+    build_internal_doc_link_maps,
+    BucketGenerationEngine,
+    escape_mdx_route_params,
+    escape_mdx_text_hazards,
+    normalize_code_fence_languages,
+    repair_internal_doc_links,
+    summarize_generation_results,
+)
 from .llm import LLMClient
 from .manifest import Manifest, file_hash
 from .openapi import (
+    extract_endpoints_from_spec,
     find_openapi_specs,
     parse_openapi_spec,
-    extract_endpoints_from_spec,
     spec_to_context_string,
-)
-from .planner_v2 import (
-    DocBucket,
-    DocPlan as BucketDocPlan,
-    RepoScan as BucketRepoScan,
-    plan_docs as bucket_plan_docs,
-    scan_repo as bucket_scan_repo,
-)
-from .prompts_v2 import SYSTEM_V2, get_prompt_for_page_type
-from .generator_v2 import (
-    BucketGenerationEngine,
-    escape_mdx_text_hazards,
-    escape_mdx_route_params,
-    normalize_code_fence_languages,
-    summarize_generation_results,
 )
 from .persistence_v2 import (
     cleanup_stale_generated_files,
     load_generation_ledger,
     prune_generation_ledger,
     save_all,
-    save_plan,
-    save_file_map,
+    save_sync_receipt,
     save_sync_state,
 )
-from .chatbot.settings import chatbot_enabled
+from .planner import (
+    plan_docs as bucket_plan_docs,
+)
+from .planner import (
+    scan_repo as bucket_scan_repo,
+)
+from .prompts_v2 import SYSTEM_V2, get_prompt_for_page_type
 
 console = Console()
 
@@ -76,7 +74,10 @@ MAX_RETRIES = 5
 def _page_is_overview(page: Any) -> bool:
     """Check whether a planned page is the landing page."""
     hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
-    return hints.get("is_introduction_page") or getattr(page, "page_type", None) == "overview"
+    return (
+        hints.get("is_introduction_page")
+        or getattr(page, "page_type", None) == "overview"
+    )
 
 
 def _page_uses_openapi_route(page: Any, has_openapi: bool) -> bool:
@@ -84,7 +85,10 @@ def _page_uses_openapi_route(page: Any, has_openapi: bool) -> bool:
     if not has_openapi:
         return False
     hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
-    return hints.get("is_endpoint_ref") or getattr(page, "page_type", None) == "endpoint_ref"
+    return (
+        hints.get("is_endpoint_ref")
+        or getattr(page, "page_type", None) == "endpoint_ref"
+    )
 
 
 def _page_url(page: Any, has_openapi: bool) -> str:
@@ -104,7 +108,9 @@ def _endpoint_ref_slug(method: str, path: str) -> str:
     return f"{method.lower()}-{path_slug}"
 
 
-def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None) -> bool:
+def stage_openapi_assets(
+    repo_root: Path, openapi_paths: list[str] | None = None
+) -> bool:
     """Stage the first detected OpenAPI spec for the generated Fumadocs app."""
     site_openapi_dir = repo_root / "site" / "openapi"
     site_openapi_dir.mkdir(parents=True, exist_ok=True)
@@ -115,7 +121,9 @@ def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None
 
     detected_paths = openapi_paths
     if detected_paths is None:
-        detected_paths = [str(path.relative_to(repo_root)) for path in find_openapi_specs(repo_root)]
+        detected_paths = [
+            str(path.relative_to(repo_root)) for path in find_openapi_specs(repo_root)
+        ]
 
     for spec_rel_path in detected_paths:
         spec_src = repo_root / spec_rel_path
@@ -227,6 +235,13 @@ class PipelineV2:
         stats["pages_generated"] = generation_summary.succeeded
         stats["pages_failed"] = generation_summary.failed
         stats["pages_skipped"] = generation_summary.skipped
+        stats["pages_invalid"] = generation_summary.invalid
+        stats["pages_degraded"] = generation_summary.degraded
+        stats["page_warnings"] = generation_summary.warnings_total
+        stats["quality_report"] = {
+            "invalid_slugs": generation_summary.invalid_slugs,
+            "degraded_slugs": generation_summary.degraded_slugs,
+        }
         stats["status"] = generation_summary.status
 
         # ── Phase 4: API Playground ────────────────────────────────────
@@ -264,12 +279,14 @@ class PipelineV2:
         # ── Persist state ──────────────────────────────────────────────
         phase_start = time.perf_counter()
         save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+        self._save_quality_report(stats)
         phase_timings["persist"] = time.perf_counter() - phase_start
 
         if chatbot_enabled(self.cfg):
             try:
                 from .chatbot.indexer import ChatbotIndexer
 
+                console.print("[dim]Starting chatbot index sync...[/dim]")
                 chatbot_stats = ChatbotIndexer(self.repo_root, self.cfg).sync_full(
                     plan=plan,
                     scan=scan,
@@ -277,12 +294,23 @@ class PipelineV2:
                     has_openapi=openapi_ready,
                 )
                 stats["chatbot"] = chatbot_stats
-                total = sum(chatbot_stats.get(k, 0) for k in ("code_chunks", "artifact_chunks", "doc_chunks"))
+                total = sum(
+                    chatbot_stats.get(k, 0)
+                    for k in (
+                        "code_chunks",
+                        "artifact_chunks",
+                        "doc_chunks",
+                        "doc_full_chunks",
+                        "repo_doc_chunks",
+                    )
+                )
                 console.print(
                     f"[green]✓[/green] Chatbot index: {total} chunks "
                     f"({chatbot_stats.get('code_chunks', 0)} code, "
                     f"{chatbot_stats.get('artifact_chunks', 0)} artifact, "
-                    f"{chatbot_stats.get('doc_chunks', 0)} doc)"
+                    f"{chatbot_stats.get('doc_chunks', 0)} doc summary, "
+                    f"{chatbot_stats.get('doc_full_chunks', 0)} doc full, "
+                    f"{chatbot_stats.get('repo_doc_chunks', 0)} repo doc)"
                 )
                 console.print("[green]✓[/green] Backend scaffold: chatbot_backend/")
             except Exception as e:
@@ -295,16 +323,59 @@ class PipelineV2:
             import git as _git
 
             _repo = _git.Repo(self.repo_root)
+            head_sha = _repo.head.commit.hexsha
             plan_version = "v2_buckets" if hasattr(plan, "buckets") else "v1_legacy"
             overall_status = generation_summary.status
             if not chatbot_sync_ok:
-                overall_status = "partial" if generation_summary.succeeded > 0 else "failed"
+                overall_status = (
+                    "partial" if generation_summary.succeeded > 0 else "failed"
+                )
             save_sync_state(
                 self.repo_root,
-                commit_sha=_repo.head.commit.hexsha,
+                commit_sha=head_sha,
                 status=overall_status,
                 generator_version=plan_version,
                 advance_baseline=generation_summary.failed == 0 and chatbot_sync_ok,
+            )
+            save_sync_receipt(
+                self.repo_root,
+                {
+                    "baseline_commit": head_sha,
+                    "target_commit": head_sha,
+                    "strategy": "full_generate",
+                    "engine_mismatch": False,
+                    "chatbot_recovery_needed": False,
+                    "change_count": stats.get("files_scanned", 0),
+                    "changed_files": [],
+                    "new_files": [],
+                    "deleted_files": [],
+                    "changed_artifact_files": [],
+                    "new_artifact_files": [],
+                    "deleted_artifact_files": [],
+                    "stale_bucket_slugs": [],
+                    "updated_slugs": [
+                        result.bucket.slug
+                        for result in gen_results
+                        if result.content is not None and not result.error
+                    ],
+                    "failed_slugs": [
+                        result.bucket.slug for result in gen_results if result.error
+                    ],
+                    "deleted_doc_paths": [],
+                    "refreshed_corpora": list(
+                        (stats.get("chatbot") or {}).get("corpora_refreshed", [])
+                    ),
+                    "chatbot_failed": not chatbot_sync_ok,
+                    "status": overall_status,
+                    "pages_updated": generation_summary.succeeded,
+                    "pages_failed": generation_summary.failed
+                    + (0 if chatbot_sync_ok else 1),
+                    "pages_invalid": generation_summary.invalid,
+                    "pages_degraded": generation_summary.degraded,
+                    "page_warnings": generation_summary.warnings_total,
+                    "pages_skipped": generation_summary.skipped,
+                    "replanned": True,
+                },
             )
         except Exception:
             pass  # Not a git repo or detached HEAD — skip silently
@@ -325,11 +396,17 @@ class PipelineV2:
                 )
 
         if not chatbot_sync_ok:
-            stats["status"] = "partial" if generation_summary.succeeded > 0 else "failed"
+            stats["status"] = (
+                "partial" if generation_summary.succeeded > 0 else "failed"
+            )
 
-        stats["timings"] = {name: round(duration, 2) for name, duration in phase_timings.items()}
+        stats["timings"] = {
+            name: round(duration, 2) for name, duration in phase_timings.items()
+        }
         timing_summary = ", ".join(
-            f"{name}={duration:.2f}s" for name, duration in phase_timings.items() if duration >= 0.01
+            f"{name}={duration:.2f}s"
+            for name, duration in phase_timings.items()
+            if duration >= 0.01
         )
         if timing_summary:
             console.print(f"[dim]Pipeline timings: {timing_summary}[/dim]")
@@ -403,7 +480,9 @@ class PipelineV2:
                     doc_content = self._generate_single_page(page, scan, plan)
 
                     # Sub-step 2: write to disk
-                    filename = "index.mdx" if _page_is_overview(page) else f"{page.slug}.mdx"
+                    filename = (
+                        "index.mdx" if _page_is_overview(page) else f"{page.slug}.mdx"
+                    )
                     doc_path = self.output_dir / filename
                     doc_path.parent.mkdir(parents=True, exist_ok=True)
                     doc_path.write_text(doc_content, encoding="utf-8")
@@ -459,13 +538,17 @@ class PipelineV2:
         # Get the right prompt — prefer bucket hints, fall back to page_type
         if hasattr(page, "_b"):
             from .prompts_v2 import get_prompt_for_bucket
+
             prompt_template = get_prompt_for_bucket(page._b)
         else:
             prompt_template = get_prompt_for_page_type(page.page_type)
 
         # Build OpenAPI context if hints or page_type indicate endpoint/api content
         _hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
-        _wants_openapi = _hints.get("include_openapi") or page.page_type in ("api_reference", "endpoint")
+        _wants_openapi = _hints.get("include_openapi") or page.page_type in (
+            "api_reference",
+            "endpoint",
+        )
         openapi_context = ""
         if _wants_openapi and scan.has_openapi:
             for spec_path in scan.openapi_paths:
@@ -475,7 +558,10 @@ class PipelineV2:
                     break
 
         # Build endpoints detail
-        _wants_endpoints = _hints.get("include_endpoint_detail") or page.page_type in ("api_reference", "endpoint")
+        _wants_endpoints = _hints.get("include_endpoint_detail") or page.page_type in (
+            "api_reference",
+            "endpoint",
+        )
         endpoints_detail = ""
         if _wants_endpoints:
             page_files = set(page.source_files)
@@ -546,6 +632,15 @@ class PipelineV2:
         raw = normalize_code_fence_languages(raw)
         raw = escape_mdx_route_params(raw)
         raw = escape_mdx_text_hazards(raw)
+        doc_pages = [
+            (
+                candidate.title,
+                _canonical_page_url(candidate, scan.has_openapi),
+            )
+            for candidate in self.plan.pages
+        ]
+        valid_urls, title_to_url, alias_map = build_internal_doc_link_maps(doc_pages)
+        raw = repair_internal_doc_links(raw, valid_urls, title_to_url, alias_map)
 
         return raw
 
@@ -1057,16 +1152,18 @@ class PipelineV2:
                 )
                 line = re.sub(
                     r'^(\s*)([A-Za-z][\w-]*)\s*--\s*"([^"]+)"\s*-->\s*([A-Za-z][\w-]*)\s*$',
-                    lambda m: f"{m.group(1)}{m.group(2)} -->|{m.group(3)}| {m.group(4)}",
+                    lambda m: (
+                        f"{m.group(1)}{m.group(2)} -->|{m.group(3)}| {m.group(4)}"
+                    ),
                     line,
                 )
                 line = re.sub(
-                    r'^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$',
+                    r"^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$",
                     lambda m: f"{m.group(1)}{m.group(3)} --> {m.group(2)}",
                     line,
                 )
                 line = re.sub(
-                    r'^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$',
+                    r"^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$",
                     lambda m: (
                         f"{m.group(1)}{m.group(2)} --> {m.group(3)}\n"
                         f"{m.group(1)}{m.group(3)} --> {m.group(2)}"
@@ -1146,6 +1243,7 @@ class PipelineV2:
         - Cross-checks symbol names against parsed AST where possible
         """
         import re
+
         from .parser import parse_file
 
         known_files = set(scan.file_summaries.keys())
@@ -1297,7 +1395,7 @@ class PipelineV2:
 
     def _build_site(self, plan: DocPlan, has_openapi: bool) -> None:
         """Build the generated Fumadocs site from the AI's nav plan."""
-        from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
+        from .site.builder import build_fumadocs_from_plan
 
         build_fumadocs_from_plan(
             self.repo_root, self.output_dir, self.cfg, plan, has_openapi
@@ -1379,6 +1477,17 @@ class PipelineV2:
         stale_line = ""
         if stats.get("stale_pages_removed"):
             stale_line = f"  Stale removed:    [cyan]{stats.get('stale_pages_removed', 0)}[/cyan]\n"
+        quality_line = ""
+        if (
+            stats.get("pages_invalid")
+            or stats.get("pages_degraded")
+            or stats.get("page_warnings")
+        ):
+            quality_line = (
+                f"  Invalid pages:    [cyan]{stats.get('pages_invalid', 0)}[/cyan]\n"
+                f"  Degraded pages:   [cyan]{stats.get('pages_degraded', 0)}[/cyan]\n"
+                f"  Warnings:         [cyan]{stats.get('page_warnings', 0)}[/cyan]\n"
+            )
 
         console.print()
         console.print(
@@ -1387,10 +1496,29 @@ class PipelineV2:
                 f"  Files scanned:    [cyan]{stats.get('files_scanned', 0)}[/cyan]\n"
                 f"  Pages planned:    [cyan]{stats.get('pages_planned', 0)}[/cyan]\n"
                 f"  Pages generated:  [cyan]{stats.get('pages_generated', 0)}[/cyan]\n"
+                f"  Status:           [cyan]{stats.get('status', 'unknown')}[/cyan]\n"
+                f"{quality_line}"
                 f"{stale_line}"
                 f"  API reference:    [cyan]{'yes' if stats.get('playground') else 'no'}[/cyan]\n\n"
                 f"[dim]Preview: [bold]deepdoc serve[/bold]  |  Deploy: [bold]deepdoc deploy[/bold][/dim]",
                 title="DeepDoc",
                 border_style="green",
             )
+        )
+
+    def _save_quality_report(self, stats: dict[str, Any]) -> None:
+        state_dir = self.repo_root / ".deepdoc"
+        state_dir.mkdir(parents=True, exist_ok=True)
+        quality_payload = {
+            "status": stats.get("status", "unknown"),
+            "pages_generated": stats.get("pages_generated", 0),
+            "pages_failed": stats.get("pages_failed", 0),
+            "pages_invalid": stats.get("pages_invalid", 0),
+            "pages_degraded": stats.get("pages_degraded", 0),
+            "page_warnings": stats.get("page_warnings", 0),
+            "quality_report": stats.get("quality_report", {}),
+        }
+        (state_dir / "generation_quality.json").write_text(
+            json.dumps(quality_payload, indent=2) + "\n",
+            encoding="utf-8",
         )

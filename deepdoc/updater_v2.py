@@ -9,23 +9,24 @@ Flow:
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 
 from rich.console import Console
 from rich.panel import Panel
 
+from ._legacy_types import DocPage
 from .llm import LLMClient
 from .manifest import Manifest, file_hash
 from .parser import parse_file, supported_extensions
-from ._legacy_types import DocPage, DocPlan, RepoScan
-from .planner_v2 import scan_repo
-from .prompts_v2 import SYSTEM_V2, UPDATE_PAGE_V2
 from .persistence_v2 import (
-    load_plan, load_file_map, load_generation_ledger,
-    find_stale_buckets, save_all,
+    find_stale_buckets,
+    load_file_map,
+    load_plan,
+    save_all,
 )
+from .planner import scan_repo
+from .prompts_v2 import SYSTEM_V2, UPDATE_PAGE_V2
 
 console = Console()
 
@@ -129,7 +130,7 @@ class UpdaterV2:
 
         # Step 6: Rebuild nav
         from .pipeline_v2 import stage_openapi_assets
-        from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
+        from .site.builder import build_fumadocs_from_plan
         if plan:
             has_openapi = stage_openapi_assets(self.repo_root)
             build_fumadocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
@@ -253,8 +254,7 @@ class UpdaterV2:
         Uses the ledger to find stale buckets, then re-generates only those
         using the full BucketGenerationEngine (evidence assembly + validation).
         """
-        from .planner_v2 import DocPlan as BucketDocPlan
-        from .generator_v2 import BucketGenerationEngine
+        from .generator import BucketGenerationEngine
 
         # Step 1: Determine stale buckets via ledger + current file hashes
         stale_slugs = set(find_stale_buckets(plan, self.repo_root, output_dir=self.output_dir))
@@ -286,7 +286,7 @@ class UpdaterV2:
 
         # Step 3: Build a mini-plan containing only stale buckets
         # (generator uses full plan for sitemap/cross-refs, but only generates stale ones)
-        from .planner_v2 import DocPlan as BucketPlan
+        from .planner import DocPlan as BucketPlan
         mini_plan = BucketPlan(
             buckets=stale_buckets,
             nav_structure=plan.nav_structure,
@@ -316,7 +316,7 @@ class UpdaterV2:
 
         # Step 5: Rebuild nav
         from .pipeline_v2 import stage_openapi_assets
-        from .site.fumadocs_builder_v2 import build_fumadocs_from_plan
+        from .site.builder import build_fumadocs_from_plan
         has_openapi = stage_openapi_assets(self.repo_root)
         build_fumadocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 

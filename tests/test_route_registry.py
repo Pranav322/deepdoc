@@ -5,7 +5,7 @@ from pathlib import Path
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.parser.api_detector import detect_endpoints as facade_detect_endpoints
 from deepdoc.parser.routes import ROUTE_DETECTOR_REGISTRY, detect_endpoints
-from deepdoc.planner_v2 import scan_repo
+from deepdoc.planner import scan_repo
 
 
 def test_route_registry_is_the_single_dispatch_entrypoint() -> None:
@@ -15,8 +15,6 @@ def test_route_registry_is_the_single_dispatch_entrypoint() -> None:
         "nestjs",
     )
     assert tuple(d.name for d in ROUTE_DETECTOR_REGISTRY["python"]) == (
-        "fastapi",
-        "flask",
         "falcon",
         "django",
     )

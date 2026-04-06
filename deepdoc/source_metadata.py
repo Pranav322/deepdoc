@@ -5,7 +5,6 @@ from __future__ import annotations
 from collections import Counter
 from pathlib import Path
 
-
 SOURCE_KIND_CORE = "product"
 SOURCE_KIND_SUPPORTING = {
     "test",
@@ -32,8 +31,6 @@ HEADER_LIKE_SEGMENTS = {
 FRAMEWORK_PRIORITIES = {
     "falcon": 100,
     "django": 90,
-    "fastapi": 90,
-    "flask": 85,
     "express": 80,
     "fastify": 80,
     "laravel": 75,
@@ -198,7 +195,7 @@ def endpoint_publication_decision(
     confidence = 0.9
     if framework == "falcon":
         confidence = 0.98
-    elif framework in {"express", "fastify", "fastapi", "flask", "django", "laravel", "go"}:
+    elif framework in {"express", "fastify", "django", "laravel", "go"}:
         confidence = 0.92
     elif framework == "nestjs":
         confidence = 0.7

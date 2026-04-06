@@ -5,8 +5,14 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from typing import Any, Literal
 
-
-ChunkKind = Literal["code", "artifact", "doc_summary", "relationship"]
+ChunkKind = Literal[
+    "code",
+    "artifact",
+    "doc_summary",
+    "doc_full",
+    "repo_doc",
+    "relationship",
+]
 
 
 @dataclass
@@ -35,13 +41,17 @@ class ChunkRecord:
     imports_summary: list[str] = field(default_factory=list)
     related_bucket_slugs: list[str] = field(default_factory=list)
     owned_files: list[str] = field(default_factory=list)
+    linked_file_paths: list[str] = field(default_factory=list)
+    related_doc_paths: list[str] = field(default_factory=list)
+    related_doc_urls: list[str] = field(default_factory=list)
+    related_doc_titles: list[str] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ChunkRecord":
+    def from_dict(cls, data: dict[str, Any]) -> ChunkRecord:
         return cls(**data)
 
 

@@ -1,11 +1,11 @@
 # AGENTS.md
 Guidance for coding agents working in this repository.
+This file might be stale and if that is the case please update it first 
 
 ## Scope
 - Applies to the repository root.
-- Checked for Cursor rules in `.cursor/rules/` and `.cursorrules`: none found.
-- Checked for Copilot rules in `.github/copilot-instructions.md`: none found.
-- If you change core CLI behavior, persistence/state formats, routing semantics, or generated-site behavior, update this file in the same task.
+
+- If you change core CLI behavior, persistence/state formats, routing semantics, or generated-site behavior, update this file in the same task. ANd also make sure that README.md is in sync with actual codebase.
 
 ## Repo Summary
 - Project name: `deepdoc`
@@ -22,31 +22,42 @@ Guidance for coding agents working in this repository.
 - `deepdoc/cli.py`: Click commands, Rich output, serve/deploy flow
 - `deepdoc/config.py`: defaults and `.deepdoc.yaml` helpers
 - `deepdoc/pipeline_v2.py`: end-to-end orchestration
-- `deepdoc/planner_v2.py`: scan model, bucket planning, endpoint ownership
-- `deepdoc/generator_v2.py`: page generation, evidence assembly, validation
+- `deepdoc/planner/engine.py`: repo scan entrypoint and bucket planning orchestration
+- `deepdoc/planner/heuristics.py`: bucket ownership, decomposition, and coverage attachment
+- `deepdoc/generator/generation.py`: page generation orchestration
+- `deepdoc/generator/evidence.py`: page evidence assembly
+- `deepdoc/generator/validation.py`: generated-page validation
 - `deepdoc/persistence_v2.py`: `.deepdoc/` state, plan, ledger, sync baseline
 - `deepdoc/smart_update_v2.py`: incremental update and replan logic
 - `deepdoc/parser/routes/`: route detection and repo-aware resolution
-- `deepdoc/chatbot/` and `deepdoc/site/fumadocs_builder_v2.py`: chatbot and site scaffolding
+- `deepdoc/scanner/`: runtime, integration, artifact, and data extraction helpers
+- `deepdoc/chatbot/`: chatbot corpora, retrieval, and backend scaffolding
+- `deepdoc/site/builder/`: generated site scaffolding and build/export flow
 - `tests/`: pytest suite and fixtures
 
 ## Architecture Notes
 - Prefer extending `_v2` modules instead of creating new parallel flows.
 - Keep `deepdoc/parser/api_detector.py` as a compatibility facade.
 - Put repo-aware route fixes in `deepdoc/parser/routes/repo_resolver.py`, not planner code.
-- Runtime/background-job, GraphQL, and data-layer extraction should flow through `deepdoc/scan_v2.py` into `RepoScan` metadata, then be consumed by `planner_v2.py` and `generator_v2.py`; avoid one-off generator-only heuristics when scan metadata can be made explicit.
+- Target-repo framework support is intentionally scoped. Next.js, Nuxt, FastAPI, and Flask are not supported scan targets; preserve the generated site and chatbot stacks, which still use Next.js and FastAPI internally.
+- Runtime/background-job, GraphQL, and data-layer extraction should flow through `deepdoc/scanner/` into `RepoScan` metadata, then be consumed by `deepdoc/planner/` and `deepdoc/generator/`; avoid one-off generator-only heuristics when scan metadata can be made explicit.
+- Runtime extraction currently includes Celery, `node-cron`, JS queue/agenda workers, Go workers/schedulers, Django management commands/signals/Channels, Laravel jobs/events/listeners/scheduler registrations, Socket.IO/websocket consumers, and lightweight crontab-style declarations. Extend those families in `deepdoc/scanner/runtime.py` before inventing generator-only runtime prose.
 - Large database estates should stay in the overview-plus-groups model: keep `database-schema` as the overview page and use child buckets with `parent_slug="database-schema"` for deterministic subgroup coverage.
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - Preserve `source_kind` and `publication_tier` semantics consistently across planner, persistence, generation, smart update, and chatbot indexing.
+- Chatbot indexing now has a separate repo-doc corpus for selected repo-authored docs; keep raw repo docs distinct from generated MDX docs and continue excluding generated outputs from the repo-doc corpus.
+- Chatbot retrieval is hybrid: exact-match lexical search and embedding search both feed the candidate set, and exact-match code hits can stitch adjacent windows from the same file. Keep bounded live repo inspection limited to `/deep-research`; normal `/query` should remain index-only.
 - Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`.
 - Generated Fumadocs output must stay MDX-safe and GitHub-Pages-safe: preserve explicit site base-path support in the scaffold and escape raw destructured brace args in markdown tables before writing docs.
-- If freshness/state semantics change, audit `planner_v2.py`, `generator_v2.py`, `persistence_v2.py`, and `smart_update_v2.py` together.
+- Generated-page validation now checks not just sections/files/routes, but also runtime/config/integration grounding when that evidence was assembled. Keep those checks aligned with `deepdoc/generator/evidence.py`.
+- If freshness/state semantics change, audit `deepdoc/planner/`, `deepdoc/generator/`, `persistence_v2.py`, and `smart_update_v2.py` together.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 
 ## Generated And Derived Files
 Treat these as generated or persisted outputs unless the task is specifically about their format:
 - `.deepdoc/` contents and legacy files like `.deepdoc_plan.json` and `.deepdoc_file_map.json`
 - `.deepdoc/scan_cache.json`, including runtime summaries, database groups, GraphQL interface summaries, and Knex artifact summaries
+- `.deepdoc/generation_quality.json`
 - `docs/`, `site/`, `site/public/`, and `site/out/`
 - `build/`, `dist/`, `deepdoc.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
 - Test fixture apps under `tests/fixtures/` unless the scenario explicitly requires fixture changes
@@ -88,6 +99,7 @@ Notes:
 - `deepdoc deploy` runs the generated Next/Fumadocs build and exports `site/out/`.
 - `deepdoc serve` and `deepdoc deploy` assume generated site files already exist under `site/`.
 - Avoid destructive generation modes like `deepdoc generate --clean --yes` unless the task explicitly requires a clean rebuild.
+- `deepdoc update` is commit-based: it diffs the last synced commit in `.deepdoc/state.json` against the current `HEAD`, compares the saved scan cache with the current scan for semantic endpoint changes, then refreshes docs and chatbot state from one update run.
 
 ## Lint, Type Check, And Test Commands
 - No formatter, linter, or type checker is configured in `pyproject.toml`.
@@ -113,6 +125,7 @@ Single-test guidance:
 ## Testing Expectations
 - For route work, run route-detector coverage plus at least one `scan_repo(...)` regression.
 - For runtime/database/interface extraction work, add fixture-backed scan coverage plus planner/generator regressions so the new metadata changes page planning and page evidence, not just raw scan output.
+- For runtime extraction work, cover both scanner output and the downstream runtime bucket/evidence/validation behavior.
 - For freshness or update work, run stale and smart-update tests, not just tiny helper tests.
 - For chatbot or generated-site work, run chatbot config/scaffold/relationship tests and `tests/test_fumadocs_builder.py` if scaffold output changed.
 - For non-trivial changes, prefer a focused test first, then `python3 -m pytest -q` if feasible.
@@ -161,9 +174,22 @@ Single-test guidance:
 - If a change touches persisted data or freshness semantics, audit plan save/load, ledger save/load, sync state save/load, manifest updates, and stale detection.
 - If a change touches routing, audit the per-framework detector, route registry, repo resolver, `scan_repo(...)`, and endpoint bucket ownership.
 - If a change touches chatbot behavior, audit `deepdoc/chatbot/settings.py`, `deepdoc/chatbot/indexer.py`, `deepdoc/chatbot/service.py`, `deepdoc/chatbot/scaffold.py`, and `deepdoc/site/fumadocs_builder_v2.py`.
+- The generated chatbot now supports two shared-context answer modes over one visible thread:
+  - `POST /query` for fast retrieval answers
+  - `POST /deep-research` for heavier synthesis using the same `question` + `history` request contract
+- The Start Here onboarding setup page uses the slug `local-development-setup`; keep the generic configuration page at `setup`.
 - If you change documented CLI behavior, update `README.md` in the same task.
 - This repo may be in a dirty worktree; inspect carefully and never revert unrelated user changes.
 
 ## Verification Defaults
 - Good default checks are `python3 -m compileall deepdoc`, `python3 -m deepdoc.cli --help`, and targeted `python3 -m pytest ...` runs.
 - Prefer the smallest command that exercises the edited area first.
+
+
+## Notes from the creator 
+
+- i am creating it for my internal team , we mostly work with the mentioned languages (python , go ,php ,  js/ts - frameworks including fastify , express , laravel , django , falcon , go )
+- i am creating one step solution to create and update docs which contains cahtbot 
+- i want the chatbot to be able to answer anything literally form the codebase 
+- the docs shoudl be complete enough and comparable to deepwiki by devin 
+- you are not supposed to assume anything , at any step stop and ask me question until you are sure about in whcih direction to take the projects  

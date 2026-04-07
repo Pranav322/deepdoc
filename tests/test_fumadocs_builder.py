@@ -11,7 +11,9 @@ from deepdoc.generator import (
     normalize_code_fence_languages,
     normalize_html_code_blocks,
     normalize_mdx_steps,
+    repair_mdx_component_blocks,
     repair_internal_doc_links,
+    repair_unbalanced_code_fences,
 )
 from deepdoc.pipeline_v2 import _endpoint_ref_slug, stage_openapi_assets
 from deepdoc.prompts_v2 import (
@@ -93,12 +95,24 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     global_css = (repo_root / "site" / "app" / "global.css").read_text(encoding="utf-8")
     next_config = (repo_root / "site" / "next.config.mjs").read_text(encoding="utf-8")
     app_layout = (repo_root / "site" / "app" / "layout.tsx").read_text(encoding="utf-8")
-    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(encoding="utf-8")
-    docs_page = (repo_root / "site" / "app" / "[[...slug]]" / "page.tsx").read_text(encoding="utf-8")
-    ask_page = (repo_root / "site" / "app" / "ask" / "page.tsx").read_text(encoding="utf-8")
-    api_page_component = (repo_root / "site" / "components" / "api-page.tsx").read_text(encoding="utf-8")
-    chatbot_panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(encoding="utf-8")
-    openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(encoding="utf-8")
+    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(
+        encoding="utf-8"
+    )
+    docs_page = (repo_root / "site" / "app" / "[[...slug]]" / "page.tsx").read_text(
+        encoding="utf-8"
+    )
+    ask_page = (repo_root / "site" / "app" / "ask" / "page.tsx").read_text(
+        encoding="utf-8"
+    )
+    api_page_component = (repo_root / "site" / "components" / "api-page.tsx").read_text(
+        encoding="utf-8"
+    )
+    chatbot_panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(
+        encoding="utf-8"
+    )
+    openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(
+        encoding="utf-8"
+    )
     auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
     assert '"url": "/"' in page_tree
     assert '"name": "Core"' in page_tree
@@ -118,7 +132,10 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert package_json["dependencies"]["react"] == "19.1.0"
     assert "fumadocs-ui/provider';" in app_layout
     assert "NEXT_PUBLIC_DEEPDOC_SITE_BASE_PATH" in app_layout
-    assert "const searchApiPath = siteBasePath ? `${siteBasePath}/search` : '/search';" in app_layout
+    assert (
+        "const searchApiPath = siteBasePath ? `${siteBasePath}/search` : '/search';"
+        in app_layout
+    )
     assert "api: searchApiPath" in app_layout
     assert 'title: "Demo"' in (output_dir / "index.mdx").read_text(encoding="utf-8")
     assert "icon: 'favicon.svg'" in app_layout
@@ -126,7 +143,10 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "turbopack" not in next_config
     assert "DEEPDOC_SITE_BASE_PATH" in next_config
     assert "normalizedExplicitBasePath" in next_config
-    assert "siteBasePath = normalizedExplicitBasePath || githubPagesBasePath" in next_config
+    assert (
+        "siteBasePath = normalizedExplicitBasePath || githubPagesBasePath"
+        in next_config
+    )
     assert "trailingSlash: useTrailingSlash" in next_config
     assert "GITHUB_REPOSITORY" in next_config
     assert "basePath: siteBasePath || undefined" in next_config
@@ -140,7 +160,9 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "!content.includes('\\n')" in chatbot_panel
     assert "/deep-research" in chatbot_panel
     assert "deepdoc-chatbot-mode-toggle" in chatbot_panel
-    assert "mode=fast|deep" not in chatbot_panel  # URL state is runtime-built, not hardcoded
+    assert (
+        "mode=fast|deep" not in chatbot_panel
+    )  # URL state is runtime-built, not hardcoded
     assert "mode," in chatbot_panel
     assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
     assert "satisfies PageTree.Root" in page_tree
@@ -195,7 +217,9 @@ def test_start_here_prompts_include_generation_placeholders() -> None:
         assert "{dependency_links}" in prompt
 
 
-def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(tmp_path: Path) -> None:
+def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     output_dir = repo_root / "docs"
@@ -280,7 +304,9 @@ It runs the admin platform.
     assert "## What This Does" in index_text
 
 
-def test_build_fumadocs_without_openapi_omits_api_route_scaffold(tmp_path: Path) -> None:
+def test_build_fumadocs_without_openapi_omits_api_route_scaffold(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     output_dir = repo_root / "docs"
@@ -306,9 +332,15 @@ def test_build_fumadocs_without_openapi_omits_api_route_scaffold(tmp_path: Path)
         has_openapi=False,
     )
 
-    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(encoding="utf-8")
-    assert not (repo_root / "site" / "app" / "api" / "[[...slug]]" / "page.tsx").exists()
-    assert not (repo_root / "site" / "app" / "api" / "[[...slug]]" / "layout.tsx").exists()
+    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(
+        encoding="utf-8"
+    )
+    assert not (
+        repo_root / "site" / "app" / "api" / "[[...slug]]" / "page.tsx"
+    ).exists()
+    assert not (
+        repo_root / "site" / "app" / "api" / "[[...slug]]" / "layout.tsx"
+    ).exists()
     assert not (repo_root / "site" / "components" / "api-page.tsx").exists()
     assert not (repo_root / "site" / "lib" / "openapi.ts").exists()
     assert "@/components/api-page" not in mdx_components
@@ -343,7 +375,12 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
         ["README.md"],
         generation_hints={"is_introduction_page": True},
     )
-    health = make_bucket("Health & Readiness Endpoints", "operations-health", ["health.js"], section="API Reference")
+    health = make_bucket(
+        "Health & Readiness Endpoints",
+        "operations-health",
+        ["health.js"],
+        section="API Reference",
+    )
     plan = make_plan([overview, health])
     plan.nav_structure = {"API Reference": ["operations-health"]}
 
@@ -371,7 +408,7 @@ def test_fumadocs_prompts_drop_mintlify_only_components() -> None:
     assert "<Callout" in SYSTEM_V2
     assert "<Cards>" in SYSTEM_V2
     assert "<Tabs items={" in SYSTEM_V2
-    assert "<Accordions type=\"single\">" in SYSTEM_V2
+    assert '<Accordions type="single">' in SYSTEM_V2
     assert "<CardGroup" not in SYSTEM_V2
     assert "<AccordionGroup" not in SYSTEM_V2
 
@@ -422,7 +459,9 @@ def test_stage_openapi_assets_uses_endpoint_ref_slug_shape(tmp_path: Path) -> No
     ]
 
 
-def test_stage_openapi_assets_strips_server_origin_from_manifest_paths(tmp_path: Path) -> None:
+def test_stage_openapi_assets_strips_server_origin_from_manifest_paths(
+    tmp_path: Path,
+) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
 
@@ -486,7 +525,9 @@ flowchart TD
 
 
 def test_escape_mdx_route_params_escapes_typed_route_params() -> None:
-    content = "See [GET /artists/{slug:int}/{page:int}](/get-artists-slug-int-page-int)."
+    content = (
+        "See [GET /artists/{slug:int}/{page:int}](/get-artists-slug-int-page-int)."
+    )
 
     escaped = escape_mdx_route_params(content)
 
@@ -629,12 +670,29 @@ def test_escape_mdx_text_hazards_rewrites_br_tags_inside_table_cells() -> None:
     assert ".error(), / .warn(), / .info()" in escaped
 
 
-def test_escape_mdx_text_hazards_escapes_generic_types_inside_inline_code_table_cells() -> None:
-    content = '| fn | returns |\n|---|---|\n| `save()` | `Promise<object|boolean>` |'
+def test_escape_mdx_text_hazards_normalizes_br_tags_to_self_closing() -> None:
+    content = """<Accordion title=\"Health Endpoint Failure\">
+**Symptom**: `/health` returns non-200.<br>
+**Root Cause**: Application misconfiguration.<br/>
+**Fix**: Check logs.
+</Accordion>"""
 
     escaped = escape_mdx_text_hazards(content)
 
-    assert '`Promise&lt;object|boolean&gt;`' in escaped
+    assert "**Symptom**: `/health` returns non-200.<br />" in escaped
+    assert "**Root Cause**: Application misconfiguration.<br />" in escaped
+    assert "<br>" not in escaped
+    assert "<br/>" not in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_generic_types_inside_inline_code_table_cells() -> (
+    None
+):
+    content = "| fn | returns |\n|---|---|\n| `save()` | `Promise<object|boolean>` |"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "`Promise&lt;object|boolean&gt;`" in escaped
 
 
 def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
@@ -645,7 +703,10 @@ Inline code: `<code>server.js&lt;/code&gt;`
 
     escaped = escape_mdx_text_hazards(content)
 
-    assert "<Callout>Handler: <strong>statsHandler</strong> in <code>server.js</code></Callout>" in escaped
+    assert (
+        "<Callout>Handler: <strong>statsHandler</strong> in <code>server.js</code></Callout>"
+        in escaped
+    )
     assert "Inline code: `<code>server.js&lt;/code&gt;`" in escaped
 
 
@@ -705,6 +766,22 @@ def test_normalize_html_code_blocks_converts_multiline_code_tags_to_fences() -> 
     assert "<code>" not in normalized
 
 
+def test_normalize_html_code_blocks_escapes_br_tags_before_mdx_parse() -> None:
+    content = "<code>git clone &lt;repo-url&gt;<br>cd app</code>"
+
+    normalized = normalize_html_code_blocks(content)
+
+    assert normalized == "<code>git clone &lt;repo-url&gt;&lt;br&gt;cd app</code>"
+
+
+def test_normalize_html_code_blocks_does_not_escape_br_outside_code_tags() -> None:
+    content = "Before<br><Callout>Keep break<br /></Callout>"
+
+    normalized = normalize_html_code_blocks(content)
+
+    assert normalized == content
+
+
 def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> None:
     content = """<Steps>
   <Step>
@@ -724,7 +801,9 @@ def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> 
     assert "```bash" in normalized
 
 
-def test_normalize_mdx_steps_leaves_code_fence_contents_and_external_headings_unchanged() -> None:
+def test_normalize_mdx_steps_leaves_code_fence_contents_and_external_headings_unchanged() -> (
+    None
+):
     content = """## Setup
 
 <Steps>
@@ -756,6 +835,46 @@ def test_normalize_mdx_steps_converts_html_headings_inside_step_blocks() -> None
 
     assert "<h3>Install dependencies</h3>" not in normalized
     assert "**Install dependencies**" in normalized
+
+
+def test_repair_mdx_component_blocks_converts_inline_callout_before_fence() -> None:
+    content = """<Callout type=\"info\">If using ASGI, start Daphne with:
+```bash
+daphne <django_project>.asgi:application
+```
+</Callout>
+"""
+
+    repaired = repair_mdx_component_blocks(content)
+
+    assert repaired.startswith('<Callout type="info">\n')
+    assert "If using ASGI, start Daphne with:\n\n```bash" in repaired
+    assert repaired.rstrip().endswith("</Callout>")
+
+
+def test_repair_unbalanced_code_fences_drops_last_unmatched_fence() -> None:
+    content = """<Tabs items={['curl', 'Browser']}>
+  <Tab value="curl">
+    ```bash
+    curl http://localhost:8000/
+    ```
+    ```
+  </Tab>
+</Tabs>
+"""
+
+    repaired = repair_unbalanced_code_fences(content)
+
+    assert repaired.count("```") == 2
+    assert "\n    ```\n    ```" not in repaired
+
+
+def test_escape_mdx_text_hazards_repairs_mis_escaped_inline_closing_tags() -> None:
+    content = "<code>python -m venv venv&lt;br>source venv/bin/activate</code&gt;"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert escaped == "<code>python -m venv venv&lt;br>source venv/bin/activate</code>"
 
 
 def test_repair_internal_doc_links_rewrites_aliases_using_page_titles() -> None:
@@ -803,7 +922,9 @@ def test_repair_internal_doc_links_preserves_api_routes() -> None:
     assert repaired == content
 
 
-def test_ensure_mdx_frontmatter_normalizes_existing_yaml_scalars(tmp_path: Path) -> None:
+def test_ensure_mdx_frontmatter_normalizes_existing_yaml_scalars(
+    tmp_path: Path,
+) -> None:
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
     mdx_path = docs_dir / "start-here.mdx"
@@ -822,11 +943,17 @@ description: Orientation for new developers: what this service does, who uses it
 
     updated = mdx_path.read_text(encoding="utf-8")
     assert 'title: "Start Here"' in updated
-    assert 'description: "Orientation for new developers: what this service does, who uses it."' in updated
+    assert (
+        'description: "Orientation for new developers: what this service does, who uses it."'
+        in updated
+    )
 
 
 def test_endpoint_ref_slug_strips_angle_bracket_path_converters() -> None:
-    assert _endpoint_ref_slug("GET", "/get-prod-variants/<str:prod_slug>") == "get-get-prod-variants-str-prod_slug"
+    assert (
+        _endpoint_ref_slug("GET", "/get-prod-variants/<str:prod_slug>")
+        == "get-get-prod-variants-str-prod_slug"
+    )
 
 
 def test_fix_mermaid_diagram_rewrites_quoted_edge_targets() -> None:
@@ -850,7 +977,9 @@ SiteBuilder --> FumadocsSite["Fumadocs Site"]
     assert 'FumadocsSite["Fumadocs Site"]' not in fixed
 
 
-def test_fix_mermaid_diagram_quotes_flowchart_labels_with_html_breaks_and_parentheses() -> None:
+def test_fix_mermaid_diagram_quotes_flowchart_labels_with_html_breaks_and_parentheses() -> (
+    None
+):
     diagram = """flowchart LR
     A[Application Code<br>(SyncWeightOfOrder.py,<br>fast_queue.py)]
     B[requests Library]
@@ -881,7 +1010,7 @@ def test_fix_mermaid_diagram_rewrites_quoted_flowchart_edge_labels() -> None:
 
     fixed = _fix_mermaid_diagram(diagram)
 
-    assert 'A -->|forks| B' in fixed
+    assert "A -->|forks| B" in fixed
     assert '-- "forks" -->' not in fixed
 
 
@@ -904,7 +1033,7 @@ def test_fix_mermaid_diagram_strips_quotes_from_class_diagram_targets() -> None:
 
     fixed = _fix_mermaid_diagram(diagram)
 
-    assert 'MySQLCart --> CartSerializer' in fixed
+    assert "MySQLCart --> CartSerializer" in fixed
     assert '"CartSerializer"' not in fixed
 
 
@@ -916,11 +1045,13 @@ def test_fix_mermaid_diagram_strips_quotes_from_simple_state_ids() -> None:
 
     fixed = _fix_mermaid_diagram(diagram)
 
-    assert 'Open --> InProgress: updateOneDirectComplaint' in fixed
-    assert 'InProgress --> Closed: closeOneDirectTicket' in fixed
+    assert "Open --> InProgress: updateOneDirectComplaint" in fixed
+    assert "InProgress --> Closed: closeOneDirectTicket" in fixed
 
 
-def test_fix_mermaid_diagram_strips_erdiagram_placeholders_and_rewrites_comments() -> None:
+def test_fix_mermaid_diagram_strips_erdiagram_placeholders_and_rewrites_comments() -> (
+    None
+):
     diagram = """erDiagram
   ORDERS {
     bigint id PK

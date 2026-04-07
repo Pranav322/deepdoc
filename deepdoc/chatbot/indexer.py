@@ -28,6 +28,7 @@ from .persistence import corpus_paths, load_corpus, save_corpus
 from .providers import build_embedding_client
 from .scaffold import scaffold_chatbot_backend
 from .settings import chatbot_index_dir, get_chatbot_cfg, service_model_identity
+from .source_archive import build_source_archive, update_source_archive
 from .types import ChunkRecord
 
 console = Console()
@@ -98,6 +99,8 @@ class ChatbotIndexer:
         self._save_records("doc_full", doc_full_records)
         self._save_records("repo_doc", repo_doc_records)
         self._save_records("relationship", relationship_records)
+        console.print("[dim]Chatbot sync: packing full source text archive...[/dim]")
+        build_source_archive(self.repo_root, self.index_dir, self.cfg)
         console.print("[dim]Chatbot sync: scaffolding backend...[/dim]")
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         return {
@@ -321,6 +324,15 @@ class ChatbotIndexer:
                 changed_keys=relationship_targets,
                 deleted_keys=deleted_files,
             )
+            
+        update_source_archive(
+            self.repo_root,
+            self.index_dir,
+            self.cfg,
+            changed_files=changed_files,
+            deleted_files=deleted_files,
+        )
+            
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         refreshed_corpora = [
             corpus

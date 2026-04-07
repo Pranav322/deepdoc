@@ -94,26 +94,11 @@ class DeepResearcher:
         all_source_files: list[str] = []
 
         for sq in sub_questions[: self.max_rounds]:
-            chunks = self._retrieve_for_question(sq, history, question)
-            sources = list(
-                dict.fromkeys(
-                    getattr(c.record, "file_path", None)
-                    or getattr(c.record, "doc_path", None)
-                    for c in chunks
-                    if getattr(c.record, "file_path", None)
-                    or getattr(c.record, "doc_path", None)
-                )
+            step_result = self._agent_loop(sq, history, question)
+            steps.append(step_result)
+            all_source_files.extend(
+                s for s in step_result.sources if s not in all_source_files
             )
-            answer = self._answer_step(sq, chunks, history)
-            steps.append(
-                ResearchStep(
-                    question=sq,
-                    answer=answer,
-                    sources=sources,
-                    chunks_used=len(chunks),
-                )
-            )
-            all_source_files.extend(s for s in sources if s not in all_source_files)
 
         # Step 4: Synthesise
         final_answer = self._synthesise(question, steps, history)
@@ -140,17 +125,42 @@ class DeepResearcher:
             retrieve_context = getattr(self.service, "retrieve_context", None)
             if not callable(retrieve_context):
                 return []
-            context = retrieve_context(
-                question,
-                history,
-                original_question=original_question,
-            )
-            all_hits = (
-                context.get("code_hits", [])
-                + context.get("artifact_hits", [])
-                + context.get("doc_hits", [])
-                + context.get("relationship_hits", [])
-            )
+            try:
+                context = retrieve_context(
+                    question,
+                    history,
+                    original_question=original_question,
+                    mode="deep",
+                )
+            except TypeError:
+                context = retrieve_context(
+                    question,
+                    history,
+                    original_question=original_question,
+                )
+
+            all_hits = _context_hits(context)
+            if question.strip() != original_question.strip():
+                try:
+                    try:
+                        root_context = retrieve_context(
+                            original_question,
+                            history,
+                            original_question=original_question,
+                            mode="deep",
+                        )
+                    except TypeError:
+                        root_context = retrieve_context(
+                            original_question,
+                            history,
+                            original_question=original_question,
+                        )
+                    all_hits.extend(_context_hits(root_context))
+                except Exception as e:
+                    logger.warning(
+                        f"[deep_research] Original-question retrieval failed: {e}"
+                    )
+
             best_hits: dict[str, Any] = {}
             for hit in all_hits:
                 chunk_id = getattr(hit.record, "chunk_id", "")
@@ -206,29 +216,50 @@ class DeepResearcher:
             )
             sub_qs = _extract_json_array(response.strip())
             if isinstance(sub_qs, list) and sub_qs:
-                return [str(q) for q in sub_qs[:4]]
+                ordered = [question] + [
+                    str(q).strip() for q in sub_qs if str(q).strip()
+                ]
+                deduped: list[str] = []
+                seen: set[str] = set()
+                for item in ordered:
+                    key = item.lower()
+                    if key in seen:
+                        continue
+                    seen.add(key)
+                    deduped.append(item)
+                return deduped[:4]
         except Exception as e:
             logger.warning(f"[deep_research] Decomposition failed: {e}")
         # Fallback: use original question as only sub-question
         return [question]
 
-    def _answer_step(
+    def _agent_loop(
         self,
         question: str,
-        chunks: list[Any],
         history: list[dict[str, str]],
-    ) -> str:
-        """Answer a single sub-question using retrieved evidence chunks."""
-        if not chunks:
-            return "No relevant evidence found for this sub-question."
+        original_question: str,
+    ) -> ResearchStep:
+        """Run a Tool-Using ReAct loop for a single sub-question."""
+        max_iterations = 3
+        chunks = self._retrieve_for_question(question, history, original_question)
+        sources_used = list(
+            dict.fromkeys(
+                getattr(c.record, "file_path", None)
+                or getattr(c.record, "doc_path", None)
+                for c in chunks
+                if getattr(c.record, "file_path", None)
+                or getattr(c.record, "doc_path", None)
+            )
+        )
 
-        evidence_parts = []
         chunk_chars = 3200
         chat_cfg = getattr(self.service, "chat_cfg", {})
         if isinstance(chat_cfg, dict):
             retrieval_cfg = chat_cfg.get("retrieval", {})
             if isinstance(retrieval_cfg, dict):
                 chunk_chars = int(retrieval_cfg.get("deep_research_chunk_chars", 3200))
+
+        evidence_parts = []
         for i, c in enumerate(chunks[: self.top_k], 1):
             record = getattr(c, "record", c)
             source = (
@@ -238,26 +269,138 @@ class DeepResearcher:
             )
             text = getattr(record, "text", "")[:chunk_chars]
             evidence_parts.append(f"[{i}] From `{source}`:\n{text}")
-        evidence_text = "\n\n---\n\n".join(evidence_parts)
 
         system = (
-            "You are a technical assistant answering questions about a software codebase. "
-            "Answer ONLY based on the provided evidence. Be specific and cite file paths "
-            "using backticks. If the evidence does not contain enough information, say so. "
-            "Do not invent function names, file paths, or behaviour not in the evidence. "
-            "Prefer a detailed, implementation-level walkthrough over a short summary."
+            "You are a software engineering agent answering a specific sub-question. "
+            "You have access to the following initial evidence chunks from the codebase.\n\n"
+            "If the evidence is sufficient, provide your final answer in plain text.\n"
+            "If you need to explore the codebase further, you can use the following tools by outputting a JSON object and NOTHING else:\n"
+            '1. read_file: `{"action": "read_file", "path": "file/path.py", "start": 10, "end": 50}`\n'
+            '2. grep: `{"action": "grep", "pattern": "def main"}`\n\n'
+            "Answer ONLY based on evidence. Prefer a detailed, implementation-level walkthrough."
         )
+
+        history_context = _history_context(history)
         user_msg = (
-            f"Recent conversation:\n{_history_context(history)}\n\nQuestion: {question}\n\n"
-            f"Evidence:\n{evidence_text}\n\n"
-            "Answer in 6-12 sentences. Walk through concrete code paths, supporting "
-            "configuration, and connected files when present. Cite source files."
+            f"Recent conversation:\n{history_context}\n\n"
+            f"Original Goal: {original_question}\n"
+            f"Current Sub-question: {question}\n\n"
+            f"Initial Evidence:\n{chr(10).join(evidence_parts)}\n\n"
+            "What is your answer or next action?"
         )
+
+        turn_history: list[dict[str, str]] = [{"role": "user", "content": user_msg}]
+
+        for iteration in range(max_iterations):
+            try:
+                # Provide the full turn history to the LLM
+                prompt = "\n\n".join(
+                    [f"{msg['role'].upper()}: {msg['content']}" for msg in turn_history]
+                )
+                response = self._complete_sub_question(system, prompt).strip()
+            except Exception as e:
+                logger.warning(f"[deep_research] Agent iteration failed: {e}")
+                return ResearchStep(
+                    question=question,
+                    answer=f"Error generating answer: {e}",
+                    sources=sources_used,
+                    chunks_used=len(chunks),
+                )
+
+            tool_call = _extract_json_object(response)
+            if tool_call and isinstance(tool_call, dict) and "action" in tool_call:
+                turn_history.append({"role": "assistant", "content": response})
+                try:
+                    output = self._execute_tool(tool_call, sources_used)
+                except Exception as e:
+                    logger.warning(f"[deep_research] Tool execution failed: {e}")
+                    output = f"Error: Tool execution failed - {e}"
+                turn_history.append({"role": "tool", "content": output})
+            else:
+                return ResearchStep(
+                    question=question,
+                    answer=response,
+                    sources=sources_used,
+                    chunks_used=len(chunks) + iteration,
+                )
+
+        # Fallback if iterations exhaust
         try:
-            return self.llm.complete(system, user_msg)
-        except Exception as e:
-            logger.warning(f"[deep_research] Step answer failed: {e}")
-            return f"Could not generate answer: {e}"
+            prompt = "\n\n".join(
+                [f"{msg['role'].upper()}: {msg['content']}" for msg in turn_history]
+            )
+            prompt += (
+                "\n\nSYSTEM: Max iterations reached. Please summarize your findings "
+                "into a final answer now."
+            )
+            final_ans = self._complete_sub_question(system, prompt).strip()
+        except Exception:
+            final_ans = "Exhausted agent iterations. Partial results only."
+
+        return ResearchStep(
+            question=question,
+            answer=final_ans,
+            sources=sources_used,
+            chunks_used=len(chunks) + max_iterations,
+        )
+
+    def _execute_tool(self, tool_call: dict[str, Any], sources_used: list[str]) -> str:
+        action = str(tool_call.get("action", "")).strip()
+        archive = getattr(self.service, "source_archive", {})
+
+        if action == "read_file":
+            path = str(tool_call.get("path", ""))
+            if not path:
+                return "Error: read_file requires a non-empty 'path'."
+            start = _parse_tool_int(tool_call.get("start"), default=1)
+            end = _parse_tool_int(tool_call.get("end"), default=100)
+            if start is None or end is None:
+                return "Error: read_file 'start' and 'end' must be integers."
+            if start < 1:
+                start = 1
+            if end < start:
+                return "Error: read_file 'end' must be >= 'start'."
+            content = archive.get(path)
+            if not content:
+                return f"Error: File '{path}' not found in source archive."
+            if path not in sources_used:
+                sources_used.append(path)
+            lines = content.splitlines()
+            snippet = "\n".join(lines[max(0, start - 1) : end])
+            return f"--- {path} (lines {start}-{end}) ---\n{snippet}"
+
+        elif action == "grep":
+            pattern = str(tool_call.get("pattern", ""))
+            if not pattern or len(pattern) < 3:
+                return "Error: Grep pattern must be at least 3 characters."
+
+            try:
+                rx = re.compile(pattern, re.IGNORECASE)
+            except Exception as e:
+                return f"Error: Invalid regex '{pattern}' - {e}"
+
+            results = []
+            for path, content in archive.items():
+                lines = content.splitlines()
+                matched_in_file = False
+                for i, line in enumerate(lines, 1):
+                    if rx.search(line):
+                        matched_in_file = True
+                        results.append(f"{path}:{i}: {line.strip()}")
+                        if len(results) >= 30:
+                            break
+                if matched_in_file and path not in sources_used:
+                    sources_used.append(path)
+                if len(results) >= 30:
+                    break
+
+            if not results:
+                return f"No matches found in archive for '{pattern}'."
+            if len(results) >= 30:
+                results.append("... [truncated due to length]")
+            return "\n".join(results)
+
+        return f"Error: Unknown action '{action}'"
 
     def _synthesise(
         self,
@@ -292,16 +435,27 @@ class DeepResearcher:
             f"Original question: {original_question}\n\n"
             f"Research findings:\n{sub_answers}"
             f"{sources_note}\n\n"
-            "Write a comprehensive answer in 2-5 paragraphs that directly answers the "
-            "original question, covering the main implementation path, important related "
-            "files, configuration, and notable gaps in evidence."
+            "Write a highly detailed, comprehensive answer that directly answers the "
+            "original question. Use literal code snippets and examples from the evidence "
+            "to ground your explanation. Cover the main implementation path, important related "
+            "files, configuration, and any notable gaps in evidence."
         )
         try:
-            return self.llm.complete(system, user_msg)
+            return self._complete_sub_question(system, user_msg)
         except Exception as e:
             logger.warning(f"[deep_research] Synthesis failed: {e}")
             # Fallback: concatenate step answers
             return " ".join(step.answer for step in steps)
+
+    def _complete_sub_question(self, system: str, prompt: str) -> str:
+        complete_with_continuation = getattr(
+            self.service,
+            "_complete_with_continuation",
+            None,
+        )
+        if callable(complete_with_continuation):
+            return complete_with_continuation(system, prompt)
+        return self.llm.complete(system, prompt)
 
     def _estimate_confidence(self, steps: list[ResearchStep]) -> str:
         """Estimate confidence based on how many chunks were found."""
@@ -335,4 +489,49 @@ def _extract_json_array(text: str) -> list[Any] | None:
                 continue
             if isinstance(parsed, list):
                 return parsed
+    return None
+
+
+def _context_hits(context: dict[str, list[Any]] | None) -> list[Any]:
+    if not isinstance(context, dict):
+        return []
+    return (
+        list(context.get("code_hits", []))
+        + list(context.get("artifact_hits", []))
+        + list(context.get("doc_hits", []))
+        + list(context.get("relationship_hits", []))
+    )
+
+
+def _extract_json_object(text: str) -> dict[str, Any] | None:
+    fenced_match = re.search(r"```(?:json)?\s*(\{[\s\S]*?\})\s*```", text)
+    candidates = [fenced_match.group(1)] if fenced_match else []
+    candidates.append(text)
+    decoder = json.JSONDecoder()
+    for candidate in candidates:
+        for match in re.finditer(r"\{", candidate):
+            try:
+                parsed, _ = decoder.raw_decode(candidate[match.start() :])
+            except Exception:
+                continue
+            if isinstance(parsed, dict):
+                return parsed
+    return None
+
+
+def _parse_tool_int(value: Any, *, default: int) -> int | None:
+    if value is None:
+        return default
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int):
+        return value
+    if isinstance(value, float):
+        return int(value)
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return default
+        if re.fullmatch(r"-?\d+", stripped):
+            return int(stripped)
     return None

@@ -47,6 +47,8 @@ This file might be stale and if that is the case please update it first
 - Preserve `source_kind` and `publication_tier` semantics consistently across planner, persistence, generation, smart update, and chatbot indexing.
 - Chatbot indexing now has a separate repo-doc corpus for selected repo-authored docs; keep raw repo docs distinct from generated MDX docs and continue excluding generated outputs from the repo-doc corpus.
 - Chatbot retrieval is hybrid: exact-match lexical search and embedding search both feed the candidate set, and exact-match code hits can stitch adjacent windows from the same file. Keep bounded live repo inspection limited to `/deep-research`; normal `/query` should remain index-only.
+- Query modes are intentional: `/query` runs fast mode (index-only, lower prompt budget, and LLM retrieval steps disabled by default), while `/deep-research` keeps richer retrieval and can run bounded live-repo fallback.
+- The chatbot backend also exposes `/query-context` for retrieval-only diagnostics (selected chunks/citations without answer generation); keep this endpoint aligned with fast-mode selection logic.
 - Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`.
 - Generated Fumadocs output must stay MDX-safe and GitHub-Pages-safe: preserve explicit site base-path support in the scaffold and escape raw destructured brace args in markdown tables before writing docs.
 - Generated-page validation now checks not just sections/files/routes, but also runtime/config/integration grounding when that evidence was assembled. Keep those checks aligned with `deepdoc/generator/evidence.py`.

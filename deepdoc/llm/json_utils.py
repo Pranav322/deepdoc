@@ -5,7 +5,7 @@ import re
 from typing import Any
 
 TRAILING_COMMA_RE = re.compile(r",(\s*[}\]])")
-VALUE_END_CHARS = set('}"0123456789eln')
+VALUE_END_CHARS = set('}]"0123456789eln')
 VALUE_START_CHARS = set('{"[-0123456789tfn')
 SMART_QUOTES = str.maketrans(
     {
@@ -129,12 +129,19 @@ def _repair_json_candidate(text: str, exc: json.JSONDecodeError) -> str:
         if insert_at is not None:
             return text[:insert_at] + "," + text[insert_at:]
 
+    if exc.msg in ("Expecting value", "Unexpected UTF-8 BOM"):
+        extracted = _extract_first_json_value(text)
+        if extracted and extracted != text:
+            return extracted
+
     return text
 
 
 def _missing_comma_position(text: str, error_pos: int) -> int | None:
     current = _next_significant_index(text, error_pos)
-    previous = _previous_significant_index(text, current - 1 if current is not None else error_pos - 1)
+    previous = _previous_significant_index(
+        text, current - 1 if current is not None else error_pos - 1
+    )
     if current is None or previous is None:
         return None
 

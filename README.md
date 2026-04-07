@@ -596,6 +596,8 @@ chatbot:
     api_version: ""
     temperature: 0.1
     max_tokens: 24000
+    continuation_retries: 2                   # Auto-continue if answer ends abruptly
+    continuation_context_chars: 12000         # Tail chars included in continuation prompt
 
   embeddings:                                 # LLM used for embedding code/docs
     provider: "azure"
@@ -629,7 +631,11 @@ chatbot:
     max_prompt_artifact_chunks: 6
     max_prompt_doc_chunks: 6
     max_prompt_relationship_chunks: 6
-    max_prompt_chars: 200000
+    max_prompt_chars: 120000
+    fast_mode_use_llm_retrieval_steps: false  # Fast mode skips expansion/rerank by default
+    fast_mode_iterative_retrieval: false      # Fast mode skips second-pass follow-up retrieval
+    fast_mode_max_prompt_chars: 90000         # Smaller prompt budget for faster /query answers
+    deep_mode_max_prompt_chars: 140000        # Larger budget for /deep-research synthesis
     lexical_retrieval: true
     lexical_candidate_limit: 24
     query_expansion: true
@@ -689,6 +695,8 @@ chatbot:
 | `chatbot.answer.api_version` | `""` | Azure API version string |
 | `chatbot.answer.temperature` | `0.1` | Sampling temperature (lower = more deterministic) |
 | `chatbot.answer.max_tokens` | `24000` | Max tokens per answer |
+| `chatbot.answer.continuation_retries` | `2` | Extra completion attempts when an answer appears truncated |
+| `chatbot.answer.continuation_context_chars` | `12000` | Number of trailing chars passed when asking the model to continue |
 | **Embeddings LLM** | | |
 | `chatbot.embeddings.provider` | `azure` | Provider for the embedding model |
 | `chatbot.embeddings.model` | `azure/text-embedding-3-large` | Embedding model |
@@ -709,7 +717,11 @@ chatbot:
 | `chatbot.retrieval.max_prompt_artifact_chunks` | `6` | Max artifact chunks in the final prompt |
 | `chatbot.retrieval.max_prompt_doc_chunks` | `6` | Max doc chunks in the final prompt |
 | `chatbot.retrieval.max_prompt_relationship_chunks` | `6` | Max relationship chunks included in the final prompt |
-| `chatbot.retrieval.max_prompt_chars` | `200000` | Total character budget for the assembled prompt |
+| `chatbot.retrieval.max_prompt_chars` | `120000` | Default character budget for assembled prompts |
+| `chatbot.retrieval.fast_mode_use_llm_retrieval_steps` | `false` | In `/query` fast mode, disable LLM query expansion and reranking |
+| `chatbot.retrieval.fast_mode_iterative_retrieval` | `false` | In `/query` fast mode, disable iterative follow-up retrieval |
+| `chatbot.retrieval.fast_mode_max_prompt_chars` | `90000` | Prompt budget used by `/query` fast mode |
+| `chatbot.retrieval.deep_mode_max_prompt_chars` | `140000` | Prompt budget used by `/deep-research` |
 | `chatbot.retrieval.lexical_retrieval` | `true` | Blend exact-match retrieval with embedding retrieval |
 | `chatbot.retrieval.lexical_candidate_limit` | `24` | Max lexical candidates gathered before merge/rerank |
 | `chatbot.retrieval.query_expansion` | `true` | Use LLM to generate alternative search queries |
@@ -810,22 +822,24 @@ During `deepdoc generate`, six corpora are built and stored in `.deepdoc/chatbot
 
 ### Chatbot Query Pipeline
 
-When a user asks a question, the backend runs a multi-step retrieval pipeline:
+When a user asks a question, the backend runs a mode-aware retrieval pipeline:
 
-1. **Query expansion** — The LLM generates up to 3 alternative search queries to improve recall.
+1. **Query expansion** — In default/deep mode, the LLM can generate alternative search queries to improve recall. Fast mode disables this by default.
 2. **Embedding** — All queries are embedded using the configured embedding model.
 3. **Hybrid retrieval** — FAISS similarity search and exact-match lexical search both gather candidates from each corpus.
-4. **Follow-up retrieval** — The backend can derive focused second-pass searches and pull linked files/docs via graph-neighbor expansion.
+4. **Follow-up retrieval** — The backend can derive focused second-pass searches and pull linked files/docs via graph-neighbor expansion. Fast mode can skip follow-up queries for lower latency.
 5. **Chunk stitching** — Exact-match code hits can pull adjacent code windows from the same file so larger implementations survive chunk boundaries.
-6. **Reranking** — The LLM scores and reranks the retrieved chunks for relevance.
+6. **Reranking** — In default/deep mode, the LLM can rerank candidates for relevance. Fast mode disables this by default.
 7. **Prompt assembly** — Query-type-aware budgets reserve space for the most important evidence types within the character budget.
-8. **Answer generation** — The answer LLM produces a grounded response with code, artifact, doc, repo-doc, relationship, and live-fallback citations when used.
+8. **Answer generation + continuity guard** — The answer LLM produces a grounded response, and if the output appears truncated (for example ending on a dangling heading), DeepDoc retries with a continuation prompt so the response finishes cleanly.
 
 `POST /deep-research` uses the same indexed corpora first, but it can also inspect a small bounded set of live repo files when exact-match evidence is missing from the index. This fallback respects the repo's exclude rules, skips oversized/binary files, and is only used in deep research mode.
 
+`POST /query` and `POST /deep-research` now return `response_mode` in the payload (`fast`, `deep`, or `default`) so clients can confirm which retrieval profile generated the result.
+
 ### Chatbot API Endpoints
 
-The generated `chatbot_backend/` exposes two endpoints:
+The generated `chatbot_backend/` exposes three endpoints:
 
 **Health check:**
 ```
@@ -845,6 +859,19 @@ POST /query
 ```
 
 The response includes the answer text, code citations (file path + line range), artifact citations, and links to relevant generated doc pages.
+
+`/query` is optimized for speed: it runs retrieval in fast mode (no LLM query expansion/rerank by default) and returns an answer plus citations.
+
+**Retrieve context only (no answer generation):**
+```
+POST /query-context
+{
+  "question": "Where is reshipping implemented?",
+  "history": []
+}
+```
+
+`/query-context` returns selected citations/chunks only. Use this endpoint to inspect retrieval quality independently from answer generation.
 
 ### Deploying the Chatbot
 

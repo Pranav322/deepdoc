@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .types import ChunkRecord, RetrievedChunk
+import gzip
 
 CORPUS_FILES = {
     "code": ("code_chunks.jsonl", "code_vectors.npy", "code.faiss"),
@@ -99,6 +100,24 @@ def save_corpus(
         paths["vectors"].write_text(json.dumps(vectors), encoding="utf-8")
         write_vector_index(paths["index"], vectors)
     paths["meta"].write_text(json.dumps(meta or {}, indent=2), encoding="utf-8")
+
+
+def save_source_archive(index_dir: Path, archive_data: dict[str, str]) -> None:
+    ensure_index_dir(index_dir)
+    archive_path = index_dir / "source_archive.json.gz"
+    with gzip.open(archive_path, "wt", encoding="utf-8") as f:
+        json.dump(archive_data, f)
+
+
+def load_source_archive(index_dir: Path) -> dict[str, str]:
+    archive_path = index_dir / "source_archive.json.gz"
+    if not archive_path.exists():
+        return {}
+    try:
+        with gzip.open(archive_path, "rt", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception:
+        return {}
 
 
 def write_vector_index(path: Path, vectors: Any) -> None:

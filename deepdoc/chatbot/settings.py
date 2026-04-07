@@ -27,6 +27,8 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "api_version": "",
         "temperature": 0.1,
         "max_tokens": 24000,
+        "continuation_retries": 2,
+        "continuation_context_chars": 12000,
     },
     "embeddings": {
         "backend": "litellm",  # default: use configured litellm model (text-embedding-3-small, Azure, etc.)
@@ -63,7 +65,11 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "max_prompt_artifact_chunks": 6,
         "max_prompt_doc_chunks": 6,
         "max_prompt_relationship_chunks": 6,
-        "max_prompt_chars": 200000,
+        "max_prompt_chars": 120000,
+        "fast_mode_use_llm_retrieval_steps": False,
+        "fast_mode_iterative_retrieval": False,
+        "fast_mode_max_prompt_chars": 90000,
+        "deep_mode_max_prompt_chars": 140000,
         "lexical_retrieval": True,
         "lexical_candidate_limit": 24,
         "query_expansion": True,

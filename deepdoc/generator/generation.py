@@ -452,7 +452,9 @@ class BucketGenerationEngine:
             )
             content = normalize_html_code_blocks(content)
             content = normalize_code_fence_languages(content)
+            content = repair_unbalanced_code_fences(content)
             content = normalize_mdx_steps(content)
+            content = repair_mdx_component_blocks(content)
             content = escape_mdx_route_params(content)
             content = escape_mdx_text_hazards(content)
             content = repair_internal_doc_links(
@@ -487,7 +489,9 @@ class BucketGenerationEngine:
                     )
                     content = normalize_html_code_blocks(content)
                     content = normalize_code_fence_languages(content)
+                    content = repair_unbalanced_code_fences(content)
                     content = normalize_mdx_steps(content)
+                    content = repair_mdx_component_blocks(content)
                     content = escape_mdx_route_params(content)
                     content = escape_mdx_text_hazards(content)
                     content = repair_internal_doc_links(

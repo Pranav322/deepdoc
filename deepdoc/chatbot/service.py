@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import fnmatch
 import hashlib
-import os
 from pathlib import Path
 import re
 from typing import Any
@@ -14,7 +14,12 @@ from pydantic import BaseModel, Field
 from ..parser import supported_extensions
 from ..persistence_v2 import load_plan
 from ..source_metadata import classify_source_kind
-from .persistence import load_corpus, load_vector_index, similarity_search
+from .persistence import (
+    load_corpus,
+    load_source_archive,
+    load_vector_index,
+    similarity_search,
+)
 from .providers import build_chat_client, build_embedding_client
 from .settings import chatbot_allowed_origins, get_chatbot_cfg
 from .types import ChunkRecord, RetrievedChunk
@@ -107,6 +112,8 @@ class ChatbotQueryService:
         self.repo_doc_index = load_vector_index(self.index_dir, "repo_doc")
         self.relationship_index = load_vector_index(self.index_dir, "relationship")
 
+        self.source_archive = load_source_archive(self.index_dir)
+
         # Build corpus lookups for chain and graph-neighbor expansion.
         self._code_by_file: dict[str, list[int]] = {}
         for idx, record in enumerate(self.code_records):
@@ -138,9 +145,14 @@ class ChatbotQueryService:
             self._index_doc_record("repo_doc", idx, record)
 
     def query(
-        self, question: str, history: list[dict[str, str]] | None = None
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        *,
+        mode: str = "default",
     ) -> dict[str, Any]:
-        context = self.retrieve_context(question, history)
+        retrieval_cfg = self._retrieval_profile(mode)
+        context = self.retrieve_context(question, history, mode=mode)
         code_hits = context["code_hits"]
         artifact_hits = context["artifact_hits"]
         doc_hits = context["doc_hits"]
@@ -151,6 +163,7 @@ class ChatbotQueryService:
             artifact_hits,
             doc_hits,
             relationship_hits,
+            retrieval_cfg,
         )
         selected_code = selected["code_hits"]
         selected_artifacts = selected["artifact_hits"]
@@ -163,7 +176,9 @@ class ChatbotQueryService:
             or selected_docs
             or selected_relationships
         ):
-            return self._no_context_result(question)
+            result = self._no_context_result(question)
+            result["response_mode"] = mode
+            return result
 
         # Step 6: Build prompt and generate answer
         prompt = self._build_prompt(
@@ -173,8 +188,9 @@ class ChatbotQueryService:
             selected_artifacts,
             selected_docs,
             selected_relationships,
+            retrieval_cfg,
         )
-        answer = self.chat_client.complete(self._system_prompt(), prompt)
+        answer = self._complete_with_continuation(self._system_prompt(), prompt)
         all_selected_hits = (
             selected_code + selected_artifacts + selected_docs + selected_relationships
         )
@@ -211,6 +227,7 @@ class ChatbotQueryService:
             + len(selected_artifacts)
             + len(selected_docs)
             + len(selected_relationships),
+            "response_mode": mode,
         }
 
     def retrieve_context(
@@ -219,8 +236,9 @@ class ChatbotQueryService:
         history: list[dict[str, str]] | None = None,
         *,
         original_question: str | None = None,
+        mode: str = "default",
     ) -> dict[str, list[RetrievedChunk]]:
-        retrieval_cfg = self.chat_cfg["retrieval"]
+        retrieval_cfg = self._retrieval_profile(mode)
         search_question = original_question or question
 
         queries = self._expand_query(question, retrieval_cfg)
@@ -346,7 +364,7 @@ class ChatbotQueryService:
             max_rounds=max_rounds,
         )
         result = researcher.research(question, history=history or [])
-        base = self.query(question, history)
+        base = self.query(question, history, mode="deep")
         base.update(
             {
                 "answer": result.final_answer,
@@ -870,8 +888,8 @@ class ChatbotQueryService:
         artifact_hits: list[RetrievedChunk],
         doc_hits: list[RetrievedChunk],
         relationship_hits: list[RetrievedChunk],
+        retrieval_cfg: dict[str, Any],
     ) -> dict[str, list[RetrievedChunk]]:
-        retrieval_cfg = self.chat_cfg["retrieval"]
         profile = self._question_support_profile(question)
         budgets = self._prompt_budgets(profile, retrieval_cfg)
         exact_terms = set(profile.get("exact_terms", []))
@@ -1098,6 +1116,138 @@ class ChatbotQueryService:
             "identifier_like": identifier_like,
         }
 
+    def _retrieval_profile(self, mode: str) -> dict[str, Any]:
+        base = deepcopy(self.chat_cfg["retrieval"])
+        mode_name = mode.strip().lower() if isinstance(mode, str) else "default"
+        if mode_name == "default":
+            return base
+        if mode_name == "deep":
+            deep_prompt_chars = base.get("deep_mode_max_prompt_chars")
+            if isinstance(deep_prompt_chars, int) and deep_prompt_chars > 0:
+                base["max_prompt_chars"] = deep_prompt_chars
+            return base
+
+        fast_prompt_chars = base.get("fast_mode_max_prompt_chars")
+        if isinstance(fast_prompt_chars, int) and fast_prompt_chars > 0:
+            base["max_prompt_chars"] = fast_prompt_chars
+        if base.get("fast_mode_use_llm_retrieval_steps", False) is False:
+            base["query_expansion"] = False
+            base["rerank"] = False
+        if base.get("fast_mode_iterative_retrieval", False) is False:
+            base["iterative_retrieval"] = False
+        return base
+
+    def _complete_with_continuation(self, system: str, user: str) -> str:
+        answer_cfg = self.chat_cfg.get("answer", {})
+        max_retries = 0
+        try:
+            max_retries = max(0, int(answer_cfg.get("continuation_retries", 2)))
+        except (TypeError, ValueError):
+            max_retries = 2
+        try:
+            context_chars = max(
+                400,
+                int(answer_cfg.get("continuation_context_chars", 12000)),
+            )
+        except (TypeError, ValueError):
+            context_chars = 12000
+
+        answer = self.chat_client.complete(system, user)
+        if not answer:
+            return answer
+
+        current = answer
+        retries = 0
+        while retries < max_retries and self._answer_looks_incomplete(current):
+            continuation_prompt = (
+                "The previous answer appears incomplete and ended abruptly. "
+                "Continue from the exact point where it stopped. "
+                "Do not repeat earlier sections. Complete any unfinished bullets, "
+                "headings, or sentences, and end with `## Summary`.\n\n"
+                "Previous answer tail:\n"
+                f"{current[-context_chars:]}"
+            )
+            continuation = self.chat_client.complete(system, continuation_prompt)
+            if not continuation or not continuation.strip():
+                break
+            merged = self._merge_continuation(current, continuation)
+            if merged == current:
+                break
+            current = merged
+            retries += 1
+        return current
+
+    def _answer_looks_incomplete(self, answer: str) -> bool:
+        if not answer:
+            return False
+        stripped = answer.strip()
+        if len(stripped) < 260:
+            return False
+
+        lower = stripped.lower()
+        score = 0
+        if stripped.count("```") % 2 == 1:
+            score += 2
+        if re.search(r"(relationships?|dependencies?)\s*:\s*$", lower):
+            score += 2
+        if stripped.endswith((":", "-", "*", ",", "/", "(")):
+            score += 1
+        if not re.search(r"[.!?`\)\]]\s*$", stripped) and not stripped.endswith("```"):
+            score += 1
+
+        has_structured_sections = any(
+            token in lower
+            for token in (
+                "## overview",
+                "## implementation",
+                "dependencies & connections",
+                "## sources",
+            )
+        )
+        if has_structured_sections and "## summary" not in lower:
+            score += 1
+
+        tail_word_match = re.search(r"([a-z0-9_]+)\W*$", lower)
+        if tail_word_match and tail_word_match.group(1) in {
+            "and",
+            "or",
+            "with",
+            "to",
+            "for",
+            "of",
+            "in",
+            "when",
+            "if",
+            "because",
+            "relationships",
+            "relationship",
+        }:
+            score += 1
+        return score >= 2
+
+    def _merge_continuation(self, existing: str, continuation: str) -> str:
+        left = existing.rstrip()
+        right = continuation.strip()
+        if not right:
+            return left
+        if right in left:
+            return left
+
+        left_lower = left.lower()
+        right_lower = right.lower()
+        overlap = 0
+        max_overlap = min(len(left_lower), len(right_lower), 800)
+        for size in range(max_overlap, 39, -1):
+            if left_lower.endswith(right_lower[:size]):
+                overlap = size
+                break
+
+        if overlap:
+            right = right[overlap:].lstrip()
+            if not right:
+                return left
+        return f"{left}\n\n{right}"
+
     def _lexical_score(self, record: Any, query_signals: dict[str, Any]) -> float:
         haystacks = self._record_haystacks(record)
         text_blob = haystacks["text"]
@@ -1210,10 +1360,7 @@ class ChatbotQueryService:
         )
 
         candidates: list[tuple[float, str, str]] = []
-        for rel_path, content in self._iter_live_fallback_files(
-            max_file_bytes=max_file_bytes,
-            exclude_patterns=exclude_patterns,
-        ):
+        for rel_path, content in self.source_archive.items():
             path_score = self._path_match_score(rel_path, query_signals)
             content_score = self._content_match_score(content, query_signals)
             score = path_score + content_score
@@ -1239,53 +1386,6 @@ class ChatbotQueryService:
                 hits.append(hit)
                 seen_ids.add(hit.record.chunk_id)
         return hits
-
-    def _iter_live_fallback_files(
-        self,
-        *,
-        max_file_bytes: int,
-        exclude_patterns: list[str],
-    ) -> list[tuple[str, str]]:
-        files: list[tuple[str, str]] = []
-        for root, dirs, file_names in os.walk(self.repo_root):
-            root_path = Path(root)
-            rel_dir = (
-                root_path.relative_to(self.repo_root).as_posix()
-                if root_path != self.repo_root
-                else "."
-            )
-            dirs[:] = [
-                directory
-                for directory in dirs
-                if not self._matches_any_exclude(directory, exclude_patterns)
-                and not self._matches_any_exclude(
-                    f"{rel_dir}/{directory}" if rel_dir != "." else directory,
-                    exclude_patterns,
-                )
-            ]
-            for file_name in sorted(file_names):
-                rel_path = (
-                    (root_path / file_name).relative_to(self.repo_root).as_posix()
-                )
-                if self._matches_any_exclude(
-                    rel_path, exclude_patterns
-                ) or self._matches_any_exclude(file_name, exclude_patterns):
-                    continue
-                path = self.repo_root / rel_path
-                try:
-                    if path.stat().st_size > max_file_bytes:
-                        continue
-                    with path.open("rb") as handle:
-                        sample = handle.read(2048)
-                    if b"\x00" in sample:
-                        continue
-                    content = path.read_text(encoding="utf-8", errors="replace")
-                except OSError:
-                    continue
-                if not content.strip():
-                    continue
-                files.append((rel_path, content))
-        return files
 
     def _matches_any_exclude(self, path: str, patterns: list[str]) -> bool:
         normalized = path.replace("\\", "/")
@@ -1781,8 +1881,10 @@ class ChatbotQueryService:
         artifact_hits: list[RetrievedChunk],
         doc_hits: list[RetrievedChunk],
         relationship_hits: list[RetrievedChunk] | None = None,
+        retrieval_cfg: dict[str, Any] | None = None,
     ) -> str:
-        max_chars = self.chat_cfg["retrieval"].get("max_prompt_chars", 200000)
+        retrieval_settings = retrieval_cfg or self.chat_cfg["retrieval"]
+        max_chars = retrieval_settings.get("max_prompt_chars", 120000)
         profile = self._question_support_profile(question)
 
         history_lines = []
@@ -1972,7 +2074,7 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
     @app.post("/query")
     def query(request: QueryRequest = Body(...)) -> dict[str, Any]:
         try:
-            return service.query(request.question, request.history)
+            return service.query(request.question, request.history, mode="fast")
         except Exception as exc:
             return JSONResponse(
                 status_code=500,
@@ -1995,6 +2097,64 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
                 status_code=500,
                 content={
                     "error": "chatbot_deep_research_failed",
+                    "detail": str(exc),
+                },
+            )
+
+    @app.post("/query-context")
+    def query_context(request: QueryRequest = Body(...)) -> dict[str, Any]:
+        try:
+            context = service.retrieve_context(
+                request.question,
+                request.history,
+                mode="fast",
+            )
+            selected = service._select_prompt_hits(
+                request.question,
+                context.get("code_hits", []),
+                context.get("artifact_hits", []),
+                context.get("doc_hits", []),
+                context.get("relationship_hits", []),
+                service._retrieval_profile("fast"),
+            )
+            selected_hits = (
+                selected.get("code_hits", [])
+                + selected.get("artifact_hits", [])
+                + selected.get("doc_hits", [])
+                + selected.get("relationship_hits", [])
+            )
+            return {
+                "question": request.question,
+                "response_mode": "fast",
+                "selected_chunks": len(selected_hits),
+                "code_citations": [
+                    service._citation_payload(hit)
+                    for hit in selected.get("code_hits", [])
+                ],
+                "artifact_citations": [
+                    service._citation_payload(hit)
+                    for hit in selected.get("artifact_hits", [])
+                ],
+                "doc_citations": [
+                    service._citation_payload(hit)
+                    for hit in selected.get("doc_hits", [])
+                    if hit.record.kind in {"doc_summary", "doc_full"}
+                ],
+                "repo_doc_citations": [
+                    service._citation_payload(hit)
+                    for hit in selected.get("doc_hits", [])
+                    if hit.record.kind == "repo_doc"
+                ],
+                "relationship_citations": [
+                    service._citation_payload(hit)
+                    for hit in selected.get("relationship_hits", [])
+                ],
+            }
+        except Exception as exc:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "chatbot_query_context_failed",
                     "detail": str(exc),
                 },
             )

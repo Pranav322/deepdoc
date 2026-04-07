@@ -1,0 +1,194 @@
+project_name: codewiki
+description: ''
+output_dir: docs
+site_dir: site
+max_pages: 0
+generation_mode: feature_buckets
+large_file_lines: 500
+giant_file_lines: 2000
+source_context_budget: 200000
+decompose_threshold: 7
+consolidation_similarity_threshold: 0.55
+database_doc_mode: overview_plus_groups
+database_group_model_cap: 12
+database_group_file_cap: 8
+runtime_doc_mode: dedicated_pages
+max_parallel_workers: 6
+rate_limit_pause: 0.5
+integration_detection: auto
+include_feature_pages: true
+include_endpoint_pages: true
+include_integration_pages: true
+llm:
+  provider: azure
+  model: azure/gpt-4.1
+  api_key_env: AZURE_OPENAI_API_KEY
+  base_url: https://aiservices-orizn.openai.azure.com/
+  max_tokens: null
+  temperature: 0.2
+languages:
+- python
+- javascript
+- typescript
+- go
+- php
+- vue
+include: []
+exclude:
+- .git
+- .svn
+- .hg
+- .idea
+- .vscode
+- '*.swp'
+- '*.swo'
+- .DS_Store
+- Thumbs.db
+- __pycache__
+- '*.pyc'
+- '*.pyo'
+- '*.pyd'
+- .venv
+- venv
+- '*venv*'
+- .mypy_cache
+- .pytest_cache
+- .ruff_cache
+- .tox
+- '*.egg-info'
+- .eggs
+- htmlcov
+- node_modules
+- '*.min.js'
+- '*.bundle.js'
+- '*.map'
+- .nyc_output
+- .eslintcache
+- .cache
+- .parcel-cache
+- .turbo
+- storybook-static
+- .nuxt
+- .output
+- .next
+- '*.sum'
+- '*.exe'
+- '*.test'
+- '*.out'
+- vendor
+- .phpunit.cache
+- .php-cs-fixer.cache
+- storage/framework
+- bootstrap/cache
+- static
+- staticfiles
+- media
+- dist
+- build
+- bin
+- out
+- target
+- coverage
+- tmp
+- .env
+- .env.*
+- '*.local'
+- logs
+- '*.log'
+- '*.sql'
+- '*.lock'
+- .docker
+- .terraform
+- backend-tss-api_v2/backend-tss-api_v2-docs/
+github_pages:
+  enabled: false
+  branch: gh-pages
+  remote: origin
+site:
+  repo_url: ''
+  favicon: ''
+  logo: ''
+  colors:
+    primary: ''
+    light: ''
+    dark: ''
+chatbot:
+  enabled: true
+  index_dir: .deepdoc/chatbot
+  backend:
+    base_url: ''
+    allowed_origins:
+    - http://localhost:3000
+    - http://127.0.0.1:3000
+  answer:
+    provider: azure
+    model: azure/gpt-4.1
+    api_key_env: AZURE_OPENAI_API_KEY
+    base_url: https://aiservices-orizn.openai.azure.com/
+    api_version: 2024-02-15-preview
+    temperature: 0.1
+    max_tokens: 24000
+  embeddings:
+    backend: litellm
+    fastembed_model: nomic-ai/nomic-embed-text-v1.5
+    fastembed_batch_size: 4
+    provider: azure
+    model: azure/text-embedding-3-small
+    api_key_env: AZURE_EMBEDDING_API_KEY
+    base_url: https://prod-chatbot-1.cognitiveservices.azure.com/
+    api_version: 2024-12-01-preview
+    batch_size: 24
+  vector_store:
+    kind: faiss
+  indexing:
+    include_repo_docs: true
+    include_tests: false
+    repo_doc_globs: []
+    exclude_globs: []
+    max_file_bytes: 250000
+    max_repo_doc_chars: 12000
+  retrieval:
+    top_k_code: 15
+    top_k_artifact: 8
+    top_k_docs: 6
+    top_k_relationship: 8
+    candidate_top_k_code: 30
+    candidate_top_k_artifact: 16
+    candidate_top_k_docs: 12
+    candidate_top_k_relationship: 12
+    max_prompt_code_chunks: 12
+    max_prompt_artifact_chunks: 6
+    max_prompt_doc_chunks: 6
+    max_prompt_relationship_chunks: 6
+    max_prompt_chars: 200000
+    lexical_retrieval: true
+    lexical_candidate_limit: 24
+    query_expansion: true
+    expansion_max_queries: 3
+    iterative_retrieval: true
+    iterative_max_followup_queries: 2
+    graph_neighbor_expansion: true
+    graph_neighbor_max_files: 6
+    graph_neighbor_code_chunks_per_file: 2
+    graph_neighbor_artifact_chunks_per_file: 1
+    graph_neighbor_relationship_chunks_per_file: 2
+    graph_neighbor_max_docs: 4
+    rerank: true
+    rerank_candidate_limit: 32
+    rerank_candidate_limit_per_kind: 8
+    rerank_preview_chars: 450
+    stitch_adjacent_code_chunks: true
+    stitch_max_adjacent_chunks: 2
+    deep_research_live_fallback: true
+    live_fallback_max_files: 6
+    live_fallback_max_per_file: 2
+    live_fallback_context_lines: 12
+    deep_research_chunk_chars: 3200
+    deep_research_top_k: 10
+  chunking:
+    code_chunk_lines: 120
+    code_chunk_overlap: 20
+    artifact_chunk_lines: 140
+    artifact_chunk_overlap: 20
+    max_doc_summary_chunks_per_page: 4
+    max_doc_summary_chars: 4000

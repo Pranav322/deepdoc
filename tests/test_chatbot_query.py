@@ -8,7 +8,7 @@ from unittest.mock import patch
 import pytest
 
 from deepdoc.chatbot.indexer import ChatbotIndexer
-from deepdoc.chatbot.persistence import save_corpus
+from deepdoc.chatbot.persistence import save_corpus, save_source_archive
 from deepdoc.chatbot.service import ChatbotQueryService, create_fastapi_app
 from deepdoc.chatbot.types import ChunkRecord, RetrievedChunk
 from deepdoc.config import DEFAULT_CONFIG
@@ -48,6 +48,49 @@ class _UnexpectedChatClient:
     def complete(self, system: str, user: str) -> str:
         raise AssertionError(
             "chat model should not be called without retrieved context"
+        )
+
+
+class _FastModeNoLlmRetrievalChatClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        if "alternative search queries" in system:
+            raise AssertionError("fast mode should not run query expansion")
+        if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+            raise AssertionError("fast mode should not run reranking")
+        return "Grounded answer"
+
+
+class _ContinuationAnswerChatClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        if len(self.calls) == 1:
+            return (
+                "## Overview\n"
+                "Reshipping creates a follow-up order that references the original order.\n\n"
+                "## Implementation details\n"
+                "- `create_reshipping_order` validates the source order.\n"
+                "- It copies customer and shipping details into a new order draft.\n"
+                "- It writes a `ReshippingOrderLog` entry for traceability.\n\n"
+                "## Dependencies & Connections\n"
+                "- Imports: models are loaded from `models/Order.py`.\n"
+                "- API Integration: `/api/v2/reshipping-order-creation` triggers creation.\n"
+                "- Data Flow: original order -> new reship order -> log record.\n"
+                "- Relationships:"
+            )
+        return (
+            "- `ReshippingOrderLog` links the original order id and new order id.\n\n"
+            "## Sources\n"
+            "- `models/Order.py:1-120`\n"
+            "- `api/orders.py:55-110`\n\n"
+            "## Summary\n"
+            "Reshipping is implemented as a new order creation flow with explicit linkage to the original order."
         )
 
 
@@ -420,6 +463,292 @@ def test_query_expansion_disabled_uses_single_query(tmp_path: Path) -> None:
     assert len(embed_calls[0]) == 1  # only original query
 
 
+def test_fast_mode_skips_llm_retrieval_steps_and_uses_single_embedding_call(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user): return issue(user)",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=1,
+                symbol_names=["login"],
+                related_bucket_slugs=["auth"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    class _TrackingEmbedClient:
+        def __init__(self) -> None:
+            self.calls: list[list[str]] = []
+
+        def embed(self, texts):
+            self.calls.append(list(texts))
+            return [[1.0, 0.0] for _ in texts]
+
+    embed_client = _TrackingEmbedClient()
+    chat_client = _FastModeNoLlmRetrievalChatClient()
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": True,
+                "rerank": True,
+                "iterative_retrieval": True,
+                "fast_mode_use_llm_retrieval_steps": False,
+                "fast_mode_iterative_retrieval": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=embed_client,
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.query("Where is auth handled?", mode="fast")
+
+    assert result["answer"] == "Grounded answer"
+    assert result["response_mode"] == "fast"
+    assert len(chat_client.calls) == 1
+    assert len(embed_client.calls) == 1
+    assert len(embed_client.calls[0]) == 1
+
+
+def test_default_query_mode_keeps_query_expansion_and_rerank(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user): return issue(user)",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=1,
+                symbol_names=["login"],
+                related_bucket_slugs=["auth"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    class _TrackingRetrievalStepChatClient:
+        def __init__(self) -> None:
+            self.saw_expansion = False
+            self.saw_rerank = False
+
+        def complete(self, system: str, user: str) -> str:
+            if "alternative search queries" in system:
+                self.saw_expansion = True
+                return "auth login flow"
+            if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+                self.saw_rerank = True
+                lines = [
+                    line
+                    for line in user.splitlines()
+                    if line.strip() and line.strip()[0].isdigit()
+                ]
+                return "\n".join("8" for _ in lines) if lines else "8"
+            return "Grounded answer"
+
+    chat_client = _TrackingRetrievalStepChatClient()
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": True,
+                "rerank": True,
+                "iterative_retrieval": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.query("Where is auth handled?")
+
+    assert result["answer"] == "Grounded answer"
+    assert result["response_mode"] == "default"
+    assert chat_client.saw_expansion
+    assert chat_client.saw_rerank
+
+
+def test_query_continues_abrupt_answer_and_adds_missing_summary(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+
+    plan = make_plan([make_bucket("Orders", "orders", ["src/orders.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/orders.py",
+                text="def create_reshipping_order(payload): return payload",
+                chunk_hash="h1",
+                file_path="src/orders.py",
+                start_line=1,
+                end_line=1,
+                symbol_names=["create_reshipping_order"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    chat_client = _ContinuationAnswerChatClient()
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": False,
+                "rerank": False,
+                "iterative_retrieval": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.query("Explain reshipping order flow", mode="fast")
+
+    assert len(chat_client.calls) == 2
+    assert "## Summary" in result["answer"]
+    assert "ReshippingOrderLog" in result["answer"]
+
+
+def test_fastapi_query_context_endpoint_returns_selected_citations(
+    tmp_path: Path,
+) -> None:
+    testclient = pytest.importorskip("fastapi.testclient")
+    TestClient = testclient.TestClient
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user): return issue(user)",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=1,
+                symbol_names=["login"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_UnexpectedChatClient(),
+        ),
+    ):
+        app = create_fastapi_app(repo_root, {"chatbot": {"enabled": True}})
+        client = TestClient(app)
+        response = client.post(
+            "/query-context", json={"question": "Where is login handled?"}
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["response_mode"] == "fast"
+    assert payload["selected_chunks"] > 0
+    assert payload["code_citations"][0]["file_path"] == "src/auth.py"
+    assert "answer" not in payload
+
+
 def test_query_service_uses_lexical_retrieval_when_vector_search_misses(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -504,6 +833,10 @@ def test_deep_research_uses_live_repo_fallback_when_index_is_empty(
         'PAYMENTS_HOST = os.getenv("PAYMENTS_HOST")\n',
         encoding="utf-8",
     )
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_source_archive(
+        index_dir, {"src/payments.py": 'PAYMENTS_HOST = os.getenv("PAYMENTS_HOST")\n'}
+    )
 
     class _DeepFallbackChatClient:
         def complete(self, system: str, user: str) -> str:
@@ -511,7 +844,7 @@ def test_deep_research_uses_live_repo_fallback_when_index_is_empty(
                 return ""
             if "Break the given question into 2–4 focused sub-questions" in system:
                 return '["Where is PAYMENTS_HOST used?"]'
-            if "answering questions about a software codebase" in system:
+            if "agent answering a specific sub-question" in system:
                 assert "src/payments.py" in user
                 return "PAYMENTS_HOST is used in `src/payments.py`."
             if "synthesising research findings" in system:
@@ -548,6 +881,235 @@ def test_deep_research_uses_live_repo_fallback_when_index_is_empty(
     assert result["research_mode"] == "deep"
     assert "src/payments.py" in result["research_sources"]
     assert result["used_chunks"] > 0
+
+
+def test_deep_research_handles_invalid_read_file_arguments(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan([make_bucket("Payments", "payments", ["src/payments.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/payments.py",
+                text='PAYMENTS_HOST = os.getenv("PAYMENTS_HOST")\n',
+                chunk_hash="h1",
+                file_path="src/payments.py",
+                start_line=1,
+                end_line=1,
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_corpus(index_dir, "doc_full", [], [])
+    save_corpus(index_dir, "repo_doc", [], [])
+    save_corpus(index_dir, "relationship", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/payments.py": 'PAYMENTS_HOST = os.getenv("PAYMENTS_HOST")\n'},
+    )
+
+    class _DeepResearchToolChatClient:
+        def __init__(self) -> None:
+            self.sub_question_calls = 0
+            self.sub_question_prompts: list[str] = []
+
+        def complete(self, system: str, user: str) -> str:
+            if "alternative search queries" in system:
+                return ""
+            if "Break the given question into 2–4 focused sub-questions" in system:
+                return '["Where is PAYMENTS_HOST used?"]'
+            if "agent answering a specific sub-question" in system:
+                self.sub_question_calls += 1
+                self.sub_question_prompts.append(user)
+                if self.sub_question_calls == 1:
+                    return (
+                        '{"action": "read_file", "path": "src/payments.py", '
+                        '"start": "ten", "end": 20}'
+                    )
+                assert "Error: read_file 'start' and 'end' must be integers." in user
+                return "PAYMENTS_HOST is used in `src/payments.py`."
+            if "synthesising research findings" in system:
+                return "Deep answer grounded in `src/payments.py`."
+            return "Grounded answer"
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": False,
+                "iterative_retrieval": False,
+                "rerank": False,
+            },
+        }
+    }
+    chat_client = _DeepResearchToolChatClient()
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.deep_research("Explain PAYMENTS_HOST", max_rounds=1)
+
+    assert result["answer"] == "Deep answer grounded in `src/payments.py`."
+    assert "src/payments.py" in result["research_sources"]
+    assert chat_client.sub_question_calls >= 2
+    assert all("\\n\\n" not in prompt for prompt in chat_client.sub_question_prompts)
+
+
+def test_deep_research_does_not_cite_missing_read_file_target(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan([make_bucket("Schemas", "schemas", ["src/schema.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(index_dir, "code", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_corpus(index_dir, "doc_full", [], [])
+    save_corpus(index_dir, "repo_doc", [], [])
+    save_corpus(index_dir, "relationship", [], [])
+
+    class _DeepResearchMissingFileChatClient:
+        def __init__(self) -> None:
+            self.sub_question_calls = 0
+
+        def complete(self, system: str, user: str) -> str:
+            if "alternative search queries" in system:
+                return ""
+            if "Break the given question into 2–4 focused sub-questions" in system:
+                return '["List every schema"]'
+            if "agent answering a specific sub-question" in system:
+                self.sub_question_calls += 1
+                if self.sub_question_calls == 1:
+                    return (
+                        '{"action": "read_file", "path": "src/missing_schema.py", '
+                        '"start": 1, "end": 30}'
+                    )
+                return "No evidence found in retrieved context."
+            if "synthesising research findings" in system:
+                return "Could not find schema definitions from current evidence."
+            return "Grounded answer"
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": False,
+                "iterative_retrieval": False,
+                "rerank": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_DeepResearchMissingFileChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.deep_research("Tell me all schemas", max_rounds=1)
+
+    assert (
+        result["answer"] == "Could not find schema definitions from current evidence."
+    )
+    assert "src/missing_schema.py" not in result["research_sources"]
+
+
+def test_deep_research_grep_adds_matched_files_to_sources(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan([make_bucket("Payments", "payments", ["src/payments.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(index_dir, "code", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_corpus(index_dir, "doc_full", [], [])
+    save_corpus(index_dir, "repo_doc", [], [])
+    save_corpus(index_dir, "relationship", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/payments.py": 'PAYMENTS_HOST = os.getenv("PAYMENTS_HOST")\n'},
+    )
+
+    class _DeepResearchGrepSourcesChatClient:
+        def __init__(self) -> None:
+            self.sub_question_calls = 0
+
+        def complete(self, system: str, user: str) -> str:
+            if "alternative search queries" in system:
+                return ""
+            if "Break the given question into 2–4 focused sub-questions" in system:
+                return '["Where is PAYMENTS_HOST defined?"]'
+            if "agent answering a specific sub-question" in system:
+                self.sub_question_calls += 1
+                if self.sub_question_calls == 1:
+                    return '{"action": "grep", "pattern": "PAYMENTS_HOST"}'
+                assert "src/payments.py:1:" in user
+                return "PAYMENTS_HOST is defined in `src/payments.py`."
+            if "synthesising research findings" in system:
+                return "Deep answer grounded in `src/payments.py`."
+            return "Grounded answer"
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": False,
+                "iterative_retrieval": False,
+                "rerank": False,
+                "deep_research_live_fallback": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_DeepResearchGrepSourcesChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.deep_research("Where is PAYMENTS_HOST defined?", max_rounds=1)
+
+    assert result["answer"] == "Deep answer grounded in `src/payments.py`."
+    assert "src/payments.py" in result["research_sources"]
 
 
 def test_query_service_stitches_adjacent_code_chunks_for_exact_match(
@@ -759,7 +1321,7 @@ def test_deep_research_uses_extended_chunk_evidence(tmp_path: Path) -> None:
                 return ""
             if "Break the given question into 2–4 focused sub-questions" in system:
                 return '["How does the payment flow work?"]'
-            if "answering questions about a software codebase" in system:
+            if "agent answering a specific sub-question" in system:
                 assert "IMPORTANT_MARKER_AFTER_2200" in user
                 return "Step answer"
             if "synthesising research findings" in system:
@@ -792,6 +1354,87 @@ def test_deep_research_uses_extended_chunk_evidence(tmp_path: Path) -> None:
         result = service.deep_research("How does payments work?", max_rounds=1)
 
     assert result["answer"] == "Final answer"
+
+
+def test_deep_research_schema_question_uses_original_question_retrieval(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan([make_bucket("Database", "database", ["src/models.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="schema1",
+                kind="code",
+                source_key="src/models.py",
+                text=(
+                    "from django.db import models\n\n"
+                    "class User(models.Model):\n"
+                    "    email = models.EmailField(unique=True)\n"
+                ),
+                chunk_hash="schemahash1",
+                file_path="src/models.py",
+                start_line=1,
+                end_line=4,
+                symbol_names=["User"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_corpus(index_dir, "doc_full", [], [])
+    save_corpus(index_dir, "repo_doc", [], [])
+    save_corpus(index_dir, "relationship", [], [])
+
+    class _SchemaDeepResearchChatClient:
+        def complete(self, system: str, user: str) -> str:
+            if "alternative search queries" in system:
+                return ""
+            if "Break the given question into 2–4 focused sub-questions" in system:
+                return '["What schema files are used?"]'
+            if "agent answering a specific sub-question" in system:
+                assert "src/models.py" in user
+                return "Schemas include `src/models.py` with a `User` model."
+            if "synthesising research findings" in system:
+                return "Schema is defined in `src/models.py`."
+            return "Grounded answer"
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": False,
+                "iterative_retrieval": False,
+                "rerank": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_SchemaDeepResearchChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.deep_research("tell me all the schemabeing used", max_rounds=1)
+
+    assert result["answer"] == "Schema is defined in `src/models.py`."
+    assert "src/models.py" in result["research_sources"]
 
 
 def test_scan_index_query_end_to_end_on_falcon_fixture(tmp_path: Path) -> None:
@@ -1639,7 +2282,7 @@ def test_fastapi_deep_research_endpoint_uses_shared_history(tmp_path: Path) -> N
                 return "\n".join("8" for _ in lines) if lines else "8"
             if "Break the given question into 2–4 focused sub-questions" in system:
                 return '["Where is auth handled?", "Which config affects auth?"]'
-            if "answering questions about a software codebase" in system:
+            if "agent answering a specific sub-question" in system:
                 return "Auth is handled in `src/auth.py`."
             if "synthesising research findings" in system:
                 return "Deep answer grounded in `src/auth.py` and `auth.mdx`."

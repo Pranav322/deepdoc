@@ -36,6 +36,8 @@ from .generator import (
     escape_mdx_route_params,
     escape_mdx_text_hazards,
     normalize_code_fence_languages,
+    repair_unbalanced_code_fences,
+    repair_mdx_component_blocks,
     repair_internal_doc_links,
     summarize_generation_results,
 )
@@ -630,6 +632,8 @@ class PipelineV2:
         raw = self._validate_and_fix_mermaid(raw)
         raw = self._validate_file_refs(raw, scan, page)
         raw = normalize_code_fence_languages(raw)
+        raw = repair_unbalanced_code_fences(raw)
+        raw = repair_mdx_component_blocks(raw)
         raw = escape_mdx_route_params(raw)
         raw = escape_mdx_text_hazards(raw)
         doc_pages = [

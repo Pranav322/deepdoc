@@ -64,6 +64,7 @@ def fix_mermaid_diagrams(content: str) -> str:
 
 def _fix_mermaid_diagram(diagram: str) -> str:
     """Fix the most common Mermaid mistakes LLMs make."""
+
     def sanitize_edge_label(label: str) -> str:
         cleaned = re.sub(r"<br\s*/?>", " ", label, flags=re.IGNORECASE)
         cleaned = cleaned.replace("(", " ").replace(")", " ")
@@ -109,7 +110,7 @@ def _fix_mermaid_diagram(diagram: str) -> str:
             line = re.sub(
                 r'(-->|---|-.->|==>)\s*"([^"]+)"',
                 lambda m: (
-                    f'{m.group(1)} '
+                    f"{m.group(1)} "
                     f'{re.sub(r"[^A-Za-z0-9]+", "", m.group(2)).strip() or "Node"}["{m.group(2)}"]'
                 ),
                 line,
@@ -120,12 +121,12 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 line,
             )
             line = re.sub(
-                r'^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$',
+                r"^(\s*)([A-Za-z][\w-]*)\s*<--\s*([A-Za-z][\w-]*)\s*$",
                 lambda m: f"{m.group(1)}{m.group(3)} --> {m.group(2)}",
                 line,
             )
             line = re.sub(
-                r'^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$',
+                r"^(\s*)([A-Za-z][\w-]*)\s*<-->\s*([A-Za-z][\w-]*)\s*$",
                 lambda m: (
                     f"{m.group(1)}{m.group(2)} --> {m.group(3)}\n"
                     f"{m.group(1)}{m.group(3)} --> {m.group(2)}"
@@ -347,7 +348,10 @@ def repair_internal_doc_links(
                 ):
                     return candidate_url
 
-        if normalized in {"/architecture", "/overview", "/introduction"} and "/" in valid_urls:
+        if (
+            normalized in {"/architecture", "/overview", "/introduction"}
+            and "/" in valid_urls
+        ):
             return "/"
 
         return None
@@ -371,7 +375,9 @@ def repair_internal_doc_links(
 
         target = href_match.group("target")
         title_match = re.search(r'\btitle="(?P<title>[^"]+)"', attrs)
-        resolved = resolve_target(target, title=(title_match.group("title") if title_match else ""))
+        resolved = resolve_target(
+            target, title=(title_match.group("title") if title_match else "")
+        )
         if resolved is None:
             resolved = "/" if "/" in valid_urls else target
         if resolved == target:
@@ -425,7 +431,9 @@ def escape_mdx_route_params(content: str) -> str:
 
         parts = re.split(r"(`[^`]*`)", line)
         escaped = "".join(
-            part if part.startswith("`") and part.endswith("`") else escape_segment(part)
+            part
+            if part.startswith("`") and part.endswith("`")
+            else escape_segment(part)
             for part in parts
         )
         if "|" in line:
@@ -526,9 +534,26 @@ def escape_mdx_text_hazards(content: str) -> str:
         def escape_segment(part: str) -> str:
             part = re.sub(
                 r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)&gt;",
-                lambda match: f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>",
+                lambda match: (
+                    f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>"
+                ),
                 part,
             )
+            part = re.sub(
+                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)</(?P=tag)&gt;",
+                lambda match: (
+                    f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>"
+                ),
+                part,
+            )
+            part = re.sub(
+                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)>",
+                lambda match: (
+                    f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>"
+                ),
+                part,
+            )
+            part = re.sub(r"<br\s*/?>", "<br />", part, flags=re.IGNORECASE)
             if "|" in line:
                 part = re.sub(r"<br\s*/?>", " / ", part, flags=re.IGNORECASE)
             part = re.sub(r"<(?=\d)", "&lt;", part)
@@ -594,14 +619,42 @@ def normalize_code_fence_languages(content: str) -> str:
         normalized = alias_map.get(lang.lower(), lang)
         return f"{indent}```{normalized}{rest}"
 
-    return re.sub(r"^([ \t]*)```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE)
+    return re.sub(
+        r"^([ \t]*)```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE
+    )
+
+
+def repair_unbalanced_code_fences(content: str) -> str:
+    """Drop one trailing unmatched fence marker when fence count is odd."""
+
+    lines = content.splitlines()
+    fence_indexes = [
+        idx for idx, line in enumerate(lines) if line.lstrip().startswith("```")
+    ]
+    if len(fence_indexes) % 2 == 0:
+        return content
+
+    plain_fence_indexes = [
+        idx for idx in fence_indexes if re.match(r"^\s*```\s*$", lines[idx])
+    ]
+    drop_idx = plain_fence_indexes[-1] if plain_fence_indexes else fence_indexes[-1]
+    lines.pop(drop_idx)
+    repaired = "\n".join(lines)
+    if content.endswith("\n"):
+        repaired += "\n"
+    return repaired
 
 
 def normalize_html_code_blocks(content: str) -> str:
     """Convert raw HTML code blocks into fenced code blocks."""
 
     def replace_pre(match: re.Match) -> str:
-        body = match.group("body")
+        body = re.sub(
+            r"<br(\s*/?)>",
+            r"&lt;br\1&gt;",
+            match.group("body"),
+            flags=re.IGNORECASE,
+        )
         normalized = body.strip("\n")
         return f"```bash\n{normalized}\n```"
 
@@ -613,13 +666,24 @@ def normalize_html_code_blocks(content: str) -> str:
     )
 
     def replace_code(match: re.Match) -> str:
-        body = html.unescape(match.group("body"))
+        escaped_body = re.sub(
+            r"<br(\s*/?)>",
+            r"&lt;br\1&gt;",
+            match.group("body"),
+            flags=re.IGNORECASE,
+        )
+        body = html.unescape(escaped_body)
         normalized = body.strip("\n")
         if "\n" not in normalized:
-            return match.group(0)
-        language = "javascript" if any(
-            token in normalized for token in ("await ", "const ", "=>", "$set", "updateOne(")
-        ) else "text"
+            return f"<code>{escaped_body}</code>"
+        language = (
+            "javascript"
+            if any(
+                token in normalized
+                for token in ("await ", "const ", "=>", "$set", "updateOne(")
+            )
+            else "text"
+        )
         return f"\n```{language}\n{normalized}\n```\n"
 
     content = re.sub(
@@ -679,3 +743,49 @@ def normalize_mdx_steps(content: str) -> str:
         content,
         flags=re.DOTALL,
     )
+
+
+def repair_mdx_component_blocks(content: str) -> str:
+    """Repair malformed block-level JSX components in generated MDX.
+
+    LLM output sometimes emits inline-started components with fenced blocks, e.g.
+    `<Callout>Text:\n```bash ...` where the closing tag appears after the fence.
+    That structure breaks MDX parsing because the opening JSX tag is treated as an
+    inline node inside a paragraph. Normalize those cases into multiline blocks.
+    """
+
+    multiline_components = (
+        "Callout",
+        "Card",
+        "Tabs",
+        "Tab",
+        "Steps",
+        "Step",
+        "Accordions",
+        "Accordion",
+        "Frame",
+    )
+
+    for component in multiline_components:
+        pattern = re.compile(
+            rf"<({component})(\s[^>]*)?>([^\n<][^\n]*?):\s*\n(```[\s\S]*?```\s*</\1>)"
+        )
+
+        def _rewrite(match: re.Match) -> str:
+            name = match.group(1)
+            attrs = match.group(2) or ""
+            lead = match.group(3).strip()
+            tail = match.group(4)
+            return f"<{name}{attrs}>\n{lead}:\n\n{tail}"
+
+        content = pattern.sub(_rewrite, content)
+
+    for component in multiline_components:
+        open_count = len(re.findall(rf"<{component}(?:\s[^>]*)?>", content))
+        close_count = len(re.findall(rf"</{component}>", content))
+        if open_count <= close_count:
+            continue
+        deficit = open_count - close_count
+        content = content.rstrip() + (f"\n</{component}>" * deficit) + "\n"
+
+    return content

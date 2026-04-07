@@ -9,6 +9,56 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.3.0] - 2026-04-07
+
+DeepDoc 1.3.0 improves deep-research coverage, rebalances retrieval quality,
+and adds a scorecard workflow for release readiness checks.
+
+### Added
+
+- Added source-archive persistence for chatbot indexing (`source_archive.json.gz`)
+  so deep-research workflows can inspect repository files from indexed state.
+- Added an agent-style deep-research loop with bounded `read_file` and `grep`
+  tool actions over archived sources for multi-step investigation.
+- Added benchmark scorecard workflows in `deepdoc benchmark`, including
+  catalog-based and artifact-proxy scoring, scorecard JSON output, and strict
+  quality-gate enforcement.
+- Added retrieval diagnostics and API enhancements for chatbot backends,
+  including `POST /query-context` and `response_mode` in query responses.
+- Added generated `chatbot_backend/` scaffolding (`app.py`, schemas, settings,
+  requirements, and env example) for standalone chatbot deployment.
+
+### Changed
+
+- Updated deep-research retrieval to combine sub-question evidence with
+  original-question retrieval context and deeper per-step evidence budgets.
+- Rebalanced retrieval/rerank behavior across code, artifact, docs, and
+  relationship corpora with per-kind candidate balancing and expanded
+  query-intent heuristics.
+- Updated chatbot retrieval defaults and prompt-budget behavior to improve
+  runtime, flow, and architecture question coverage.
+- Updated README guidance around benchmark scorecards, chatbot retrieval modes,
+  and release flow details.
+
+### Fixed
+
+- Fixed deep-research answer continuity by routing long step and synthesis
+  responses through continuation-aware completion handling.
+- Fixed evidence-loss scenarios during reranking by preserving relationship
+  chunks as first-class candidates in final retrieval ordering.
+
+### Maintenance
+
+- Removed checked-in generated DeepDoc state and static site export artifacts
+  (`.deepdoc/*`, legacy plan/file-map snapshots, and `site/out/*`) to keep
+  release commits focused on source changes.
+
+### Docs And Tests
+
+- Added/expanded regression coverage for benchmark scorecards, source-archive
+  persistence, deep-research retrieval behavior, chatbot config/query/scaffold,
+  generation evidence validation, Fumadocs builder behavior, and JSON parsing.
+
 ## [1.2.0] - 2026-04-06
 
 DeepDoc 1.2.0 expands repo-grounded chatbot retrieval, broadens runtime extraction,

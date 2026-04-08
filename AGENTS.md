@@ -15,10 +15,15 @@ This file might be stale and if that is the case please update it first
 - Test runner: `pytest`
 - Main implementation path is the v2 bucket-based pipeline.
 - Generated docs usually live in `docs/`; the generated site lives in `site/`.
+- Repo also contains a VS Code extension module at `vscode-extension/` with its own Node/TypeScript toolchain and Marketplace release flow.
 
 ## Important Paths
 - `pyproject.toml`: packaging, dependencies, pytest discovery
 - `README.md`: user-facing behavior and documented workflows
+- `.github/workflows/release.yml`: Python package release automation (PyPI + GitHub release)
+- `.github/workflows/release-vscode-extension.yml`: VS Code extension release automation
+- `vscode-extension/package.json`: extension manifest, version, commands, settings
+- `vscode-extension/CHANGELOG.md`: extension release notes source
 - `deepdoc/cli.py`: Click commands, Rich output, serve/deploy flow
 - `deepdoc/config.py`: defaults and `.deepdoc.yaml` helpers
 - `deepdoc/pipeline_v2.py`: end-to-end orchestration
@@ -62,7 +67,16 @@ Treat these as generated or persisted outputs unless the task is specifically ab
 - `.deepdoc/generation_quality.json`
 - `docs/`, `site/`, `site/public/`, and `site/out/`
 - `build/`, `dist/`, `deepdoc.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
+- `vscode-extension/out/`, `vscode-extension/*.vsix`, `vscode-extension/node_modules/`
 - Test fixture apps under `tests/fixtures/` unless the scenario explicitly requires fixture changes
+
+## Multi-Release Rules
+- This repository has two independent release tracks:
+  - Python package release uses root `CHANGELOG.md` + `pyproject.toml` + `.github/workflows/release.yml`.
+  - VS Code extension release uses `vscode-extension/CHANGELOG.md` + `vscode-extension/package.json` + `.github/workflows/release-vscode-extension.yml`.
+- Do not mix versions or changelog entries between these tracks.
+- If extension behavior changes, update `vscode-extension/README.md` and `vscode-extension/CHANGELOG.md`.
+- If CLI/package behavior changes, update root `README.md` and root `CHANGELOG.md`.
 
 ## Install And Build Commands
 Prefer `python3` over `python` in this repo.

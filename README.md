@@ -1119,6 +1119,15 @@ Add your API key to repo Settings → Secrets → Actions → `ANTHROPIC_API_KEY
 
 DeepDoc now supports automated releases through GitHub Actions.
 
+### Release tracks
+
+This repository now has two independent release tracks:
+
+- **Python package (`deepdoc`)**: controlled by `pyproject.toml`, root `CHANGELOG.md`, and `.github/workflows/release.yml`.
+- **VS Code extension (`vscode-extension/`)**: controlled by `vscode-extension/package.json`, `vscode-extension/CHANGELOG.md`, and `.github/workflows/release-vscode-extension.yml`.
+
+Keep versions and changelog entries separated by track.
+
 ### What happens automatically
 
 When you push to `main`, the release workflow checks the version in `pyproject.toml`.
@@ -1175,6 +1184,30 @@ If the matching version section is missing, GitHub falls back to auto-generated 
 5. Set Workflow permissions to `Read and write permissions`
 
 After that, every new version pushed to `main` can publish without a PyPI token.
+
+### VS Code extension release flow
+
+The VS Code extension release is automated from `main` when files under `vscode-extension/` change.
+
+What the extension workflow does:
+
+- reads `vscode-extension/package.json` version
+- checks whether tag `vscode-extension-v<version>` already exists
+- builds and packages the extension
+- publishes to Marketplace using `VSCE_PAT`
+- creates and pushes the matching git tag
+- creates a GitHub release with notes from `vscode-extension/CHANGELOG.md` (fallback to generated notes)
+
+One-time setup for extension publishing:
+
+1. Create a VS Code Marketplace PAT with Manage scope for publisher `Pranawww`
+2. Add repo secret `VSCE_PAT` in GitHub Actions secrets
+
+Extension release flow on each version:
+
+1. Update `vscode-extension/package.json` version
+2. Add matching section to `vscode-extension/CHANGELOG.md`
+3. Commit and push to `main`
 
 ---
 

@@ -2,6 +2,17 @@
 
 All notable changes to the DeepDoc VS Code extension are documented here.
 
+## [0.0.2] - 2026-04-08
+
+### Added
+
+- Added automated VS Code Marketplace publishing workflow scoped to `vscode-extension/`.
+- Added auto-tagging and GitHub release creation for extension versions.
+
+### Changed
+
+- Moved extension into `vscode-extension/` for clear separation from Python package release flow.
+
 ## [0.0.1] - 2026-04-08
 
 ### Added

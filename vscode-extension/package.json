@@ -2,7 +2,7 @@
   "name": "deepdoc",
   "displayName": "DeepDoc",
   "description": "Explain selected snippets in Fast or Deep mode and insert docs above code.",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "publisher": "Pranawww",
   "repository": {
     "type": "git",

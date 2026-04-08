@@ -1,0 +1,172 @@
+name: Release VS Code Extension
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "vscode-extension/**"
+      - ".github/workflows/release-vscode-extension.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: release-vscode-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  publish-vscode-extension:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: vscode-extension
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: vscode-extension/package-lock.json
+
+      - name: Compute release version and tag
+        id: version
+        run: |
+          node -e '
+            const fs = require("fs");
+            const pkg = JSON.parse(fs.readFileSync("package.json", "utf8"));
+            const tag = `vscode-extension-v${pkg.version}`;
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `version=${pkg.version}\n`);
+            fs.appendFileSync(process.env.GITHUB_OUTPUT, `tag=${tag}\n`);
+            console.log(`Version: ${pkg.version}`);
+            console.log(`Tag: ${tag}`);
+          '
+
+      - name: Check whether tag already exists
+        id: check
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if git ls-remote --exit-code --tags origin "refs/tags/${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+            echo "Tag ${RELEASE_TAG} already exists. Skipping publish."
+          else
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+            echo "Tag ${RELEASE_TAG} does not exist. Publishing."
+          fi
+
+      - name: Install dependencies
+        if: steps.check.outputs.should_release == 'true'
+        run: npm ci
+
+      - name: Build extension
+        if: steps.check.outputs.should_release == 'true'
+        run: npm run compile
+
+      - name: Package VSIX
+        if: steps.check.outputs.should_release == 'true'
+        run: npx @vscode/vsce package
+
+      - name: Publish to VS Code Marketplace
+        if: steps.check.outputs.should_release == 'true'
+        run: npx @vscode/vsce publish --pat "${{ secrets.VSCE_PAT }}"
+
+      - name: Create git tag
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag "${RELEASE_TAG}" "${GITHUB_SHA}"
+          git push origin "${RELEASE_TAG}"
+
+      - name: Extract release notes from extension changelog
+        id: notes
+        if: steps.check.outputs.should_release == 'true'
+        env:
+          RELEASE_TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          python - <<'PY'
+          import os
+          import re
+          from pathlib import Path
+
+          tag = os.environ["RELEASE_TAG"]
+          version = tag.replace("vscode-extension-v", "", 1)
+          changelog_path = Path("CHANGELOG.md")
+          output_path = Path(os.environ["RUNNER_TEMP"]) / "vscode-extension-release-notes.md"
+          github_output = Path(os.environ["GITHUB_OUTPUT"])
+
+          if not changelog_path.exists():
+              with github_output.open("a", encoding="utf-8") as fh:
+                  fh.write("has_notes=false\n")
+              raise SystemExit(0)
+
+          heading_pattern = re.compile(
+              rf"^##\s+(?:\[{re.escape(version)}\]|{re.escape(version)}|v{re.escape(version)}|\[v{re.escape(version)}\])(?:\s+-\s+.+)?\s*$"
+          )
+          next_heading_pattern = re.compile(r"^##\s+")
+
+          lines = changelog_path.read_text(encoding="utf-8").splitlines()
+          start_index = None
+          end_index = len(lines)
+
+          for index, line in enumerate(lines):
+              if heading_pattern.match(line.strip()):
+                  start_index = index + 1
+                  break
+
+          if start_index is None:
+              with github_output.open("a", encoding="utf-8") as fh:
+                  fh.write("has_notes=false\n")
+              raise SystemExit(0)
+
+          for index in range(start_index, len(lines)):
+              if next_heading_pattern.match(lines[index].strip()):
+                  end_index = index
+                  break
+
+          body_lines = lines[start_index:end_index]
+          while body_lines and not body_lines[0].strip():
+              body_lines.pop(0)
+          while body_lines and not body_lines[-1].strip():
+              body_lines.pop()
+
+          if not body_lines:
+              with github_output.open("a", encoding="utf-8") as fh:
+                  fh.write("has_notes=false\n")
+              raise SystemExit(0)
+
+          output_path.write_text("\n".join(body_lines) + "\n", encoding="utf-8")
+
+          with github_output.open("a", encoding="utf-8") as fh:
+              fh.write("has_notes=true\n")
+              fh.write(f"notes_file={output_path}\n")
+          PY
+
+      - name: Create GitHub release (changelog notes)
+        if: steps.check.outputs.should_release == 'true' && steps.notes.outputs.has_notes == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" ./*.vsix \
+            --title "$TAG" \
+            --notes-file "${{ steps.notes.outputs.notes_file }}"
+
+      - name: Create GitHub release (generated notes)
+        if: steps.check.outputs.should_release == 'true' && steps.notes.outputs.has_notes != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          gh release create "$TAG" ./*.vsix \
+            --title "$TAG" \
+            --generate-notes

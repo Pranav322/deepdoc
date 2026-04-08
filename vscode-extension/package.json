@@ -1,0 +1,163 @@
+{
+  "name": "deepdoc",
+  "displayName": "DeepDoc",
+  "description": "Explain selected snippets in Fast or Deep mode and insert docs above code.",
+  "version": "0.0.1",
+  "publisher": "Pranawww",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/tss-pranavkumar/deepdoc.git",
+    "directory": "vscode-extension"
+  },
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished",
+    "onCommand:deepdoc.explainFast",
+    "onCommand:deepdoc.explainDeep",
+    "onCommand:deepdoc.testConnection",
+    "onCommand:deepdoc.configureApiKey",
+    "onCommand:deepdoc.clearApiKey"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "deepdoc.explainFast",
+        "title": "DeepDoc: Fast"
+      },
+      {
+        "command": "deepdoc.explainDeep",
+        "title": "DeepDoc: Deep"
+      },
+      {
+        "command": "deepdoc.testConnection",
+        "title": "DeepDoc: Test Connection"
+      },
+      {
+        "command": "deepdoc.configureApiKey",
+        "title": "DeepDoc: Set API Key"
+      },
+      {
+        "command": "deepdoc.clearApiKey",
+        "title": "DeepDoc: Clear API Key"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "deepdoc.explainFast",
+          "group": "navigation@10",
+          "when": "editorHasSelection"
+        },
+        {
+          "command": "deepdoc.explainDeep",
+          "group": "navigation@11",
+          "when": "editorHasSelection"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "deepdoc.explainFast",
+        "key": "ctrl+alt+e",
+        "mac": "cmd+alt+e",
+        "when": "editorTextFocus && editorHasSelection"
+      },
+      {
+        "command": "deepdoc.explainDeep",
+        "key": "ctrl+alt+d",
+        "mac": "cmd+alt+d",
+        "when": "editorTextFocus && editorHasSelection"
+      }
+    ],
+    "configuration": {
+      "title": "DeepDoc",
+      "properties": {
+        "deepdoc.baseUrl": {
+          "type": "string",
+          "default": "http://localhost:11434/v1",
+          "description": "OpenAI-compatible base URL."
+        },
+        "deepdoc.provider": {
+          "type": "string",
+          "enum": [
+            "openaiCompatible",
+            "azureOpenAI"
+          ],
+          "default": "openaiCompatible"
+        },
+        "deepdoc.azureApiVersion": {
+          "type": "string",
+          "default": "2024-02-15-preview"
+        },
+        "deepdoc.azureDeploymentName": {
+          "type": "string",
+          "default": ""
+        },
+        "deepdoc.fastModel": {
+          "type": "string",
+          "default": "llama3.2:latest"
+        },
+        "deepdoc.deepModel": {
+          "type": "string",
+          "default": "qwen3.5:latest"
+        },
+        "deepdoc.maxSelectedLines": {
+          "type": "number",
+          "default": 1000,
+          "minimum": 1
+        },
+        "deepdoc.includeContextLines": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0
+        },
+        "deepdoc.timeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "minimum": 1000
+        },
+        "deepdoc.fastMaxTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0
+        },
+        "deepdoc.deepMaxTokens": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0
+        },
+        "deepdoc.includeMetadataHeader": {
+          "type": "boolean",
+          "default": false
+        },
+        "deepdoc.includeMarkers": {
+          "type": "boolean",
+          "default": false
+        },
+        "deepdoc.replaceExistingBlock": {
+          "type": "boolean",
+          "default": true
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "vscode:prepublish": "npm run compile",
+    "package": "vsce package"
+  },
+  "devDependencies": {
+    "@types/node": "^20.16.10",
+    "@types/vscode": "^1.90.0",
+    "@vscode/vsce": "^3.2.2",
+    "typescript": "^5.6.3"
+  }
+}

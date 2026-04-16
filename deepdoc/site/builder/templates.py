@@ -286,6 +286,27 @@ def _global_css(cfg: dict[str, Any]) -> str:
           z-index: 60;
           width: min(56rem, calc(100vw - 2rem));
           transform: translateX(-50%);
+          opacity: 1;
+          will-change: transform, opacity;
+          transition:
+            transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+            opacity 260ms ease;
+        }
+
+        .deepdoc-chatbot-shell--visible {
+          opacity: 1;
+          transform: translateX(-50%);
+        }
+
+        .deepdoc-chatbot-shell--hidden {
+          opacity: 0.01;
+          transform: translate(-50%, calc(100% + 1rem));
+        }
+
+        .deepdoc-chatbot-shell--hidden .deepdoc-chatbot-dock {
+          pointer-events: none;
+          transform: translateY(0.7rem) scale(0.985);
+          filter: blur(6px);
         }
 
         .deepdoc-chatbot-dock {
@@ -298,6 +319,20 @@ def _global_css(cfg: dict[str, Any]) -> str:
             0 10px 28px rgba(131, 39, 25, 0.05),
             0 4px 10px rgba(235, 62, 37, 0.025);
           backdrop-filter: blur(8px);
+          transform-origin: center bottom;
+          will-change: transform, filter;
+          transition:
+            transform 320ms cubic-bezier(0.22, 1, 0.36, 1),
+            filter 220ms ease,
+            box-shadow 220ms ease,
+            border-color 220ms ease;
+        }
+
+        @media (prefers-reduced-motion: reduce) {
+          .deepdoc-chatbot-shell,
+          .deepdoc-chatbot-dock {
+            transition: none;
+          }
         }
 
         .deepdoc-chatbot-dock__meta {
@@ -1676,7 +1711,7 @@ def _chatbot_toggle_tsx() -> str:
         """\
         'use client';
 
-        import { startTransition, useState, type FormEvent, type KeyboardEvent } from 'react';
+        import { startTransition, useEffect, useRef, useState, type FormEvent, type KeyboardEvent } from 'react';
         import { usePathname, useRouter } from 'next/navigation';
         import { chatbotConfig } from '@/lib/chatbot-config';
 
@@ -1692,10 +1727,51 @@ def _chatbot_toggle_tsx() -> str:
         export function ChatbotToggle() {
           const pathname = usePathname();
           const router = useRouter();
+          const isEnabledOnPage = chatbotConfig.enabled && pathname !== '/ask';
           const [question, setQuestion] = useState('');
           const [mode, setMode] = useState<'fast' | 'deep' | 'code'>('fast');
+          const [isDockVisible, setIsDockVisible] = useState(true);
+          const lastScrollYRef = useRef(0);
 
-          if (!chatbotConfig.enabled || pathname === '/ask') return null;
+          useEffect(() => {
+            if (!isEnabledOnPage) return;
+            if (typeof window === 'undefined') return;
+
+            lastScrollYRef.current = window.scrollY;
+
+            let ticking = false;
+            const threshold = 18;
+
+            const syncVisibility = () => {
+              ticking = false;
+              const nextY = window.scrollY;
+              const delta = nextY - lastScrollYRef.current;
+              if (Math.abs(delta) < threshold) return;
+
+              if (nextY < 24) {
+                setIsDockVisible(true);
+                lastScrollYRef.current = nextY;
+                return;
+              }
+
+              setIsDockVisible(delta < 0);
+              lastScrollYRef.current = nextY;
+            };
+
+            const onScroll = () => {
+              if (ticking) return;
+              ticking = true;
+              window.requestAnimationFrame(syncVisibility);
+            };
+
+            window.addEventListener('scroll', onScroll, { passive: true });
+
+            return () => {
+              window.removeEventListener('scroll', onScroll);
+            };
+          }, [isEnabledOnPage]);
+
+          if (!isEnabledOnPage) return null;
 
           function submit(event?: FormEvent<HTMLFormElement>) {
             event?.preventDefault();
@@ -1708,7 +1784,7 @@ def _chatbot_toggle_tsx() -> str:
           }
 
           return (
-            <div className="deepdoc-chatbot-shell">
+            <div className={`deepdoc-chatbot-shell ${isDockVisible ? 'deepdoc-chatbot-shell--visible' : 'deepdoc-chatbot-shell--hidden'}`}>
               <form className="deepdoc-chatbot-dock" onSubmit={submit}>
                 <div className="deepdoc-chatbot-dock__meta">
                   <div className="min-w-0">
@@ -2162,11 +2238,51 @@ def _chatbot_panel_tsx() -> str:
           const [loadedMode, setLoadedMode] = useState<'fast' | 'deep' | 'code'>('fast');
           const [liveTrace, setLiveTrace] = useState<TraceEntry[]>([]);
           const [modalCitation, setModalCitation] = useState<CitationEntry | null>(null);
+          const [isDockVisible, setIsDockVisible] = useState(true);
           const latestRequestIdRef = useRef(0);
+          const lastScrollYRef = useRef(0);
 
           useEffect(() => {
             setMode(modeParam);
           }, [modeParam]);
+
+          useEffect(() => {
+            if (typeof window === 'undefined') return;
+
+            lastScrollYRef.current = window.scrollY;
+
+            let ticking = false;
+            const threshold = 18;
+
+            const syncVisibility = () => {
+              ticking = false;
+              const nextY = window.scrollY;
+
+              const delta = nextY - lastScrollYRef.current;
+              if (Math.abs(delta) < threshold) return;
+
+              if (nextY < 24) {
+                setIsDockVisible(true);
+                lastScrollYRef.current = nextY;
+                return;
+              }
+
+              setIsDockVisible(delta < 0);
+              lastScrollYRef.current = nextY;
+            };
+
+            const onScroll = () => {
+              if (ticking) return;
+              ticking = true;
+              window.requestAnimationFrame(syncVisibility);
+            };
+
+            window.addEventListener('scroll', onScroll, { passive: true });
+
+            return () => {
+              window.removeEventListener('scroll', onScroll);
+            };
+          }, []);
 
           useEffect(() => {
             if (!question) {
@@ -2563,7 +2679,7 @@ def _chatbot_panel_tsx() -> str:
                 />
               ) : null}
 
-              <div className="deepdoc-chatbot-shell">
+              <div className={`deepdoc-chatbot-shell ${isDockVisible ? 'deepdoc-chatbot-shell--visible' : 'deepdoc-chatbot-shell--hidden'}`}>
                 <form className="deepdoc-chatbot-dock" onSubmit={submit}>
                   <div className="deepdoc-chatbot-dock__meta">
                     <div className="min-w-0">

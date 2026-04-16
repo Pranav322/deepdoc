@@ -90,13 +90,25 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert "/deep-research" in panel
     assert "/code-deep" in panel
     assert "/code-deep/stream" in panel
+    assert "const [isDockVisible, setIsDockVisible] = useState(true);" in panel
+    assert "window.addEventListener('scroll', onScroll, { passive: true });" in panel
+    assert "setIsDockVisible(delta < 0);" in panel
+    assert "deepdoc-chatbot-shell--hidden" in panel
+    assert "matchMedia" not in panel
     assert "deepdoc-chatbot-mode-toggle" in panel
     assert "Code Aware" in panel
     assert "useRef" in panel
     assert "latestRequestIdRef" in panel
     assert "const [loading, setLoading] = useState(false);" in panel
     assert "usePathname" in toggle
+    assert "const isEnabledOnPage = chatbotConfig.enabled && pathname !== '/ask';" in toggle
     assert "buildAskUrl(trimmed, pathname || '/', mode)" in toggle
+    assert "if (!isEnabledOnPage) return;" in toggle
+    assert "if (!isEnabledOnPage) return null;" in toggle
+    assert "const [isDockVisible, setIsDockVisible] = useState(true);" in toggle
+    assert "window.addEventListener('scroll', onScroll, { passive: true });" in toggle
+    assert "setIsDockVisible(delta < 0);" in toggle
+    assert "deepdoc-chatbot-shell--hidden" in toggle
     assert "Chatbot backend URL is not configured." in panel
     assert "setResponse(null);" in panel
     assert "setLoading(false);" in panel

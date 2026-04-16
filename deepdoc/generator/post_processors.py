@@ -651,6 +651,128 @@ def repair_unbalanced_code_fences(content: str) -> str:
     return repaired
 
 
+def repair_dangling_plain_fences(content: str) -> str:
+    """Remove standalone fence lines that dangle outside a real code block."""
+
+    explanatory_prefixes = (
+        "expected:",
+        "output:",
+        "result:",
+        "response:",
+        "returns:",
+        "return:",
+        "you should see:",
+    )
+
+    lines = content.splitlines()
+    repaired: list[str] = []
+    in_fence = False
+
+    for idx, line in enumerate(lines):
+        stripped = line.strip()
+        plain_fence = re.match(r"^\s*```\s*$", line)
+        labeled_fence = re.match(r"^\s*```[A-Za-z0-9_+-]+", line)
+
+        if labeled_fence:
+            repaired.append(line)
+            in_fence = not in_fence
+            continue
+
+        if plain_fence:
+            if in_fence:
+                repaired.append(line)
+                in_fence = False
+                continue
+
+            prev_nonblank = ""
+            for prev in range(idx - 1, -1, -1):
+                candidate = lines[prev].strip().lower()
+                if candidate:
+                    prev_nonblank = candidate
+                    break
+
+            next_nonblank = ""
+            for nxt in range(idx + 1, len(lines)):
+                candidate = lines[nxt].strip()
+                if candidate:
+                    next_nonblank = candidate
+                    break
+
+            if (
+                any(prev_nonblank.startswith(prefix) for prefix in explanatory_prefixes)
+                or next_nonblank.startswith("</")
+            ):
+                continue
+
+            repaired.append(line)
+            in_fence = True
+            continue
+
+        repaired.append(line)
+
+    normalized = "\n".join(repaired)
+    if content.endswith("\n"):
+        normalized += "\n"
+    return normalized
+
+
+def normalize_explanatory_lines_outside_fences(content: str) -> str:
+    """Move prose lines like `Expected:` out of fenced code blocks.
+
+    LLM output sometimes leaves explanatory prose inside a shell/code fence,
+    which then cascades into malformed JSX children inside components like
+    <Tab>. Close the current fence before those prose lines and let the
+    existing fence-repair pass clean up any leftover trailing fence.
+    """
+
+    explanatory_prefixes = (
+        "expected:",
+        "output:",
+        "result:",
+        "response:",
+        "returns:",
+        "return:",
+        "you should see:",
+    )
+
+    lines = content.splitlines()
+    normalized: list[str] = []
+    in_fence = False
+    fence_indent = ""
+
+    idx = 0
+    while idx < len(lines):
+        line = lines[idx]
+        fence_match = re.match(r"^(\s*)```", line)
+        if fence_match:
+            normalized.append(line)
+            if in_fence:
+                in_fence = False
+                fence_indent = ""
+            else:
+                in_fence = True
+                fence_indent = fence_match.group(1)
+            idx += 1
+            continue
+
+        stripped = line.strip().lower()
+        if in_fence and any(stripped.startswith(prefix) for prefix in explanatory_prefixes):
+            normalized.append(f"{fence_indent}```")
+            in_fence = False
+            fence_indent = ""
+            next_idx = idx + 1
+            if next_idx < len(lines) and re.match(r"^\s*```\s*$", lines[next_idx]):
+                idx += 1
+
+        normalized.append(line)
+        idx += 1
+
+    repaired = "\n".join(normalized)
+    if content.endswith("\n"):
+        repaired += "\n"
+    return repaired
+
+
 def normalize_html_code_blocks(content: str) -> str:
     """Convert raw HTML code blocks into fenced code blocks."""
 

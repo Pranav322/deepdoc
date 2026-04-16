@@ -15,9 +15,11 @@ from .post_processors import (
     fix_file_references,
     fix_mermaid_diagrams,
     normalize_code_fence_languages,
+    normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
     normalize_mdx_steps,
     repair_internal_doc_links,
     repair_mdx_component_blocks,
+    repair_dangling_plain_fences,
     repair_unbalanced_code_fences,
 )

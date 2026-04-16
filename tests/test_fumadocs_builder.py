@@ -9,9 +9,11 @@ from deepdoc.generator import (
     escape_mdx_route_params,
     escape_mdx_text_hazards,
     normalize_code_fence_languages,
+    normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
     normalize_mdx_steps,
     repair_mdx_component_blocks,
+    repair_dangling_plain_fences,
     repair_internal_doc_links,
     repair_unbalanced_code_fences,
 )
@@ -110,6 +112,9 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     chatbot_panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(
         encoding="utf-8"
     )
+    chatbot_toggle = (repo_root / "site" / "components" / "chatbot-toggle.tsx").read_text(
+        encoding="utf-8"
+    )
     openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(
         encoding="utf-8"
     )
@@ -121,6 +126,10 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert '"url": "/api/get-order"' in page_tree
     assert "--deepdoc-brand-primary: #EB3E25;" in global_css
     assert ".deepdoc-chatbot-dock" in global_css
+    assert ".deepdoc-chatbot-shell--visible" in global_css
+    assert ".deepdoc-chatbot-shell--hidden" in global_css
+    assert "cubic-bezier(0.22, 1, 0.36, 1)" in global_css
+    assert "@media (prefers-reduced-motion: reduce)" in global_css
     assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists()
 
     package_json = json.loads(
@@ -157,10 +166,22 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "page.data as { body:" in docs_page
     assert "Suspense" in ask_page
     assert "<ChatbotPanel />" in ask_page
+    assert "const isEnabledOnPage = chatbotConfig.enabled && pathname !== '/ask';" in chatbot_toggle
+    assert "if (!isEnabledOnPage) return;" in chatbot_toggle
+    assert "if (!isEnabledOnPage) return null;" in chatbot_toggle
+    assert "const [isDockVisible, setIsDockVisible] = useState(true);" in chatbot_toggle
+    assert "window.addEventListener('scroll', onScroll, { passive: true });" in chatbot_toggle
+    assert "setIsDockVisible(delta < 0);" in chatbot_toggle
+    assert "deepdoc-chatbot-shell--hidden" in chatbot_toggle
     assert "!content.includes('\\n')" in chatbot_panel
     assert "/deep-research" in chatbot_panel
     assert "/code-deep" in chatbot_panel
     assert "/code-deep/stream" in chatbot_panel
+    assert "const [isDockVisible, setIsDockVisible] = useState(true);" in chatbot_panel
+    assert "window.addEventListener('scroll', onScroll, { passive: true });" in chatbot_panel
+    assert "setIsDockVisible(delta < 0);" in chatbot_panel
+    assert "deepdoc-chatbot-shell--hidden" in chatbot_panel
+    assert "matchMedia" not in chatbot_panel
     assert "deepdoc-chatbot-mode-toggle" in chatbot_panel
     assert "Code Aware" in chatbot_panel
     assert "deepdoc-chatbot-page__hero" not in chatbot_panel
@@ -886,6 +907,41 @@ def test_repair_unbalanced_code_fences_drops_last_unmatched_fence() -> None:
 
     assert repaired.count("```") == 2
     assert "\n    ```\n    ```" not in repaired
+
+
+def test_normalize_explanatory_lines_outside_fences_closes_fence_before_prose() -> None:
+    content = """<Tabs items={['curl']}>
+  <Tab value="curl">
+    ```bash
+    curl http://127.0.0.1:8000/admin/
+    Expected: HTML login page.
+    ```
+  </Tab>
+</Tabs>
+"""
+
+    normalized = normalize_explanatory_lines_outside_fences(content)
+
+    assert "curl http://127.0.0.1:8000/admin/\n    ```\n    Expected: HTML login page." in normalized
+    assert "Expected: HTML login page.\n    ```\n  </Tab>" not in normalized
+
+
+def test_repair_dangling_plain_fences_drops_fence_before_closing_tab() -> None:
+    content = """<Tabs items={['curl']}>
+  <Tab value="curl">
+    ```bash
+    curl http://127.0.0.1:8000/admin/
+    ```
+    Expected: HTML login page.
+    ```
+  </Tab>
+</Tabs>
+"""
+
+    repaired = repair_dangling_plain_fences(content)
+
+    assert repaired.count("```") == 2
+    assert "Expected: HTML login page.\n    ```\n  </Tab>" not in repaired
 
 
 def test_escape_mdx_text_hazards_repairs_mis_escaped_inline_closing_tags() -> None:

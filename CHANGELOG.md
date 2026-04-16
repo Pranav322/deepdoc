@@ -8,8 +8,19 @@ The automated release workflow reads the section that matches the version in
 ## Unreleased
 
 - Ongoing development.
+
+## [1.4.0] - 2026-04-17
+
+DeepDoc 1.4.0 adds a dedicated code-aware chatbot mode with live trace events
+and improves planner output quality for generated docs in large repositories.
+
+### Added
+
 - Added a dedicated code-aware chatbot mode with `POST /code-deep` and live SSE tracing via `POST /code-deep/stream`.
 - Added code-aware retrieval defaults, file inventory output, and generated site UI support for a third chatbot mode with live progress visibility.
+
+### Changed
+
 - Updated planner nav shaping to produce a reader-first, repo-agnostic flow that keeps backend docs in a natural order (`Start Here` → `Core Workflows` → `API Reference` → `Data Model` → runtime/integrations/ops) while preserving coverage.
 - Updated endpoint-reference nav grouping to live under `API Reference` and dedupe legacy setup overlap with `local-development-setup`.
 - Updated fallback orphan bucket naming/placement to reduce noisy `* and Related` module pages in generated navigation.

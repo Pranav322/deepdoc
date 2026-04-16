@@ -216,6 +216,37 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
     assert "leftJoin" in query_artifact.query_patterns[0]
 
 
+def test_database_grouping_coalesces_sparse_singleton_models() -> None:
+    parsed_files: dict[str, ParsedFile] = {}
+    file_contents: dict[str, str] = {}
+
+    for index in range(10):
+        file_path = f"models/model_{index}.py"
+        class_name = f"Model{index}"
+        parsed_files[file_path] = _parsed_file(
+            file_path,
+            symbols=[
+                Symbol(
+                    name=class_name,
+                    kind="class",
+                    signature=f"class {class_name}(models.Model):",
+                )
+            ],
+        )
+        file_contents[file_path] = (
+            "from django.db import models\n\n"
+            f"class {class_name}(models.Model):\n"
+            "    name = models.CharField(max_length=64)\n"
+        )
+
+    db_scan = discover_database_schema(parsed_files, file_contents, {}, Path("."))
+
+    assert len(db_scan.groups) < 10
+    core_group = next(group for group in db_scan.groups if group.key == "core-models")
+    assert len(core_group.file_paths) == 10
+    assert len(core_group.model_names) == 10
+
+
 def test_discover_config_impacts_maps_keys_to_files_and_endpoints() -> None:
     file_contents = {
         "settings.py": "API_PREFIX = '/api/v2'\nPAYMENTS_HOST = os.getenv('PAYMENTS_HOST', 'https://pay.example')\n",

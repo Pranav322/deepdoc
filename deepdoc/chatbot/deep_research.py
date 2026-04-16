@@ -21,7 +21,8 @@ from dataclasses import dataclass, field
 import json
 import logging
 import re
-from typing import Any
+from time import time
+from typing import Any, Callable
 
 logger = logging.getLogger(__name__)
 
@@ -61,7 +62,16 @@ class DeepResearcher:
     ask arbitrary questions that cut across multiple files and services.
     """
 
-    def __init__(self, service: Any, llm: Any, top_k: int = 10, max_rounds: int = 3):
+    def __init__(
+        self,
+        service: Any,
+        llm: Any,
+        top_k: int = 10,
+        max_rounds: int = 3,
+        *,
+        mode: str = "deep",
+        trace_callback: Callable[[dict[str, Any]], None] | None = None,
+    ):
         """
         Args:
             service: ChatbotQueryService instance (has .query(question, top_k) method).
@@ -73,6 +83,26 @@ class DeepResearcher:
         self.llm = llm
         self.top_k = top_k
         self.max_rounds = max_rounds
+        self.mode = mode
+        self.trace_callback = trace_callback
+
+    def _emit_trace(self, phase: str, message: str, **data: Any) -> None:
+        callback = self.trace_callback
+        if not callable(callback):
+            return
+        payload: dict[str, Any] = {
+            "phase": phase,
+            "message": message,
+            "mode": self.mode,
+            "timestamp": int(time() * 1000),
+        }
+        for key, value in data.items():
+            if value is not None:
+                payload[key] = value
+        try:
+            callback(payload)
+        except Exception:
+            logger.debug("[deep_research] Trace callback failed", exc_info=True)
 
     def research(
         self,
@@ -82,27 +112,71 @@ class DeepResearcher:
         """Run a full deep research session for the given question."""
         logger.info(f"[deep_research] Starting research: {question[:80]}")
         history = (history or [])[-4:]
+        self._emit_trace(
+            "start",
+            "Starting research session",
+            question=question,
+            max_rounds=self.max_rounds,
+            top_k=self.top_k,
+        )
 
         # Step 1: Decompose
         sub_questions = self._decompose(question, history)
         logger.info(
             f"[deep_research] Decomposed into {len(sub_questions)} sub-questions"
         )
+        self._emit_trace(
+            "decompose",
+            "Generated focused sub-questions",
+            sub_questions=sub_questions,
+            sub_question_count=len(sub_questions),
+        )
 
         # Step 2+3: Retrieve and answer each sub-question
         steps: list[ResearchStep] = []
         all_source_files: list[str] = []
 
-        for sq in sub_questions[: self.max_rounds]:
-            step_result = self._agent_loop(sq, history, question)
+        for step_index, sq in enumerate(sub_questions[: self.max_rounds], start=1):
+            self._emit_trace(
+                "step_start",
+                "Researching sub-question",
+                step=step_index,
+                question=sq,
+            )
+            step_result = self._agent_loop(
+                sq,
+                history,
+                question,
+                step=step_index,
+            )
             steps.append(step_result)
             all_source_files.extend(
                 s for s in step_result.sources if s not in all_source_files
             )
+            self._emit_trace(
+                "step_done",
+                "Completed sub-question",
+                step=step_index,
+                question=sq,
+                chunks_used=step_result.chunks_used,
+                sources=step_result.sources,
+            )
 
         # Step 4: Synthesise
+        self._emit_trace(
+            "synthesise_start",
+            "Synthesising final answer",
+            step_count=len(steps),
+        )
         final_answer = self._synthesise(question, steps, history)
         confidence = self._estimate_confidence(steps)
+        self._emit_trace(
+            "done",
+            "Finished research session",
+            confidence=confidence,
+            source_count=len(all_source_files),
+            step_count=len(steps),
+        )
 
         return ResearchResult(
             original_question=question,
@@ -119,6 +193,8 @@ class DeepResearcher:
         question: str,
         history: list[dict[str, str]],
         original_question: str,
+        *,
+        step: int,
     ) -> list[Any]:
         """Retrieve chunks for a single question using the service's retrieval."""
         try:
@@ -130,7 +206,7 @@ class DeepResearcher:
                     question,
                     history,
                     original_question=original_question,
-                    mode="deep",
+                    mode=self.mode,
                 )
             except TypeError:
                 context = retrieve_context(
@@ -147,7 +223,7 @@ class DeepResearcher:
                             original_question,
                             history,
                             original_question=original_question,
-                            mode="deep",
+                            mode=self.mode,
                         )
                     except TypeError:
                         root_context = retrieve_context(
@@ -168,6 +244,15 @@ class DeepResearcher:
                     chunk_id not in best_hits or hit.score > best_hits[chunk_id].score
                 ):
                     best_hits[chunk_id] = hit
+
+            self._emit_trace(
+                "retrieve",
+                "Retrieved indexed evidence",
+                step=step,
+                question=question,
+                retrieved=len(best_hits),
+            )
+
             fallback = getattr(self.service, "live_research_fallback", None)
             should_fallback = getattr(self.service, "should_use_live_fallback", None)
             if callable(fallback) and callable(should_fallback):
@@ -175,6 +260,12 @@ class DeepResearcher:
                     best_hits.values(), key=lambda hit: hit.score, reverse=True
                 )
                 if should_fallback(question, ranked_hits[: self.top_k]):
+                    self._emit_trace(
+                        "fallback_start",
+                        "Indexed evidence was weak, checking archived source",
+                        step=step,
+                        question=question,
+                    )
                     fallback_hits = fallback(
                         question,
                         history,
@@ -188,11 +279,25 @@ class DeepResearcher:
                             or hit.score > best_hits[chunk_id].score
                         ):
                             best_hits[chunk_id] = hit
+                    self._emit_trace(
+                        "fallback_done",
+                        "Added archived-source fallback evidence",
+                        step=step,
+                        question=question,
+                        fallback_hits=len(fallback_hits),
+                    )
             return sorted(best_hits.values(), key=lambda hit: hit.score, reverse=True)[
                 : self.top_k
             ]
         except Exception as e:
             logger.warning(f"[deep_research] Retrieval failed: {e}")
+            self._emit_trace(
+                "retrieve_error",
+                "Failed to retrieve evidence",
+                step=step,
+                question=question,
+                error=str(e),
+            )
             return []
 
     def _decompose(self, question: str, history: list[dict[str, str]]) -> list[str]:
@@ -238,10 +343,17 @@ class DeepResearcher:
         question: str,
         history: list[dict[str, str]],
         original_question: str,
+        *,
+        step: int,
     ) -> ResearchStep:
         """Run a Tool-Using ReAct loop for a single sub-question."""
         max_iterations = 3
-        chunks = self._retrieve_for_question(question, history, original_question)
+        chunks = self._retrieve_for_question(
+            question,
+            history,
+            original_question,
+            step=step,
+        )
         sources_used = list(
             dict.fromkeys(
                 getattr(c.record, "file_path", None)
@@ -310,13 +422,38 @@ class DeepResearcher:
             tool_call = _extract_json_object(response)
             if tool_call and isinstance(tool_call, dict) and "action" in tool_call:
                 turn_history.append({"role": "assistant", "content": response})
+                self._emit_trace(
+                    "tool_call",
+                    "Running archive inspection tool",
+                    step=step,
+                    question=question,
+                    iteration=iteration + 1,
+                    action=str(tool_call.get("action", "")),
+                    path=str(tool_call.get("path", "")) or None,
+                    pattern=str(tool_call.get("pattern", "")) or None,
+                )
                 try:
                     output = self._execute_tool(tool_call, sources_used)
                 except Exception as e:
                     logger.warning(f"[deep_research] Tool execution failed: {e}")
                     output = f"Error: Tool execution failed - {e}"
                 turn_history.append({"role": "tool", "content": output})
+                self._emit_trace(
+                    "tool_result",
+                    "Tool output received",
+                    step=step,
+                    question=question,
+                    iteration=iteration + 1,
+                    output_preview=output[:240],
+                )
             else:
+                self._emit_trace(
+                    "step_answer",
+                    "Produced sub-question answer",
+                    step=step,
+                    question=question,
+                    chunks_used=len(chunks) + iteration,
+                )
                 return ResearchStep(
                     question=question,
                     answer=response,

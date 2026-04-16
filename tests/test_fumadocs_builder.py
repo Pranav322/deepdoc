@@ -159,7 +159,16 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "<ChatbotPanel />" in ask_page
     assert "!content.includes('\\n')" in chatbot_panel
     assert "/deep-research" in chatbot_panel
+    assert "/code-deep" in chatbot_panel
+    assert "/code-deep/stream" in chatbot_panel
     assert "deepdoc-chatbot-mode-toggle" in chatbot_panel
+    assert "Code Aware" in chatbot_panel
+    assert "deepdoc-chatbot-page__hero" not in chatbot_panel
+    assert "Grounded answer" not in chatbot_panel
+    assert "Research trace" not in chatbot_panel
+    assert "deepdoc-chatbot-trace" in chatbot_panel
+    assert "toTraceLine(entry)" in chatbot_panel
+    assert "traceHeader(liveTrace)" in chatbot_panel
     assert (
         "mode=fast|deep" not in chatbot_panel
     )  # URL state is runtime-built, not hardcoded
@@ -708,6 +717,16 @@ Inline code: `<code>server.js&lt;/code&gt;`
         in escaped
     )
     assert "Inline code: `<code>server.js&lt;/code&gt;`" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_json_literals_inside_inline_code_tags() -> (
+    None
+):
+    content = '<Callout type="info">You should see <code>{"status": "ok"}</code> or similar.</Callout>'
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert '<code>&#123;"status": "ok"&#125;</code>' in escaped
 
 
 def test_normalize_code_fence_languages_rewrites_env_aliases() -> None:

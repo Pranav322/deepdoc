@@ -80,9 +80,18 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     )
     assert "ReactMarkdown" in panel
     assert "Back to docs" in panel
+    assert "deepdoc-chatbot-page__hero" not in panel
+    assert "Grounded answer" not in panel
+    assert "Research trace" not in panel
+    assert "deepdoc-chatbot-trace" in panel
+    assert "toTraceLine(entry)" in panel
+    assert "traceHeader(liveTrace)" in panel
     assert "router.replace(buildAskUrl(trimmed, from" in panel
     assert "/deep-research" in panel
+    assert "/code-deep" in panel
+    assert "/code-deep/stream" in panel
     assert "deepdoc-chatbot-mode-toggle" in panel
+    assert "Code Aware" in panel
     assert "useRef" in panel
     assert "latestRequestIdRef" in panel
     assert "const [loading, setLoading] = useState(false);" in panel

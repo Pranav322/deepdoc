@@ -1,5 +1,6 @@
 from .common import *
 
+
 def _package_json(project_name: str) -> str:
     return (
         json.dumps(
@@ -840,6 +841,103 @@ def _global_css(cfg: dict[str, Any]) -> str:
           font-size: 0.78rem;
         }
 
+        .deepdoc-chatbot-trace {
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 14%, var(--color-fd-border) 86%);
+          border-radius: 1rem;
+          padding: 0.85rem 0.9rem;
+          background: color-mix(in srgb, white 96%, var(--deepdoc-brand-light) 4%);
+        }
+
+        .deepdoc-chatbot-trace__header {
+          display: flex;
+          align-items: center;
+          gap: 0.55rem;
+          margin-bottom: 0.6rem;
+          color: #2f120d;
+          font-size: 0.93rem;
+        }
+
+        .deepdoc-chatbot-trace__header strong {
+          flex: 1;
+          min-width: 0;
+          font-weight: 600;
+          color: inherit;
+        }
+
+        .deepdoc-chatbot-trace__header span {
+          font-size: 0.82rem;
+          color: var(--color-fd-muted-foreground);
+        }
+
+        .deepdoc-chatbot-trace__dot {
+          width: 0.52rem;
+          height: 0.52rem;
+          border-radius: 999px;
+          background: var(--deepdoc-brand-primary);
+          box-shadow: 0 0 0 0 rgba(235, 62, 37, 0.4);
+          animation: deepdoc-chatbot-trace-pulse 1.4s ease-in-out infinite;
+          flex-shrink: 0;
+        }
+
+        .deepdoc-chatbot-trace__bar {
+          width: 100%;
+          height: 0.42rem;
+          border-radius: 999px;
+          background: color-mix(in srgb, var(--deepdoc-brand-light) 14%, white 86%);
+          overflow: hidden;
+          margin-bottom: 0.72rem;
+        }
+
+        .deepdoc-chatbot-trace__bar > span {
+          display: block;
+          height: 100%;
+          border-radius: inherit;
+          background: linear-gradient(90deg, var(--deepdoc-brand-light), var(--deepdoc-brand-primary));
+          transition: width 180ms ease;
+        }
+
+        .deepdoc-chatbot-trace__lines {
+          margin: 0;
+          padding: 0;
+          max-height: 11.25rem;
+          overflow-y: auto;
+          list-style: none;
+          display: grid;
+          gap: 0.36rem;
+        }
+
+        .deepdoc-chatbot-trace__lines li {
+          display: block;
+          font-size: 0.87rem;
+          line-height: 1.35;
+          color: var(--color-fd-muted-foreground);
+          opacity: 0.8;
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          padding-left: 0.75rem;
+          position: relative;
+        }
+
+        .deepdoc-chatbot-trace__lines li::before {
+          content: '-';
+          position: absolute;
+          left: 0;
+          color: color-mix(in srgb, var(--deepdoc-brand-primary) 56%, var(--color-fd-muted-foreground) 44%);
+        }
+
+        @keyframes deepdoc-chatbot-trace-pulse {
+          0% {
+            box-shadow: 0 0 0 0 rgba(235, 62, 37, 0.3);
+          }
+          70% {
+            box-shadow: 0 0 0 0.48rem rgba(235, 62, 37, 0);
+          }
+          100% {
+            box-shadow: 0 0 0 0 rgba(235, 62, 37, 0);
+          }
+        }
+
         /* Code modal overlay */
         .deepdoc-code-modal-overlay {
           position: fixed;
@@ -1142,6 +1240,26 @@ def _global_css(cfg: dict[str, Any]) -> str:
         :is(.dark, [data-theme='dark']) .deepdoc-chatbot-citation-list__action {
           border-color: rgba(255, 255, 255, 0.08);
           background: rgba(255, 237, 233, 0.06);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-trace {
+          border-color: rgba(255, 255, 255, 0.1);
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+            #131520;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-trace__header {
+          color: #fff1ed;
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-trace__header span,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-trace__lines li {
+          color: rgba(226, 232, 240, 0.72);
+        }
+
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-trace__bar {
+          background: rgba(255, 255, 255, 0.09);
         }
 
         :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer__inline-code {
@@ -1562,7 +1680,7 @@ def _chatbot_toggle_tsx() -> str:
         import { usePathname, useRouter } from 'next/navigation';
         import { chatbotConfig } from '@/lib/chatbot-config';
 
-        function buildAskUrl(question: string, from: string, mode: 'fast' | 'deep' = 'fast') {
+        function buildAskUrl(question: string, from: string, mode: 'fast' | 'deep' | 'code' = 'fast') {
           const params = new URLSearchParams({
             q: question,
             from: from || '/',
@@ -1575,7 +1693,7 @@ def _chatbot_toggle_tsx() -> str:
           const pathname = usePathname();
           const router = useRouter();
           const [question, setQuestion] = useState('');
-          const [mode, setMode] = useState<'fast' | 'deep'>('fast');
+          const [mode, setMode] = useState<'fast' | 'deep' | 'code'>('fast');
 
           if (!chatbotConfig.enabled || pathname === '/ask') return null;
 
@@ -1617,6 +1735,13 @@ def _chatbot_toggle_tsx() -> str:
                     type="button"
                   >
                     Deep Research
+                  </button>
+                  <button
+                    className={`deepdoc-chatbot-mode-toggle ${mode === 'code' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                    onClick={() => setMode('code')}
+                    type="button"
+                  >
+                    Code Aware
                   </button>
                 </div>
                 <div className="deepdoc-chatbot-dock__row">
@@ -1678,8 +1803,41 @@ def _chatbot_panel_tsx() -> str:
           }>;
           used_chunks: number;
           confidence?: string;
-          research_mode?: 'deep';
+          response_mode?: 'fast' | 'default' | 'deep' | 'code_deep';
+          research_mode?: 'deep' | 'code_deep';
           research_sources?: string[];
+          trace?: TraceEntry[];
+          file_inventory?: FileInventoryEntry[];
+        };
+
+        type TraceEntry = {
+          index?: number;
+          phase: string;
+          message: string;
+          mode?: string;
+          timestamp?: number;
+          step?: number;
+          max_rounds?: number;
+          sub_question_count?: number;
+          question?: string;
+          action?: string;
+          path?: string;
+          pattern?: string;
+          output_preview?: string;
+          retrieved?: number;
+          fallback_hits?: number;
+          source_count?: number;
+          confidence?: string;
+        };
+
+        type FileInventoryEntry = {
+          file_path: string;
+          score: number;
+          reasons: string[];
+          source_kind?: string;
+          publication_tier?: string;
+          symbol_names?: string[];
+          line_ranges?: string[];
         };
 
         type ChatHistoryItem = {
@@ -1687,13 +1845,115 @@ def _chatbot_panel_tsx() -> str:
           content: string;
         };
 
-        function buildAskUrl(question: string, from: string, mode: 'fast' | 'deep' = 'fast') {
+        function buildAskUrl(question: string, from: string, mode: 'fast' | 'deep' | 'code' = 'fast') {
           const params = new URLSearchParams({
             q: question,
             from: from || '/',
             mode,
           });
           return `/ask?${params.toString()}`;
+        }
+
+        function parseSseChunk(buffer: string) {
+          const blocks = buffer.split('\\n\\n');
+          const complete = blocks.slice(0, -1);
+          const remainder = blocks[blocks.length - 1] || '';
+          const events: Array<{ event: string; data: string }> = [];
+          for (const block of complete) {
+            let event = 'message';
+            const data: string[] = [];
+            for (const line of block.split('\\n')) {
+              if (line.startsWith('event:')) {
+                event = line.slice(6).trim() || 'message';
+              } else if (line.startsWith('data:')) {
+                data.push(line.slice(5).trim());
+              }
+            }
+            events.push({ event, data: data.join('\\n') });
+          }
+          return { events, remainder };
+        }
+
+        function toTraceLine(entry: TraceEntry): string {
+          if (entry.phase === 'tool_call') {
+            if (entry.action === 'grep') {
+              const pattern = entry.pattern ? `"${entry.pattern}"` : 'pattern';
+              const scope = entry.path ? ` in ${entry.path}` : '';
+              return `Searched ${pattern}${scope}`;
+            }
+            if (entry.action === 'read_file') {
+              return `Read ${entry.path || 'a file'}`;
+            }
+            return `Ran ${entry.action || 'tool'}${entry.path ? ` on ${entry.path}` : ''}`;
+          }
+          if (entry.phase === 'retrieve') {
+            return `Retrieved ${entry.retrieved ?? 0} indexed chunks`;
+          }
+          if (entry.phase === 'fallback_start') {
+            return 'Indexed evidence looked weak, checking archived source';
+          }
+          if (entry.phase === 'fallback_done') {
+            return `Added ${entry.fallback_hits ?? 0} archived-source hits`;
+          }
+          if (entry.phase === 'step_start') {
+            return `Working on step ${entry.step ?? '?'}${entry.question ? `: ${entry.question}` : ''}`;
+          }
+          if (entry.phase === 'step_done') {
+            return `Completed step ${entry.step ?? '?'}`;
+          }
+          if (entry.phase === 'decompose') {
+            return `Planned ${entry.sub_question_count ?? '?'} focused research steps`;
+          }
+          if (entry.phase === 'synthesise_start') {
+            return 'Synthesizing final answer';
+          }
+          if (entry.phase === 'done') {
+            return 'Answer ready';
+          }
+          return entry.message;
+        }
+
+        function traceHeader(trace: TraceEntry[]) {
+          const latest = trace[trace.length - 1];
+          if (!latest) {
+            return { title: 'Analyzing code', current: 0, total: 0, progressPct: 8 };
+          }
+
+          let total = 0;
+          let current = 0;
+          for (const entry of trace) {
+            if (typeof entry.sub_question_count === 'number') {
+              total = Math.max(total, entry.sub_question_count);
+            }
+            if (typeof entry.max_rounds === 'number') {
+              total = Math.max(total, entry.max_rounds);
+            }
+            if (typeof entry.step === 'number') {
+              current = Math.max(current, entry.step);
+            }
+          }
+
+          const inferred = trace.filter((entry) => entry.phase === 'step_start').length;
+          if (!total) total = inferred;
+          if (!current && latest.phase !== 'start') current = inferred;
+          if (latest.phase === 'done') current = Math.max(current, total || 1);
+
+          const normalizedTotal = Math.max(total, 1);
+          const normalizedCurrent = Math.max(Math.min(current || 1, normalizedTotal), 1);
+          const title = latest.phase === 'done'
+            ? 'Answer ready'
+            : latest.phase === 'synthesise_start'
+              ? 'Synthesizing answer'
+              : latest.phase === 'decompose'
+                ? 'Planning research'
+                : 'Analyzing code';
+
+          return {
+            title,
+            current: normalizedCurrent,
+            total: normalizedTotal,
+            progressPct: Math.max(8, Math.round((normalizedCurrent / normalizedTotal) * 100)),
+          };
         }
 
         function formatLines(startLine: number, endLine: number) {
@@ -1889,16 +2149,18 @@ def _chatbot_panel_tsx() -> str:
           const searchParams = useSearchParams();
           const question = searchParams.get('q')?.trim() ?? '';
           const from = searchParams.get('from')?.trim() || '/';
-          const modeParam = searchParams.get('mode') === 'deep' ? 'deep' : 'fast';
+          const modeParamRaw = searchParams.get('mode');
+          const modeParam: 'fast' | 'deep' | 'code' = modeParamRaw === 'deep' ? 'deep' : modeParamRaw === 'code' ? 'code' : 'fast';
           const [draft, setDraft] = useState('');
-          const [mode, setMode] = useState<'fast' | 'deep'>(modeParam);
+          const [mode, setMode] = useState<'fast' | 'deep' | 'code'>(modeParam);
           const [activeQuestion, setActiveQuestion] = useState(question);
           const [loading, setLoading] = useState(false);
           const [error, setError] = useState('');
           const [response, setResponse] = useState<ChatResponse | null>(null);
           const [history, setHistory] = useState<ChatHistoryItem[]>([]);
           const [loadedQuestion, setLoadedQuestion] = useState('');
-          const [loadedMode, setLoadedMode] = useState<'fast' | 'deep'>('fast');
+          const [loadedMode, setLoadedMode] = useState<'fast' | 'deep' | 'code'>('fast');
+          const [liveTrace, setLiveTrace] = useState<TraceEntry[]>([]);
           const [modalCitation, setModalCitation] = useState<CitationEntry | null>(null);
           const latestRequestIdRef = useRef(0);
 
@@ -1915,6 +2177,7 @@ def _chatbot_panel_tsx() -> str:
               setResponse(null);
               setHistory([]);
               setLoadedQuestion('');
+              setLiveTrace([]);
               return;
             }
             if (question === loadedQuestion && modeParam === loadedMode) return;
@@ -1924,7 +2187,7 @@ def _chatbot_panel_tsx() -> str:
           async function askQuestion(
             nextQuestion: string,
             nextHistory: ChatHistoryItem[],
-            nextMode: 'fast' | 'deep',
+            nextMode: 'fast' | 'deep' | 'code',
           ) {
             if (!nextQuestion.trim()) return;
             if (!chatbotConfig.apiBaseUrl) {
@@ -1940,7 +2203,95 @@ def _chatbot_panel_tsx() -> str:
             setLoading(true);
             setError('');
             setResponse(null);
+            setLiveTrace([]);
             try {
+              if (nextMode === 'code') {
+                const streamRes = await fetch(`${chatbotConfig.apiBaseUrl}/code-deep/stream`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    question: nextQuestion,
+                    history: nextHistory,
+                    max_rounds: 4,
+                  }),
+                });
+
+                if (!streamRes.ok || !streamRes.body) {
+                  const fallbackRes = await fetch(`${chatbotConfig.apiBaseUrl}/code-deep`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      question: nextQuestion,
+                      history: nextHistory,
+                      max_rounds: 4,
+                    }),
+                  });
+                  if (!fallbackRes.ok) {
+                    throw new Error(`Request failed with ${fallbackRes.status}`);
+                  }
+                  const fallbackData = (await fallbackRes.json()) as ChatResponse;
+                  if (latestRequestIdRef.current != requestId) return;
+                  setActiveQuestion(nextQuestion);
+                  setMode(nextMode);
+                  setResponse(fallbackData);
+                  setLiveTrace([]);
+                  setHistory([
+                    ...nextHistory,
+                    { role: 'user', content: nextQuestion },
+                    { role: 'assistant', content: fallbackData.answer },
+                  ]);
+                  return;
+                }
+
+                const reader = streamRes.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+                let streamResult: ChatResponse | null = null;
+
+                while (true) {
+                  if (latestRequestIdRef.current != requestId) {
+                    return;
+                  }
+                  const { done, value } = await reader.read();
+                  if (done) break;
+                  buffer += decoder.decode(value, { stream: true });
+                  const parsed = parseSseChunk(buffer);
+                  buffer = parsed.remainder;
+                  for (const ev of parsed.events) {
+                    if (ev.event === 'trace') {
+                      try {
+                        const payload = JSON.parse(ev.data) as TraceEntry;
+                        setLiveTrace(prev => [...prev, payload]);
+                      } catch {
+                        // ignore malformed trace frame
+                      }
+                    } else if (ev.event === 'result') {
+                      streamResult = JSON.parse(ev.data) as ChatResponse;
+                    } else if (ev.event === 'error') {
+                      const payload = JSON.parse(ev.data) as { detail?: string };
+                      throw new Error(payload.detail || 'Code-aware research failed');
+                    }
+                  }
+                }
+
+                if (!streamResult) {
+                  throw new Error('Code-aware stream ended without a result');
+                }
+                if (latestRequestIdRef.current != requestId) {
+                  return;
+                }
+                setActiveQuestion(nextQuestion);
+                setMode(nextMode);
+                setResponse(streamResult);
+                setLiveTrace([]);
+                setHistory([
+                  ...nextHistory,
+                  { role: 'user', content: nextQuestion },
+                  { role: 'assistant', content: streamResult.answer },
+                ]);
+                return;
+              }
+
               const endpoint = nextMode === 'deep' ? '/deep-research' : '/query';
               const res = await fetch(`${chatbotConfig.apiBaseUrl}${endpoint}`, {
                 method: 'POST',
@@ -1970,6 +2321,7 @@ def _chatbot_panel_tsx() -> str:
               if (latestRequestIdRef.current != requestId) {
                 return;
               }
+              setLiveTrace([]);
               setError(err instanceof Error ? err.message : 'Chatbot unavailable');
             } finally {
               if (latestRequestIdRef.current == requestId) {
@@ -1997,23 +2349,6 @@ def _chatbot_panel_tsx() -> str:
                 <span>Back to docs</span>
               </Link>
 
-              <div className="deepdoc-chatbot-page__hero">
-                <div>
-                  <p className="deepdoc-chatbot-page__eyebrow">Grounded answer</p>
-                  <h1>{question || 'Ask anything about this codebase'}</h1>
-                  <p>
-                    {question
-                      ? 'Results are generated from indexed code, artifacts, and docs so the answer can stay anchored to the repository.'
-                      : 'Ask a question to open a cleaner research-style answer view with source references and suggested follow-up reading.'}
-                  </p>
-                </div>
-                {response ? (
-                  <span className="deepdoc-chatbot-page__chip">
-                    {response.research_mode === 'deep' ? 'Deep Research' : 'Fast'} · {response.used_chunks} retrieved chunks{response.confidence ? ` · ${response.confidence} confidence` : ''}
-                  </span>
-                ) : null}
-              </div>
-
               <div className="deepdoc-chatbot-page__grid">
                 <section className="deepdoc-chatbot-panel">
                   <div className="deepdoc-chatbot-panel__header">
@@ -2025,6 +2360,34 @@ def _chatbot_panel_tsx() -> str:
                     ) : null}
                   </div>
                   <div className="deepdoc-chatbot-panel__body">
+                    {loading && mode === 'code' ? (
+                      <div className="deepdoc-chatbot-trace mb-5" role="status" aria-live="polite">
+                        {(() => {
+                          const progress = traceHeader(liveTrace);
+                          return (
+                            <>
+                              <div className="deepdoc-chatbot-trace__header">
+                                <span className="deepdoc-chatbot-trace__dot" aria-hidden="true" />
+                                <strong>{progress.title}</strong>
+                                <span>{progress.current} / {progress.total}</span>
+                              </div>
+                              <div className="deepdoc-chatbot-trace__bar" aria-hidden="true">
+                                <span style={{ width: `${progress.progressPct}%` }} />
+                              </div>
+                            </>
+                          );
+                        })()}
+                        <ul className="deepdoc-chatbot-trace__lines">
+                          {liveTrace.length ? (
+                            liveTrace.map((entry, idx) => (
+                              <li key={`${entry.phase}-${idx}`}>{toTraceLine(entry)}</li>
+                            ))
+                          ) : (
+                            <li>Preparing research context</li>
+                          )}
+                        </ul>
+                      </div>
+                    ) : null}
                     {loading ? (
                       <ChatbotLoadingSkeleton />
                     ) : error ? (
@@ -2081,6 +2444,20 @@ def _chatbot_panel_tsx() -> str:
                   </div>
 
                   {loading ? <ChatbotSidebarSkeleton /> : null}
+
+                  {!loading && response?.file_inventory?.length ? (
+                    <div className="mb-5">
+                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Files considered</h3>
+                      <ul className="deepdoc-chatbot-citation-list">
+                        {response.file_inventory.map((entry) => (
+                          <li key={entry.file_path}>
+                            <strong>{entry.file_path}</strong>
+                            <span>Score {entry.score}{entry.reasons.length ? ` · ${entry.reasons.join(', ')}` : ''}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  ) : null}
 
                   {!loading && response?.code_citations.length ? (
                     <div className="mb-5">
@@ -2208,14 +2585,21 @@ def _chatbot_panel_tsx() -> str:
                     >
                       Fast
                     </button>
-                    <button
-                      className={`deepdoc-chatbot-mode-toggle ${mode === 'deep' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
-                      onClick={() => setMode('deep')}
-                      type="button"
-                    >
-                      Deep Research
-                    </button>
-                  </div>
+                  <button
+                    className={`deepdoc-chatbot-mode-toggle ${mode === 'deep' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                    onClick={() => setMode('deep')}
+                    type="button"
+                  >
+                    Deep Research
+                  </button>
+                  <button
+                    className={`deepdoc-chatbot-mode-toggle ${mode === 'code' ? 'deepdoc-chatbot-mode-toggle--active' : ''}`}
+                    onClick={() => setMode('code')}
+                    type="button"
+                  >
+                    Code Aware
+                  </button>
+                </div>
                   <div className="deepdoc-chatbot-dock__row">
                     <textarea
                       className="deepdoc-chatbot-dock__input text-sm"
@@ -2246,5 +2630,3 @@ def _chatbot_panel_tsx() -> str:
         }
         """
     )
-
-

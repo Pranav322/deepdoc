@@ -520,6 +520,12 @@ def escape_mdx_text_hazards(content: str) -> str:
             lines.append(line)
             continue
 
+        line = re.sub(
+            r"<code>\{([^{}\n]+)\}</code>",
+            lambda match: f"<code>&#123;{match.group(1)}&#125;</code>",
+            line,
+        )
+
         parts = re.split(r"(`[^`]*`)", line)
 
         def normalize_code_span(part: str) -> str:

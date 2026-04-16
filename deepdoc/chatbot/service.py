@@ -5,9 +5,12 @@ from __future__ import annotations
 from copy import deepcopy
 import fnmatch
 import hashlib
+import json
 from pathlib import Path
+import queue
 import re
-from typing import Any
+import threading
+from typing import Any, Callable
 
 from pydantic import BaseModel, Field
 
@@ -71,6 +74,12 @@ class DeepResearchRequest(QueryRequest):
     """Incoming deep-research payload."""
 
     max_rounds: int = Field(default=3, ge=1, le=6)
+
+
+class CodeDeepRequest(QueryRequest):
+    """Incoming code-deep payload."""
+
+    max_rounds: int = Field(default=4, ge=1, le=8)
 
 
 class ChatbotQueryService:
@@ -354,30 +363,205 @@ class ChatbotQueryService:
         Returns:
             ResearchResult with fields: original_question, steps, final_answer, all_sources, confidence.
         """
+        retrieval_cfg = self.chat_cfg["retrieval"]
+        _, response = self._run_research_mode(
+            question,
+            history,
+            mode="deep",
+            max_rounds=max_rounds,
+            top_k=max(8, retrieval_cfg.get("deep_research_top_k", 10)),
+        )
+        return response
+
+    def code_deep(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None = None,
+        max_rounds: int = 4,
+        *,
+        trace_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> dict[str, Any]:
+        retrieval_cfg = self._retrieval_profile("code_deep")
+        trace: list[dict[str, Any]] = []
+
+        def emit(event: dict[str, Any]) -> None:
+            payload = dict(event)
+            payload["index"] = len(trace) + 1
+            trace.append(payload)
+            callback = trace_callback
+            if callable(callback):
+                callback(payload)
+
+        result, response = self._run_research_mode(
+            question,
+            history,
+            mode="code_deep",
+            max_rounds=max_rounds,
+            top_k=max(
+                10,
+                int(retrieval_cfg.get("code_deep_top_k", retrieval_cfg["top_k_code"])),
+            ),
+            trace_callback=emit,
+        )
+        response["trace"] = trace
+        response["file_inventory"] = self._collect_file_inventory(
+            question,
+            response,
+            result.all_sources,
+            retrieval_cfg,
+            trace,
+        )
+        response["response_mode"] = "code_deep"
+        response["research_mode"] = "code_deep"
+        return response
+
+    def _run_research_mode(
+        self,
+        question: str,
+        history: list[dict[str, str]] | None,
+        *,
+        mode: str,
+        max_rounds: int,
+        top_k: int,
+        trace_callback: Callable[[dict[str, Any]], None] | None = None,
+    ) -> tuple[Any, dict[str, Any]]:
         from .deep_research import DeepResearcher
 
-        retrieval_cfg = self.chat_cfg["retrieval"]
         researcher = DeepResearcher(
             service=self,
             llm=self._llm,
-            top_k=max(8, retrieval_cfg.get("deep_research_top_k", 10)),
+            top_k=top_k,
             max_rounds=max_rounds,
+            mode=mode,
+            trace_callback=trace_callback,
         )
         result = researcher.research(question, history=history or [])
-        base = self.query(question, history, mode="deep")
-        base.update(
+        query_mode = "deep" if mode == "deep" else "code_deep"
+        response = self.query(question, history, mode=query_mode)
+        response.update(
             {
                 "answer": result.final_answer,
                 "used_chunks": max(
-                    base.get("used_chunks", 0),
+                    response.get("used_chunks", 0),
                     sum(step.chunks_used for step in result.steps),
                 ),
                 "confidence": result.confidence,
-                "research_mode": "deep",
+                "research_mode": mode,
                 "research_sources": result.all_sources,
+                "response_mode": mode,
             }
         )
-        return base
+        return result, response
+
+    def _collect_file_inventory(
+        self,
+        question: str,
+        response: dict[str, Any],
+        research_sources: list[str],
+        retrieval_cfg: dict[str, Any],
+        trace: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        limit = max(8, int(retrieval_cfg.get("code_deep_file_inventory_limit", 18)))
+        inventory: dict[str, dict[str, Any]] = {}
+
+        def add_entry(
+            path: str,
+            reason: str,
+            *,
+            score: float = 0.0,
+            source_kind: str = "",
+            publication_tier: str = "",
+            symbol_names: list[str] | None = None,
+            start_line: int = 0,
+            end_line: int = 0,
+        ) -> None:
+            normalized = str(path or "").strip()
+            if not normalized:
+                return
+            item = inventory.setdefault(
+                normalized,
+                {
+                    "file_path": normalized,
+                    "score": 0.0,
+                    "reasons": set(),
+                    "source_kind": source_kind,
+                    "publication_tier": publication_tier,
+                    "symbol_names": set(),
+                    "line_ranges": set(),
+                },
+            )
+            item["score"] = max(float(item.get("score", 0.0)), float(score))
+            item["reasons"].add(reason)
+            if source_kind and not item.get("source_kind"):
+                item["source_kind"] = source_kind
+            if publication_tier and not item.get("publication_tier"):
+                item["publication_tier"] = publication_tier
+            for symbol in symbol_names or []:
+                if symbol:
+                    item["symbol_names"].add(symbol)
+            if start_line and end_line and end_line >= start_line:
+                item["line_ranges"].add(f"{start_line}-{end_line}")
+
+        citation_map = {
+            "code_citations": "retrieved_code",
+            "artifact_citations": "retrieved_artifact",
+            "relationship_citations": "retrieved_relationship",
+            "live_fallback_citations": "live_fallback",
+            "repo_doc_citations": "retrieved_repo_doc",
+            "doc_citations": "retrieved_doc",
+        }
+        for key, reason in citation_map.items():
+            for citation in response.get(key, []):
+                path = citation.get("file_path") or citation.get("doc_path")
+                add_entry(
+                    path,
+                    reason,
+                    score=float(citation.get("score", 0.0) or 0.0),
+                    source_kind=str(citation.get("source_kind", "") or ""),
+                    publication_tier=str(citation.get("publication_tier", "") or ""),
+                    symbol_names=list(citation.get("symbol_names", []) or []),
+                    start_line=int(citation.get("start_line", 0) or 0),
+                    end_line=int(citation.get("end_line", 0) or 0),
+                )
+
+        for path in research_sources:
+            add_entry(path, "research_step", score=1.1)
+
+        for event in trace:
+            if str(event.get("phase", "")) == "tool_call":
+                path = str(event.get("path", "") or "")
+                action = str(event.get("action", "") or "")
+                if path:
+                    add_entry(path, f"tool_{action or 'call'}", score=1.05)
+
+        query_signals = self._query_signals([question])
+        archive_candidates: list[tuple[float, str]] = []
+        for rel_path in self.source_archive:
+            score = self._path_match_score(rel_path, query_signals)
+            if score > 0.9:
+                archive_candidates.append((score, rel_path))
+        archive_candidates.sort(key=lambda item: (item[0], item[1]), reverse=True)
+        for score, rel_path in archive_candidates[:limit]:
+            add_entry(rel_path, "path_match", score=score)
+
+        rows: list[dict[str, Any]] = []
+        for item in inventory.values():
+            rows.append(
+                {
+                    "file_path": item["file_path"],
+                    "score": round(float(item.get("score", 0.0)), 3),
+                    "reasons": sorted(item.get("reasons", set())),
+                    "source_kind": item.get("source_kind", ""),
+                    "publication_tier": item.get("publication_tier", ""),
+                    "symbol_names": sorted(item.get("symbol_names", set()))[:8],
+                    "line_ranges": sorted(item.get("line_ranges", set()))[:6],
+                }
+            )
+        rows.sort(
+            key=lambda item: (float(item.get("score", 0.0)), item["file_path"]),
+            reverse=True,
+        )
+        return rows[:limit]
 
     def _expand_query(self, question: str, retrieval_cfg: dict[str, Any]) -> list[str]:
         """Generate alternative search queries via LLM for better recall."""
@@ -1125,6 +1309,40 @@ class ChatbotQueryService:
             deep_prompt_chars = base.get("deep_mode_max_prompt_chars")
             if isinstance(deep_prompt_chars, int) and deep_prompt_chars > 0:
                 base["max_prompt_chars"] = deep_prompt_chars
+            return base
+
+        if mode_name == "code_deep":
+            code_prompt_chars = base.get("code_deep_mode_max_prompt_chars")
+            if isinstance(code_prompt_chars, int) and code_prompt_chars > 0:
+                base["max_prompt_chars"] = code_prompt_chars
+
+            code_top_k = base.get("code_deep_top_k")
+            if isinstance(code_top_k, int) and code_top_k > 0:
+                base["top_k_code"] = max(base.get("top_k_code", code_top_k), code_top_k)
+                base["candidate_top_k_code"] = max(
+                    base.get("candidate_top_k_code", code_top_k * 2),
+                    code_top_k * 2,
+                )
+
+            relationship_top_k = base.get("code_deep_top_k_relationship")
+            if isinstance(relationship_top_k, int) and relationship_top_k > 0:
+                base["top_k_relationship"] = max(
+                    base.get("top_k_relationship", relationship_top_k),
+                    relationship_top_k,
+                )
+                base["candidate_top_k_relationship"] = max(
+                    base.get("candidate_top_k_relationship", relationship_top_k * 2),
+                    relationship_top_k * 2,
+                )
+
+            docs_cap = base.get("code_deep_top_k_docs")
+            if isinstance(docs_cap, int) and docs_cap > 0:
+                base["top_k_docs"] = min(base.get("top_k_docs", docs_cap), docs_cap)
+
+            base["query_expansion"] = True
+            base["iterative_retrieval"] = True
+            base["graph_neighbor_expansion"] = True
+            base["rerank"] = True
             return base
 
         fast_prompt_chars = base.get("fast_mode_max_prompt_chars")
@@ -2055,7 +2273,7 @@ class ChatbotQueryService:
 def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
     from fastapi import Body, FastAPI
     from fastapi.middleware.cors import CORSMiddleware
-    from fastapi.responses import JSONResponse
+    from fastapi.responses import JSONResponse, StreamingResponse
 
     service = ChatbotQueryService(repo_root, cfg)
     app = FastAPI(title="DeepDoc Chatbot")
@@ -2100,6 +2318,75 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
                     "detail": str(exc),
                 },
             )
+
+    @app.post("/code-deep")
+    def code_deep(request: CodeDeepRequest = Body(...)) -> dict[str, Any]:
+        try:
+            return service.code_deep(
+                request.question,
+                request.history,
+                max_rounds=request.max_rounds,
+            )
+        except Exception as exc:
+            return JSONResponse(
+                status_code=500,
+                content={
+                    "error": "chatbot_code_deep_failed",
+                    "detail": str(exc),
+                },
+            )
+
+    @app.post("/code-deep/stream")
+    def code_deep_stream(request: CodeDeepRequest = Body(...)):
+        events: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+
+        def emit(event: dict[str, Any]) -> None:
+            events.put(("trace", event))
+
+        def run() -> None:
+            try:
+                result = service.code_deep(
+                    request.question,
+                    request.history,
+                    max_rounds=request.max_rounds,
+                    trace_callback=emit,
+                )
+                events.put(("result", result))
+            except Exception as exc:
+                events.put(
+                    (
+                        "error",
+                        {
+                            "error": "chatbot_code_deep_failed",
+                            "detail": str(exc),
+                        },
+                    )
+                )
+            finally:
+                events.put(("done", {"status": "done"}))
+                events.put(None)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+        def event_stream():
+            while True:
+                item = events.get()
+                if item is None:
+                    break
+                event_name, payload = item
+                yield f"event: {event_name}\n"
+                yield f"data: {json.dumps(payload)}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/query-context")
     def query_context(request: QueryRequest = Body(...)) -> dict[str, Any]:

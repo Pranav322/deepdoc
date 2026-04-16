@@ -4,7 +4,12 @@ from pathlib import Path
 
 from deepdoc.chatbot.service import ChatbotQueryService
 from deepdoc.chatbot.types import ChunkRecord, RetrievedChunk
-from deepdoc.persistence_v2 import load_plan, load_scan_cache, save_plan, save_scan_cache
+from deepdoc.persistence_v2 import (
+    load_plan,
+    load_scan_cache,
+    save_plan,
+    save_scan_cache,
+)
 from deepdoc.planner import (
     DocBucket,
     DocPlan,
@@ -46,7 +51,10 @@ def _scan(
 
 def test_source_kind_classifies_internal_supporting_material() -> None:
     assert classify_source_kind("tests/test_chatbot_query.py") == "test"
-    assert classify_source_kind("tests/fixtures/frameworks/express_app/server.js") == "fixture"
+    assert (
+        classify_source_kind("tests/fixtures/frameworks/express_app/server.js")
+        == "fixture"
+    )
     assert classify_source_kind("examples/demo/app.py") == "example"
     assert classify_source_kind("docs/architecture.md") == "docs"
 
@@ -57,7 +65,9 @@ def test_endpoint_publication_rejects_fixture_and_header_like_paths() -> None:
         route_file="tests/fixtures/frameworks/express_app/server.js",
         handler_file="tests/fixtures/frameworks/express_app/server.js",
         framework="express",
-        source_kind_by_file={"tests/fixtures/frameworks/express_app/server.js": "fixture"},
+        source_kind_by_file={
+            "tests/fixtures/frameworks/express_app/server.js": "fixture"
+        },
     )
     assert publishable is False
     assert reason == "non_product_source"
@@ -119,14 +129,43 @@ def test_supporting_buckets_land_in_supporting_sections() -> None:
         skipped_files=[],
         classification={"repo_profile": {"primary_type": "backend_service"}},
     )
-    scan = _scan(source_kind_by_file={"app/main.py": "product", "tests/test_app.py": "test"})
+    scan = _scan(
+        source_kind_by_file={"app/main.py": "product", "tests/test_app.py": "test"}
+    )
 
     plan = _assign_publication_tiers(plan, scan, plan.classification)
     plan = _shape_plan_nav(plan, plan.classification)
 
-    testing_bucket = next(bucket for bucket in plan.buckets if bucket.slug == "testing-strategy")
+    testing_bucket = next(
+        bucket for bucket in plan.buckets if bucket.slug == "testing-strategy"
+    )
     assert testing_bucket.publication_tier == "supporting"
     assert "Testing" in plan.nav_structure
+
+
+def test_shape_plan_nav_routes_backend_data_layer_to_data_model() -> None:
+    plan = DocPlan(
+        buckets=[
+            DocBucket(
+                bucket_type="database",
+                title="Database & Schema",
+                slug="database-schema",
+                section="Data Layer",
+                description="Database docs",
+                owned_files=["models.py"],
+            )
+        ],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+    scan = _scan(source_kind_by_file={"models.py": "product"})
+
+    plan = _assign_publication_tiers(plan, scan, plan.classification)
+    plan = _shape_plan_nav(plan, plan.classification)
+
+    assert "Data Model" in plan.nav_structure
+    assert plan.nav_structure["Data Model"] == ["database-schema"]
 
 
 def test_auto_generate_endpoint_refs_uses_only_publishable_endpoints() -> None:
@@ -319,7 +358,9 @@ def test_scan_cache_preserves_source_kinds_and_frameworks(tmp_path: Path) -> Non
     assert cached["file_frameworks"]["app/main.py"] == ["falcon"]
     assert cached["runtime_summary"]["tasks"][0]["name"] == "sync_orders"
     assert cached["runtime_summary"]["schedulers"][0]["scheduler_type"] == "beat"
-    assert cached["runtime_summary"]["realtime_consumers"][0]["routes"] == ["ws/orders/"]
+    assert cached["runtime_summary"]["realtime_consumers"][0]["routes"] == [
+        "ws/orders/"
+    ]
     assert cached["database_groups"][0]["key"] == "orders"
     assert cached["graphql_interfaces"][0]["name"] == "OrdersSchema"
     assert cached["knex_artifacts"][0]["table_name"] == "orders"
@@ -358,8 +399,13 @@ def test_chatbot_prefers_core_but_can_prioritize_tests_when_explicit() -> None:
         score=0.9,
     )
 
-    normal = service._sort_hits([test_hit, core_hit], service._question_support_profile("where is auth handled"))
-    explicit = service._sort_hits([test_hit, core_hit], service._question_support_profile("which test covers auth"))
+    normal = service._sort_hits(
+        [test_hit, core_hit], service._question_support_profile("where is auth handled")
+    )
+    explicit = service._sort_hits(
+        [test_hit, core_hit],
+        service._question_support_profile("which test covers auth"),
+    )
 
     assert normal[0].record.file_path == "app/main.py"
     assert explicit[0].record.file_path == "tests/test_main.py"

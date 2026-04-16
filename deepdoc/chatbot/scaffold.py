@@ -61,6 +61,18 @@ def _app_py() -> str:
             @app.post("/query")
             def _query():
                 return JSONResponse(status_code=503, content={"error": "startup_failed", "detail": _detail})
+
+            @app.post("/deep-research")
+            def _deep_research():
+                return JSONResponse(status_code=503, content={"error": "startup_failed", "detail": _detail})
+
+            @app.post("/code-deep")
+            def _code_deep():
+                return JSONResponse(status_code=503, content={"error": "startup_failed", "detail": _detail})
+
+            @app.post("/code-deep/stream")
+            def _code_deep_stream():
+                return JSONResponse(status_code=503, content={"error": "startup_failed", "detail": _detail})
         """
     )
 

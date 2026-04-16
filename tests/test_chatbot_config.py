@@ -19,6 +19,7 @@ def test_chatbot_defaults_are_present() -> None:
     assert chatbot["enabled"] is False
     assert chatbot["vector_store"]["kind"] == "faiss"
     assert chatbot["retrieval"]["top_k_code"] == 15
+    assert chatbot["retrieval"]["code_deep_top_k"] == 16
     assert chatbot["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
     assert chatbot["embeddings"]["api_key_env"] == "DEEPDOC_EMBED_API_KEY"
     assert chatbot["embeddings"]["fastembed_batch_size"] == 4
@@ -41,6 +42,11 @@ def test_chatbot_defaults_match_runtime_settings_defaults() -> None:
         "rerank_candidate_limit_per_kind",
         "deep_research_chunk_chars",
         "deep_research_top_k",
+        "code_deep_mode_max_prompt_chars",
+        "code_deep_top_k",
+        "code_deep_top_k_relationship",
+        "code_deep_top_k_docs",
+        "code_deep_file_inventory_limit",
     ):
         assert chatbot["retrieval"][key] == runtime_defaults["retrieval"][key]
 

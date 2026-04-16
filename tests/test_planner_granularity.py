@@ -326,6 +326,110 @@ def test_start_here_setup_slug_and_section_are_preserved() -> None:
     assert start_here_bucket.generation_hints["preserve_section"] is True
 
 
+def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
+    plan = DocPlan(
+        buckets=[
+            DocBucket(
+                bucket_type="start_here_index",
+                title="Start Here",
+                slug="start-here",
+                section="Start Here",
+                description="Orientation",
+                generation_hints={"preserve_section": True},
+                priority=-20,
+            ),
+            DocBucket(
+                bucket_type="start_here_setup",
+                title="Local Development Setup",
+                slug="local-development-setup",
+                section="Start Here",
+                description="Setup",
+                owned_files=["README.md"],
+                generation_hints={"preserve_section": True},
+                priority=-19,
+            ),
+            DocBucket(
+                bucket_type="setup",
+                title="Setup & Getting Started",
+                slug="setup",
+                section="Subsystems",
+                description="Legacy setup bucket",
+                owned_files=["settings.py"],
+                priority=1,
+            ),
+            DocBucket(
+                bucket_type="domain_glossary",
+                title="Domain Glossary",
+                slug="domain-glossary",
+                section="Start Here",
+                description="Terms",
+                generation_hints={"preserve_section": True},
+                priority=-18,
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="Orders Workflow",
+                slug="orders-workflow",
+                section="Architecture",
+                description="Orders flow",
+                owned_files=["orders.py"],
+                priority=10,
+            ),
+            DocBucket(
+                bucket_type="endpoint-family",
+                title="Orders API",
+                slug="orders-api",
+                section="API Reference",
+                description="Orders endpoints",
+                generation_hints={
+                    "is_endpoint_family": True,
+                    "prompt_style": "endpoint",
+                },
+                priority=20,
+            ),
+            DocBucket(
+                bucket_type="endpoint-ref",
+                title="GET /orders/{id}",
+                slug="get-orders-id",
+                section="API Reference",
+                description="Endpoint ref",
+                generation_hints={
+                    "is_endpoint_ref": True,
+                    "prompt_style": "endpoint_ref",
+                },
+                depends_on=["orders-api"],
+                priority=25,
+            ),
+        ],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+
+    shaped = _shape_plan_nav(
+        plan, {"repo_profile": {"primary_type": "backend_service"}}
+    )
+
+    slugs = {bucket.slug for bucket in shaped.buckets}
+    assert "setup" not in slugs
+
+    sections = list(shaped.nav_structure.keys())
+    assert sections[:3] == [
+        "Start Here",
+        "Core Workflows",
+        "API Reference > Orders API",
+    ]
+    assert shaped.nav_structure["Start Here"] == [
+        "start-here",
+        "local-development-setup",
+        "domain-glossary",
+    ]
+    assert shaped.nav_structure["API Reference > Orders API"] == [
+        "orders-api",
+        "get-orders-id",
+    ]
+
+
 def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtime_pages() -> (
     None
 ):

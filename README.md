@@ -16,6 +16,8 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **Five-Phase Pipeline** — Scan, plan, generate, playground, build. Planning and generation are separated so large repos and large files are handled more cleanly.
 - **Multi-Step AI Planner** — The planner classifies the repo, proposes buckets, then assigns files, symbols, artifacts, and dependencies into the final doc structure.
 - **Giant-File Handling** — Large files are decomposed into feature-aligned clusters so giant controllers or service files can feed multiple doc pages.
+- **Reader-First Repo-Agnostic Nav** — The planner normalizes bucket output into a natural onboarding flow (for backend repos: Start Here → Core Workflows → API Reference → Data Model → runtime/integrations/ops) while preserving full coverage.
+- **Large-Database Anti-Noise Grouping** — Sparse singleton model files are coalesced into stable aggregate groups (for example `core-models`) so huge schemas stay complete without one-file-per-page nav spam.
 - **Endpoint-Family + Per-Endpoint Docs** — High-level endpoint family pages are AI-planned, and individual `endpoint_ref` pages are derived from scan data and generated separately.
 - **Integration Discovery** — Third-party systems like payment gateways, delivery providers, warehouse systems, and webhook integrations can be grouped into integration docs.
 - **Incremental Updates** — `deepdoc update` uses persisted plan and ledger data to regenerate only stale or structurally affected docs.
@@ -636,6 +638,11 @@ chatbot:
     fast_mode_iterative_retrieval: false      # Fast mode skips second-pass follow-up retrieval
     fast_mode_max_prompt_chars: 90000         # Smaller prompt budget for faster /query answers
     deep_mode_max_prompt_chars: 140000        # Larger budget for /deep-research synthesis
+    code_deep_mode_max_prompt_chars: 180000   # Largest prompt budget for /code-deep
+    code_deep_top_k: 16                       # Code chunks retrieved for code-aware mode
+    code_deep_top_k_relationship: 12          # Relationship chunks retrieved for code-aware mode
+    code_deep_top_k_docs: 4                   # Cap docs chunks in code-aware mode
+    code_deep_file_inventory_limit: 18        # Max files listed in code-aware inventory
     lexical_retrieval: true
     lexical_candidate_limit: 24
     query_expansion: true
@@ -722,6 +729,11 @@ chatbot:
 | `chatbot.retrieval.fast_mode_iterative_retrieval` | `false` | In `/query` fast mode, disable iterative follow-up retrieval |
 | `chatbot.retrieval.fast_mode_max_prompt_chars` | `90000` | Prompt budget used by `/query` fast mode |
 | `chatbot.retrieval.deep_mode_max_prompt_chars` | `140000` | Prompt budget used by `/deep-research` |
+| `chatbot.retrieval.code_deep_mode_max_prompt_chars` | `180000` | Prompt budget used by `/code-deep` |
+| `chatbot.retrieval.code_deep_top_k` | `16` | Code chunks retrieved in code-aware mode |
+| `chatbot.retrieval.code_deep_top_k_relationship` | `12` | Relationship chunks retrieved in code-aware mode |
+| `chatbot.retrieval.code_deep_top_k_docs` | `4` | Docs chunk cap in code-aware mode |
+| `chatbot.retrieval.code_deep_file_inventory_limit` | `18` | Max files listed in code-aware inventory |
 | `chatbot.retrieval.lexical_retrieval` | `true` | Blend exact-match retrieval with embedding retrieval |
 | `chatbot.retrieval.lexical_candidate_limit` | `24` | Max lexical candidates gathered before merge/rerank |
 | `chatbot.retrieval.query_expansion` | `true` | Use LLM to generate alternative search queries |
@@ -824,22 +836,24 @@ During `deepdoc generate`, six corpora are built and stored in `.deepdoc/chatbot
 
 When a user asks a question, the backend runs a mode-aware retrieval pipeline:
 
-1. **Query expansion** — In default/deep mode, the LLM can generate alternative search queries to improve recall. Fast mode disables this by default.
+1. **Query expansion** — In default/deep/code-aware mode, the LLM can generate alternative search queries to improve recall. Fast mode disables this by default.
 2. **Embedding** — All queries are embedded using the configured embedding model.
 3. **Hybrid retrieval** — FAISS similarity search and exact-match lexical search both gather candidates from each corpus.
 4. **Follow-up retrieval** — The backend can derive focused second-pass searches and pull linked files/docs via graph-neighbor expansion. Fast mode can skip follow-up queries for lower latency.
 5. **Chunk stitching** — Exact-match code hits can pull adjacent code windows from the same file so larger implementations survive chunk boundaries.
-6. **Reranking** — In default/deep mode, the LLM can rerank candidates for relevance. Fast mode disables this by default.
+6. **Reranking** — In default/deep/code-aware mode, the LLM can rerank candidates for relevance. Fast mode disables this by default.
 7. **Prompt assembly** — Query-type-aware budgets reserve space for the most important evidence types within the character budget.
 8. **Answer generation + continuity guard** — The answer LLM produces a grounded response, and if the output appears truncated (for example ending on a dangling heading), DeepDoc retries with a continuation prompt so the response finishes cleanly.
 
 `POST /deep-research` uses the same indexed corpora first, but it can also inspect a small bounded set of live repo files when exact-match evidence is missing from the index. This fallback respects the repo's exclude rules, skips oversized/binary files, and is only used in deep research mode.
 
-`POST /query` and `POST /deep-research` now return `response_mode` in the payload (`fast`, `deep`, or `default`) so clients can confirm which retrieval profile generated the result.
+`POST /code-deep` uses a code-heavy retrieval profile and returns an explicit file inventory plus step trace so users can see where evidence came from while answering file-oriented questions such as “where is auth defined?”.
+
+`POST /query`, `POST /deep-research`, and `POST /code-deep` return `response_mode` in the payload (`fast`, `deep`, `code_deep`, or `default`) so clients can confirm which retrieval profile generated the result.
 
 ### Chatbot API Endpoints
 
-The generated `chatbot_backend/` exposes three endpoints:
+The generated `chatbot_backend/` exposes five endpoints:
 
 **Health check:**
 ```
@@ -861,6 +875,30 @@ POST /query
 The response includes the answer text, code citations (file path + line range), artifact citations, and links to relevant generated doc pages.
 
 `/query` is optimized for speed: it runs retrieval in fast mode (no LLM query expansion/rerank by default) and returns an answer plus citations.
+
+**Code-aware deep query:**
+```
+POST /code-deep
+{
+  "question": "Where is authentication defined?",
+  "history": [],
+  "max_rounds": 4
+}
+```
+
+`/code-deep` returns a code-aware answer plus `trace` and `file_inventory` fields so clients can show reasoning progress and files considered.
+
+**Code-aware live stream (SSE):**
+```
+POST /code-deep/stream
+{
+  "question": "Where is authentication defined?",
+  "history": [],
+  "max_rounds": 4
+}
+```
+
+`/code-deep/stream` emits `trace` events while researching, then a final `result` event and `done`.
 
 **Retrieve context only (no answer generation):**
 ```

@@ -8,6 +8,12 @@ The automated release workflow reads the section that matches the version in
 ## Unreleased
 
 - Ongoing development.
+- Added a dedicated code-aware chatbot mode with `POST /code-deep` and live SSE tracing via `POST /code-deep/stream`.
+- Added code-aware retrieval defaults, file inventory output, and generated site UI support for a third chatbot mode with live progress visibility.
+- Updated planner nav shaping to produce a reader-first, repo-agnostic flow that keeps backend docs in a natural order (`Start Here` → `Core Workflows` → `API Reference` → `Data Model` → runtime/integrations/ops) while preserving coverage.
+- Updated endpoint-reference nav grouping to live under `API Reference` and dedupe legacy setup overlap with `local-development-setup`.
+- Updated fallback orphan bucket naming/placement to reduce noisy `* and Related` module pages in generated navigation.
+- Updated database grouping to coalesce large sets of sparse singleton model groups into stable aggregate groups (for example `core-models`) so database coverage stays complete without one-file nav spam.
 
 ## [1.3.0] - 2026-04-07
 

@@ -1,5 +1,6 @@
 from .common import *
 
+
 def discover_database_schema(
     parsed_files: dict[str, ParsedFile],
     file_contents: dict[str, str],
@@ -343,14 +344,14 @@ def build_database_groups(
         elif file_path in db_scan.schema_files:
             group.orm_frameworks.extend(db_scan.orm_frameworks[:1])
 
+    groups = _coalesce_sparse_database_groups(list(grouped.values()))
+
     # Add cross-group references using parsed imports
     path_to_group = {
-        file_path: group.key
-        for group in grouped.values()
-        for file_path in group.file_paths
+        file_path: group.key for group in groups for file_path in group.file_paths
     }
     import_lookup = _build_import_lookup(set(path_to_group.keys()))
-    for group in grouped.values():
+    for group in groups:
         external_refs: set[str] = set()
         for file_path in group.file_paths:
             parsed = parsed_files.get(file_path)
@@ -366,17 +367,128 @@ def build_database_groups(
         group.orm_frameworks = sorted(set(group.orm_frameworks))
         group.external_refs = sorted(external_refs)
 
-    return sorted(grouped.values(), key=lambda item: item.key)
+    return sorted(groups, key=lambda item: item.key)
+
+
+def _coalesce_sparse_database_groups(
+    groups: list[DatabaseGroup],
+) -> list[DatabaseGroup]:
+    """Merge noisy singleton database groups into stable, repo-level groupings."""
+    if len(groups) <= 8:
+        return groups
+
+    singleton_groups = [
+        group
+        for group in groups
+        if len(group.file_paths) <= 1 and len(group.model_names) <= 1
+    ]
+    if len(singleton_groups) < 6:
+        return groups
+
+    non_singletons = [group for group in groups if group not in singleton_groups]
+    grouped_singletons: dict[str, list[DatabaseGroup]] = defaultdict(list)
+    for group in singleton_groups:
+        hint = _database_group_parent_hint(
+            group.file_paths[0] if group.file_paths else ""
+        )
+        grouped_singletons[hint].append(group)
+
+    existing_keys = {group.key for group in non_singletons}
+    merged_groups: list[DatabaseGroup] = list(non_singletons)
+    leftovers: list[DatabaseGroup] = []
+
+    for hint, members in sorted(grouped_singletons.items()):
+        if len(members) < 2:
+            leftovers.extend(members)
+            continue
+        key = _unique_database_group_key(hint, existing_keys)
+        existing_keys.add(key)
+        merged_groups.append(_merge_database_groups(key, members))
+
+    if leftovers:
+        if len(leftovers) >= 3:
+            key = _unique_database_group_key("core-models", existing_keys)
+            existing_keys.add(key)
+            merged_groups.append(_merge_database_groups(key, leftovers))
+        else:
+            merged_groups.extend(leftovers)
+
+    return merged_groups
+
+
+def _database_group_parent_hint(file_path: str) -> str:
+    parts = [part.lower() for part in Path(file_path).parts[:-1]]
+    for part in reversed(parts):
+        cleaned = _clean_database_group_token(part)
+        if cleaned and cleaned not in _DB_GROUP_NOISE_SEGMENTS:
+            return cleaned
+    return "core-models"
+
+
+def _merge_database_groups(key: str, groups: list[DatabaseGroup]) -> DatabaseGroup:
+    files = sorted({path for group in groups for path in group.file_paths})
+    models = sorted({name for group in groups for name in group.model_names})
+    frameworks = sorted({fw for group in groups for fw in group.orm_frameworks})
+    external_refs = sorted({ref for group in groups for ref in group.external_refs})
+    label = key.replace("-", " ").replace("_", " ").title()
+    return DatabaseGroup(
+        key=key,
+        label=label,
+        file_paths=files,
+        model_names=models,
+        orm_frameworks=frameworks,
+        external_refs=external_refs,
+    )
+
+
+def _unique_database_group_key(base: str, existing: set[str]) -> str:
+    key = base
+    suffix = 2
+    while key in existing:
+        key = f"{base}-{suffix}"
+        suffix += 1
+    return key
+
+
+_DB_GROUP_NOISE_SEGMENTS = {
+    "src",
+    "app",
+    "api",
+    "pkg",
+    "internal",
+    "backend",
+    "frontend",
+    "models",
+    "model",
+    "schema",
+    "schemas",
+    "entity",
+    "entities",
+    "database",
+    "db",
+    "orm",
+}
+
+
+def _clean_database_group_token(token: str) -> str:
+    cleaned = Path(token).stem.lower().strip()
+    cleaned = re.sub(r"[^a-z0-9_-]+", "-", cleaned).strip("-_")
+    return cleaned
 
 
 def _database_group_key(parts: tuple[str, ...]) -> str:
     lowered = [part.lower() for part in parts]
+    cleaned = [_clean_database_group_token(part) for part in lowered]
+
+    def _usable(value: str) -> bool:
+        return bool(value) and value not in _DB_GROUP_NOISE_SEGMENTS and len(value) >= 3
+
     if "models" in lowered:
         idx = lowered.index("models")
-        if idx > 0:
-            return lowered[idx - 1]
-        if idx + 1 < len(lowered):
-            return lowered[idx + 1]
+        if idx > 0 and _usable(cleaned[idx - 1]):
+            return cleaned[idx - 1]
+        if idx + 1 < len(cleaned) and _usable(cleaned[idx + 1]):
+            return cleaned[idx + 1]
     for anchor in (
         "orderrefund",
         "orderreturnstatus",
@@ -387,11 +499,15 @@ def _database_group_key(parts: tuple[str, ...]) -> str:
     ):
         if anchor in lowered:
             return anchor
-    if len(lowered) >= 3 and lowered[0] in {"src", "app", "api", "orderreverse"}:
-        return lowered[1]
-    if len(lowered) >= 2:
-        return lowered[-2]
-    return lowered[0] if lowered else "database"
+    if len(cleaned) >= 3 and cleaned[0] in {"src", "app", "api", "orderreverse"}:
+        if _usable(cleaned[1]):
+            return cleaned[1]
+    for candidate in reversed(cleaned[:-1]):
+        if _usable(candidate):
+            return candidate
+    if cleaned and _usable(cleaned[-1]):
+        return cleaned[-1]
+    return "database"
 
 
 from .utils import _build_import_lookup, _resolve_imports_to_files

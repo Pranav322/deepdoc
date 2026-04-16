@@ -2327,3 +2327,248 @@ def test_fastapi_deep_research_endpoint_uses_shared_history(tmp_path: Path) -> N
     assert any(
         "We were looking at login earlier." in user for _, user in chat_client.messages
     )
+
+
+class _CodeDeepChatClient:
+    def complete(self, system: str, user: str) -> str:
+        if "alternative search queries" in system:
+            return "auth middleware\nauth flow"
+        if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+            lines = [line for line in user.splitlines() if line.strip()[:1].isdigit()]
+            return "\n".join("8" for _ in lines) if lines else "8"
+        if "Break the given question into 2–4 focused sub-questions" in system:
+            return '["Where is auth defined?", "Which middleware applies?"]'
+        if "agent answering a specific sub-question" in system:
+            return "Auth flows through `src/auth.py` and `src/auth_middleware.py`."
+        if "synthesising research findings" in system:
+            return "Final code-aware answer from `src/auth.py` and `src/auth_middleware.py`."
+        return "Grounded answer"
+
+
+def test_code_deep_returns_trace_and_file_inventory(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan(
+        [make_bucket("Auth", "auth", ["src/auth.py", "src/auth_middleware.py"])]
+    )
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def authenticate(user):\n    return issue_token(user)\n",
+                chunk_hash="hc1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["authenticate"],
+            ),
+            ChunkRecord(
+                chunk_id="c2",
+                kind="code",
+                source_key="src/auth_middleware.py",
+                text="def auth_middleware(request):\n    return check_auth(request)\n",
+                chunk_hash="hc2",
+                file_path="src/auth_middleware.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["auth_middleware"],
+            ),
+        ],
+        [[1.0, 0.0], [0.95, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_source_archive(
+        index_dir,
+        {
+            "src/auth.py": "def authenticate(user):\n    return issue_token(user)\n",
+            "src/auth_middleware.py": "def auth_middleware(request):\n    return check_auth(request)\n",
+        },
+    )
+
+    cfg = {
+        "chatbot": {
+            "enabled": True,
+            "retrieval": {
+                "query_expansion": False,
+                "iterative_retrieval": False,
+                "rerank": False,
+            },
+        }
+    }
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_CodeDeepChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, cfg)
+        result = service.code_deep(
+            "Where is auth defined and which middleware runs?",
+            max_rounds=2,
+        )
+
+    assert result["research_mode"] == "code_deep"
+    assert result["response_mode"] == "code_deep"
+    phases = {entry["phase"] for entry in result["trace"]}
+    assert {"start", "decompose", "step_start", "step_done", "done"}.issubset(phases)
+    inventory_paths = {entry["file_path"] for entry in result["file_inventory"]}
+    assert "src/auth.py" in inventory_paths
+    assert "src/auth_middleware.py" in inventory_paths
+
+
+def test_fastapi_code_deep_endpoint_returns_trace_and_inventory(tmp_path: Path) -> None:
+    testclient = pytest.importorskip("fastapi.testclient")
+    TestClient = testclient.TestClient
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan(
+        [make_bucket("Auth", "auth", ["src/auth.py", "src/auth_middleware.py"])]
+    )
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def authenticate(user):\n    return issue_token(user)\n",
+                chunk_hash="hc1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["authenticate"],
+            ),
+            ChunkRecord(
+                chunk_id="c2",
+                kind="code",
+                source_key="src/auth_middleware.py",
+                text="def auth_middleware(request):\n    return check_auth(request)\n",
+                chunk_hash="hc2",
+                file_path="src/auth_middleware.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["auth_middleware"],
+            ),
+        ],
+        [[1.0, 0.0], [0.95, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_source_archive(
+        index_dir,
+        {
+            "src/auth.py": "def authenticate(user):\n    return issue_token(user)\n",
+            "src/auth_middleware.py": "def auth_middleware(request):\n    return check_auth(request)\n",
+        },
+    )
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_CodeDeepChatClient(),
+        ),
+    ):
+        app = create_fastapi_app(repo_root, {"chatbot": {"enabled": True}})
+        client = TestClient(app)
+        response = client.post(
+            "/code-deep",
+            json={"question": "Where is auth defined?", "history": []},
+        )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["research_mode"] == "code_deep"
+    assert payload["trace"]
+    assert payload["file_inventory"]
+
+
+def test_fastapi_code_deep_stream_emits_trace_result_and_done(tmp_path: Path) -> None:
+    testclient = pytest.importorskip("fastapi.testclient")
+    TestClient = testclient.TestClient
+
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def authenticate(user):\n    return issue_token(user)\n",
+                chunk_hash="hc1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["authenticate"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/auth.py": "def authenticate(user):\n    return issue_token(user)\n"},
+    )
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_CodeDeepChatClient(),
+        ),
+    ):
+        app = create_fastapi_app(repo_root, {"chatbot": {"enabled": True}})
+        client = TestClient(app)
+        with client.stream(
+            "POST",
+            "/code-deep/stream",
+            json={"question": "Where is auth defined?", "history": []},
+        ) as response:
+            body = "".join(chunk for chunk in response.iter_text())
+
+    assert response.status_code == 200
+    assert "event: trace" in body
+    assert "event: result" in body
+    assert "event: done" in body
+    assert '"research_mode": "code_deep"' in body

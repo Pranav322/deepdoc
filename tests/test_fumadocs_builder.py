@@ -1024,6 +1024,42 @@ description: Orientation for new developers: what this service does, who uses it
     )
 
 
+def test_ensure_mdx_frontmatter_moves_leaked_body_out_of_yaml_frontmatter(
+    tmp_path: Path,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    mdx_path = docs_dir / "background-jobs.mdx"
+    mdx_path.write_text(
+        """---
+title: "Background Jobs"
+description: "Auto-generated developer documentation"
+# Background Jobs & Runtime
+
+This page documents the asynchronous runtime surfaces.
+
+<Callout>
+If you are looking for Django management commands, see [Django Commands & Signals](/background-jobs-django).
+</Callout>
+---
+
+## Overview
+""",
+        encoding="utf-8",
+    )
+
+    _ensure_mdx_frontmatter(docs_dir)
+
+    updated = mdx_path.read_text(encoding="utf-8")
+    frontmatter, body = updated.split("\n---\n\n", 1)
+    assert '# Background Jobs & Runtime' not in frontmatter
+    assert 'title: "Background Jobs"' in frontmatter
+    assert 'description: "Auto-generated developer documentation"' in frontmatter
+    assert body.startswith("# Background Jobs & Runtime")
+    assert "<Callout>" in body
+    assert "## Overview" in body
+
+
 def test_endpoint_ref_slug_strips_angle_bracket_path_converters() -> None:
     assert (
         _endpoint_ref_slug("GET", "/get-prod-variants/<str:prod_slug>")

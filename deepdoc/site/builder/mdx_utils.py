@@ -44,6 +44,43 @@ def _extract_frontmatter_scalar(frontmatter_lines: list[str], key: str) -> str |
     return None
 
 
+def _split_yaml_frontmatter_and_leaked_body(
+    frontmatter_lines: list[str],
+) -> tuple[list[str], list[str]]:
+    """Separate real YAML frontmatter lines from leaked MDX body content."""
+    yaml_lines: list[str] = []
+    leaked_body_lines: list[str] = []
+    body_started = False
+    expects_indented_block = False
+
+    for line in frontmatter_lines:
+        stripped = line.strip()
+
+        if body_started:
+            leaked_body_lines.append(line)
+            continue
+
+        if not stripped:
+            yaml_lines.append(line)
+            continue
+
+        if expects_indented_block and (line.startswith((" ", "\t")) or stripped.startswith("- ")):
+            yaml_lines.append(line)
+            continue
+
+        if ":" in stripped and not stripped.startswith(("# ", "<")):
+            yaml_lines.append(line)
+            value = stripped.split(":", 1)[1].strip()
+            expects_indented_block = value == "" or value in {"|", "|-", "|+", ">", ">-", ">+"}
+            continue
+
+        body_started = True
+        leaked_body_lines.append(line)
+        expects_indented_block = False
+
+    return yaml_lines, leaked_body_lines
+
+
 def _ensure_mdx_frontmatter(output_dir: Path) -> None:
     """Add minimal frontmatter to generated MDX pages and repair malformed blocks."""
     for mdx_path in output_dir.glob("*.mdx"):
@@ -55,17 +92,27 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
         if frontmatter_block:
             frontmatter_lines, frontmatter_body = frontmatter_block
             if _frontmatter_has_yaml_fields(frontmatter_lines):
+                yaml_lines, leaked_body_lines = _split_yaml_frontmatter_and_leaked_body(
+                    frontmatter_lines
+                )
+                leaked_body = "\n".join(leaked_body_lines).strip()
+                normalized_body = frontmatter_body.lstrip()
+                if leaked_body and normalized_body:
+                    normalized_body = leaked_body + "\n\n" + normalized_body
+                elif leaked_body:
+                    normalized_body = leaked_body
+
                 title = (
-                    _extract_frontmatter_scalar(frontmatter_lines, "title")
-                    or _first_mdx_heading(frontmatter_body, fallback_title)
+                    _extract_frontmatter_scalar(yaml_lines, "title")
+                    or _first_mdx_heading(normalized_body, fallback_title)
                 )
                 description = (
-                    _extract_frontmatter_scalar(frontmatter_lines, "description")
+                    _extract_frontmatter_scalar(yaml_lines, "description")
                     or "Auto-generated developer documentation"
                 )
                 extra_lines = [
                     line
-                    for line in frontmatter_lines
+                    for line in yaml_lines
                     if not line.strip().startswith("title:")
                     and not line.strip().startswith("description:")
                 ]
@@ -78,7 +125,7 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
                     "",
                 ]
                 mdx_path.write_text(
-                    "\n".join(normalized_frontmatter) + frontmatter_body.lstrip(),
+                    "\n".join(normalized_frontmatter) + normalized_body,
                     encoding="utf-8",
                 )
                 continue
@@ -104,4 +151,3 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
             frontmatter_lines.append("_deepdoc_autogen_: true")
         frontmatter = "\n".join(frontmatter_lines) + "\n---\n\n"
         mdx_path.write_text(frontmatter + body_text.lstrip(), encoding="utf-8")
-

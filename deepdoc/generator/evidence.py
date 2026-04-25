@@ -1120,11 +1120,26 @@ class EvidenceAssembler:
         # ── endpoint / feature: family-level evidence ─────────────────────
         # Check endpoint bundles first (richer evidence)
         if self.scan.endpoint_bundles:
+            bucket_tokens = {
+                token
+                for token in re.split(
+                    r"[^a-z0-9]+",
+                    f"{bucket.slug} {bucket.title}".lower().replace("_", "-"),
+                )
+                if token
+            }
             for bundle in self.scan.endpoint_bundles:
+                family = bundle.endpoint_family.lower().replace("_", "-")
+                family_aliases = {family, family.replace("-", "_")}
+                if family.endswith("s") and len(family) > 3:
+                    singular = family[:-1]
+                    family_aliases.update({singular, singular.replace("-", "_")})
+                else:
+                    family_aliases.add(f"{family}s")
                 # Match if handler is in our files or family matches slug
                 if (
                     bundle.handler_file in page_files
-                    or bundle.endpoint_family.lower() in bucket.slug.lower()
+                    or bool(bucket_tokens & family_aliases)
                 ):
                     lines.append(f"\n**Endpoint Family: {bundle.endpoint_family}**")
                     for mp in bundle.methods_paths:

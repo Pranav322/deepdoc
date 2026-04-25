@@ -209,7 +209,10 @@ def test_auto_generate_endpoint_refs_uses_only_publishable_endpoints() -> None:
     expanded = _auto_generate_endpoint_refs(plan, scan)
     slugs = {bucket.slug for bucket in expanded.buckets}
 
-    assert "get-api-users" in slugs
+    assert "users-api" in slugs
+    assert "routes.py" in api_family.owned_files
+    assert "handlers.py" in api_family.owned_files
+    assert not [bucket for bucket in expanded.buckets if bucket.generation_hints.get("is_endpoint_ref")]
     assert "get-authorization" not in slugs
 
 

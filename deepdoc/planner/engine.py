@@ -8,7 +8,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     Step 1: CLASSIFY — categorize every file/artifact
     Step 2: PROPOSE — create bucket candidates (no cap, LLM decides freely)
     Step 3: ASSIGN — map files to buckets, produce final plan
-    Step 4: AUTO-GEN endpoint_ref buckets from scan data (one per endpoint)
+    Step 4: attach scanned endpoints to grouped API-reference buckets
     """
 
     phase_start = time.perf_counter()
@@ -207,9 +207,14 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     scan.planner_timings["assign"] = time.perf_counter() - step_start
     if not assignment:
         console.print(
-            "[yellow]⚠ Assignment failed — falling back to auto-plan[/yellow]"
+            "[yellow]⚠ Assignment failed — using deterministic file assignment fallback[/yellow]"
         )
-        return _fallback_plan(scan, cfg)
+        assignment = _build_heuristic_assignment(proposal, scan)
+        if not assignment.get("buckets"):
+            console.print(
+                "[yellow]⚠ Deterministic assignment had no buckets — falling back to auto-plan[/yellow]"
+            )
+            return _fallback_plan(scan, cfg)
 
     # ── Merge proposal + assignment into final plan ──────────────────────
     plan = _merge_plan(proposal, assignment, classification, scan)
@@ -230,7 +235,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
 
     plan = _inject_research_context_buckets(plan, scan, classification)
 
-    # ── Step 4: Auto-generate per-endpoint reference pages from scan data ─
+    # ── Step 4: Attach endpoint reference details without one-page-per-route spam ─
     plan = _auto_generate_endpoint_refs(
         plan,
         scan,
@@ -677,6 +682,6 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return False
 
 
-from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _consolidate_similar_buckets, _decompose_buckets, _derive_topic_candidates, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
+from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _derive_topic_candidates, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
 from .utils import _build_classification_summary, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_topic_candidates, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets

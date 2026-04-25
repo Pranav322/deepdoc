@@ -590,6 +590,11 @@ def escape_mdx_text_hazards(content: str) -> str:
                     part,
                 )
                 part = re.sub(
+                    r"\{([^`\n{}]*:[^`\n{}]*)\}",
+                    lambda match: f"&#123;{match.group(1)}&#125;",
+                    part,
+                )
+                part = re.sub(
                     r"([,(]\s*)\{([A-Za-z_][A-Za-z0-9_, ]*)\}(?=\s*[),])",
                     lambda match: f"{match.group(1)}&#123;{match.group(2)}&#125;",
                     part,

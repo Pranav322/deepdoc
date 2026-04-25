@@ -14,6 +14,7 @@ from deepdoc.planner import (
     RepoScan,
     _apply_page_contracts,
     _auto_generate_endpoint_refs,
+    _build_heuristic_assignment,
     _decompose_buckets,
     _derive_topic_candidates,
     _ensure_database_runtime_and_interface_buckets,
@@ -272,7 +273,10 @@ def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> 
 
     expanded = _auto_generate_endpoint_refs(backend_plan, backend_scan)
     slugs = {b.slug for b in expanded.buckets}
-    assert "get-orders-id" in slugs
+    assert "orders-api" in slugs
+    assert "routes.py" in api_family.owned_files
+    assert "orders.py" in api_family.owned_files
+    assert not [b for b in expanded.buckets if b.generation_hints.get("is_endpoint_ref")]
     assert "get-health" not in slugs
 
     skipped_plan = DocPlan(
@@ -287,6 +291,167 @@ def test_auto_generate_endpoint_refs_respects_profile_and_suppresses_noise() -> 
         include_endpoint_pages=False,
     )
     assert not [b for b in skipped.buckets if b.generation_hints.get("is_endpoint_ref")]
+
+
+def test_auto_generate_endpoint_refs_matches_semantic_api_families() -> None:
+    auth_family = DocBucket(
+        bucket_type="endpoint-family",
+        title="User Authentication & Profile",
+        slug="user-auth-profile",
+        section="API Reference",
+        description="Login, registration, OTP, password, and profile endpoints",
+        generation_hints={"prompt_style": "endpoint"},
+    )
+    plan = DocPlan(
+        buckets=[auth_family],
+        nav_structure={"API Reference": ["user-auth-profile"]},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+    scan = _make_scan(
+        api_endpoints=[
+            {
+                "method": "POST",
+                "path": "/api/v2/login",
+                "handler": "login",
+                "file": "routes.py",
+                "handler_file": "auth/views.py",
+            },
+            {
+                "method": "POST",
+                "path": "/api/v2/register",
+                "handler": "register",
+                "file": "routes.py",
+                "handler_file": "auth/views.py",
+            },
+            {
+                "method": "POST",
+                "path": "/api/v2/sendotp",
+                "handler": "send_otp",
+                "file": "routes.py",
+                "handler_file": "otp/views.py",
+            },
+        ]
+    )
+
+    expanded = _auto_generate_endpoint_refs(plan, scan)
+
+    assert [bucket.slug for bucket in expanded.buckets] == ["user-auth-profile"]
+    assert {"routes.py", "auth/views.py", "otp/views.py"} <= set(auth_family.owned_files)
+    assert auth_family.generation_hints["is_endpoint_family"] is True
+    assert auth_family.generation_hints["include_endpoint_detail"] is True
+    assert not [b for b in expanded.buckets if b.generation_hints.get("is_endpoint_ref")]
+
+
+def test_auto_generate_endpoint_refs_splits_unmatched_fallback_groups() -> None:
+    plan = DocPlan(
+        buckets=[],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+    scan = _make_scan(
+        api_endpoints=[
+            {"method": "GET", "path": "/alpha/red", "handler": "alpha_red", "file": "alpha.py"},
+            {"method": "GET", "path": "/alpha/blue", "handler": "alpha_blue", "file": "alpha.py"},
+            {"method": "GET", "path": "/alpha/green", "handler": "alpha_green", "file": "alpha.py"},
+            {"method": "GET", "path": "/beta/red", "handler": "beta_red", "file": "beta.py"},
+            {"method": "GET", "path": "/beta/blue", "handler": "beta_blue", "file": "beta.py"},
+            {"method": "GET", "path": "/beta/green", "handler": "beta_green", "file": "beta.py"},
+            {"method": "GET", "path": "/gamma/red", "handler": "gamma_red", "file": "gamma.py"},
+            {"method": "GET", "path": "/delta/red", "handler": "delta_red", "file": "delta.py"},
+        ]
+    )
+
+    expanded = _auto_generate_endpoint_refs(plan, scan)
+    slugs = {bucket.slug for bucket in expanded.buckets}
+
+    assert {"alpha-api-endpoints", "beta-api-endpoints", "additional-api-endpoints"} <= slugs
+    assert not [b for b in expanded.buckets if b.generation_hints.get("is_endpoint_ref")]
+    assert len(expanded.buckets) == 3
+
+
+def test_build_heuristic_assignment_preserves_proposed_buckets_after_parse_failure() -> None:
+    scan = _make_scan(
+        file_summaries={
+            "controllers/UserController.py": "login register profile otp handlers",
+            "controllers/OrderController.py": "order checkout cancellation handlers",
+            "tests/test_orders.py": "order tests",
+        },
+        parsed_files={
+            "controllers/UserController.py": _parsed_file(
+                "controllers/UserController.py",
+                imports=[],
+                symbols=[
+                    Symbol(name="login", kind="function", signature="def login()"),
+                    Symbol(name="register", kind="function", signature="def register()"),
+                ],
+            ),
+            "controllers/OrderController.py": _parsed_file(
+                "controllers/OrderController.py",
+                imports=[],
+                symbols=[
+                    Symbol(name="checkout", kind="function", signature="def checkout()"),
+                    Symbol(name="cancel_order", kind="function", signature="def cancel_order()"),
+                ],
+            ),
+        },
+    )
+    proposal = {
+        "buckets": [
+            {
+                "slug": "user-auth-profile",
+                "title": "User Authentication & Profile",
+                "description": "Login, registration, OTP, and profile workflows",
+                "candidate_files": [],
+            },
+            {
+                "slug": "orders-management",
+                "title": "Order Management & Checkout",
+                "description": "Order checkout and cancellation workflows",
+                "candidate_files": [],
+            },
+        ]
+    }
+
+    assignment = _build_heuristic_assignment(proposal, scan)
+    by_slug = {bucket["slug"]: bucket for bucket in assignment["buckets"]}
+
+    assert "controllers/UserController.py" in by_slug["user-auth-profile"]["owned_files"]
+    assert "controllers/OrderController.py" in by_slug["orders-management"]["owned_files"]
+    assert assignment["skipped_files"] == ["tests/test_orders.py"]
+
+
+def test_build_heuristic_assignment_skips_zero_overlap_files() -> None:
+    scan = _make_scan(
+        file_summaries={
+            "shipping/tracker.py": "shipment tracking eta updates",
+        }
+    )
+    proposal = {
+        "buckets": [
+            {
+                "slug": "user-auth-profile",
+                "title": "User Authentication & Profile",
+                "description": "Login, registration, OTP, and profile workflows",
+                "candidate_files": [],
+            },
+            {
+                "slug": "orders-management",
+                "title": "Order Management & Checkout",
+                "description": "Order checkout and cancellation workflows",
+                "candidate_files": [],
+            },
+        ]
+    }
+
+    assignment = _build_heuristic_assignment(proposal, scan)
+
+    assert assignment["skipped_files"] == ["shipping/tracker.py"]
+    assert all(
+        "shipping/tracker.py" not in bucket["owned_files"]
+        for bucket in assignment["buckets"]
+    )
 
 
 def test_start_here_setup_slug_and_section_are_preserved() -> None:

@@ -286,6 +286,87 @@ def _merge_plan(
     )
 
 
+def _build_heuristic_assignment(proposal: dict[str, Any], scan: RepoScan) -> dict[str, Any]:
+    """Build deterministic file assignments when the LLM assign JSON is invalid."""
+    buckets = list(proposal.get("buckets", []))
+    if not buckets:
+        return {"buckets": [], "skipped_files": [], "file_to_buckets": {}}
+
+    source_files = set(scan.file_summaries)
+    assigned_files: set[str] = set()
+    assignment_by_slug: dict[str, dict[str, Any]] = {}
+    bucket_tokens: dict[str, set[str]] = {}
+
+    for idx, bucket in enumerate(buckets):
+        slug = bucket.get("slug", f"bucket-{idx}")
+        candidate_files = [
+            file_path
+            for file_path in bucket.get("candidate_files", [])
+            if file_path in source_files
+        ]
+        artifact_refs = [
+            file_path
+            for file_path in bucket.get("candidate_files", [])
+            if file_path in set(scan.config_files)
+        ]
+        assignment_by_slug[slug] = {
+            "slug": slug,
+            "owned_files": list(dict.fromkeys(candidate_files)),
+            "owned_symbols": [],
+            "artifact_refs": list(dict.fromkeys(artifact_refs)),
+            "priority": idx,
+        }
+        assigned_files.update(candidate_files)
+        bucket_tokens[slug] = _proposal_bucket_tokens(bucket)
+
+    def _file_tokens(file_path: str) -> set[str]:
+        parsed = scan.parsed_files.get(file_path)
+        imports = parsed.imports[:12] if parsed else []
+        symbols = [symbol.name for symbol in parsed.symbols[:20]] if parsed else []
+        return _normalize_tokens(
+            file_path,
+            scan.file_summaries.get(file_path, ""),
+            " ".join(imports),
+            " ".join(symbols),
+            scan.source_kind_by_file.get(file_path, ""),
+        )
+
+    skipped_files: list[str] = []
+    for file_path in sorted(source_files - assigned_files):
+        lower_parts = set(file_path.lower().split("/"))
+        if lower_parts & {"tests", "test", "__tests__", "spec"}:
+            skipped_files.append(file_path)
+            continue
+
+        tokens = _file_tokens(file_path)
+        best_slug = ""
+        best_score = 0
+        for slug, tokens_for_bucket in bucket_tokens.items():
+            score = len(tokens & tokens_for_bucket)
+            if scan.source_kind_by_file.get(file_path) in tokens_for_bucket:
+                score += 1
+            if score > best_score:
+                best_score = score
+                best_slug = slug
+
+        if best_slug and best_score > 0:
+            assignment_by_slug[best_slug]["owned_files"].append(file_path)
+        else:
+            skipped_files.append(file_path)
+
+    file_to_buckets: dict[str, list[str]] = {}
+    for assignment in assignment_by_slug.values():
+        assignment["owned_files"] = list(dict.fromkeys(assignment["owned_files"]))
+        for file_path in assignment["owned_files"]:
+            file_to_buckets.setdefault(file_path, []).append(assignment["slug"])
+
+    return {
+        "buckets": list(assignment_by_slug.values()),
+        "skipped_files": sorted(set(skipped_files)),
+        "file_to_buckets": file_to_buckets,
+    }
+
+
 def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
     cache = PROPOSAL_BUCKET_TOKEN_CACHE.get(id(bucket))
     if cache is not None:
@@ -1807,11 +1888,12 @@ def _auto_generate_endpoint_refs(
     scan: RepoScan,
     include_endpoint_pages: bool = True,
 ) -> DocPlan:
-    """Auto-generate individual endpoint_ref buckets from scan API endpoints.
+    """Attach scanned endpoint details to grouped API-reference buckets.
 
-    This creates one page per API endpoint (e.g. GET /api/v1/orders) and nests
-    each under its parent endpoint-family bucket. The LLM planner only creates
-    family buckets (endpoint type) — this fills in the per-endpoint detail pages.
+    Historically this created one generated page per concrete route. That made
+    large backend repos produce hundreds of thin pages. Runtime-discovered
+    endpoints now feed endpoint-family pages, with bounded grouped fallback pages
+    for endpoints that do not match an existing family.
     """
     import re as _re
 
@@ -1831,6 +1913,146 @@ def _auto_generate_endpoint_refs(
         "/sitemap.xml",
     }
     NOISE_SUFFIXES = (".svg", ".png", ".jpg", ".ico", ".css", ".js", ".map")
+    ENDPOINT_DOMAIN_KEYWORDS: dict[str, set[str]] = {
+        "auth": {
+            "account",
+            "applelogin",
+            "auth",
+            "blacklist",
+            "block",
+            "email",
+            "facebooklogin",
+            "forgetpassword",
+            "googlelogin",
+            "login",
+            "logout",
+            "otp",
+            "password",
+            "profile",
+            "register",
+            "resendotp",
+            "resetpassword",
+            "sendotp",
+            "tfa",
+            "token",
+            "user",
+            "verifyotp",
+            "whitelist",
+        },
+        "orders": {
+            "cancel",
+            "checkout",
+            "exchange",
+            "hyperlocal",
+            "order",
+            "processorder",
+            "purchase",
+            "return",
+            "survey",
+            "thank",
+            "undelivered",
+        },
+        "payments": {
+            "cashback",
+            "coupon",
+            "discount",
+            "giftvoucher",
+            "pay",
+            "payment",
+            "refund",
+            "tssmoney",
+            "upi",
+            "voucher",
+            "wallet",
+        },
+        "products": {
+            "artist",
+            "catalog",
+            "category",
+            "feed",
+            "gallery",
+            "inventory",
+            "listing",
+            "price",
+            "pricelist",
+            "product",
+            "rating",
+            "search",
+            "sitemap",
+            "syncproduct",
+            "tag",
+            "theme",
+            "variant",
+            "wwe",
+        },
+        "cart": {
+            "address",
+            "cart",
+            "checkout",
+            "coupon",
+            "giftvoucher",
+            "wishlist",
+        },
+        "shipping": {
+            "clickpost",
+            "countries",
+            "deliver",
+            "delivery",
+            "fulfillment",
+            "location",
+            "pincode",
+            "reshipping",
+            "ship",
+            "shipment",
+            "warehouse",
+            "zone",
+        },
+        "support": {
+            "callback",
+            "contact",
+            "feedback",
+            "haptik",
+            "notify",
+            "notification",
+            "nps",
+            "question",
+            "support",
+            "ticket",
+        },
+        "loyalty": {
+            "cashback",
+            "climes",
+            "exclusive",
+            "loyalty",
+            "point",
+            "reward",
+            "saving",
+            "tss",
+            "tssmoney",
+        },
+        "integrations": {
+            "bittersweet",
+            "bot",
+            "cataloguemgmt",
+            "convozen",
+            "erp",
+            "external",
+            "firebase",
+            "gmetri",
+            "haptik",
+            "omnichannel",
+            "pos",
+            "sync",
+            "webhook",
+        },
+        "graphql": {"cmsgraphql", "graphql", "mutation", "query", "schema"},
+        "cache": {
+            "cache",
+            "invalidate",
+            "redis",
+            "reset",
+        },
+    }
 
     endpoints = scan.published_api_endpoints
     if not include_endpoint_pages or not endpoints:
@@ -1840,12 +2062,6 @@ def _auto_generate_endpoint_refs(
     primary_type = repo_profile.get("primary_type", "other")
     restrict_endpoints = primary_type not in ("backend_service", "falcon_backend")
 
-    # Map endpoints to their family bucket by matching resource group
-    family_buckets = [
-        b for b in plan.buckets if b.generation_hints.get("is_endpoint_family")
-    ]
-
-    # Build resource → family bucket slug mapping
     def _resource_from_path(path: str) -> str:
         clean = _re.sub(r"^/(?:api/)?(?:v\d+/)?", "", path)
         parts_list = [
@@ -1855,113 +2071,231 @@ def _auto_generate_endpoint_refs(
         ]
         return parts_list[0] if parts_list else "general"
 
-    resource_to_family: dict[str, str] = {}
-    for fb in family_buckets:
-        # Derive resource from slug (e.g. "orders-api" → "orders")
-        resource = fb.slug.replace("-api", "").replace("-", "_")
-        resource_to_family[resource] = fb.slug
-        # Also map without underscores
-        resource_to_family[resource.replace("_", "-")] = fb.slug
+    def _resource_aliases(resource: str) -> set[str]:
+        normalized = resource.lower().replace("_", "-")
+        aliases = {normalized, normalized.replace("-", "_")}
+        if normalized.endswith("s") and len(normalized) > 3:
+            singular = normalized[:-1]
+            aliases.update({singular, singular.replace("-", "_")})
+        else:
+            aliases.add(f"{normalized}s")
+        return aliases
 
-    ref_buckets: list[DocBucket] = []
-    existing_slugs = {b.slug for b in plan.buckets}
+    def _bucket_tokens(bucket: DocBucket) -> set[str]:
+        return _normalize_tokens(
+            bucket.slug,
+            bucket.title,
+            bucket.description,
+            " ".join(bucket.owned_symbols[:20]),
+            " ".join(bucket.owned_files[:20]),
+        )
 
-    for ep in endpoints:
+    def _endpoint_tokens(ep: dict) -> set[str]:
+        owned_files = endpoint_owned_files(ep)
+        path_parts = _re.split(r"[^A-Za-z0-9_+-]+", ep.get("path", ""))
+        return _normalize_tokens(
+            ep.get("path", ""),
+            ep.get("handler", ""),
+            ep.get("name", ""),
+            ep.get("summary", ""),
+            " ".join(path_parts),
+            " ".join(owned_files),
+        )
+
+    def _domain_labels(tokens: set[str]) -> set[str]:
+        labels: set[str] = set()
+        for label, keywords in ENDPOINT_DOMAIN_KEYWORDS.items():
+            matched = False
+            for token in tokens:
+                for keyword in keywords:
+                    if keyword == token:
+                        matched = True
+                    elif len(keyword) >= 4 and keyword in token:
+                        matched = True
+                    elif len(token) >= 4 and token in keyword:
+                        matched = True
+                    if matched:
+                        break
+                if matched:
+                    break
+            if matched:
+                labels.add(label)
+        return labels
+
+    def _slugify(value: str) -> str:
+        return _re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-") or "api"
+
+    def _unique_slug(base_slug: str, existing_slugs: set[str]) -> str:
+        slug = base_slug
+        suffix = 2
+        while slug in existing_slugs:
+            slug = f"{base_slug}-{suffix}"
+            suffix += 1
+        existing_slugs.add(slug)
+        return slug
+
+    def _is_noise_endpoint(ep: dict) -> bool:
         method = ep.get("method", "GET").upper()
         path = ep.get("path", "/unknown")
         handler = ep.get("handler", "")
-        ep_files = endpoint_owned_files(ep)
         path_lower = path.lower()
-
         if path_lower in NOISE_PATHS:
-            continue
+            return True
         if any(path_lower.endswith(s) for s in NOISE_SUFFIXES):
+            return True
+        return path == "/" and method == "GET" and handler in ("root", "index", "home")
+
+    endpoints = [ep for ep in endpoints if not _is_noise_endpoint(ep)]
+    if not endpoints:
+        return plan
+
+    # Match against planned API-reference buckets, not only path-shaped
+    # endpoint-family slugs. LLM plans often use semantic pages such as
+    # user_auth_profile for /login, /logout, and /register.
+    family_buckets = []
+    for bucket in plan.buckets:
+        hints = bucket.generation_hints or {}
+        if hints.get("is_endpoint_ref") or hints.get("is_introduction_page"):
             continue
-        if path == "/" and method == "GET" and handler in ("root", "index", "home"):
-            continue
+        section = (bucket.section or "").lower()
+        if (
+            hints.get("is_endpoint_family")
+            or hints.get("include_endpoint_detail")
+            or hints.get("prompt_style") == "endpoint"
+            or section.startswith("api reference")
+        ):
+            family_buckets.append(bucket)
+
+    bucket_profiles: dict[str, tuple[set[str], set[str]]] = {
+        bucket.slug: (_bucket_tokens(bucket), _domain_labels(_bucket_tokens(bucket)))
+        for bucket in family_buckets
+    }
+
+    def _best_endpoint_family(ep: dict) -> DocBucket | None:
+        resource = _resource_from_path(ep.get("path", "/unknown"))
+        resource_aliases = _resource_aliases(resource)
+        ep_files = set(endpoint_owned_files(ep))
+        ep_tokens = _endpoint_tokens(ep)
+        ep_labels = _domain_labels(ep_tokens)
+
+        best_bucket: DocBucket | None = None
+        best_score = 0
+        for bucket in family_buckets:
+            bucket_tokens, bucket_labels = bucket_profiles[bucket.slug]
+            score = 0
+            score += len(ep_tokens & bucket_tokens) * 3
+            score += len(ep_labels & bucket_labels) * 6
+            if resource_aliases & bucket_tokens:
+                score += 6
+            if ep_files and ep_files & set(bucket.owned_files):
+                score += 4
+            if (bucket.generation_hints or {}).get("is_endpoint_family"):
+                score += 1
+            if score > best_score:
+                best_score = score
+                best_bucket = bucket
+
+        return best_bucket if best_score >= 6 else None
+
+    unmatched: list[dict] = []
+    for ep in endpoints:
         if restrict_endpoints and not family_buckets:
             continue
+        parent = _best_endpoint_family(ep)
+        ep_files = endpoint_owned_files(ep)
 
-        # Build slug
-        path_slug = _re.sub(r"[/:{}<>]+", "-", path).strip("-").lower()
-        ref_slug = f"{method.lower()}-{path_slug}"
+        if parent:
+            parent.owned_files = sorted({*parent.owned_files, *ep_files})
+            parent.generation_hints["is_endpoint_family"] = True
+            parent.generation_hints["include_endpoint_detail"] = True
+            parent.generation_hints.setdefault("include_openapi", True)
+            parent.generation_hints.setdefault("prompt_style", "endpoint")
+        else:
+            unmatched.append(ep)
 
-        # Avoid duplicates
-        if ref_slug in existing_slugs:
-            continue
-        existing_slugs.add(ref_slug)
+    if unmatched:
+        existing_slugs = {b.slug for b in plan.buckets}
+        grouped: dict[str, list[dict]] = defaultdict(list)
+        sparse: list[dict] = []
+        fallback_page_count = 0
 
-        # Find parent family bucket
-        resource = _resource_from_path(path)
-        parent_slug = resource_to_family.get(
-            resource, resource_to_family.get(resource.replace("_", "-"), "")
-        )
+        for ep in unmatched:
+            ep_labels = sorted(_domain_labels(_endpoint_tokens(ep)))
+            if ep_labels:
+                grouped[ep_labels[0]].append(ep)
+                continue
+            grouped[_resource_from_path(ep.get("path", "/unknown"))].append(ep)
 
-        ref_buckets.append(
-            DocBucket(
-                bucket_type="endpoint-ref",
-                title=f"{method} {path}",
-                slug=ref_slug,
-                section="API Reference",
-                description=f"API reference for {method} {path} — handler: {handler}",
-                owned_files=ep_files,
-                owned_symbols=[handler] if handler else [],
-                required_sections=[
-                    "endpoint_summary",
-                    "handler",
-                    "parameters",
-                    "request_body",
-                    "response_format",
-                    "error_responses",
-                    "auth",
-                    "sequence_diagram",
-                ],
-                generation_hints={
-                    "is_endpoint_ref": True,
-                    "include_endpoint_detail": True,
-                    "include_openapi": True,
-                    "prompt_style": "endpoint_ref",
-                    "icon": "globe-alt",
-                },
-                priority=25,
-                depends_on=[parent_slug] if parent_slug else [],
+        for group_key, group_eps in list(grouped.items()):
+            if len(group_eps) < 3 and group_key not in ENDPOINT_DOMAIN_KEYWORDS:
+                sparse.extend(group_eps)
+                del grouped[group_key]
+
+        if sparse:
+            grouped["supporting"] = sparse
+
+        for group_key, group_eps in sorted(grouped.items()):
+            display = group_key.replace("_", " ").replace("-", " ").title()
+            base_slug = (
+                "additional-api-endpoints"
+                if group_key == "supporting"
+                else f"{_slugify(group_key)}-api-endpoints"
             )
-        )
+            slug = _unique_slug(base_slug, existing_slugs)
+            ep_files = sorted(
+                {f for ep in group_eps for f in endpoint_owned_files(ep)}
+            )
+            handlers = sorted(
+                {ep.get("handler", "") for ep in group_eps if ep.get("handler")}
+            )
+            plan.buckets.append(
+                DocBucket(
+                    bucket_type="endpoint-family",
+                    title=(
+                        "Additional API Endpoints"
+                        if group_key == "supporting"
+                        else f"{display} API Endpoints"
+                    ),
+                    slug=slug,
+                    section="API Reference",
+                    description=(
+                        "Grouped API reference for scanned runtime endpoints that did "
+                        "not match a planned endpoint family "
+                        f"({len(group_eps)} endpoints)."
+                    ),
+                    owned_files=ep_files,
+                    owned_symbols=handlers[:50],
+                    required_sections=[
+                        "route_overview",
+                        "auth_validation",
+                        "execution_flow",
+                        "downstream_calls",
+                        "state_changes",
+                        "response_errors",
+                        "diagrams",
+                    ],
+                    generation_hints={
+                        "is_endpoint_family": True,
+                        "include_endpoint_detail": True,
+                        "include_openapi": True,
+                        "prompt_style": "endpoint",
+                        "icon": "globe-alt",
+                    },
+                    priority=24,
+                )
+            )
+            fallback_page_count += 1
+            plan.nav_structure.setdefault("API Reference", []).append(slug)
+    else:
+        fallback_page_count = 0
 
-    if ref_buckets:
-        plan.buckets.extend(ref_buckets)
-
-        # Group endpoint_refs by family in nav — nested under parent family title
-        family_slug_to_title: dict[str, str] = {
-            b.slug: b.title
-            for b in plan.buckets
-            if b.generation_hints.get("is_endpoint_family")
-        }
-        family_refs: dict[str, list[str]] = defaultdict(list)
-        ungrouped: list[str] = []
-        for b in ref_buckets:
-            parent = b.depends_on[0] if b.depends_on else ""
-            if parent and parent in family_slug_to_title:
-                family_refs[parent].append(b.slug)
-            else:
-                ungrouped.append(b.slug)
-
-        # Build nested nav sections: "API Endpoints > Orders API" etc.
-        for family_slug, ref_slugs in sorted(family_refs.items()):
-            family_title = family_slug_to_title.get(family_slug, family_slug)
-            section_key = f"API Reference > {family_title}"
-            # Include the family overview page first, then individual endpoints
-            plan.nav_structure[section_key] = [family_slug] + ref_slugs
-            # Remove family slug from its original section so it's not duplicated
-            for section_name, slugs in list(plan.nav_structure.items()):
-                if section_name != section_key and family_slug in slugs:
-                    slugs.remove(family_slug)
-
-        if ungrouped:
-            plan.nav_structure["API Reference > Other"] = ungrouped
-
+    attached = len(endpoints) - len(unmatched)
+    if attached or unmatched:
         console.print(
-            f"[green]✓ Auto-generated {len(ref_buckets)} individual endpoint reference pages[/green]"
+            "[green]✓ Grouped "
+            f"{attached} endpoint(s) into family pages"
+            f"{f' and {len(unmatched)} into {fallback_page_count} grouped fallback page(s)' if unmatched else ''}"
+            "[/green]"
         )
 
     return plan
@@ -2376,47 +2710,6 @@ def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:
             )
             nav["API Reference"].append(slug)
             assigned_files.update(ep_files)
-
-            # Individual endpoint reference pages
-            for ep in eps:
-                method = ep.get("method", "GET").upper()
-                path = ep.get("path", "/unknown")
-                handler = ep.get("handler", "")
-                ep_files = endpoint_owned_files(ep)
-                path_slug = re.sub(r"[/:{}<>]+", "-", path).strip("-").lower()
-                ref_slug = f"{method.lower()}-{path_slug}"
-                ref_title = f"{method} {path}"
-                buckets.append(
-                    DocBucket(
-                        bucket_type="endpoint-ref",
-                        title=ref_title,
-                        slug=ref_slug,
-                        section="API Endpoints",
-                        description=f"API reference for {method} {path} — handler: {handler}",
-                        owned_files=ep_files,
-                        owned_symbols=[handler] if handler else [],
-                        required_sections=[
-                            "endpoint_summary",
-                            "handler",
-                            "parameters",
-                            "request_body",
-                            "response_format",
-                            "error_responses",
-                            "auth",
-                            "sequence_diagram",
-                        ],
-                        generation_hints={
-                            "is_endpoint_ref": True,
-                            "include_endpoint_detail": True,
-                            "include_openapi": True,
-                            "prompt_style": "endpoint_ref",
-                            "icon": "globe-alt",
-                        },
-                        priority=25,
-                        depends_on=[slug],
-                    )
-                )
-                nav["API Endpoints"].append(ref_slug)
 
     # ── Skipped files ────────────────────────────────────────────────────
     all_source = set(scan.file_summaries.keys())

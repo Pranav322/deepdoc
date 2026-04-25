@@ -57,7 +57,7 @@ This file might be stale and if that is the case please update it first
 - Query modes are intentional: `/query` runs fast mode (index-only, lower prompt budget, and LLM retrieval steps disabled by default), `/deep-research` runs richer synthesis with bounded live-repo fallback, and `/code-deep` runs code-aware deep retrieval with file inventory and trace output.
 - The chatbot backend also exposes `/query-context` for retrieval-only diagnostics (selected chunks/citations without answer generation); keep this endpoint aligned with fast-mode selection logic.
 - For realtime UX, `/code-deep/stream` emits SSE trace events during research followed by the final result payload.
-- Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`.
+- Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`, but scanned endpoints should enrich grouped endpoint-family pages instead of creating one generated MDX page per route. Keep per-route pages limited to canonical OpenAPI assets or legacy plans.
 - Generated Fumadocs output must stay MDX-safe and GitHub-Pages-safe: preserve explicit site base-path support in the scaffold and escape raw destructured brace args in markdown tables before writing docs.
 - Generated-page validation now checks not just sections/files/routes, but also runtime/config/integration grounding when that evidence was assembled. Keep those checks aligned with `deepdoc/generator/evidence.py`.
 - If freshness/state semantics change, audit `deepdoc/planner/`, `deepdoc/generator/`, `persistence_v2.py`, and `smart_update_v2.py` together.

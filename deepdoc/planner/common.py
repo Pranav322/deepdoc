@@ -217,7 +217,7 @@ if the repo needs something different.
 Each bucket MUST also include a "generation_hints" object with these boolean flags \
 (set true only when applicable):
 - include_endpoint_detail: this bucket documents API endpoints (assemble endpoint listing)
-- is_endpoint_ref: this is a single-endpoint reference page (canonical OpenAPI page when a spec exists)
+- is_endpoint_ref: this is a single-endpoint reference page (used only for canonical OpenAPI pages or legacy plans)
 - is_endpoint_family: this groups related endpoints (e.g. all /orders/* routes)
 - include_openapi: inject OpenAPI spec context when generating
 - include_database_context: inject DB schema, ER diagrams, model definitions
@@ -255,7 +255,7 @@ Rules:
   "Common Logic", "Shared Code", or "Miscellaneous". Every file belongs to a
   concept — find the concept.
 - Group by BUSINESS WORKFLOW or LOGICAL CONCERN, not by file path.
-- Endpoint family buckets cover a resource family (all /orders/* endpoints, not one per route).
+- Endpoint family buckets cover a resource family (all /orders/* endpoints, not one per route). Do not create one generated MDX page per scanned route.
 - If an integration is trivial (used in one place, no setup complexity), embed it in the \
   relevant bucket instead of creating a standalone one.
 - Every bucket MUST have required_sections and required_diagrams that make sense for \
@@ -312,8 +312,8 @@ Based on this repository classification, propose documentation buckets.
 - Endpoint family buckets should group by resource family, NOT one-per-route
 - Create as many buckets as needed for thorough coverage — prefer depth and completeness \
   over brevity. Every important area should have its own bucket.
-- Individual per-endpoint reference pages will be created in a follow-up step — do NOT \
-  create single-endpoint reference buckets here.
+- Scanned endpoints will be attached to grouped API-reference pages in a follow-up step — \
+  do NOT create single-endpoint reference buckets here.
 - Choose nav_structure section names that fit THIS repo. Do not force generic names.
 
 Return JSON:

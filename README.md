@@ -18,7 +18,7 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **Giant-File Handling** — Large files are decomposed into feature-aligned clusters so giant controllers or service files can feed multiple doc pages.
 - **Reader-First Repo-Agnostic Nav** — The planner normalizes bucket output into a natural onboarding flow (for backend repos: Start Here → Core Workflows → API Reference → Data Model → runtime/integrations/ops) while preserving full coverage.
 - **Large-Database Anti-Noise Grouping** — Sparse singleton model files are coalesced into stable aggregate groups (for example `core-models`) so huge schemas stay complete without one-file-per-page nav spam.
-- **Endpoint-Family + Per-Endpoint Docs** — High-level endpoint family pages are AI-planned, and individual `endpoint_ref` pages are derived from scan data and generated separately.
+- **Grouped API Reference Docs** — High-level endpoint family pages are AI-planned and enriched from scanned runtime endpoints, avoiding one-page-per-route navigation spam. OpenAPI specs still stage canonical interactive `/api/*` pages when present.
 - **Integration Discovery** — Third-party systems like payment gateways, delivery providers, warehouse systems, and webhook integrations can be grouped into integration docs.
 - **Incremental Updates** — `deepdoc update` uses persisted plan and ledger data to regenerate only stale or structurally affected docs.
 - **Full Refresh and Clean Rebuild Modes** — `generate --force` fully refreshes DeepDoc-managed docs and removes stale generated pages; `generate --clean --yes` wipes output and rebuilds from scratch.
@@ -176,7 +176,7 @@ deepdoc generate --exclude "tests/**"
 
 1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
-3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; per-endpoint reference pages are derived from scan data and generated individually.
+3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route.
 4. **Phase 4: API Ref** — Stage OpenAPI assets for the generated Fumadocs `/api/*` pages when a spec exists.
 5. **Phase 5: Build** — Write the generated `site/` Fumadocs scaffold, page tree, search route, and static assets from the generated plan.
 
@@ -983,7 +983,7 @@ The current system is bucket-based.
 | `system` | Architecture, setup, testing, deployment/ops, auth, shared middleware, observability |
 | `feature` | Business workflows like checkout, refunds, order status, onboarding |
 | `endpoint` | Endpoint-family or resource-level API docs |
-| `endpoint_ref` | One generated page per concrete API endpoint |
+| `endpoint_ref` | Legacy or OpenAPI-backed single-endpoint page; scanned runtime endpoints are grouped into endpoint-family docs by default |
 | `integration` | Third-party systems like payment, warehouse, delivery, webhook providers |
 | `database` | Cross-cutting database/schema/data-layer documentation |
 

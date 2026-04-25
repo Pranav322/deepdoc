@@ -688,7 +688,7 @@ def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:
 
     escaped = escape_mdx_text_hazards(content)
 
-    assert '`[{"prod_id":101}]`' in escaped
+    assert '`[&#123;"prod_id":101&#125;]`' in escaped
 
 
 def test_escape_mdx_text_hazards_rewrites_br_tags_inside_table_cells() -> None:
@@ -950,6 +950,17 @@ def test_escape_mdx_text_hazards_repairs_mis_escaped_inline_closing_tags() -> No
     escaped = escape_mdx_text_hazards(content)
 
     assert escaped == "<code>python -m venv venv&lt;br>source venv/bin/activate</code>"
+
+
+def test_escape_mdx_text_hazards_escapes_json_like_table_cells() -> None:
+    content = (
+        '| `WishlistFactory.instantiate` | `middleware/WishlistMiddleware.py` | '
+        '(None, {"user_id": ...}, context, sync=True) | Instantiates wishlist object. |'
+    )
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert '&#123;"user_id": ...&#125;' in escaped
 
 
 def test_repair_internal_doc_links_rewrites_aliases_using_page_titles() -> None:

@@ -288,7 +288,7 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     "--api/--skip-api",
     "include_api",
     default=None,
-    help="Include detected API endpoint pages for this run. Use --skip-api to omit API buckets and per-endpoint docs.",
+    help="Include detected API endpoint pages for this run. Use --skip-api to omit grouped API buckets and endpoint details.",
 )
 @click.option(
     "--deploy",

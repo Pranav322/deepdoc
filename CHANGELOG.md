@@ -9,6 +9,11 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.5.0] - 2026-04-25
+
+- Changed scanned runtime endpoint planning to enrich grouped endpoint-family pages instead of generating one MDX page per route, while preserving OpenAPI-backed per-route API pages when a spec exists.
+- Added a deterministic planner assignment fallback so malformed LLM JSON in the assign step no longer discards the proposed bucket plan.
+
 ## [1.4.0] - 2026-04-17
 
 DeepDoc 1.4.0 adds a dedicated code-aware chatbot mode with live trace events

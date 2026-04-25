@@ -122,10 +122,9 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
                     f"description: {json.dumps(description)}",
                     *extra_lines,
                     "---",
-                    "",
                 ]
                 mdx_path.write_text(
-                    "\n".join(normalized_frontmatter) + normalized_body,
+                    "\n".join(normalized_frontmatter) + "\n\n" + normalized_body,
                     encoding="utf-8",
                 )
                 continue

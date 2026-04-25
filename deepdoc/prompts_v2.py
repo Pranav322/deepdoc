@@ -1246,7 +1246,7 @@ Link to related API, database, runtime, and feature pages.
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Endpoint Ref (individual per-endpoint reference page)
+# Endpoint Ref (legacy individual per-endpoint reference page)
 # ─────────────────────────────────────────────────────────────────────────────
 
 ENDPOINT_REF_V2 = """\

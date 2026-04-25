@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import shutil
 from textwrap import dedent
 
 from .settings import chatbot_enabled, chatbot_site_api_base_url
@@ -12,7 +13,7 @@ def scaffold_chatbot_backend(repo_root: Path, cfg: dict) -> None:
     backend_dir = repo_root / "chatbot_backend"
     if not chatbot_enabled(cfg):
         if backend_dir.exists():
-            return
+            shutil.rmtree(backend_dir)
         return
 
     files = {

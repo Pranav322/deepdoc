@@ -9,6 +9,10 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.5.1] - 2026-04-25
+
+- Changed the generated Fumadocs scaffold to omit chatbot routes, frontend components, and `chatbot_backend/` artifacts when `chatbot.enabled` is false, keeping docs-only builds clean.
+
 ## [1.5.0] - 2026-04-25
 
 - Changed scanned runtime endpoint planning to enrich grouped endpoint-family pages instead of generating one MDX page per route, while preserving OpenAPI-backed per-route API pages when a spec exists.

@@ -1,5 +1,7 @@
 from .common import *
 
+import shutil
+
 def build_fumadocs_from_plan(
     repo_root: Path,
     output_dir: Path,
@@ -53,6 +55,7 @@ def _ensure_app_scaffold(
     """Write or update the DeepDoc-managed Fumadocs app scaffold."""
     site_dir = repo_root / "site"
     site_dir.mkdir(parents=True, exist_ok=True)
+    chatbot_enabled = bool(cfg.get("chatbot", {}).get("enabled"))
 
     files = {
         site_dir / "package.json": _package_json(project_name),
@@ -62,22 +65,28 @@ def _ensure_app_scaffold(
         site_dir / "next.config.mjs": _next_config_mjs(),
         site_dir / "source.config.mjs": _source_config_mjs(docs_dir_relative),
         site_dir / "mdx-components.tsx": _mdx_components_tsx(has_openapi),
-        site_dir / "app" / "layout.tsx": _app_layout_tsx(project_name),
+        site_dir / "app" / "layout.tsx": _app_layout_tsx(project_name, chatbot_enabled),
         site_dir / "app" / "global.css": _global_css(cfg),
-        site_dir / "app" / "ask" / "page.tsx": _chatbot_ask_page_tsx(),
         site_dir / "app" / "search" / "route.ts": _search_route_ts(),
         site_dir / "app" / "[[...slug]]" / "layout.tsx": _docs_layout_tsx(),
         site_dir / "app" / "[[...slug]]" / "page.tsx": _docs_page_tsx(),
-        site_dir / "components" / "chatbot-panel.tsx": _chatbot_panel_tsx(),
-        site_dir / "components" / "chatbot-toggle.tsx": _chatbot_toggle_tsx(),
         site_dir / "components" / "mdx" / "mermaid.tsx": _mermaid_component_tsx(),
-        site_dir / "lib" / "chatbot-config.ts": _chatbot_config_ts(repo_root, cfg),
         site_dir / "lib" / "source.ts": _source_ts(),
         site_dir / "lib" / "layout-options.ts": _layout_options_ts(
             project_name, repo_url
         ),
         site_dir / "openapi" / ".gitkeep": "",
     }
+
+    if chatbot_enabled:
+        files.update(
+            {
+                site_dir / "app" / "ask" / "page.tsx": _chatbot_ask_page_tsx(),
+                site_dir / "components" / "chatbot-panel.tsx": _chatbot_panel_tsx(),
+                site_dir / "components" / "chatbot-toggle.tsx": _chatbot_toggle_tsx(),
+                site_dir / "lib" / "chatbot-config.ts": _chatbot_config_ts(repo_root, cfg),
+            }
+        )
 
     if has_openapi:
         files.update(
@@ -109,6 +118,21 @@ def _ensure_app_scaffold(
         for path in stale_paths:
             if path.exists():
                 path.unlink()
+
+    if not chatbot_enabled:
+        stale_paths = [
+            site_dir / "app" / "ask" / "page.tsx",
+            site_dir / "components" / "chatbot-panel.tsx",
+            site_dir / "components" / "chatbot-toggle.tsx",
+            site_dir / "lib" / "chatbot-config.ts",
+        ]
+        for path in stale_paths:
+            if path.exists():
+                path.unlink()
+
+        chatbot_backend_dir = repo_root / "chatbot_backend"
+        if chatbot_backend_dir.exists():
+            shutil.rmtree(chatbot_backend_dir)
 
 
 def _build_page_tree_from_plan(

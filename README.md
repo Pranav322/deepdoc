@@ -87,12 +87,24 @@ pip show faiss-cpu fastapi uvicorn
 
 ## Quick Start
 
+DeepDoc has two separate model surfaces:
+
+- `llm.*` powers planning and doc generation.
+- `chatbot.answer.*` and `chatbot.embeddings.*` power the optional chatbot.
+
+If you only want generated docs, configure `llm.*` and skip the chatbot sections.
+If you want docs plus chatbot, install `deepdoc[chatbot]` and configure both.
+
+When `chatbot.enabled` is `false`, DeepDoc now generates a docs-only site: no chatbot route, no chatbot UI components, and no `chatbot_backend/` scaffold.
+
+### Docs Only
+
 ```bash
 # 1. Go to your project
 cd /path/to/your-project
 
 # 2. Initialize DeepDoc
-deepdoc init
+deepdoc init --provider anthropic
 
 # 3. Set your API key
 export ANTHROPIC_API_KEY=sk-ant-...
@@ -104,6 +116,37 @@ deepdoc generate
 deepdoc serve
 # → Open http://localhost:3000
 ```
+
+### Docs + Chatbot
+
+```bash
+# 1. Install chatbot extras
+pip install "deepdoc[chatbot]"
+
+# 2. Go to your project
+cd /path/to/your-project
+
+# 3. Initialize with chatbot enabled
+deepdoc init --with-chatbot
+
+# 4. Configure providers for docs + chatbot
+#    Use one of the provider recipes in:
+#    - LLM Provider Setup
+#    - Chatbot Quick Start
+
+# 5. Generate docs and chatbot indexes
+deepdoc generate
+
+# 6. Start the local docs site + chatbot backend
+deepdoc serve
+```
+
+For most new users, the fastest path is:
+
+- Claude for docs, OpenAI embeddings for chatbot
+- OpenAI for both docs and chatbot
+- Gemini for both docs and chatbot
+- Azure when your team already runs Azure OpenAI deployments
 
 ---
 
@@ -293,7 +336,9 @@ When you do not have a hand-written benchmark catalog or chatbot eval file yet, 
 
 ## LLM Provider Setup
 
-DeepDoc uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood, which means it supports 100+ LLM providers. Here are the most common setups:
+DeepDoc uses [LiteLLM](https://github.com/BerriAI/litellm) under the hood, which means it supports 100+ providers.
+
+For new users, start with one of these common doc-generation setups:
 
 ### Anthropic (Claude) — Default
 
@@ -314,6 +359,21 @@ deepdoc generate
 ```
 
 Models: `gpt-4.1`, `gpt-4.1-mini`, `gpt-4o`, `gpt-4o-mini`, `gpt-4-turbo`
+
+### Google Gemini
+
+If you use a simple Google AI Studio API key, use the `gemini/` prefix. Without that prefix, LiteLLM defaults to Vertex AI semantics.
+
+```bash
+deepdoc init
+deepdoc config set llm.provider gemini
+deepdoc config set llm.model gemini/gemini-2.0-flash
+deepdoc config set llm.api_key_env GEMINI_API_KEY
+export GEMINI_API_KEY=...
+deepdoc generate
+```
+
+Common choices: `gemini/gemini-2.0-flash`, `gemini/gemini-2.5-flash`, `gemini/gemini-2.5-pro`
 
 ### Azure OpenAI
 
@@ -388,9 +448,14 @@ Other Ollama models: `ollama/codellama`, `ollama/mistral`, `ollama/mixtral`
 
 ### Any LiteLLM Provider
 
-DeepDoc passes the model string directly to LiteLLM, so you can use any provider LiteLLM supports by using the correct prefix:
+DeepDoc passes the model string directly to LiteLLM, so you can use any provider LiteLLM supports by using the correct prefix. `deepdoc init` only has shortcuts for the common providers above, so for everything else initialize once and then use `deepdoc config set ...`:
 
 ```bash
+# Gemini
+deepdoc config set llm.provider gemini
+deepdoc config set llm.model gemini/gemini-2.0-flash
+export GEMINI_API_KEY=...
+
 # Groq
 deepdoc config set llm.model groq/llama3-70b-8192
 export GROQ_API_KEY=...
@@ -480,7 +545,7 @@ site:
 | `project_name` | directory name | Project name used in site title |
 | `description` | `""` | Short project description |
 | `output_dir` | `docs` | Where generated markdown pages are written |
-| `site_dir` | `site` | Where MkDocs builds the static site |
+| `site_dir` | `site` | Where the generated Fumadocs site lives |
 | **LLM** | | |
 | `llm.provider` | `anthropic` | `anthropic`, `openai`, `azure`, `ollama`, or any LiteLLM alias |
 | `llm.model` | `claude-3-5-sonnet-20241022` | Model name (use provider prefix for non-Anthropic, e.g. `azure/gpt-4.1`) |
@@ -517,42 +582,139 @@ site:
 
 DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using RAG (Retrieval-Augmented Generation). The chatbot indexes your source code, config artifacts, generated docs, and selected repo-authored docs into a FAISS vector store, then serves a FastAPI backend that your Fumadocs site talks to.
 
+If chatbot is disabled, DeepDoc keeps the generated site docs-only: it does not generate the `/ask` route, chatbot frontend components, or `chatbot_backend/` scaffold.
+
 ### Quick Start
 
+The chatbot is configured independently from doc generation:
+
+- `llm.*` controls the models used during planning and page generation.
+- `chatbot.answer.*` controls the model that writes answers.
+- `chatbot.embeddings.*` controls the model used to embed code, docs, and artifacts for retrieval.
+
+That means you can mix providers. For example:
+
+- Claude for docs, OpenAI embeddings for chatbot
+- OpenAI for everything
+- Gemini for everything
+- Azure for everything
+
 ```bash
-# 1. Initialize with chatbot enabled
+# 1. Install chatbot extras
+pip install "deepdoc[chatbot]"
+
+# 2. Initialize with chatbot enabled
 deepdoc init --with-chatbot
 
-# 2. Set chatbot-specific API keys
+# 3. Configure docs + chatbot providers
+#    Use one of the recipes below
+
+# 4. Set chatbot-specific API keys
 export DEEPDOC_CHAT_API_KEY=your-answer-model-key
 export DEEPDOC_EMBED_API_KEY=your-embedding-model-key
 
-# 3. Generate docs + chatbot indexes
+# 5. Generate docs + chatbot indexes
 deepdoc generate
 
-# 4. Serve docs + chatbot backend locally
+# 6. Serve docs + chatbot backend locally
 deepdoc serve
 ```
 
 `deepdoc serve` auto-starts the chatbot backend alongside the Fumadocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
-### use this ready to go config 
-```
-deepdoc config set llm.provider azure                                            
-deepdoc config set llm.model azure/gpt-4.1
-deepdoc config set llm.api_key_env AZURE_OPENAI_API_KEY
-deepdoc config set llm.base_url https://aiservices-orizn.openai.azure.com/
+
+### Provider Recipes
+
+#### Claude For Docs + Chatbot Answers
+
+Anthropic works well for doc generation and chatbot answers, but you still need a separate embeddings provider.
+
+```bash
+export ANTHROPIC_API_KEY=...
+export OPENAI_API_KEY=...
+export DEEPDOC_CHAT_API_KEY=$ANTHROPIC_API_KEY
+export DEEPDOC_EMBED_API_KEY=$OPENAI_API_KEY
+
+deepdoc config set llm.provider anthropic
+deepdoc config set llm.model claude-3-5-sonnet-20241022
+deepdoc config set llm.api_key_env ANTHROPIC_API_KEY
 
 deepdoc config set chatbot.enabled true
+deepdoc config set chatbot.answer.provider anthropic
+deepdoc config set chatbot.answer.model claude-3-5-sonnet-20241022
+deepdoc config set chatbot.answer.api_key_env DEEPDOC_CHAT_API_KEY
 
-deepdoc config set chatbot.answer.api_key_env AZURE_OPENAI_API_KEY
-deepdoc config set chatbot.answer.base_url https://aiservices-orizn.openai.azure.com/
-deepdoc config set chatbot.answer.api_version 2024-02-15-preview
+deepdoc config set chatbot.embeddings.provider openai
+deepdoc config set chatbot.embeddings.model text-embedding-3-large
+deepdoc config set chatbot.embeddings.api_key_env DEEPDOC_EMBED_API_KEY
+```
+
+#### OpenAI For Docs + Chatbot
+
+```bash
+export OPENAI_API_KEY=...
+export DEEPDOC_CHAT_API_KEY=$OPENAI_API_KEY
+export DEEPDOC_EMBED_API_KEY=$OPENAI_API_KEY
+
+deepdoc config set llm.provider openai
+deepdoc config set llm.model gpt-4o
+deepdoc config set llm.api_key_env OPENAI_API_KEY
+
+deepdoc config set chatbot.enabled true
+deepdoc config set chatbot.answer.provider openai
+deepdoc config set chatbot.answer.model gpt-4o-mini
+deepdoc config set chatbot.answer.api_key_env DEEPDOC_CHAT_API_KEY
+
+deepdoc config set chatbot.embeddings.provider openai
+deepdoc config set chatbot.embeddings.model text-embedding-3-large
+deepdoc config set chatbot.embeddings.api_key_env DEEPDOC_EMBED_API_KEY
+```
+
+#### Google Gemini For Docs + Chatbot
+
+With Google AI Studio, keep the `gemini/` prefix in model names and use `GEMINI_API_KEY`.
+
+```bash
+export GEMINI_API_KEY=...
+export DEEPDOC_CHAT_API_KEY=$GEMINI_API_KEY
+export DEEPDOC_EMBED_API_KEY=$GEMINI_API_KEY
+
+deepdoc config set llm.provider gemini
+deepdoc config set llm.model gemini/gemini-2.0-flash
+deepdoc config set llm.api_key_env GEMINI_API_KEY
+
+deepdoc config set chatbot.enabled true
+deepdoc config set chatbot.answer.provider gemini
+deepdoc config set chatbot.answer.model gemini/gemini-2.0-flash
+deepdoc config set chatbot.answer.api_key_env DEEPDOC_CHAT_API_KEY
+
+deepdoc config set chatbot.embeddings.provider gemini
+deepdoc config set chatbot.embeddings.model gemini/text-embedding-004
+deepdoc config set chatbot.embeddings.api_key_env DEEPDOC_EMBED_API_KEY
+```
+
+#### Azure For Docs + Chatbot
+
+```bash
+export AZURE_OPENAI_API_KEY=...
+export AZURE_EMBEDDING_API_KEY=...
+
+deepdoc config set llm.provider azure
+deepdoc config set llm.model azure/gpt-4.1
+deepdoc config set llm.api_key_env AZURE_OPENAI_API_KEY
+deepdoc config set llm.base_url https://YOUR-RESOURCE.openai.azure.com/
+
+deepdoc config set chatbot.enabled true
+deepdoc config set chatbot.answer.provider azure
 deepdoc config set chatbot.answer.model azure/gpt-4.1
+deepdoc config set chatbot.answer.api_key_env AZURE_OPENAI_API_KEY
+deepdoc config set chatbot.answer.base_url https://YOUR-RESOURCE.openai.azure.com/
+deepdoc config set chatbot.answer.api_version 2024-02-15-preview
 
-deepdoc config set chatbot.embeddings.api_key_env AZURE_EMBEDDING_API_KEY
-deepdoc config set chatbot.embeddings.base_url https://prod-chatbot-1.cognitiveservices.azure.com/
-deepdoc config set chatbot.embeddings.api_version 2024-12-01-preview
+deepdoc config set chatbot.embeddings.provider azure
 deepdoc config set chatbot.embeddings.model azure/text-embedding-3-small
+deepdoc config set chatbot.embeddings.api_key_env AZURE_EMBEDDING_API_KEY
+deepdoc config set chatbot.embeddings.base_url https://YOUR-RESOURCE.openai.azure.com/
+deepdoc config set chatbot.embeddings.api_version 2024-02-15-preview
 ```
 
 ### Installation
@@ -579,6 +741,8 @@ pip show faiss-cpu fastapi uvicorn
 
 All chatbot settings live under the `chatbot` key in `.deepdoc.yaml`. Running `deepdoc init --with-chatbot` populates these defaults:
 
+These are scaffolding defaults, not a recommendation that you must use Azure. Most teams change the provider, model, and API-key env vars right after `init`.
+
 ```yaml
 chatbot:
   enabled: true
@@ -602,6 +766,9 @@ chatbot:
     continuation_context_chars: 12000         # Tail chars included in continuation prompt
 
   embeddings:                                 # LLM used for embedding code/docs
+    backend: "litellm"                       # "litellm" for cloud embeddings or "fastembed" for fully local embeddings
+    fastembed_model: "nomic-ai/nomic-embed-text-v1.5"
+    fastembed_batch_size: 4
     provider: "azure"
     model: "azure/text-embedding-3-large"
     api_key_env: "DEEPDOC_EMBED_API_KEY"
@@ -705,6 +872,9 @@ chatbot:
 | `chatbot.answer.continuation_retries` | `2` | Extra completion attempts when an answer appears truncated |
 | `chatbot.answer.continuation_context_chars` | `12000` | Number of trailing chars passed when asking the model to continue |
 | **Embeddings LLM** | | |
+| `chatbot.embeddings.backend` | `litellm` | Embedding backend: `litellm` for cloud providers or `fastembed` for fully local embeddings |
+| `chatbot.embeddings.fastembed_model` | `nomic-ai/nomic-embed-text-v1.5` | Local embedding model used when `chatbot.embeddings.backend=fastembed` |
+| `chatbot.embeddings.fastembed_batch_size` | `4` | Local fastembed batch size |
 | `chatbot.embeddings.provider` | `azure` | Provider for the embedding model |
 | `chatbot.embeddings.model` | `azure/text-embedding-3-large` | Embedding model |
 | `chatbot.embeddings.api_key_env` | `DEEPDOC_EMBED_API_KEY` | Env var holding the embedding API key |
@@ -770,7 +940,7 @@ chatbot:
 
 The chatbot's `answer` and `embeddings` sections are configured independently from the main `llm` section, so you can use different providers for doc generation vs. chatbot.
 
-**Azure (default):**
+**Azure:**
 
 ```yaml
 chatbot:
@@ -801,6 +971,31 @@ chatbot:
     model: "text-embedding-3-large"
     api_key_env: "DEEPDOC_EMBED_API_KEY"
     batch_size: 24                            # OpenAI supports larger batches
+```
+
+**Google Gemini:**
+
+```yaml
+chatbot:
+  answer:
+    provider: "gemini"
+    model: "gemini/gemini-2.0-flash"
+    api_key_env: "DEEPDOC_CHAT_API_KEY"
+  embeddings:
+    backend: "litellm"
+    provider: "gemini"
+    model: "gemini/text-embedding-004"
+    api_key_env: "DEEPDOC_EMBED_API_KEY"
+```
+
+**Fully local embeddings with fastembed:**
+
+```yaml
+chatbot:
+  embeddings:
+    backend: "fastembed"
+    fastembed_model: "nomic-ai/nomic-embed-text-v1.5"
+    fastembed_batch_size: 4
 ```
 
 **Anthropic:**
@@ -1000,7 +1195,7 @@ The current system is bucket-based.
 3. **Generation engine**
     - Build evidence packs for buckets
     - Generate pages in batches with parallel workers
-    - Create nested endpoint reference pages under endpoint families
+    - Enrich grouped endpoint-family pages with scanned endpoint details and stage OpenAPI-backed API pages when a spec exists
     - Validate output for file, route, runtime, config, and integration grounding
     - Degrade gracefully on failures
     - Persist quality status so invalid/degraded pages are visible after a run

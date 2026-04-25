@@ -31,6 +31,18 @@ def test_chatbot_backend_scaffold_is_generated(tmp_path: Path) -> None:
     assert "http://127.0.0.1:8010" in settings
 
 
+def test_chatbot_backend_scaffold_is_removed_when_disabled(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    backend_dir = repo_root / "chatbot_backend"
+    backend_dir.mkdir()
+    (backend_dir / "app.py").write_text("# stale\n", encoding="utf-8")
+
+    scaffold_chatbot_backend(repo_root, {"chatbot": {"enabled": False}})
+
+    assert not backend_dir.exists()
+
+
 def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
@@ -112,3 +124,51 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert "Chatbot backend URL is not configured." in panel
     assert "setResponse(null);" in panel
     assert "setLoading(false);" in panel
+
+
+def test_fumadocs_builder_removes_chatbot_files_when_disabled(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+    (output_dir / "index.mdx").write_text("# Demo\n", encoding="utf-8")
+
+    overview = make_bucket(
+        "Overview",
+        "overview",
+        ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    plan = make_plan([overview])
+
+    build_fumadocs_from_plan(
+        repo_root,
+        output_dir,
+        {
+            "project_name": "Demo",
+            "site": {"repo_url": "https://example.com/repo"},
+            "chatbot": {"enabled": True},
+        },
+        plan,
+        has_openapi=False,
+    )
+    (repo_root / "chatbot_backend").mkdir()
+    (repo_root / "chatbot_backend" / "app.py").write_text("# stale\n", encoding="utf-8")
+
+    build_fumadocs_from_plan(
+        repo_root,
+        output_dir,
+        {
+            "project_name": "Demo",
+            "site": {"repo_url": "https://example.com/repo"},
+            "chatbot": {"enabled": False},
+        },
+        plan,
+        has_openapi=False,
+    )
+
+    assert not (repo_root / "site" / "components" / "chatbot-panel.tsx").exists()
+    assert not (repo_root / "site" / "components" / "chatbot-toggle.tsx").exists()
+    assert not (repo_root / "site" / "app" / "ask" / "page.tsx").exists()
+    assert not (repo_root / "site" / "lib" / "chatbot-config.ts").exists()
+    assert not (repo_root / "chatbot_backend").exists()

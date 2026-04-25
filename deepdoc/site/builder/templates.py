@@ -201,12 +201,17 @@ def _mdx_components_tsx(has_openapi: bool) -> str:
     )
 
 
-def _app_layout_tsx(project_name: str) -> str:
+def _app_layout_tsx(project_name: str, chatbot_enabled: bool = False) -> str:
+    chatbot_import = (
+        "import { ChatbotToggle } from '@/components/chatbot-toggle';\n"
+        if chatbot_enabled
+        else ""
+    )
+    chatbot_mount = "          <ChatbotToggle />\n" if chatbot_enabled else ""
     return dedent(
         f"""\
         import './global.css';
-        import {{ ChatbotToggle }} from '@/components/chatbot-toggle';
-        import {{ RootProvider }} from 'fumadocs-ui/provider';
+        {chatbot_import}import {{ RootProvider }} from 'fumadocs-ui/provider';
         import type {{ Metadata }} from 'next';
         import type {{ ReactNode }} from 'react';
 
@@ -238,8 +243,7 @@ def _app_layout_tsx(project_name: str) -> str:
           }}}}
         >
                   {{children}}
-                  <ChatbotToggle />
-                </RootProvider>
+{chatbot_mount}        </RootProvider>
               </body>
             </html>
           );
@@ -251,11 +255,12 @@ def _app_layout_tsx(project_name: str) -> str:
 def _global_css(cfg: dict[str, Any]) -> str:
     site_cfg = cfg.get("site", {})
     site_colors = site_cfg.get("colors", {}) if isinstance(site_cfg, dict) else {}
+    chatbot_enabled = bool(cfg.get("chatbot", {}).get("enabled"))
     primary = site_colors.get("primary") or "#EB3E25"
     light = site_colors.get("light") or "#EF624E"
     dark = site_colors.get("dark") or "#C1331F"
 
-    css = dedent(
+    base_css = dedent(
         """\
         @import 'tailwindcss';
         @import 'fumadocs-ui/css/neutral.css';
@@ -275,8 +280,12 @@ def _global_css(cfg: dict[str, Any]) -> str:
         body {
           font-feature-settings: 'liga' 1, 'calt' 1;
           background: var(--color-fd-background);
-          padding-bottom: clamp(7.5rem, 18vh, 10rem);
         }
+        """
+    )
+
+    chatbot_css = dedent(
+        """\
 
         .deepdoc-chatbot-shell {
           pointer-events: none;
@@ -1365,7 +1374,7 @@ def _global_css(cfg: dict[str, Any]) -> str:
         """
     )
     return (
-        css.replace("__PRIMARY__", primary)
+        (base_css + (chatbot_css if chatbot_enabled else "")).replace("__PRIMARY__", primary)
         .replace("__LIGHT__", light)
         .replace("__DARK__", dark)
     )

@@ -103,16 +103,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     docs_page = (repo_root / "site" / "app" / "[[...slug]]" / "page.tsx").read_text(
         encoding="utf-8"
     )
-    ask_page = (repo_root / "site" / "app" / "ask" / "page.tsx").read_text(
-        encoding="utf-8"
-    )
     api_page_component = (repo_root / "site" / "components" / "api-page.tsx").read_text(
-        encoding="utf-8"
-    )
-    chatbot_panel = (repo_root / "site" / "components" / "chatbot-panel.tsx").read_text(
-        encoding="utf-8"
-    )
-    chatbot_toggle = (repo_root / "site" / "components" / "chatbot-toggle.tsx").read_text(
         encoding="utf-8"
     )
     openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(
@@ -125,12 +116,13 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert '"name": "API Reference"' in page_tree
     assert '"url": "/api/get-order"' in page_tree
     assert "--deepdoc-brand-primary: #EB3E25;" in global_css
-    assert ".deepdoc-chatbot-dock" in global_css
-    assert ".deepdoc-chatbot-shell--visible" in global_css
-    assert ".deepdoc-chatbot-shell--hidden" in global_css
-    assert "cubic-bezier(0.22, 1, 0.36, 1)" in global_css
-    assert "@media (prefers-reduced-motion: reduce)" in global_css
-    assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists()
+    assert ".deepdoc-chatbot-dock" not in global_css
+    assert ".deepdoc-chatbot-shell--visible" not in global_css
+    assert ".deepdoc-chatbot-shell--hidden" not in global_css
+    assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists() is False
+    assert (repo_root / "site" / "components" / "chatbot-panel.tsx").exists() is False
+    assert (repo_root / "site" / "components" / "chatbot-toggle.tsx").exists() is False
+    assert (repo_root / "site" / "lib" / "chatbot-config.ts").exists() is False
 
     package_json = json.loads(
         (repo_root / "site" / "package.json").read_text(encoding="utf-8")
@@ -148,6 +140,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "api: searchApiPath" in app_layout
     assert 'title: "Demo"' in (output_dir / "index.mdx").read_text(encoding="utf-8")
     assert "icon: 'favicon.svg'" in app_layout
+    assert "ChatbotToggle" not in app_layout
     assert "provider/next" not in app_layout
     assert "turbopack" not in next_config
     assert "DEEPDOC_SITE_BASE_PATH" in next_config
@@ -164,36 +157,6 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "ComponentType" in docs_page
     assert "TOCItemType" in docs_page
     assert "page.data as { body:" in docs_page
-    assert "Suspense" in ask_page
-    assert "<ChatbotPanel />" in ask_page
-    assert "const isEnabledOnPage = chatbotConfig.enabled && pathname !== '/ask';" in chatbot_toggle
-    assert "if (!isEnabledOnPage) return;" in chatbot_toggle
-    assert "if (!isEnabledOnPage) return null;" in chatbot_toggle
-    assert "const [isDockVisible, setIsDockVisible] = useState(true);" in chatbot_toggle
-    assert "window.addEventListener('scroll', onScroll, { passive: true });" in chatbot_toggle
-    assert "setIsDockVisible(delta < 0);" in chatbot_toggle
-    assert "deepdoc-chatbot-shell--hidden" in chatbot_toggle
-    assert "!content.includes('\\n')" in chatbot_panel
-    assert "/deep-research" in chatbot_panel
-    assert "/code-deep" in chatbot_panel
-    assert "/code-deep/stream" in chatbot_panel
-    assert "const [isDockVisible, setIsDockVisible] = useState(true);" in chatbot_panel
-    assert "window.addEventListener('scroll', onScroll, { passive: true });" in chatbot_panel
-    assert "setIsDockVisible(delta < 0);" in chatbot_panel
-    assert "deepdoc-chatbot-shell--hidden" in chatbot_panel
-    assert "matchMedia" not in chatbot_panel
-    assert "deepdoc-chatbot-mode-toggle" in chatbot_panel
-    assert "Code Aware" in chatbot_panel
-    assert "deepdoc-chatbot-page__hero" not in chatbot_panel
-    assert "Grounded answer" not in chatbot_panel
-    assert "Research trace" not in chatbot_panel
-    assert "deepdoc-chatbot-trace" in chatbot_panel
-    assert "toTraceLine(entry)" in chatbot_panel
-    assert "traceHeader(liveTrace)" in chatbot_panel
-    assert (
-        "mode=fast|deep" not in chatbot_panel
-    )  # URL state is runtime-built, not hardcoded
-    assert "mode," in chatbot_panel
     assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
     assert "satisfies PageTree.Root" in page_tree
     assert "APIPage as FumadocsAPIPage" in api_page_component

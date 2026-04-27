@@ -531,11 +531,18 @@ def escape_mdx_text_hazards(content: str) -> str:
         def normalize_code_span(part: str) -> str:
             if "|" not in line:
                 return part
-            return re.sub(
-                r"`([A-Za-z_][A-Za-z0-9_]*)<([^`\n]+)>`",
-                lambda match: f"`{match.group(1)}&lt;{match.group(2)}&gt;`",
-                part,
+            if not (part.startswith("`") and part.endswith("`")):
+                return part
+
+            code = part[1:-1]
+            code = re.sub(
+                r"<([^`\n<>]+)>",
+                lambda match: f"&lt;{match.group(1)}&gt;",
+                code,
             )
+            if "{" in code or "}" in code:
+                code = code.replace("{", "&#123;").replace("}", "&#125;")
+            return f"`{code}`"
 
         def escape_segment(part: str) -> str:
             part = re.sub(
@@ -564,7 +571,7 @@ def escape_mdx_text_hazards(content: str) -> str:
                 part = re.sub(r"<br\s*/?>", " / ", part, flags=re.IGNORECASE)
             part = re.sub(r"<(?=\d)", "&lt;", part)
             part = re.sub(
-                r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, .|/&;<>-]*)>",
+                r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, .|/&;<>[\]-]*)>",
                 lambda match: f"{match.group(1)}&lt;{match.group(2)}&gt;",
                 part,
             )
@@ -583,15 +590,16 @@ def escape_mdx_text_hazards(content: str) -> str:
                 part,
             )
             part = part.replace("<=", "&lt;=")
-            if "|" in line:
-                part = re.sub(
-                    r"(?<!`)(\[\{[^`\n]*\}\])(?!`)",
-                    r"`\1`",
-                    part,
-                )
+            if not line.lstrip().startswith("<"):
                 part = re.sub(
                     r"\{([^`\n{}]*:[^`\n{}]*)\}",
                     lambda match: f"&#123;{match.group(1)}&#125;",
+                    part,
+                )
+            if line.lstrip().startswith("|"):
+                part = re.sub(
+                    r"(?<!`)(\[\{[^`\n]*\}\])(?!`)",
+                    r"`\1`",
                     part,
                 )
                 part = re.sub(
@@ -608,6 +616,12 @@ def escape_mdx_text_hazards(content: str) -> str:
             else escape_segment(part)
             for part in parts
         )
+        if not line.lstrip().startswith("<"):
+            escaped = re.sub(
+                r"\{([^{}\n]*:[^{}\n]*)\}",
+                lambda match: f"&#123;{match.group(1)}&#125;",
+                escaped,
+            )
         lines.append(escaped)
 
     return "\n".join(lines)
@@ -633,6 +647,27 @@ def normalize_code_fence_languages(content: str) -> str:
     return re.sub(
         r"^([ \t]*)```([A-Za-z0-9_+-]+)([^\n`]*)$", replace, content, flags=re.MULTILINE
     )
+
+
+def repair_split_object_code_fences(content: str) -> str:
+    """Repair code fences that were accidentally closed after an opening `{`."""
+
+    pattern = re.compile(
+        r"```(?P<lang>[A-Za-z0-9_+-]+)\n"
+        r"(?P<head>(?:(?!```)[\s\S])*?)"
+        r"\{\n```\n"
+        r"(?P<body>[\s\S]*?)"
+        r"\n\}\n```",
+    )
+
+    def replace(match: re.Match) -> str:
+        lang = match.group("lang")
+        head = match.group("head").rstrip("\n")
+        body = match.group("body").strip("\n")
+        prefix = f"{head}\n" if head else ""
+        return f"```{lang}\n{prefix}{{\n{body}\n}}\n```"
+
+    return pattern.sub(replace, content)
 
 
 def repair_unbalanced_code_fences(content: str) -> str:
@@ -663,7 +698,6 @@ def repair_dangling_plain_fences(content: str) -> str:
         "expected:",
         "output:",
         "result:",
-        "response:",
         "returns:",
         "return:",
         "you should see:",
@@ -760,8 +794,16 @@ def normalize_explanatory_lines_outside_fences(content: str) -> str:
             idx += 1
             continue
 
-        stripped = line.strip().lower()
-        if in_fence and any(stripped.startswith(prefix) for prefix in explanatory_prefixes):
+        stripped = line.strip()
+        lowered = stripped.lower()
+        looks_like_object_field = bool(
+            re.match(r"^[A-Za-z_][A-Za-z0-9_]*\s*:\s*[\[{]?$", stripped)
+        )
+        if (
+            in_fence
+            and not looks_like_object_field
+            and any(lowered.startswith(prefix) for prefix in explanatory_prefixes)
+        ):
             normalized.append(f"{fence_indent}```")
             in_fence = False
             fence_indent = ""

@@ -61,6 +61,8 @@ This file might be stale and if that is the case please update it first
 - Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`, but scanned endpoints should enrich grouped endpoint-family pages instead of creating one generated MDX page per route. Keep per-route pages limited to canonical OpenAPI assets or legacy plans.
 - Generated Fumadocs output must stay MDX-safe and GitHub-Pages-safe: preserve explicit site base-path support in the scaffold and escape raw destructured brace args in markdown tables before writing docs.
 - Generated-page validation now checks not just sections/files/routes, but also runtime/config/integration grounding when that evidence was assembled. Keep those checks aligned with `deepdoc/generator/evidence.py`.
+- Generated-page validation also guards against hallucinated file paths, hallucinated symbol references, and low file coverage on core pages. Keep validator failures actionable for the retry prompt.
+- Generated pages carry DeepDoc provenance frontmatter (`deepdoc_generated_*`, `deepdoc_status`, `deepdoc_evidence_files`) and the generated Fumadocs site surfaces the commit badge when available.
 - If freshness/state semantics change, audit `deepdoc/planner/`, `deepdoc/generator/`, `persistence_v2.py`, and `smart_update_v2.py` together.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 
@@ -69,6 +71,7 @@ Treat these as generated or persisted outputs unless the task is specifically ab
 - `.deepdoc/` contents and legacy files like `.deepdoc_plan.json` and `.deepdoc_file_map.json`
 - `.deepdoc/scan_cache.json`, including runtime summaries, database groups, GraphQL interface summaries, and Knex artifact summaries
 - `.deepdoc/generation_quality.json`
+- `.deepdoc/consistency_warnings.json`
 - `docs/`, `site/`, `site/public/`, and `site/out/`
 - `build/`, `dist/`, `deepdoc.egg-info/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`
 - `vscode-extension/out/`, `vscode-extension/*.vsix`, `vscode-extension/node_modules/`

@@ -1201,6 +1201,205 @@ def test_generation_summary_marks_invalid_and_degraded_pages_partial() -> None:
     assert summary.degraded_slugs == ["auth"]
 
 
+def test_validator_invalidates_strict_pages_with_hallucinated_paths(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scan = _make_scan(repo_root)
+    bucket = make_bucket(
+        "Auth Feature",
+        "auth-feature",
+        ["src/app.py", "src/routes.py", "src/services/auth_service.py"],
+        bucket_type="feature",
+    )
+    content = (
+        "# Auth Feature\n\n"
+        "`src/app.py`, `src/routes.py`, and `src/services/auth_service.py` are covered. "
+        "`orders/fake_one.py` and `orders/fake_two.py` do not exist. "
+        + "This grounded sentence repeats enough words to avoid short-page validation. "
+        * 12
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket)
+
+    assert result.is_valid is False
+    assert result.hallucinated_paths == ["orders/fake_one.py", "orders/fake_two.py"]
+
+
+def test_validator_flags_hallucinated_symbols_but_allows_known_symbols(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scan = _make_scan(repo_root)
+    bucket = make_bucket(
+        "Auth Feature",
+        "auth-feature",
+        ["src/routes.py", "src/services/auth_service.py"],
+        bucket_type="feature",
+    )
+    content = (
+        "# Auth Feature\n\n"
+        "`src/routes.py` calls `login()` and `src/services/auth_service.py` defines "
+        "`authenticate()`. The page must not invent `process_order()`, "
+        "`SubmitOrder`, or `fakeAuthFlow`. "
+        + "The rest of this paragraph is grounded filler for the validator. " * 14
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket)
+
+    assert result.is_valid is False
+    assert result.hallucinated_symbols == [
+        "SubmitOrder",
+        "fakeAuthFlow",
+        "process_order",
+    ]
+
+
+def test_validator_allows_known_bucket_symbols(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scan = _make_scan(repo_root)
+    bucket = make_bucket(
+        "Auth Feature",
+        "auth-feature",
+        ["src/routes.py", "src/services/auth_service.py"],
+        bucket_type="feature",
+    )
+    content = (
+        "# Auth Feature\n\n"
+        "`src/routes.py` exposes `login()` and `src/services/auth_service.py` "
+        "uses `authenticate()`. "
+        + "This paragraph repeats grounded implementation context for validation. " * 18
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket)
+
+    assert result.hallucinated_symbols == []
+
+
+def test_validator_file_coverage_threshold_fails_feature_pages(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    files = [f"src/module_{idx}.py" for idx in range(10)]
+    scan = RepoScan(
+        file_tree={"src": [Path(path).name for path in files]},
+        file_summaries={path: "summary" for path in files},
+        api_endpoints=[],
+        languages={"python": len(files)},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=len(files),
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        parsed_files={},
+        file_contents={},
+    )
+    bucket = make_bucket("Large Feature", "large-feature", files, bucket_type="feature")
+    content = (
+        "# Large Feature\n\n"
+        "`src/module_0.py`, `src/module_1.py`, `src/module_2.py`, and "
+        "`src/module_3.py` are referenced. "
+        + "Detailed grounded prose repeats enough words for validation. " * 18
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket)
+
+    assert result.is_valid is False
+    assert result.missing_file_refs[:3] == [
+        "src/module_4.py",
+        "src/module_5.py",
+        "src/module_6.py",
+    ]
+
+
+def test_generation_quality_feedback_is_actionable(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bucket = make_bucket("Auth", "auth", ["src/auth.py"])
+    engine = BucketGenerationEngine(
+        repo_root,
+        dict(DEFAULT_CONFIG),
+        SimpleNamespace(),
+        _make_scan(repo_root),
+        make_plan([bucket]),
+        repo_root / "docs",
+    )
+    validation = ValidationResult(
+        is_valid=False,
+        hallucinated_paths=["fake/path.py"],
+        hallucinated_symbols=["process_order"],
+        out_of_evidence_refs=["src/other.py"],
+        warnings=["Low file coverage"],
+    )
+
+    feedback = engine._quality_feedback_to_instructions(validation)
+
+    assert "Remove every reference to these non-existent paths" in feedback
+    assert "`fake/path.py`" in feedback
+    assert "Remove or correct these symbol names" in feedback
+    assert "`process_order`" in feedback
+
+
+def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bucket = make_bucket("Auth", "auth", ["src/auth.py"])
+    engine = BucketGenerationEngine(
+        repo_root,
+        dict(DEFAULT_CONFIG),
+        SimpleNamespace(),
+        _make_scan(repo_root),
+        make_plan([bucket]),
+        repo_root / "docs",
+    )
+    content = "# Auth\n\nBody"
+
+    updated = engine._add_provenance_frontmatter(
+        content,
+        bucket,
+        ValidationResult(is_valid=True),
+        None,
+    )
+
+    assert "deepdoc_generated_at:" in updated
+    assert 'deepdoc_generated_version: "1.5.2"' in updated
+    assert 'deepdoc_status: "valid"' in updated
+    assert "deepdoc_evidence_files:" in updated
+
+
+def test_generation_coverage_report_counts_files_endpoints_and_symbols(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scan = _make_scan(repo_root)
+    bucket = make_bucket("Auth", "auth", ["src/routes.py", "src/services/auth_service.py"])
+    engine = BucketGenerationEngine(
+        repo_root,
+        dict(DEFAULT_CONFIG),
+        SimpleNamespace(),
+        scan,
+        make_plan([bucket]),
+        repo_root / "docs",
+    )
+    result = GenerationResult(
+        bucket=bucket,
+        content=(
+            "`src/routes.py` handles `POST /api/v1/login` via `login()` and "
+            "`src/services/auth_service.py` uses `authenticate()`."
+        ),
+    )
+
+    report = engine._build_coverage_report([result])
+
+    assert report["api_endpoints"]["documented"] == 1
+    assert report["source_files"]["documented"] == 2
+    assert report["public_symbols"]["documented"] >= 2
+
+
 def test_specialized_database_and_runtime_pages_feed_deeper_evidence_and_links(
     tmp_path: Path,
 ) -> None:

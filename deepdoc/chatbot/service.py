@@ -153,6 +153,79 @@ class ChatbotQueryService:
         for idx, record in enumerate(self.repo_doc_records):
             self._index_doc_record("repo_doc", idx, record)
 
+    # Minimum score for a hit to appear as a citation. The OOD gate handles
+    # out-of-scope answers; this filter prevents weak lexical/coincidental hits
+    # from appearing as supporting evidence.
+    CITATION_MIN_SCORE: float = 0.40
+
+    # Raw semantic score threshold for out-of-domain detection in query().
+    # Aligned with DeepResearcher.OOD_THRESHOLD.
+    OOD_THRESHOLD: float = 0.35
+
+    def _get_raw_semantic_max_score(self, question: str) -> float:
+        """Return the highest raw cosine similarity score for *question* against
+        the code and doc-summary corpora, without graph expansion or reranking.
+
+        Used by DeepResearcher and query() for out-of-domain detection.
+
+        Returns 1.0 in two cases so we never falsely block a valid question:
+        - The corpora are empty (no index built yet → let no-context path handle it)
+        - Any error during embedding or search
+        """
+        # If both primary corpora are empty there's nothing to score against —
+        # this is a "no index" situation, not an "out of domain" situation.
+        if not self.code_records and not self.doc_summary_records:
+            return 1.0
+        try:
+            query_vectors = self.embedding_client.embed([question])
+            top_k = 5
+            code_hits = self._multi_query_search(
+                self.code_records,
+                self.code_vectors,
+                query_vectors,
+                top_k,
+                vector_index=self.code_index,
+                question=question,
+            )
+            doc_hits = self._multi_query_search(
+                self.doc_summary_records,
+                self.doc_summary_vectors,
+                query_vectors,
+                top_k,
+                vector_index=self.doc_summary_index,
+                question=question,
+            )
+            all_hits = code_hits + doc_hits
+            if not all_hits:
+                return 0.0
+            return max(float(h.score) for h in all_hits)
+        except Exception:
+            return 1.0  # fail open — don't falsely block on errors
+
+    def _ood_result(self, question: str) -> dict[str, Any]:
+        """Clean abstention response for out-of-domain questions.
+        No LLM call, no citations, no misleading chunk counts.
+        """
+        project_name = self.project_name
+        answer = (
+            f"This question doesn't appear to be related to the **{project_name}** codebase.\n\n"
+            "No relevant code, documentation, or configuration was found for this query. "
+            "Try asking about a specific file, function, API endpoint, data model, or "
+            "feature that exists in the project."
+        )
+        return {
+            "answer": answer,
+            "code_citations": [],
+            "artifact_citations": [],
+            "doc_citations": [],
+            "repo_doc_citations": [],
+            "relationship_citations": [],
+            "live_fallback_citations": [],
+            "doc_links": [],
+            "used_chunks": 0,
+            "confidence": "out_of_scope_confidence",
+        }
+
     def query(
         self,
         question: str,
@@ -162,6 +235,30 @@ class ChatbotQueryService:
     ) -> dict[str, Any]:
         retrieval_cfg = self._retrieval_profile(mode)
         context = self.retrieve_context(question, history, mode=mode)
+
+        # Out-of-domain gate: the raw semantic score is captured inside
+        # retrieve_context (before graph expansion) at no extra embed cost.
+        # If the question has no meaningful overlap with the indexed codebase,
+        # return a clean abstention — no LLM call, no misleading citations.
+        raw_score = float(context.get("max_raw_semantic_score", 1.0))
+        context_hits = (
+            list(context.get("code_hits", []))
+            + list(context.get("artifact_hits", []))
+            + list(context.get("doc_hits", []))
+            + list(context.get("relationship_hits", []))
+        )
+        has_strong_context_hit = any(
+            getattr(hit, "score", 0.0) >= self.CITATION_MIN_SCORE
+            and self._hit_has_exact_query_overlap(question, hit)
+            for hit in context_hits
+        )
+        if raw_score < self.OOD_THRESHOLD and (
+            self.code_records or self.doc_summary_records
+        ) and not has_strong_context_hit:
+            result = self._ood_result(question)
+            result["response_mode"] = mode
+            return result
+
         code_hits = context["code_hits"]
         artifact_hits = context["artifact_hits"]
         doc_hits = context["doc_hits"]
@@ -204,24 +301,52 @@ class ChatbotQueryService:
             selected_code + selected_artifacts + selected_docs + selected_relationships
         )
 
+        # Citation filtering: only surface hits that have meaningful semantic similarity.
+        # Graph-expansion hits (scores 0.63–0.72) are kept; truly irrelevant hits removed.
+        min_score = self.CITATION_MIN_SCORE
+
         return {
             "answer": answer,
-            "code_citations": [self._citation_payload(hit) for hit in selected_code],
+            "code_citations": [
+                self._citation_payload(hit)
+                for hit in selected_code
+                if hit.score >= min_score
+                or self._is_graph_expanded_hit(hit)
+                or self._hit_has_exact_query_overlap(question, hit)
+            ],
             "artifact_citations": [
-                self._citation_payload(hit) for hit in selected_artifacts
+                self._citation_payload(hit)
+                for hit in selected_artifacts
+                if hit.score >= min_score
+                or self._is_graph_expanded_hit(hit)
+                or self._hit_has_exact_query_overlap(question, hit)
             ],
             "doc_citations": [
                 self._citation_payload(hit)
                 for hit in selected_docs
                 if hit.record.kind in {"doc_summary", "doc_full"}
+                and (
+                    hit.score >= min_score
+                    or self._is_graph_expanded_hit(hit)
+                    or self._hit_has_exact_query_overlap(question, hit)
+                )
             ],
             "repo_doc_citations": [
                 self._citation_payload(hit)
                 for hit in selected_docs
                 if hit.record.kind == "repo_doc"
+                and (
+                    hit.score >= min_score
+                    or self._is_graph_expanded_hit(hit)
+                    or self._hit_has_exact_query_overlap(question, hit)
+                )
             ],
             "relationship_citations": [
-                self._citation_payload(hit) for hit in selected_relationships
+                self._citation_payload(hit)
+                for hit in selected_relationships
+                if hit.score >= min_score
+                or self._is_graph_expanded_hit(hit)
+                or self._hit_has_exact_query_overlap(question, hit)
             ],
             "live_fallback_citations": [
                 self._citation_payload(hit)
@@ -246,12 +371,12 @@ class ChatbotQueryService:
         *,
         original_question: str | None = None,
         mode: str = "default",
-    ) -> dict[str, list[RetrievedChunk]]:
+    ) -> dict[str, Any]:
         retrieval_cfg = self._retrieval_profile(mode)
         search_question = original_question or question
 
         queries = self._expand_query(question, retrieval_cfg)
-        code_hits, artifact_hits, doc_hits, relationship_hits = (
+        code_hits, artifact_hits, doc_hits, relationship_hits, max_raw_semantic_score = (
             self._search_query_batch(
                 queries,
                 search_question,
@@ -268,7 +393,7 @@ class ChatbotQueryService:
             retrieval_cfg,
         )
         if followup_queries:
-            followup_code, followup_artifact, followup_doc, followup_relationship = (
+            followup_code, followup_artifact, followup_doc, followup_relationship, _ = (
                 self._search_query_batch(
                     followup_queries,
                     search_question,
@@ -325,6 +450,9 @@ class ChatbotQueryService:
             "relationship_hits": relationship_hits[
                 : retrieval_cfg.get("top_k_relationship", 6)
             ],
+            # Raw cosine similarity from the initial semantic search, used for
+            # OOD detection in query().  Graph-expansion hits excluded intentionally.
+            "max_raw_semantic_score": max_raw_semantic_score,
         }
 
     def _no_context_result(self, question: str) -> dict[str, Any]:
@@ -597,6 +725,7 @@ class ChatbotQueryService:
         list[RetrievedChunk],
         list[RetrievedChunk],
         list[RetrievedChunk],
+        float,  # max_pure_semantic_score — embedding similarity before lexical merge
     ]:
         query_vectors = self.embedding_client.embed(queries)
         candidate_top_k_code = self._candidate_top_k("code", retrieval_cfg)
@@ -714,7 +843,23 @@ class ChatbotQueryService:
             lexical_relationship_hits,
             limit=candidate_top_k_relationship,
         )
-        return code_hits, artifact_hits, doc_hits, relationship_hits
+
+        # Max pure-embedding similarity score, captured BEFORE lexical merge.
+        # Lexical hits can have inflated scores from token overlap even for
+        # out-of-scope questions, so only semantic scores are reliable for OOD.
+        pure_semantic_hits = (
+            semantic_code_hits
+            + semantic_doc_summary_hits
+            + semantic_doc_full_hits
+            + semantic_repo_doc_hits
+        )
+        max_pure_semantic_score: float = (
+            max(float(h.score) for h in pure_semantic_hits)
+            if pure_semantic_hits
+            else 0.0
+        )
+
+        return code_hits, artifact_hits, doc_hits, relationship_hits, max_pure_semantic_score
 
     def _candidate_top_k(self, corpus: str, retrieval_cfg: dict[str, Any]) -> int:
         if corpus == "code":
@@ -755,6 +900,30 @@ class ChatbotQueryService:
             "metadata": record.metadata,
             "score": hit.score,
         }
+
+    def _hit_has_exact_query_overlap(self, question: str, hit: RetrievedChunk) -> bool:
+        record = hit.record
+        if record.kind == "relationship":
+            return True
+        haystack = " ".join(
+            [
+                record.text or "",
+                record.file_path or "",
+                record.doc_path or "",
+                " ".join(record.symbol_names or []),
+            ]
+        ).lower()
+        tokens = [
+            token
+            for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", question)
+            if len(token) >= 4 or "_" in token
+        ]
+        return any(token.lower() in haystack for token in tokens)
+
+    @staticmethod
+    def _is_graph_expanded_hit(hit: RetrievedChunk) -> bool:
+        subtype = (hit.record.metadata or {}).get("chunk_subtype", "")
+        return str(subtype).startswith("graph_") or str(subtype) == "live_repo_fallback"
 
     def _index_doc_record(self, corpus: str, idx: int, record: Any) -> None:
         if record.doc_path:
@@ -2232,7 +2401,8 @@ class ChatbotQueryService:
         return (
             f"You are a **deep codebase knowledge assistant** for the **{self.project_name}** project. "
             "You answer developer questions using ONLY the retrieved context provided in each query. "
-            "Never fabricate file paths, function names, class names, or code that does not appear in the context.\n\n"
+            "Never fabricate file paths, function names, class names, or code that does not appear in the context. "
+            "Never generate illustrative example code, stubs, or pseudocode unless that exact code appears in the retrieved context.\n\n"
             "## YOUR PRIMARY DIRECTIVE: BE EXHAUSTIVE\n"
             "Developers are asking you because they want DEEP understanding, not shallow summaries. "
             "Your answers should be as detailed as a senior engineer explaining the code during a code review.\n\n"

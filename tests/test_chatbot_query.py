@@ -51,6 +51,15 @@ class _UnexpectedChatClient:
         )
 
 
+class _RecordingChatClient:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+
+    def complete(self, system: str, user: str) -> str:
+        self.calls.append((system, user))
+        return "Grounded answer"
+
+
 class _FastModeNoLlmRetrievalChatClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -170,6 +179,155 @@ def test_query_service_returns_code_and_artifact_citations(tmp_path: Path) -> No
     assert result["code_citations"][0]["file_path"] == "src/auth.py"
     assert result["artifact_citations"][0]["file_path"] == "package.json"
     assert result["doc_links"][0]["url"] == "/auth"
+
+
+def test_query_service_abstains_out_of_scope_without_llm_or_citations(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    save_plan(make_plan([make_bucket("Auth", "auth", ["src/auth.py"])]), repo_root)
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user): return user",
+                chunk_hash="hashc1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=1,
+            )
+        ],
+        [[0.0, 1.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_UnexpectedChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+        result = service.query("how can i go to moon and come back")
+
+    assert result["confidence"] == "out_of_scope_confidence"
+    assert result["used_chunks"] == 0
+    assert result["code_citations"] == []
+    assert result["artifact_citations"] == []
+    assert result["doc_citations"] == []
+
+
+def test_query_service_filters_low_score_citations_but_keeps_high_score(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    save_plan(make_plan([make_bucket("Auth", "auth", ["src/auth.py"])]), repo_root)
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(index_dir, "code", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_FakeChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+
+    low = RetrievedChunk(
+        record=ChunkRecord(
+            chunk_id="low",
+            kind="code",
+            source_key="src/low.py",
+            text="low",
+            chunk_hash="low",
+            file_path="src/low.py",
+            start_line=1,
+            end_line=1,
+        ),
+        score=0.39,
+    )
+    high = RetrievedChunk(
+        record=ChunkRecord(
+            chunk_id="high",
+            kind="code",
+            source_key="src/high.py",
+            text="high",
+            chunk_hash="high",
+            file_path="src/high.py",
+            start_line=1,
+            end_line=1,
+        ),
+        score=0.41,
+    )
+    service.retrieve_context = lambda *args, **kwargs: {
+        "code_hits": [low, high],
+        "artifact_hits": [],
+        "doc_hits": [],
+        "relationship_hits": [],
+        "max_raw_semantic_score": 0.9,
+    }
+    service._select_prompt_hits = lambda *args, **kwargs: {
+        "code_hits": [low, high],
+        "artifact_hits": [],
+        "doc_hits": [],
+        "relationship_hits": [],
+    }
+
+    result = service.query("Where is auth handled?")
+
+    assert [item["file_path"] for item in result["code_citations"]] == ["src/high.py"]
+
+
+def test_normal_query_prompt_bans_fabricated_example_code(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    save_corpus(repo_root / ".deepdoc" / "chatbot", "code", [], [])
+    save_corpus(repo_root / ".deepdoc" / "chatbot", "artifact", [], [])
+    save_corpus(repo_root / ".deepdoc" / "chatbot", "doc_summary", [], [])
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_RecordingChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+
+    prompt = service._system_prompt()
+
+    assert "Never generate illustrative example code" in prompt
+    assert "stubs, or pseudocode" in prompt
 
 
 def test_query_service_uses_explicit_chunk_doc_links_without_bucket_slugs(

@@ -12,7 +12,10 @@ Phase 3 of the bucket-based doc pipeline:
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+import json
 import re
+import subprocess
 import time
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -30,6 +33,7 @@ from rich.progress import (
     TaskProgressColumn,
 )
 
+from .. import __version__ as DEEPDOC_VERSION
 from ..llm import LLMClient
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
@@ -248,6 +252,56 @@ def summarize_generation_results(results: list[GenerationResult]) -> GenerationS
     return summary
 
 
+def _coverage_entry(
+    documented: int,
+    total: int,
+    uncovered: list[str],
+) -> dict[str, Any]:
+    percent = round((documented / total) * 100.0, 2) if total else 100.0
+    return {
+        "documented": documented,
+        "total": total,
+        "percent": percent,
+        "uncovered": uncovered[:10],
+    }
+
+
+def _merge_frontmatter_fields(content: str, fields: dict[str, Any]) -> str:
+    """Merge generated provenance fields without dropping existing frontmatter."""
+    stripped = content.lstrip()
+    prefix = content[: len(content) - len(stripped)]
+    body = stripped
+    existing_lines: list[str] = []
+    if stripped.startswith("---"):
+        lines = stripped.splitlines()
+        try:
+            end_idx = lines.index("---", 1)
+        except ValueError:
+            end_idx = -1
+        if end_idx > 0:
+            existing_lines = lines[1:end_idx]
+            body = "\n".join(lines[end_idx + 1 :]).lstrip()
+
+    managed = set(fields)
+    kept = [
+        line
+        for line in existing_lines
+        if line.strip().split(":", 1)[0] not in managed
+    ]
+    merged = ["---", *kept]
+    for key, value in fields.items():
+        if isinstance(value, list):
+            merged.append(f"{key}:")
+            if value:
+                merged.extend(f"  - {json.dumps(item)}" for item in value)
+            else:
+                merged.append("  []")
+        else:
+            merged.append(f"{key}: {json.dumps(value)}")
+    merged.append("---")
+    return prefix + "\n".join(merged) + "\n\n" + body
+
+
 class BucketGenerationEngine:
     """Orchestrates parallel generation of all bucket pages with evidence assembly,
     single-pass generation, validation, post-processing, and graceful degradation.
@@ -275,6 +329,8 @@ class BucketGenerationEngine:
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
         self.rate_limit_pause = cfg.get("rate_limit_pause", RATE_LIMIT_PAUSE)
         self._repo_file_paths = set(self.scan.file_summaries.keys())
+        self.coverage_report: dict[str, Any] = {}
+        self.local_dev_warnings: list[str] = []
         self._openapi_context = self._precompute_openapi_context()
         self._doc_pages = self._planned_doc_pages()
         (
@@ -314,6 +370,7 @@ class BucketGenerationEngine:
         total = len(buckets)
         generated_count = 0
         failed_count = 0
+        stub_slugs: list[str] = []  # track pages that fell back to stubs
 
         with Progress(
             SpinnerColumn(),
@@ -365,6 +422,8 @@ class BucketGenerationEngine:
                                 console.print(
                                     f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {result.error}"
                                 )
+                                if "stub" in (result.error or "").lower():
+                                    stub_slugs.append(bucket.slug)
                             elif result.content:
                                 generated_count += 1
                                 word_count = len(result.content.split())
@@ -403,6 +462,32 @@ class BucketGenerationEngine:
             console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")
 
         console.print(f"[green]✓ Generated {generated_count}/{total} pages[/green]")
+
+        # ── Stub page warning ─────────────────────────────────────────────
+        # Collect stubs from all results (catches both LLM-failed stubs and
+        # degraded pages that ended up as stubs after retry).
+        all_stub_slugs = stub_slugs + [
+            r.bucket.slug
+            for r in results
+            if r.error and "stub" in (r.error or "").lower()
+            and r.bucket.slug not in stub_slugs
+        ]
+        if all_stub_slugs:
+            console.print(
+                Panel(
+                    "[bold red]⚠  STUB PAGES DETECTED — DO NOT PUBLISH[/bold red]\n\n"
+                    "The following pages failed to generate and contain stub content only.\n"
+                    "They are marked with [bold]stub: true[/bold] in their frontmatter.\n\n"
+                    + "\n".join(f"  • [yellow]{slug}[/yellow]" for slug in all_stub_slugs)
+                    + "\n\n[dim]Re-run [bold]deepdoc generate[/bold] to retry these pages.[/dim]",
+                    title="[red]Stub Pages",
+                    border_style="red",
+                )
+            )
+
+        self.local_dev_warnings = self._verify_local_dev_bucket()
+        self.coverage_report = self._build_coverage_report(results)
+        self._print_coverage_report(self.coverage_report)
 
         return results
 
@@ -452,6 +537,7 @@ class BucketGenerationEngine:
             )
             content = normalize_html_code_blocks(content)
             content = normalize_code_fence_languages(content)
+            content = repair_split_object_code_fences(content)
             content = repair_unbalanced_code_fences(content)
             content = normalize_explanatory_lines_outside_fences(content)
             content = repair_dangling_plain_fences(content)
@@ -471,9 +557,7 @@ class BucketGenerationEngine:
 
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
-                quality_feedback = "\n".join(
-                    f"- {warning}" for warning in validation.warnings[:8]
-                )
+                quality_feedback = self._quality_feedback_to_instructions(validation)
                 try:
                     content = self._call_with_retry(
                         evidence,
@@ -491,6 +575,7 @@ class BucketGenerationEngine:
                     )
                     content = normalize_html_code_blocks(content)
                     content = normalize_code_fence_languages(content)
+                    content = repair_split_object_code_fences(content)
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)
@@ -518,6 +603,12 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
 
             # Step 8: Write to disk
+            content = self._add_provenance_frontmatter(
+                content,
+                bucket,
+                validation,
+                evidence,
+            )
             bucket_hints = bucket.generation_hints or {}
             filename = (
                 "index.mdx"
@@ -540,6 +631,13 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
             # Graceful degradation: generate a stub page
             stub = self._generate_stub_page(bucket)
+            stub = self._add_provenance_frontmatter(
+                stub,
+                bucket,
+                None,
+                None,
+                status="stub",
+            )
             bucket_hints = bucket.generation_hints or {}
             filename = (
                 "index.mdx"
@@ -665,8 +763,54 @@ class BucketGenerationEngine:
 
         return content
 
+    def _quality_feedback_to_instructions(
+        self,
+        validation: ValidationResult,
+    ) -> str:
+        """Translate validator warnings into direct LLM repair instructions."""
+        instructions: list[str] = []
+        if validation.missing_sections:
+            instructions.append(
+                "Add grounded content for these missing required sections: "
+                + ", ".join(validation.missing_sections[:6])
+            )
+        if validation.missing_file_refs:
+            instructions.append(
+                "Reference these assigned source files where relevant; do not omit them: "
+                + ", ".join(f"`{path}`" for path in validation.missing_file_refs[:6])
+            )
+        if validation.hallucinated_paths:
+            instructions.append(
+                "Remove every reference to these non-existent paths; do not guess replacements: "
+                + ", ".join(f"`{path}`" for path in validation.hallucinated_paths[:6])
+            )
+        if validation.hallucinated_symbols:
+            instructions.append(
+                "Remove or correct these symbol names unless they appear exactly in evidence: "
+                + ", ".join(f"`{name}`" for name in validation.hallucinated_symbols[:6])
+            )
+        if validation.out_of_evidence_refs:
+            instructions.append(
+                "Do not mention files outside this page's evidence scope: "
+                + ", ".join(f"`{path}`" for path in validation.out_of_evidence_refs[:6])
+            )
+        if validation.unmatched_routes:
+            instructions.append(
+                "Remove or correct route claims that are not in scanned endpoint evidence: "
+                + ", ".join(f"`{route}`" for route in validation.unmatched_routes[:6])
+            )
+        for warning in validation.warnings[:8]:
+            if warning and not any(warning in item for item in instructions):
+                instructions.append(f"Address this validation issue: {warning}")
+        return "\n".join(f"- {item}" for item in instructions[:10])
+
     def _generate_stub_page(self, bucket: DocBucket) -> str:
-        """Generate a minimal stub page when LLM generation completely fails."""
+        """Generate a minimal stub page when LLM generation completely fails.
+
+        Stubs are marked with ``stub: true`` in their frontmatter so the site
+        builder can render a visual warning in the sidebar, and so CI/CD checks
+        can refuse to publish a site that still contains stubs.
+        """
         files_list = "\n".join(f"- `{f}`" for f in bucket.owned_files[:20])
         more = (
             f"\n- ... and {len(bucket.owned_files) - 20} more"
@@ -680,7 +824,12 @@ class BucketGenerationEngine:
                 f"- [{slug}](/{slug})" for slug in bucket.depends_on
             )
 
-        return f"""# {bucket.title}
+        return f"""---
+stub: true
+title: "{bucket.title}"
+---
+
+# {bucket.title}
 
 <Callout type="warn">
 This page could not be fully generated. It contains a file listing only.
@@ -696,6 +845,196 @@ Re-run `deepdoc generate` to retry.
 {files_list}{more}
 {deps}
 """
+
+    def _add_provenance_frontmatter(
+        self,
+        content: str,
+        bucket: DocBucket,
+        validation: ValidationResult | None,
+        evidence: AssembledEvidence | None,
+        *,
+        status: str | None = None,
+    ) -> str:
+        """Add or update DeepDoc provenance fields in MDX frontmatter."""
+        status_value = status or (
+            "valid" if validation is not None and validation.is_valid else "invalid"
+        )
+        evidence_files = (
+            sorted(evidence.evidence_file_paths)
+            if evidence is not None and evidence.evidence_file_paths
+            else tracked_bucket_files(bucket)
+        )
+        fields: dict[str, Any] = {
+            "deepdoc_generated_at": datetime.now(timezone.utc).isoformat(),
+            "deepdoc_generated_commit": self._git_commit_short(),
+            "deepdoc_generated_version": DEEPDOC_VERSION,
+            "deepdoc_status": status_value,
+            "deepdoc_evidence_files": evidence_files[:50],
+        }
+        return _merge_frontmatter_fields(content, fields)
+
+    def _git_commit_short(self) -> str:
+        try:
+            return subprocess.check_output(
+                ["git", "rev-parse", "--short", "HEAD"],
+                cwd=self.repo_root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            return "unknown"
+
+    def _verify_local_dev_bucket(self) -> list[str]:
+        setup_signals = [
+            path
+            for path in self.scan.file_summaries
+            if any(
+                token in path.lower()
+                for token in (
+                    "dockerfile",
+                    "docker-compose",
+                    "makefile",
+                    ".env",
+                    "package.json",
+                    "requirements",
+                    "pyproject.toml",
+                    "settings",
+                    "config",
+                )
+            )
+        ]
+        if not setup_signals:
+            return []
+        bucket = next(
+            (b for b in self.plan.buckets if b.slug == "local-development-setup"),
+            None,
+        )
+        warnings: list[str] = []
+        if bucket is None:
+            warnings.append("Missing Start Here local-development-setup page")
+            return warnings
+        if bucket.section != "Start Here":
+            warnings.append("local-development-setup is not in the Start Here section")
+        tracked = set(bucket.owned_files) | set(bucket.artifact_refs)
+        if not tracked.intersection(setup_signals):
+            warnings.append(
+                "local-development-setup has no setup/config evidence files attached"
+            )
+        if warnings:
+            console.print(
+                "[yellow]⚠ Local development setup verification: "
+                + "; ".join(warnings)
+                + "[/yellow]"
+            )
+        return warnings
+
+    def _build_coverage_report(
+        self,
+        results: list[GenerationResult],
+    ) -> dict[str, Any]:
+        generated_text = "\n".join(result.content or "" for result in results)
+        generated_lower = generated_text.lower()
+
+        endpoints = self.scan.published_api_endpoints
+        documented_endpoints: list[str] = []
+        undocumented_endpoints: list[str] = []
+        for endpoint in endpoints:
+            method = str(endpoint.get("method", "")).upper()
+            path = str(endpoint.get("path", ""))
+            label = f"{method} {path}".strip()
+            if path and (
+                path.lower() in generated_lower or label.lower() in generated_lower
+            ):
+                documented_endpoints.append(label)
+            elif label:
+                undocumented_endpoints.append(label)
+
+        tracked_files = sorted(
+            {
+                file_path
+                for bucket in self.plan.buckets
+                for file_path in tracked_bucket_files(bucket)
+            }
+        )
+        documented_files = [
+            file_path
+            for file_path in tracked_files
+            if file_path.lower() in generated_lower
+        ]
+        undocumented_files = [
+            file_path for file_path in tracked_files if file_path not in documented_files
+        ]
+
+        public_symbols = sorted(self._public_symbol_names())
+        referenced_symbols = [
+            name
+            for name in public_symbols
+            if re.search(rf"`?{re.escape(name)}(?:\(\))?`?", generated_text)
+        ]
+        unreferenced_symbols = [
+            name for name in public_symbols if name not in referenced_symbols
+        ]
+
+        report = {
+            "api_endpoints": _coverage_entry(
+                len(documented_endpoints),
+                len(endpoints),
+                undocumented_endpoints,
+            ),
+            "source_files": _coverage_entry(
+                len(documented_files),
+                len(tracked_files),
+                undocumented_files,
+            ),
+            "public_symbols": _coverage_entry(
+                len(referenced_symbols),
+                len(public_symbols),
+                unreferenced_symbols,
+            ),
+        }
+        if self.local_dev_warnings:
+            report["local_dev_warnings"] = self.local_dev_warnings
+        return report
+
+    def _public_symbol_names(self) -> set[str]:
+        names: set[str] = set()
+        for parsed in self.scan.parsed_files.values():
+            for symbol in parsed.symbols:
+                name = symbol.name
+                if not name or name.startswith("_"):
+                    continue
+                names.add(name)
+        return names
+
+    def _print_coverage_report(self, report: dict[str, Any]) -> None:
+        if not report:
+            return
+        lines = ["[bold]Coverage Report[/bold]"]
+        for label, key in (
+            ("API endpoints", "api_endpoints"),
+            ("Source files", "source_files"),
+            ("Public symbols", "public_symbols"),
+        ):
+            entry = report.get(key, {})
+            lines.append(
+                f"  {label}: [cyan]{entry.get('documented', 0)}/"
+                f"{entry.get('total', 0)}[/cyan] documented "
+                f"({entry.get('percent', 100.0):.0f}%)"
+            )
+            uncovered = entry.get("uncovered", [])
+            if uncovered:
+                lines.append(
+                    "    [yellow]Uncovered:[/yellow] "
+                    + ", ".join(f"`{item}`" for item in uncovered[:10])
+                )
+        if report.get("local_dev_warnings"):
+            lines.append(
+                "  [yellow]Local setup warnings:[/yellow] "
+                + "; ".join(report["local_dev_warnings"])
+            )
+        console.print(
+            Panel("\n".join(lines), title="DeepDoc Quality", border_style="cyan")
+        )
 
     # ── Helpers ──────────────────────────────────────────────────────────
 

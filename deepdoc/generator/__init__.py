@@ -20,6 +20,7 @@ from .post_processors import (
     normalize_mdx_steps,
     repair_internal_doc_links,
     repair_mdx_component_blocks,
+    repair_split_object_code_fences,
     repair_dangling_plain_fences,
     repair_unbalanced_code_fences,
 )

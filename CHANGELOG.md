@@ -9,6 +9,12 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.5.2] - 2026-04-27
+
+- Added trust hardening for generated docs: provenance frontmatter, generated-site commit badges, coverage reporting, local setup verification, and warning-only cross-page consistency artifacts.
+- Tightened generated-page validation for hallucinated paths, hallucinated symbols, and low file coverage on core pages.
+- Improved chatbot trust behavior with explicit no-fabrication prompting, score-based out-of-scope abstention, stricter citation filtering, and similarity-based confidence.
+
 ## [1.5.1] - 2026-04-25
 
 - Changed the generated Fumadocs scaffold to omit chatbot routes, frontend components, and `chatbot_backend/` artifacts when `chatbot.enabled` is false, keeping docs-only builds clean.

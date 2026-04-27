@@ -35,6 +35,8 @@ class ResearchStep:
     answer: str
     sources: list[str] = field(default_factory=list)
     chunks_used: int = 0
+    max_similarity_score: float = 0.0  # highest raw semantic score among retrieved chunks
+    mean_similarity_score: float = 0.0  # average raw score among retrieved chunks
 
 
 @dataclass
@@ -45,7 +47,9 @@ class ResearchResult:
     steps: list[ResearchStep]
     final_answer: str
     all_sources: list[str] = field(default_factory=list)
-    confidence: str = "medium"  # "high" | "medium" | "low"
+    confidence: str = "medium"  # "high" | "medium" | "low" | "out_of_scope_confidence"
+    max_semantic_score: float = 0.0  # max raw semantic score seen across all steps
+    mean_semantic_score: float = 0.0  # mean raw semantic score across research steps
 
 
 class DeepResearcher:
@@ -104,6 +108,43 @@ class DeepResearcher:
         except Exception:
             logger.debug("[deep_research] Trace callback failed", exc_info=True)
 
+    # ── Out-of-domain detection ────────────────────────────────────────────────
+
+    # Minimum raw cosine similarity for a question to be considered in-scope.
+    # Below this threshold → return a clean abstention without calling the LLM.
+    OOD_THRESHOLD: float = 0.35
+
+    def _check_out_of_domain(self, question: str) -> tuple[bool, float]:
+        """Return (is_ood, max_score).  Calls service for a lightweight raw-semantic
+        check (no graph expansion, no reranking) to assess domain relevance."""
+        get_score = getattr(self.service, "_get_raw_semantic_max_score", None)
+        if not callable(get_score):
+            return False, 1.0  # service doesn't support the check — assume in-scope
+        try:
+            score = float(get_score(question))
+            return score < self.OOD_THRESHOLD, score
+        except Exception as e:
+            logger.debug(f"[deep_research] OOD check failed: {e}")
+            return False, 1.0  # fail open
+
+    def _ood_result(self, question: str, max_score: float) -> ResearchResult:
+        """Build a clean abstention result for out-of-domain questions."""
+        project_name = getattr(self.service, "project_name", "this codebase")
+        answer = (
+            f"This question doesn't appear to be related to the **{project_name}** codebase.\n\n"
+            "No relevant code, documentation, or configuration was found. "
+            "Try asking about a specific file, function, API endpoint, "
+            "data model, or feature that exists in the project."
+        )
+        return ResearchResult(
+            original_question=question,
+            steps=[],
+            final_answer=answer,
+            all_sources=[],
+            confidence="out_of_scope_confidence",
+            max_semantic_score=max_score,
+        )
+
     def research(
         self,
         question: str,
@@ -119,6 +160,21 @@ class DeepResearcher:
             max_rounds=self.max_rounds,
             top_k=self.top_k,
         )
+
+        # Step 0: Out-of-domain gate — short-circuit before any LLM call
+        is_ood, raw_score = self._check_out_of_domain(question)
+        if is_ood:
+            logger.info(
+                f"[deep_research] OOD detected (max_score={raw_score:.3f} < "
+                f"{self.OOD_THRESHOLD}), returning abstention."
+            )
+            self._emit_trace(
+                "ood_abstention",
+                "Question is out of domain — returning abstention without LLM call",
+                max_semantic_score=raw_score,
+                threshold=self.OOD_THRESHOLD,
+            )
+            return self._ood_result(question, raw_score)
 
         # Step 1: Decompose
         sub_questions = self._decompose(question, history)
@@ -169,13 +225,19 @@ class DeepResearcher:
             step_count=len(steps),
         )
         final_answer = self._synthesise(question, steps, history)
-        confidence = self._estimate_confidence(steps)
+        max_score = max((s.max_similarity_score for s in steps), default=0.0)
+        mean_score = _mean_score(
+            s.mean_similarity_score for s in steps if s.mean_similarity_score > 0.0
+        )
+        confidence = self._estimate_confidence(steps, max_score, mean_score)
         self._emit_trace(
             "done",
             "Finished research session",
             confidence=confidence,
             source_count=len(all_source_files),
             step_count=len(steps),
+            max_semantic_score=max_score,
+            mean_semantic_score=mean_score,
         )
 
         return ResearchResult(
@@ -184,6 +246,8 @@ class DeepResearcher:
             final_answer=final_answer,
             all_sources=all_source_files,
             confidence=confidence,
+            max_semantic_score=max_score,
+            mean_semantic_score=mean_score,
         )
 
     # ── Internal methods ───────────────────────────────────────────────────────
@@ -363,6 +427,8 @@ class DeepResearcher:
                 or getattr(c.record, "doc_path", None)
             )
         )
+        max_chunk_score = max((getattr(c, "score", 0.0) for c in chunks), default=0.0)
+        mean_chunk_score = _mean_score(getattr(c, "score", 0.0) for c in chunks)
 
         chunk_chars = 3200
         chat_cfg = getattr(self.service, "chat_cfg", {})
@@ -389,7 +455,15 @@ class DeepResearcher:
             "If you need to explore the codebase further, you can use the following tools by outputting a JSON object and NOTHING else:\n"
             '1. read_file: `{"action": "read_file", "path": "file/path.py", "start": 10, "end": 50}`\n'
             '2. grep: `{"action": "grep", "pattern": "def main"}`\n\n'
-            "Answer ONLY based on evidence. Prefer a detailed, implementation-level walkthrough."
+            "Answer ONLY based on evidence. Prefer a detailed, implementation-level walkthrough.\n\n"
+            "## STRICT GROUNDING RULES\n"
+            "- Do NOT invent, fabricate, or hallucinate any code, function names, class names, "
+            "file paths, or variable names that do not appear verbatim in the evidence chunks above.\n"
+            "- Do NOT write example code, stubs, or pseudocode to illustrate an answer — only show "
+            "code that literally exists in the retrieved evidence.\n"
+            "- If the evidence chunks do not contain a relevant answer to the sub-question, "
+            "explicitly state: 'The retrieved evidence does not contain information about this.' "
+            "Do not attempt to fill the gap with plausible-sounding but fabricated content."
         )
 
         history_context = _history_context(history)
@@ -417,6 +491,8 @@ class DeepResearcher:
                     answer=f"Error generating answer: {e}",
                     sources=sources_used,
                     chunks_used=len(chunks),
+                    max_similarity_score=max_chunk_score,
+                    mean_similarity_score=mean_chunk_score,
                 )
 
             tool_call = _extract_json_object(response)
@@ -459,6 +535,8 @@ class DeepResearcher:
                     answer=response,
                     sources=sources_used,
                     chunks_used=len(chunks) + iteration,
+                    max_similarity_score=max_chunk_score,
+                    mean_similarity_score=mean_chunk_score,
                 )
 
         # Fallback if iterations exhaust
@@ -479,6 +557,8 @@ class DeepResearcher:
             answer=final_ans,
             sources=sources_used,
             chunks_used=len(chunks) + max_iterations,
+            max_similarity_score=max_chunk_score,
+            mean_similarity_score=mean_chunk_score,
         )
 
     def _execute_tool(self, tool_call: dict[str, Any], sources_used: list[str]) -> str:
@@ -565,17 +645,26 @@ class DeepResearcher:
             "Write a comprehensive answer to the original question by combining the sub-answers. "
             "Be specific, cite file paths in backticks, and highlight any gaps where evidence "
             "was insufficient. Do not invent information. Prefer complete, end-to-end "
-            "explanations over brief summaries."
+            "explanations over brief summaries.\n\n"
+            "## STRICT GROUNDING RULES — NON-NEGOTIABLE\n"
+            "- NEVER fabricate code examples, function names, class names, variable names, "
+            "or file paths that do not appear verbatim in the research findings below.\n"
+            "- Only include code in your answer if it was explicitly quoted in a research finding. "
+            "Reproducing code from memory or writing illustrative pseudocode is FORBIDDEN.\n"
+            "- If the research findings do not contain enough information to answer the question, "
+            "explicitly state what is missing. Do NOT fill gaps with plausible-sounding content.\n"
+            "- If the question is entirely outside the scope of the codebase, say so clearly "
+            "without attempting to relate it to the codebase."
         )
         user_msg = (
             f"Recent conversation:\n{_history_context(history)}\n\n"
             f"Original question: {original_question}\n\n"
             f"Research findings:\n{sub_answers}"
             f"{sources_note}\n\n"
-            "Write a highly detailed, comprehensive answer that directly answers the "
-            "original question. Use literal code snippets and examples from the evidence "
-            "to ground your explanation. Cover the main implementation path, important related "
-            "files, configuration, and any notable gaps in evidence."
+            "Write a highly detailed, comprehensive answer that directly addresses the "
+            "original question. Ground every claim in the research findings above — only "
+            "quote code that appears verbatim in those findings. Cover the main implementation "
+            "path, important related files, configuration, and any notable gaps in evidence."
         )
         try:
             return self._complete_sub_question(system, user_msg)
@@ -594,14 +683,44 @@ class DeepResearcher:
             return complete_with_continuation(system, prompt)
         return self.llm.complete(system, prompt)
 
-    def _estimate_confidence(self, steps: list[ResearchStep]) -> str:
-        """Estimate confidence based on how many chunks were found."""
-        total_chunks = sum(s.chunks_used for s in steps)
-        if total_chunks >= 12:
+    def _estimate_confidence(
+        self,
+        steps: list[ResearchStep],
+        max_score: float = 0.0,
+        mean_score: float = 0.0,
+    ) -> str:
+        """Estimate confidence based on semantic similarity scores, not chunk count.
+
+        Chunk count was a misleading proxy — FAISS always returns results regardless
+        of relevance, so high chunk counts don't indicate quality.  Similarity scores
+        are the ground truth signal: high scores mean retrieved chunks are genuinely
+        relevant to the question.
+        """
+        if not steps:
+            return "low"
+
+        # Use the max semantic score passed in from research(), which was computed
+        # from the actual chunk scores stored on each ResearchStep.
+        if max_score <= 0.0:
+            # Fallback: compute from step scores if caller didn't pass it in
+            max_score = max((s.max_similarity_score for s in steps), default=0.0)
+        if mean_score <= 0.0:
+            mean_score = _mean_score(
+                s.mean_similarity_score for s in steps if s.mean_similarity_score > 0.0
+            )
+
+        # Score bands: calibrated against cosine similarity from nomic-embed-text.
+        # >0.70 → the top retrieved chunk is highly relevant (high confidence)
+        # 0.50–0.70 → relevant but may have gaps (medium)
+        # 0.35–0.50 → weakly relevant — answer may miss detail (low)
+        # <0.35 → out of domain — should have been caught by OOD gate (out_of_scope)
+        if max_score >= 0.70 and mean_score >= 0.50:
             return "high"
-        elif total_chunks >= 5:
+        elif max_score >= 0.50 and mean_score >= 0.35:
             return "medium"
-        return "low"
+        elif max_score >= 0.35:
+            return "low"
+        return "out_of_scope_confidence"
 
 
 def _history_context(history: list[dict[str, str]]) -> str:
@@ -611,6 +730,11 @@ def _history_context(history: list[dict[str, str]]) -> str:
         if item.get("content", "").strip()
     ]
     return "\n".join(turns)
+
+
+def _mean_score(values: Any) -> float:
+    scores = [float(value) for value in values if float(value) > 0.0]
+    return sum(scores) / len(scores) if scores else 0.0
 
 
 def _extract_json_array(text: str) -> list[Any] | None:

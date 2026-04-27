@@ -13,6 +13,7 @@ from deepdoc.generator import (
     normalize_html_code_blocks,
     normalize_mdx_steps,
     repair_mdx_component_blocks,
+    repair_split_object_code_fences,
     repair_dangling_plain_fences,
     repair_internal_doc_links,
     repair_unbalanced_code_fences,
@@ -616,6 +617,17 @@ def test_escape_mdx_text_hazards_escapes_union_generic_types() -> None:
     assert "Array&lt;string|number&gt;" in escaped
 
 
+def test_escape_mdx_text_hazards_escapes_generic_types_with_array_members() -> None:
+    content = (
+        "| `fetchIncompleteOrders` | `report/index.ts` | "
+        "() => Promise<OrderData[]> | Fetches incomplete orders |"
+    )
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "() => Promise&lt;OrderData[]&gt;" in escaped
+
+
 def test_escape_mdx_text_hazards_escapes_nested_generic_types() -> None:
     content = "- **writerQuery(sql, params):** Promise<Array&lt;Row&gt;>"
 
@@ -651,7 +663,18 @@ def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:
 
     escaped = escape_mdx_text_hazards(content)
 
-    assert '`[&#123;"prod_id":101&#125;]`' in escaped
+    assert '[&#123;"prod_id":101&#125;]' in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_generic_code_spans_in_tables() -> None:
+    content = (
+        "| `getKey` | `redisUtils.ts` | `<T>(key): Promise<T | null>` | "
+        "Get and deserialize key |"
+    )
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "`&lt;T&gt;(key): Promise&lt;T | null&gt;`" in escaped
 
 
 def test_escape_mdx_text_hazards_rewrites_br_tags_inside_table_cells() -> None:
@@ -889,6 +912,21 @@ def test_normalize_explanatory_lines_outside_fences_closes_fence_before_prose() 
     assert "Expected: HTML login page.\n    ```\n  </Tab>" not in normalized
 
 
+def test_normalize_explanatory_lines_outside_fences_keeps_object_fields_inside_code() -> None:
+    content = """```typescript
+{
+  response: {
+    order: []
+  }
+}
+```
+"""
+
+    normalized = normalize_explanatory_lines_outside_fences(content)
+
+    assert normalized == content
+
+
 def test_repair_dangling_plain_fences_drops_fence_before_closing_tab() -> None:
     content = """<Tabs items={['curl']}>
   <Tab value="curl">
@@ -905,6 +943,23 @@ def test_repair_dangling_plain_fences_drops_fence_before_closing_tab() -> None:
 
     assert repaired.count("```") == 2
     assert "Expected: HTML login page.\n    ```\n  </Tab>" not in repaired
+
+
+def test_repair_split_object_code_fences_stitches_body_back_into_fence() -> None:
+    content = """```typescript
+// ReturnDetailsPayload
+{
+```
+  response: {
+    order: []
+  }
+}
+```
+"""
+
+    repaired = repair_split_object_code_fences(content)
+
+    assert "```typescript\n// ReturnDetailsPayload\n{\n  response: {\n    order: []\n  }\n}\n```" in repaired
 
 
 def test_escape_mdx_text_hazards_repairs_mis_escaped_inline_closing_tags() -> None:
@@ -924,6 +979,42 @@ def test_escape_mdx_text_hazards_escapes_json_like_table_cells() -> None:
     escaped = escape_mdx_text_hazards(content)
 
     assert '&#123;"user_id": ...&#125;' in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_raw_object_literals_in_prose() -> None:
+    content = "- **Returns:** { status: 'healthy' | 'degraded' | 'unhealthy', details: object }"
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "&#123; status: 'healthy' | 'degraded' | 'unhealthy', details: object &#125;" in escaped
+
+
+def test_escape_mdx_text_hazards_escapes_object_literals_split_by_inline_code() -> None:
+    table_row = (
+        '| `ValidationError` | Global handler | 400 | '
+        '{ status: "error", `statusCode`: 400, message: ... } |'
+    )
+    prose_line = "- **Returns:** { status: `healthy`, details: object }"
+
+    escaped_table = escape_mdx_text_hazards(table_row)
+    escaped_prose = escape_mdx_text_hazards(prose_line)
+
+    assert (
+        "&#123; status: \"error\", `statusCode`: 400, message: ... &#125;"
+        in escaped_table
+    )
+    assert "&#123; status: `healthy`, details: object &#125;" in escaped_prose
+
+
+def test_escape_mdx_text_hazards_escapes_braces_inside_table_code_spans() -> None:
+    content = (
+        '| `/health` | Example | '
+        '`{ status: "healthy", checks: { ... } }` |'
+    )
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert "`&#123; status: \"healthy\", checks: &#123; ... &#125; &#125;`" in escaped
 
 
 def test_repair_internal_doc_links_rewrites_aliases_using_page_titles() -> None:
@@ -996,6 +1087,34 @@ description: Orientation for new developers: what this service does, who uses it
         'description: "Orientation for new developers: what this service does, who uses it."'
         in updated
     )
+
+
+def test_ensure_mdx_frontmatter_preserves_deepdoc_provenance_fields(
+    tmp_path: Path,
+) -> None:
+    docs_dir = tmp_path / "docs"
+    docs_dir.mkdir(parents=True, exist_ok=True)
+    mdx_path = docs_dir / "auth.mdx"
+    mdx_path.write_text(
+        """---
+title: Auth
+deepdoc_generated_commit: "abc1234"
+deepdoc_status: "valid"
+deepdoc_evidence_files:
+  - "src/auth.py"
+---
+
+# Auth
+""",
+        encoding="utf-8",
+    )
+
+    _ensure_mdx_frontmatter(docs_dir)
+
+    updated = mdx_path.read_text(encoding="utf-8")
+    assert 'deepdoc_generated_commit: "abc1234"' in updated
+    assert 'deepdoc_status: "valid"' in updated
+    assert '  - "src/auth.py"' in updated
 
 
 def test_ensure_mdx_frontmatter_moves_leaked_body_out_of_yaml_frontmatter(

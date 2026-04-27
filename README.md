@@ -20,6 +20,8 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **Large-Database Anti-Noise Grouping** — Sparse singleton model files are coalesced into stable aggregate groups (for example `core-models`) so huge schemas stay complete without one-file-per-page nav spam.
 - **Grouped API Reference Docs** — High-level endpoint family pages are AI-planned and enriched from scanned runtime endpoints, avoiding one-page-per-route navigation spam. OpenAPI specs still stage canonical interactive `/api/*` pages when present.
 - **Integration Discovery** — Third-party systems like payment gateways, delivery providers, warehouse systems, and webhook integrations can be grouped into integration docs.
+- **Trust Signals & Coverage Reporting** — Generated pages include DeepDoc provenance frontmatter and a site badge with the source commit; generation also reports endpoint, file, and symbol coverage plus consistency warnings.
+- **Grounded Chatbot Abstention** — Out-of-scope questions return a short no-citation abstention instead of noisy unrelated evidence, and chatbot prompts forbid fabricated example code.
 - **Incremental Updates** — `deepdoc update` uses persisted plan and ledger data to regenerate only stale or structurally affected docs.
 - **Full Refresh and Clean Rebuild Modes** — `generate --force` fully refreshes DeepDoc-managed docs and removes stale generated pages; `generate --clean --yes` wipes output and rebuilds from scratch.
 - **Safe Existing-Docs Behavior** — Plain `generate` refuses to run over an existing DeepDoc-managed docs set and will not silently mix into a non-DeepDoc `docs/` folder.
@@ -119,34 +121,147 @@ deepdoc serve
 
 ### Docs + Chatbot
 
-```bash
-# 1. Install chatbot extras
-pip install "deepdoc[chatbot]"
+If you also want the AI chatbot, see **[Chatbot in 5 Minutes](#chatbot-in-5-minutes)** right below for complete copy-paste setup for every major provider.
 
-# 2. Go to your project
+---
+
+## Chatbot in 5 Minutes
+
+Pick your provider and copy-paste the entire block. Each recipe gets you from zero to a working chatbot at `localhost:3000/ask`.
+
+> **You do not need to tune anything.** The defaults for retrieval, chunking, and reranking all work out of the box. Advanced configuration is in the [Chatbot](#chatbot) section further down.
+
+### OpenAI — One Key for Everything
+
+Simplest setup. One API key powers docs, answers, and embeddings.
+
+```bash
+pip install "deepdoc[chatbot]"
 cd /path/to/your-project
 
-# 3. Initialize with chatbot enabled
-deepdoc init --with-chatbot
+export OPENAI_API_KEY=sk-...
 
-# 4. Configure providers for docs + chatbot
-#    Use one of the provider recipes in:
-#    - LLM Provider Setup
-#    - Chatbot Quick Start
+deepdoc init --with-chatbot --provider openai --model gpt-4o
 
-# 5. Generate docs and chatbot indexes
+# Wire chatbot to the same OpenAI key
+deepdoc config set chatbot.answer.provider openai
+deepdoc config set chatbot.answer.model gpt-4o-mini
+deepdoc config set chatbot.answer.api_key_env OPENAI_API_KEY
+deepdoc config set chatbot.embeddings.provider openai
+deepdoc config set chatbot.embeddings.model text-embedding-3-large
+deepdoc config set chatbot.embeddings.api_key_env OPENAI_API_KEY
+
 deepdoc generate
-
-# 6. Start the local docs site + chatbot backend
 deepdoc serve
+# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
 ```
 
-For most new users, the fastest path is:
+### Claude + OpenAI Embeddings
 
-- Claude for docs, OpenAI embeddings for chatbot
-- OpenAI for both docs and chatbot
-- Gemini for both docs and chatbot
-- Azure when your team already runs Azure OpenAI deployments
+Claude for docs and answers, OpenAI for embeddings (Anthropic doesn't offer embedding models).
+
+```bash
+pip install "deepdoc[chatbot]"
+cd /path/to/your-project
+
+export ANTHROPIC_API_KEY=sk-ant-...
+export OPENAI_API_KEY=sk-...
+
+deepdoc init --with-chatbot --provider anthropic
+
+deepdoc config set chatbot.answer.provider anthropic
+deepdoc config set chatbot.answer.model claude-3-5-sonnet-20241022
+deepdoc config set chatbot.answer.api_key_env ANTHROPIC_API_KEY
+deepdoc config set chatbot.embeddings.provider openai
+deepdoc config set chatbot.embeddings.model text-embedding-3-large
+deepdoc config set chatbot.embeddings.api_key_env OPENAI_API_KEY
+
+deepdoc generate
+deepdoc serve
+# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
+```
+
+### Google Gemini — One Key for Everything
+
+One Gemini API key for docs, answers, and embeddings. Keep the `gemini/` prefix.
+
+```bash
+pip install "deepdoc[chatbot]"
+cd /path/to/your-project
+
+export GEMINI_API_KEY=...
+
+deepdoc init --with-chatbot
+deepdoc config set llm.provider gemini
+deepdoc config set llm.model gemini/gemini-2.0-flash
+deepdoc config set llm.api_key_env GEMINI_API_KEY
+
+deepdoc config set chatbot.answer.provider gemini
+deepdoc config set chatbot.answer.model gemini/gemini-2.0-flash
+deepdoc config set chatbot.answer.api_key_env GEMINI_API_KEY
+deepdoc config set chatbot.embeddings.provider gemini
+deepdoc config set chatbot.embeddings.model gemini/text-embedding-004
+deepdoc config set chatbot.embeddings.api_key_env GEMINI_API_KEY
+
+deepdoc generate
+deepdoc serve
+# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
+```
+
+### Azure OpenAI
+
+Replace `YOUR-RESOURCE` and deployment names with your actual Azure values.
+
+```bash
+pip install "deepdoc[chatbot]"
+cd /path/to/your-project
+
+export AZURE_API_KEY=...
+export AZURE_API_BASE=https://YOUR-RESOURCE.openai.azure.com
+
+deepdoc init --with-chatbot --provider azure --model azure/gpt-4o
+deepdoc config set llm.base_url $AZURE_API_BASE
+
+deepdoc config set chatbot.answer.provider azure
+deepdoc config set chatbot.answer.model azure/gpt-4o-mini
+deepdoc config set chatbot.answer.api_key_env AZURE_API_KEY
+deepdoc config set chatbot.answer.base_url $AZURE_API_BASE
+deepdoc config set chatbot.answer.api_version 2024-02-01
+deepdoc config set chatbot.embeddings.provider azure
+deepdoc config set chatbot.embeddings.model azure/text-embedding-3-large
+deepdoc config set chatbot.embeddings.api_key_env AZURE_API_KEY
+deepdoc config set chatbot.embeddings.base_url $AZURE_API_BASE
+deepdoc config set chatbot.embeddings.api_version 2024-02-01
+
+deepdoc generate
+deepdoc serve
+# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
+```
+
+### Ollama — Fully Local, No API Keys
+
+Free and private. Runs everything on your machine.
+
+```bash
+pip install "deepdoc[chatbot]"
+cd /path/to/your-project
+
+# Start Ollama first: https://ollama.com
+ollama pull llama3.2
+
+deepdoc init --with-chatbot --provider ollama --model ollama/llama3.2
+
+deepdoc config set chatbot.answer.provider ollama
+deepdoc config set chatbot.answer.model ollama/llama3.2
+deepdoc config set chatbot.answer.base_url http://localhost:11434
+deepdoc config set chatbot.embeddings.backend fastembed
+
+deepdoc generate
+deepdoc serve
+# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
+```
+
+> Fastembed downloads the local embedding model (~300 MB) on first run. No API key needed for any step.
 
 ---
 
@@ -261,6 +376,13 @@ deepdoc update --deploy           # Update + deploy
 7. Rebuilds site config and nav afterward.
 
 If git is unavailable, it falls back to hash-based staleness detection for recovery.
+
+Generation writes quality artifacts under `.deepdoc/`:
+
+- `.deepdoc/generation_quality.json` records invalid/degraded pages, coverage metrics, local setup warnings, and consistency summary data.
+- `.deepdoc/consistency_warnings.json` records warning-only cross-page identifier consistency findings.
+
+Generated MDX pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, and `deepdoc_evidence_files`. The generated Fumadocs site renders a subtle "Last generated from commit ..." badge when this metadata is present.
 
 **Options:**
 
@@ -584,41 +706,17 @@ DeepDoc can generate an AI-powered chatbot that answers questions about your cod
 
 If chatbot is disabled, DeepDoc keeps the generated site docs-only: it does not generate the `/ask` route, chatbot frontend components, or `chatbot_backend/` scaffold.
 
-### Quick Start
+> **Already running?** If you followed the [Chatbot in 5 Minutes](#chatbot-in-5-minutes) guide above, your chatbot is already configured and working. Everything below is for advanced configuration, tuning, and production deployment. **The defaults work well out of the box** — most users never need to change the settings below.
 
-The chatbot is configured independently from doc generation:
+### How the Model Surfaces Work
 
-- `llm.*` controls the models used during planning and page generation.
-- `chatbot.answer.*` controls the model that writes answers.
-- `chatbot.embeddings.*` controls the model used to embed code, docs, and artifacts for retrieval.
+The chatbot has three independent model surfaces that you can mix across providers:
 
-That means you can mix providers. For example:
-
-- Claude for docs, OpenAI embeddings for chatbot
-- OpenAI for everything
-- Gemini for everything
-- Azure for everything
-
-```bash
-# 1. Install chatbot extras
-pip install "deepdoc[chatbot]"
-
-# 2. Initialize with chatbot enabled
-deepdoc init --with-chatbot
-
-# 3. Configure docs + chatbot providers
-#    Use one of the recipes below
-
-# 4. Set chatbot-specific API keys
-export DEEPDOC_CHAT_API_KEY=your-answer-model-key
-export DEEPDOC_EMBED_API_KEY=your-embedding-model-key
-
-# 5. Generate docs + chatbot indexes
-deepdoc generate
-
-# 6. Serve docs + chatbot backend locally
-deepdoc serve
-```
+| Surface | Controls | Example |
+|---------|----------|----------|
+| `llm.*` | Doc planning and page generation | Claude, GPT-4o, Gemini |
+| `chatbot.answer.*` | Chatbot answer generation | GPT-4o-mini, Claude, Gemini Flash |
+| `chatbot.embeddings.*` | Vector embeddings for retrieval | text-embedding-3-large, Gemini text-embedding-004 |
 
 `deepdoc serve` auto-starts the chatbot backend alongside the Fumadocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
 

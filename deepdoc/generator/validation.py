@@ -59,6 +59,7 @@ class ValidationResult:
     missing_sections: list[str] = field(default_factory=list)
     missing_file_refs: list[str] = field(default_factory=list)
     hallucinated_paths: list[str] = field(default_factory=list)
+    hallucinated_symbols: list[str] = field(default_factory=list)
     mermaid_block_count: int = 0
     word_count: int = 0
     warnings: list[str] = field(default_factory=list)
@@ -101,37 +102,40 @@ class PageValidator:
         self._check_file_refs(content, bucket, result)
 
         # 3. Check for hallucinated file paths
-        self._check_hallucinated_paths(content, result)
+        self._check_hallucinated_paths(content, bucket, result)
 
         # 4. Check references against assembled evidence when available
         self._check_evidence_backed_refs(content, bucket, evidence, result)
 
-        # 5. Check route/path claims for API and operations-heavy pages
+        # 5. Check symbol references against parsed symbols
+        self._check_hallucinated_symbols(content, bucket, evidence, result)
+
+        # 6. Check route/path claims for API and operations-heavy pages
         self._check_route_claims(content, bucket, result)
 
-        # 6. Count mermaid diagrams
+        # 7. Count mermaid diagrams
         result.mermaid_block_count = len(re.findall(r"```mermaid", content))
 
-        # 6a. Check specialized evidence grounding
+        # 7a. Check specialized evidence grounding
         self._check_runtime_grounding(content, bucket, evidence, result)
         self._check_config_grounding(content, bucket, evidence, result)
         self._check_integration_grounding(content, bucket, evidence, result)
 
-        # 7. Minimum content check
+        # 8. Minimum content check
         if result.word_count < 100:
             result.warnings.append("Very short page (<100 words) — may be incomplete")
             result.is_valid = False
 
-        # 8. Check for required diagrams
+        # 9. Check for required diagrams
         if bucket.required_diagrams and result.mermaid_block_count == 0:
             result.warnings.append(
                 f"No Mermaid diagrams found but required: {', '.join(bucket.required_diagrams)}"
             )
 
-        # 9. Check page contract
+        # 10. Check page contract
         self._check_page_contract(content, bucket, result)
 
-        # 10. Check overview grounding depth
+        # 11. Check overview grounding depth
         self._check_overview_grounding(content, bucket, result)
 
         return result
@@ -177,19 +181,44 @@ class PageValidator:
             if f.lower() in content_lower:
                 referenced += 1
 
-        # At least 30% of files should be referenced
         coverage = referenced / len(bucket.owned_files) if bucket.owned_files else 1.0
         unreferenced = [f for f in bucket.owned_files if f.lower() not in content_lower]
 
-        if coverage < 0.3 and len(unreferenced) > 2:
+        hints = bucket.generation_hints or {}
+        is_intro = hints.get("is_introduction_page") or bucket.section == "Start Here"
+        strict_types = {"feature", "system", "runtime", "integration"}
+        is_strict = (
+            bucket.bucket_type in strict_types
+            or hints.get("is_endpoint_family")
+            or hints.get("include_endpoint_detail")
+            or hints.get("include_runtime_context")
+            or hints.get("include_integration_detail")
+        )
+        threshold = 0.5 if is_strict else 0.3
+
+        if coverage < threshold and len(unreferenced) > 2:
             result.missing_file_refs = unreferenced[:5]
             result.warnings.append(
                 f"Low file coverage: {referenced}/{len(bucket.owned_files)} files referenced "
-                f"({coverage:.0%})"
+                f"({coverage:.0%}; expected at least {threshold:.0%})"
             )
+            if is_intro:
+                if coverage < 0.15 and len(bucket.owned_files) >= 10:
+                    result.is_valid = False
+            else:
+                result.is_valid = False
 
-    def _check_hallucinated_paths(self, content: str, result: ValidationResult):
-        """Find file paths in backticks that don't exist in the repo."""
+    def _check_hallucinated_paths(
+        self, content: str, bucket: "DocBucket", result: ValidationResult
+    ):
+        """Find file paths in backticks that don't exist in the repo.
+
+        Thresholds are tightened by bucket type:
+        - intro/overview pages: >3 allowed (they cite many files by name in passing)
+        - feature/endpoint/system pages: >1 allowed (one is already a problem)
+        - all others: >2 allowed
+        Any violation marks the page invalid and triggers a retry.
+        """
         # Match `path/to/file.ext` or `path/to/file.ext:123`
         refs = re.findall(
             r"`([a-zA-Z][a-zA-Z0-9_./-]*\.[a-zA-Z]{1,8})(?::\d+)?`", content
@@ -206,11 +235,28 @@ class PageValidator:
                 if not (self.repo_root / ref).exists():
                     hallucinated.append(ref)
 
-        # Only flag if there are many — some may be examples in code blocks
-        if len(hallucinated) > 5:
+        if not hallucinated:
+            return
+
+        # Determine threshold by bucket type / generation hints
+        hints = bucket.generation_hints or {}
+        is_intro = hints.get("is_introduction_page") or bucket.section == "Start Here"
+        is_strict = bucket.bucket_type in ("feature", "endpoint", "system") or hints.get(
+            "is_endpoint_ref"
+        )
+
+        if is_intro:
+            threshold = 3
+        elif is_strict:
+            threshold = 1
+        else:
+            threshold = 2
+
+        if len(hallucinated) > threshold:
             result.hallucinated_paths = hallucinated[:10]
             result.warnings.append(
-                f"{len(hallucinated)} potentially hallucinated file paths found"
+                f"{len(hallucinated)} potentially hallucinated file paths found "
+                f"(threshold: {threshold} for {bucket.bucket_type} pages)"
             )
             result.is_valid = False
 
@@ -250,6 +296,117 @@ class PageValidator:
 
             if len(violations) >= invalid_threshold:
                 result.is_valid = False
+
+    def _check_hallucinated_symbols(
+        self,
+        content: str,
+        bucket: DocBucket,
+        evidence: AssembledEvidence | None,
+        result: ValidationResult,
+    ) -> None:
+        """Flag symbol-like inline references that are not in bucket evidence."""
+        known_symbols = self._known_symbols_for_bucket(bucket, evidence)
+        if not known_symbols:
+            return
+
+        candidates: set[str] = set()
+        for inline in re.findall(r"`([^`]+)`", content):
+            if "\n" in inline or "/" in inline or "." in inline:
+                continue
+            token = inline.strip()
+            if token.endswith("()"):
+                token = token[:-2]
+            if not self._looks_like_symbol_reference(token):
+                continue
+            if self._is_allowed_symbol_like_token(token, bucket):
+                continue
+            candidates.add(token)
+
+        violations = sorted(token for token in candidates if token not in known_symbols)
+        if not violations:
+            return
+
+        result.hallucinated_symbols = violations[:10]
+        result.warnings.append(
+            f"Potentially hallucinated symbols: {', '.join(result.hallucinated_symbols[:4])}"
+        )
+        if len(violations) > 2:
+            result.is_valid = False
+
+    def _known_symbols_for_bucket(
+        self,
+        bucket: DocBucket,
+        evidence: AssembledEvidence | None,
+    ) -> set[str]:
+        file_scope = set(bucket.owned_files)
+        if evidence is not None and evidence.evidence_file_paths:
+            file_scope |= set(evidence.evidence_file_paths)
+        symbols = set(bucket.owned_symbols or [])
+        for file_path in file_scope:
+            parsed = self.scan.parsed_files.get(file_path)
+            if not parsed:
+                continue
+            for symbol in parsed.symbols:
+                if symbol.name:
+                    symbols.add(symbol.name)
+        for impact in getattr(self.scan, "config_impacts", []) or []:
+            key = impact.get("key", "") if isinstance(impact, dict) else getattr(impact, "key", "")
+            if key:
+                symbols.add(str(key))
+        return symbols
+
+    @staticmethod
+    def _looks_like_symbol_reference(token: str) -> bool:
+        if not token or len(token) > 80 or " " in token:
+            return False
+        return bool(
+            re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", token)
+            and (
+                "_" in token
+                or re.match(r"^[A-Z][A-Za-z0-9]*$", token)
+                or re.search(r"[a-z][A-Z]", token)
+            )
+        )
+
+    @staticmethod
+    def _is_allowed_symbol_like_token(token: str, bucket: DocBucket) -> bool:
+        if token.isupper():
+            return True
+        if token in {"GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"}:
+            return True
+        lower = token.lower()
+        allowed = {
+            "api",
+            "json",
+            "yaml",
+            "http",
+            "https",
+            "url",
+            "uri",
+            "id",
+            "uuid",
+            "cli",
+            "sql",
+            "html",
+            "css",
+            "mdx",
+            "docker",
+            "makefile",
+            "readme",
+            "callout",
+            "card",
+            "tabs",
+            "steps",
+            "overview",
+            "configuration",
+            "environment",
+        }
+        if lower in allowed:
+            return True
+        bucket_text = " ".join(
+            [bucket.title, bucket.slug, bucket.description, bucket.section]
+        ).lower()
+        return lower in bucket_text
 
     def _check_route_claims(
         self, content: str, bucket: DocBucket, result: ValidationResult

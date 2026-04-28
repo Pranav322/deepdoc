@@ -60,6 +60,14 @@ class _RecordingChatClient:
         return "Grounded answer"
 
 
+class _AbstentionChatClient:
+    def complete(self, system: str, user: str) -> str:
+        return (
+            "This question is not answerable from the provided codebase context. "
+            "No relevant sources; the context does not contain information about it."
+        )
+
+
 class _FastModeNoLlmRetrievalChatClient:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -300,6 +308,53 @@ def test_query_service_filters_low_score_citations_but_keeps_high_score(
     result = service.query("Where is auth handled?")
 
     assert [item["file_path"] for item in result["code_citations"]] == ["src/high.py"]
+
+
+def test_query_service_strips_citations_when_answer_abstains(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+    save_plan(make_plan([make_bucket("Auth", "auth", ["src/auth.py"])]), repo_root)
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def first_login(user): return user",
+                chunk_hash="hashc1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=1,
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_AbstentionChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+        result = service.query("who went the first on moon")
+
+    assert result["confidence"] == "out_of_scope_confidence"
+    assert result["code_citations"] == []
+    assert result["doc_citations"] == []
+    assert result["used_chunks"] == 0
 
 
 def test_normal_query_prompt_bans_fabricated_example_code(tmp_path: Path) -> None:

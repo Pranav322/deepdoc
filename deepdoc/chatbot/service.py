@@ -35,6 +35,7 @@ STOPWORD_TOKENS = {
     "are",
     "can",
     "does",
+    "first",
     "for",
     "from",
     "handle",
@@ -55,7 +56,9 @@ STOPWORD_TOKENS = {
     "to",
     "use",
     "what",
+    "went",
     "where",
+    "who",
     "which",
     "with",
     "work",
@@ -305,7 +308,7 @@ class ChatbotQueryService:
         # Graph-expansion hits (scores 0.63–0.72) are kept; truly irrelevant hits removed.
         min_score = self.CITATION_MIN_SCORE
 
-        return {
+        response = {
             "answer": answer,
             "code_citations": [
                 self._citation_payload(hit)
@@ -363,6 +366,12 @@ class ChatbotQueryService:
             + len(selected_relationships),
             "response_mode": mode,
         }
+        if self._answer_is_abstention(answer):
+            stripped = self._ood_result(question)
+            stripped["answer"] = answer
+            stripped["response_mode"] = mode
+            return stripped
+        return response
 
     def retrieve_context(
         self,
@@ -916,9 +925,25 @@ class ChatbotQueryService:
         tokens = [
             token
             for token in re.findall(r"[a-zA-Z_][a-zA-Z0-9_]{2,}", question)
-            if len(token) >= 4 or "_" in token
+            if (len(token) >= 4 or "_" in token)
+            and token.lower() not in STOPWORD_TOKENS
         ]
         return any(token.lower() in haystack for token in tokens)
+
+    @staticmethod
+    def _answer_is_abstention(answer: str) -> bool:
+        lower = answer.lower()
+        markers = (
+            "not answerable from",
+            "doesn't appear to be related",
+            "does not appear to be related",
+            "no relevant code",
+            "no relevant sources",
+            "context does not contain",
+            "retrieved context does not contain",
+            "codebase does not contain information",
+        )
+        return any(marker in lower for marker in markers)
 
     @staticmethod
     def _is_graph_expanded_hit(hit: RetrievedChunk) -> bool:

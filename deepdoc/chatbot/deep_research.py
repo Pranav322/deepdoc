@@ -117,6 +117,20 @@ class DeepResearcher:
     def _check_out_of_domain(self, question: str) -> tuple[bool, float]:
         """Return (is_ood, max_score).  Calls service for a lightweight raw-semantic
         check (no graph expansion, no reranking) to assess domain relevance."""
+        get_snapshot = getattr(self.service, "_ood_gate_snapshot", None)
+        if callable(get_snapshot):
+            try:
+                snapshot = get_snapshot(question, mode=self.mode)
+                score = float(snapshot.get("max_raw_semantic_score", 1.0))
+                has_strong_context_hit = bool(
+                    snapshot.get("has_strong_context_hit", False)
+                )
+                return (
+                    score < self.OOD_THRESHOLD and not has_strong_context_hit,
+                    score,
+                )
+            except Exception as e:
+                logger.debug(f"[deep_research] OOD snapshot failed: {e}")
         get_score = getattr(self.service, "_get_raw_semantic_max_score", None)
         if not callable(get_score):
             return False, 1.0  # service doesn't support the check — assume in-scope

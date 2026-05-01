@@ -274,6 +274,45 @@ class ChatbotQueryService:
             "diagnostics": {},
         }
 
+    def _ood_gate_snapshot(self, question: str, *, mode: str = "default") -> dict[str, Any]:
+        """Collect the lightweight OOD signals used before answer generation.
+
+        This intentionally avoids LLM retrieval steps such as query expansion and
+        reranking, but still uses the same semantic+lexical candidate search path
+        and corpora mix as normal query execution.
+        """
+        if not (
+            self.code_records
+            or self.symbol_records
+            or self.artifact_records
+            or self.doc_summary_records
+            or self.doc_full_records
+            or self.repo_doc_records
+            or self.relationship_records
+        ):
+            return {
+                "max_raw_semantic_score": 1.0,
+                "has_strong_context_hit": False,
+            }
+
+        retrieval_cfg = deepcopy(self._retrieval_profile(mode))
+        retrieval_cfg["query_expansion"] = False
+        retrieval_cfg["rerank"] = False
+
+        code_hits, artifact_hits, doc_hits, relationship_hits, raw_score = (
+            self._search_query_batch([question], question, retrieval_cfg)
+        )
+        context_hits = code_hits + artifact_hits + doc_hits + relationship_hits
+        has_strong_context_hit = any(
+            getattr(hit, "score", 0.0) >= self.CITATION_MIN_SCORE
+            and self._hit_has_exact_query_overlap(question, hit)
+            for hit in context_hits
+        )
+        return {
+            "max_raw_semantic_score": float(raw_score),
+            "has_strong_context_hit": has_strong_context_hit,
+        }
+
     def query(
         self,
         question: str,

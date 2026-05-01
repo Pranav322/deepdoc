@@ -67,6 +67,21 @@ class _BadThenCorrectChatClient:
         return "Login is implemented in `src/missing.py:1-2` [E1]."
 
 
+class _SymbolResearchChatClient:
+    def complete(self, system: str, user: str) -> str:
+        if "alternative search queries" in system:
+            return ""
+        if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+            return "8"
+        if "Break the given question into 2–4 focused sub-questions" in system:
+            return '["Where is PAYMENTS_HOST defined?"]'
+        if "agent answering a specific sub-question" in system:
+            return "PAYMENTS_HOST is defined in `src/payments.py`."
+        if "synthesising research findings" in system:
+            return "PAYMENTS_HOST is defined in `src/payments.py`."
+        return "Grounded answer"
+
+
 class _FailingEmbedClient:
     def embed(self, texts):
         raise RuntimeError("Embedding request failed: missing API key")
@@ -1360,6 +1375,104 @@ def test_query_service_uses_lexical_retrieval_when_vector_search_misses(
 
     assert result["answer"] == "Grounded answer"
     assert result["code_citations"][0]["file_path"] == "src/payments.py"
+
+
+def test_code_deep_ood_gate_respects_symbol_context(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / ".deepdoc.yaml").write_text(
+        "chatbot:\n  enabled: true\n", encoding="utf-8"
+    )
+
+    plan = make_plan([make_bucket("Payments", "payments", ["src/payments.py"])])
+    save_plan(plan, repo_root)
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/other.py",
+                text="def unrelated(): return None",
+                chunk_hash="hc1",
+                file_path="src/other.py",
+                start_line=1,
+                end_line=1,
+            )
+        ],
+        [[0.0, 1.0]],
+    )
+    save_corpus(
+        index_dir,
+        "symbol",
+        [
+            ChunkRecord(
+                chunk_id="s1",
+                kind="code",
+                source_key="src/payments.py",
+                text=(
+                    "File: src/payments.py\n"
+                    "Symbol: PAYMENTS_HOST\n"
+                    "Kind: constant\n"
+                    "Lines: 1-1\n"
+                    "Signature: PAYMENTS_HOST\n\n"
+                    'const PAYMENTS_HOST = process.env.PAYMENTS_HOST;'
+                ),
+                chunk_hash="hs1",
+                file_path="src/payments.py",
+                start_line=1,
+                end_line=1,
+                symbol_names=["PAYMENTS_HOST"],
+                metadata={"chunk_subtype": "symbol_definition"},
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_corpus(index_dir, "doc_full", [], [])
+    save_corpus(index_dir, "repo_doc", [], [])
+    save_corpus(index_dir, "relationship", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/payments.py": 'const PAYMENTS_HOST = process.env.PAYMENTS_HOST;\n'},
+    )
+    save_source_catalog(
+        index_dir,
+        [
+            SourceCatalogEntry(
+                file_path="src/payments.py",
+                content_hash="h-payments",
+                source_kind="product",
+                language="typescript",
+                total_lines=1,
+                size_bytes=48,
+            )
+        ],
+    )
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_SymbolResearchChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+        result = service.code_deep("Where is `PAYMENTS_HOST` defined?", max_rounds=1)
+
+    assert result["confidence"] != "out_of_scope_confidence"
+    assert result["research_mode"] == "code_deep"
+    assert result["used_chunks"] > 0
+    assert result["evidence"]
+    assert result["evidence"][0]["file_path"] == "src/payments.py"
+    assert "PAYMENTS_HOST is defined" in result["answer"]
 
 
 def test_deep_research_uses_live_repo_fallback_when_index_is_empty(

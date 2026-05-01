@@ -132,6 +132,11 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert package_json["dependencies"]["fumadocs-ui"] == "15.7.11"
     assert package_json["dependencies"]["next"] == "15.3.0"
     assert package_json["dependencies"]["react"] == "19.1.0"
+    assert package_json["dependencies"]["react-syntax-highlighter"] == "^15.6.1"
+    assert (
+        package_json["devDependencies"]["@types/react-syntax-highlighter"]
+        == "^15.5.13"
+    )
     assert "fumadocs-ui/provider';" in app_layout
     assert "NEXT_PUBLIC_DEEPDOC_SITE_BASE_PATH" in app_layout
     assert (

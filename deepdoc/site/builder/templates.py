@@ -26,6 +26,7 @@ def _package_json(project_name: str) -> str:
                     "react": "19.1.0",
                     "react-dom": "19.1.0",
                     "react-markdown": "^10.1.0",
+                    "react-syntax-highlighter": "^15.6.1",
                     "tailwindcss": "^4.1.3",
                 },
                 "devDependencies": {
@@ -33,6 +34,7 @@ def _package_json(project_name: str) -> str:
                     "@types/node": "^22.13.9",
                     "@types/react": "^19.0.12",
                     "@types/react-dom": "^19.0.4",
+                    "@types/react-syntax-highlighter": "^15.5.13",
                     "typescript": "^5.8.2",
                 },
             },
@@ -770,6 +772,15 @@ def _global_css(cfg: dict[str, Any]) -> str:
           white-space: pre;
         }
 
+        .deepdoc-chatbot-answer__syntax {
+          background: #181a27;
+        }
+
+        .deepdoc-chatbot-answer__syntax code,
+        .deepdoc-chatbot-answer__syntax span {
+          font-family: 'SF Mono', 'JetBrains Mono', 'Fira Code', 'Menlo', monospace;
+        }
+
         .deepdoc-chatbot-answer.prose :where(pre):not(:where([class~="not-prose"] *)) {
           margin: 0 !important;
           padding: 1rem 1.05rem 1.1rem !important;
@@ -1134,34 +1145,29 @@ def _global_css(cfg: dict[str, Any]) -> str:
         .deepdoc-code-modal__body {
           flex: 1;
           overflow: auto;
-          padding: 0;
+          padding: 0.75rem 0 0.9rem;
           background:
             linear-gradient(180deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0)),
             #181a27;
         }
-        .deepdoc-code-modal__table {
-          width: 100%;
-          border-collapse: collapse;
-          border-spacing: 0;
+        .deepdoc-code-modal__syntax {
+          min-width: 100%;
         }
-        .deepdoc-code-modal__line:hover {
-          background: rgba(255, 255, 255, 0.03);
+        .deepdoc-code-modal__syntax pre {
+          margin: 0 !important;
+          background: transparent !important;
+          border: none !important;
+          border-radius: 0 !important;
+          padding: 0 !important;
         }
-        .deepdoc-code-modal__gutter {
-          position: sticky;
-          left: 0;
-          padding: 0 0.75rem 0 1rem;
-          text-align: right;
-          font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Menlo', monospace;
-          font-size: 0.75rem;
-          line-height: 1.7;
-          color: #45475a;
-          background: #1e1e2e;
-          user-select: none;
-          white-space: nowrap;
-          border-right: 1px solid rgba(255, 255, 255, 0.04);
+        .deepdoc-code-modal__syntax code {
+          font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Menlo', monospace !important;
+          font-size: 0.8125rem !important;
+          line-height: 1.7 !important;
+          tab-size: 4;
         }
-        .deepdoc-code-modal__code {
+        .deepdoc-code-modal__plain-fallback {
+          margin: 0;
           padding: 0 1rem;
           white-space: pre;
           font-family: 'SF Mono', 'Fira Code', 'JetBrains Mono', 'Menlo', monospace;
@@ -1169,21 +1175,6 @@ def _global_css(cfg: dict[str, Any]) -> str:
           line-height: 1.7;
           color: #cdd6f4;
           tab-size: 4;
-        }
-        .deepdoc-code-modal__code pre {
-          margin: 0;
-          padding: 0;
-          background: none;
-          border: none;
-          font: inherit;
-          color: inherit;
-          white-space: pre;
-        }
-        .deepdoc-code-modal__table tr:first-child td {
-          padding-top: 0.6rem;
-        }
-        .deepdoc-code-modal__table tr:last-child td {
-          padding-bottom: 0.6rem;
         }
 
         :is(.dark, [data-theme='dark']) .deepdoc-chatbot-page__back {
@@ -1917,6 +1908,11 @@ def _chatbot_panel_tsx() -> str:
           url?: string;
         };
 
+        type LoadedSyntaxHighlighter = {
+          Component: any;
+          style: Record<string, unknown>;
+        };
+
         type ChatResponse = {
           answer: string;
           code_citations: CitationEntry[];
@@ -2143,15 +2139,139 @@ def _chatbot_panel_tsx() -> str:
         }
 
         function extractCodeLanguage(node: ReactNode): string {
-          if (!isValidElement(node)) return '';
-          const props = node.props as { className?: string };
+          const target = Array.isArray(node) ? node[0] : node;
+          if (!isValidElement(target)) return '';
+          const props = target.props as { className?: string };
           const className = typeof props.className === 'string' ? props.className : '';
           const match = className.match(/language-([\\w-]+)/);
           return match?.[1] ?? '';
         }
 
+        function nodeText(node: ReactNode): string {
+          if (node == null || typeof node === 'boolean') return '';
+          if (typeof node === 'string' || typeof node === 'number') return String(node);
+          if (Array.isArray(node)) return node.map(nodeText).join('');
+          if (!isValidElement(node)) return '';
+          const props = node.props as { children?: ReactNode };
+          return nodeText(props.children);
+        }
+
+        let syntaxHighlighterPromise: Promise<LoadedSyntaxHighlighter> | null = null;
+
+        function loadSyntaxHighlighter(): Promise<LoadedSyntaxHighlighter> {
+          if (!syntaxHighlighterPromise) {
+            syntaxHighlighterPromise = Promise.all([
+              import('react-syntax-highlighter'),
+              import('react-syntax-highlighter/dist/esm/styles/prism'),
+            ]).then(([syntaxModule, styleModule]) => ({
+              Component: syntaxModule.Prism,
+              style: styleModule.oneDark,
+            }));
+          }
+          return syntaxHighlighterPromise;
+        }
+
+        function useSyntaxHighlighter() {
+          const [syntaxHighlighter, setSyntaxHighlighter] = useState<LoadedSyntaxHighlighter | null>(null);
+
+          useEffect(() => {
+            let cancelled = false;
+
+            loadSyntaxHighlighter()
+              .then((loaded) => {
+                if (!cancelled) {
+                  setSyntaxHighlighter(loaded);
+                }
+              })
+              .catch(() => {
+                if (!cancelled) {
+                  setSyntaxHighlighter(null);
+                }
+              });
+
+            return () => {
+              cancelled = true;
+            };
+          }, []);
+
+          return syntaxHighlighter;
+        }
+
+        function highlightLanguage(language: string): string {
+          return !language || language === 'code' ? 'text' : language;
+        }
+
+        function HighlightedCodeBlock({
+          code,
+          language,
+          className,
+          showLineNumbers = false,
+          startingLineNumber = 1,
+          lineNumberMinWidth = '3ch',
+          padding = '1rem 1.05rem 1.1rem',
+        }: {
+          code: string;
+          language: string;
+          className: string;
+          showLineNumbers?: boolean;
+          startingLineNumber?: number;
+          lineNumberMinWidth?: string;
+          padding?: string;
+        }) {
+          const syntaxHighlighter = useSyntaxHighlighter();
+          const SyntaxHighlighter = syntaxHighlighter?.Component;
+          const normalizedCode = code || ' ';
+
+          if (!SyntaxHighlighter) {
+            return (
+              <pre className={className}>
+                <code>{normalizedCode}</code>
+              </pre>
+            );
+          }
+
+          return (
+            <div className={className}>
+              <SyntaxHighlighter
+                language={highlightLanguage(language)}
+                style={syntaxHighlighter.style}
+                showLineNumbers={showLineNumbers}
+                wrapLongLines={false}
+                startingLineNumber={startingLineNumber}
+                PreTag="div"
+                customStyle={{
+                  margin: 0,
+                  background: 'transparent',
+                  padding,
+                  overflowX: 'auto',
+                  fontSize: '0.88rem',
+                  lineHeight: '1.72',
+                }}
+                codeTagProps={{
+                  style: {
+                    fontFamily: "'SF Mono', 'Fira Code', 'JetBrains Mono', 'Menlo', monospace",
+                    whiteSpace: 'pre',
+                  },
+                }}
+                lineNumberStyle={{
+                  minWidth: lineNumberMinWidth,
+                  paddingRight: '1rem',
+                  marginRight: '1rem',
+                  color: '#6c7086',
+                  borderRight: '1px solid rgba(255, 255, 255, 0.06)',
+                  textAlign: 'right',
+                  userSelect: 'none',
+                }}
+              >
+                {normalizedCode}
+              </SyntaxHighlighter>
+            </div>
+          );
+        }
+
         function AnswerPre({ children }: { children?: ReactNode }) {
           const language = extractCodeLanguage(children) || 'code';
+          const code = nodeText(children).replace(/\\n$/, '');
 
           return (
             <div className="deepdoc-chatbot-answer__pre">
@@ -2163,7 +2283,11 @@ def _chatbot_panel_tsx() -> str:
                 </span>
                 <span className="deepdoc-chatbot-answer__pre-label">{language}</span>
               </div>
-              <pre>{children}</pre>
+              <HighlightedCodeBlock
+                code={code}
+                language={language}
+                className="deepdoc-chatbot-answer__syntax"
+              />
             </div>
           );
         }
@@ -2219,6 +2343,10 @@ def _chatbot_panel_tsx() -> str:
           const lang = citation.language || inferLanguage(citation.file_path);
           const parsed = parseChunkText(citation.text || '');
           const hasMeta = parsed.symbols.length > 0 || parsed.signature || parsed.imports.length > 0;
+          const maxNum = citation.end_line >= citation.start_line
+            ? citation.end_line
+            : citation.start_line + Math.max(parsed.code.split('\\n').length - 1, 0);
+          const gutterWidth = `${Math.max(String(maxNum).length + 1, 3)}ch`;
 
           useEffect(() => {
             const prev = document.body.style.overflow;
@@ -2232,10 +2360,6 @@ def _chatbot_panel_tsx() -> str:
               document.removeEventListener('keydown', handleKey);
             };
           }, [onClose]);
-
-          const codeLines = parsed.code.split('\\n');
-          const maxNum = citation.start_line + codeLines.length - 1;
-          const gutterW = String(maxNum).length;
 
           return (
             <div className="deepdoc-code-modal-overlay" onClick={onClose}>
@@ -2276,20 +2400,15 @@ def _chatbot_panel_tsx() -> str:
                 ) : null}
 
                 <div className="deepdoc-code-modal__body">
-                  <table className="deepdoc-code-modal__table">
-                    <tbody>
-                      {codeLines.map((line, i) => (
-                        <tr key={i} className="deepdoc-code-modal__line">
-                          <td className="deepdoc-code-modal__gutter">
-                            {String(citation.start_line + i).padStart(gutterW, '\\u00a0')}
-                          </td>
-                          <td className="deepdoc-code-modal__code">
-                            <pre>{line || '\\n'}</pre>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                  <HighlightedCodeBlock
+                    code={parsed.code}
+                    language={lang}
+                    className="deepdoc-code-modal__syntax"
+                    showLineNumbers
+                    startingLineNumber={citation.start_line}
+                    lineNumberMinWidth={gutterWidth}
+                    padding="0 1rem"
+                  />
                 </div>
               </div>
             </div>
@@ -2713,11 +2832,8 @@ def _chatbot_panel_tsx() -> str:
                           >
                             <div className="deepdoc-chatbot-citation-list__row">
                               <div className="deepdoc-chatbot-citation-list__text">
-                                <strong>
-                                  {citation.evidence_id ? `[${citation.evidence_id}] ` : ''}
-                                  {citation.file_path}
-                                </strong>
-                                <span>{formatLines(citation.start_line, citation.end_line)}{citation.reason ? ` · ${citation.reason}` : ''}</span>
+                                <strong>{citation.file_path}</strong>
+                                <span>{formatLines(citation.start_line, citation.end_line)}</span>
                               </div>
                               {citation.text ? (
                                 <span className="deepdoc-chatbot-citation-list__action">Preview</span>

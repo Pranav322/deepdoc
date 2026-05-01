@@ -98,6 +98,11 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert "workspaceCitations(response)" in panel
     assert "answerWithEvidenceLinks(response.answer)" in panel
     assert "evidence_id" in panel
+    assert "react-syntax-highlighter" in panel
+    assert "styleModule.oneDark" in panel
+    assert "function HighlightedCodeBlock" in panel
+    assert 'className="deepdoc-chatbot-answer__syntax"' in panel
+    assert "replace(/\\n$/, '')" in panel
     assert "diagnosticsMessages(response)" in panel
     assert "validation_failed_closed" in panel
     assert "Back to docs" in panel
@@ -121,6 +126,8 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
     assert "useRef" in panel
     assert "latestRequestIdRef" in panel
     assert "const [loading, setLoading] = useState(false);" in panel
+    assert "[${citation.evidence_id}]" not in panel
+    assert "citation.reason ?" not in panel
     assert "usePathname" in toggle
     assert "const isEnabledOnPage = chatbotConfig.enabled && pathname !== '/ask';" in toggle
     assert "buildAskUrl(trimmed, pathname || '/', mode)" in toggle

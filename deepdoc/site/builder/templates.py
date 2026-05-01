@@ -803,6 +803,19 @@ def _global_css(cfg: dict[str, Any]) -> str:
           font-size: 0.875em;
         }
 
+        .deepdoc-chatbot-answer__evidence-link {
+          display: inline-flex;
+          align-items: center;
+          border: 1px solid color-mix(in srgb, var(--deepdoc-brand-light) 20%, var(--color-fd-border) 80%);
+          border-radius: 999px;
+          padding: 0.04rem 0.42rem;
+          background: color-mix(in srgb, white 88%, var(--deepdoc-brand-light) 12%);
+          color: var(--deepdoc-brand-dark);
+          font-weight: 700;
+          text-decoration: none;
+          cursor: pointer;
+        }
+
         .deepdoc-chatbot-answer p,
         .deepdoc-chatbot-answer ul,
         .deepdoc-chatbot-answer ol,
@@ -1306,7 +1319,8 @@ def _global_css(cfg: dict[str, Any]) -> str:
           background: rgba(255, 255, 255, 0.09);
         }
 
-        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer__inline-code {
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer__inline-code,
+        :is(.dark, [data-theme='dark']) .deepdoc-chatbot-answer__evidence-link {
           border-color: rgba(255, 255, 255, 0.08);
           background: rgba(255, 237, 233, 0.08);
         }
@@ -1868,6 +1882,7 @@ def _chatbot_panel_tsx() -> str:
         import { chatbotConfig } from '@/lib/chatbot-config';
 
         type CitationEntry = {
+          evidence_id?: string;
           file_path: string;
           start_line: number;
           end_line: number;
@@ -1875,12 +1890,40 @@ def _chatbot_panel_tsx() -> str:
           language?: string;
           symbol_names?: string[];
           artifact_type?: string;
+          reason?: string;
+          source_kind?: string;
+        };
+
+        type EvidenceEntry = {
+          id: string;
+          kind: 'source' | 'config';
+          file_path: string;
+          start_line: number;
+          end_line: number;
+          snippet: string;
+          role?: string;
+          confidence?: number;
+          title?: string;
+          language?: string;
+          symbol_names?: string[];
+          source_kind?: string;
+          reason?: string;
+        };
+
+        type ReferenceEntry = {
+          kind: 'generated_doc' | 'repo_doc';
+          path: string;
+          title: string;
+          url?: string;
         };
 
         type ChatResponse = {
           answer: string;
           code_citations: CitationEntry[];
           artifact_citations: CitationEntry[];
+          evidence?: EvidenceEntry[];
+          references?: ReferenceEntry[];
+          diagnostics?: Record<string, unknown>;
           doc_links: Array<{
             title: string;
             url: string;
@@ -2043,6 +2086,60 @@ def _chatbot_panel_tsx() -> str:
 
         function formatLines(startLine: number, endLine: number) {
           return startLine === endLine ? `Line ${startLine}` : `Lines ${startLine}-${endLine}`;
+        }
+
+        function citationFromEvidence(evidence: EvidenceEntry): CitationEntry {
+          return {
+            evidence_id: evidence.id,
+            file_path: evidence.file_path,
+            start_line: evidence.start_line,
+            end_line: evidence.end_line,
+            text: evidence.snippet,
+            language: evidence.language,
+            symbol_names: evidence.symbol_names,
+            reason: evidence.reason || evidence.role,
+            source_kind: evidence.source_kind || evidence.kind,
+          };
+        }
+
+        function workspaceCitations(response: ChatResponse): CitationEntry[] {
+          if (response.evidence?.length) {
+            return response.evidence.map(citationFromEvidence);
+          }
+          return [...(response.code_citations || []), ...(response.artifact_citations || [])].filter(
+            (citation) => citation.file_path && !citation.file_path.startsWith('docs/') && !citation.file_path.startsWith('.deepdoc'),
+          );
+        }
+
+        function referenceLinks(response: ChatResponse) {
+          if (response.references?.length) {
+            return response.references.map((ref) => ({
+              title: ref.title || ref.path,
+              url: ref.url || '#',
+              doc_path: ref.path,
+              kind: ref.kind,
+            }));
+          }
+          return response.doc_links || [];
+        }
+
+        function diagnosticsMessages(response: ChatResponse): string[] {
+          const diagnostics = response.diagnostics || {};
+          const messages: string[] = [];
+          for (const key of ['validation_errors', 'warnings', 'missing_evidence', 'rejected_paths']) {
+            const value = diagnostics[key];
+            if (Array.isArray(value) && value.length) {
+              messages.push(`${key.replaceAll('_', ' ')}: ${value.join(', ')}`);
+            }
+          }
+          if (diagnostics.validation_failed_closed) {
+            messages.push('validation failed closed');
+          }
+          return messages;
+        }
+
+        function answerWithEvidenceLinks(answer: string): string {
+          return answer.replace(/\\[(E\\d+)\\]/g, '[$1](#evidence-$1)');
         }
 
         function extractCodeLanguage(node: ReactNode): string {
@@ -2467,6 +2564,10 @@ def _chatbot_panel_tsx() -> str:
             });
           }
 
+          const evidenceCitations = response ? workspaceCitations(response) : [];
+          const referenceItems = response ? referenceLinks(response) : [];
+          const diagnostics = response ? diagnosticsMessages(response) : [];
+
           return (
             <div className="deepdoc-chatbot-page">
               <Link className="deepdoc-chatbot-page__back" href={from}>
@@ -2526,6 +2627,24 @@ def _chatbot_panel_tsx() -> str:
                               pre({ children }) {
                                 return <AnswerPre>{children}</AnswerPre>;
                               },
+                              a({ href, children }) {
+                                const evidenceId = href?.startsWith('#evidence-')
+                                  ? href.replace('#evidence-', '')
+                                  : '';
+                                const citation = evidenceCitations.find((item) => item.evidence_id === evidenceId);
+                                if (citation) {
+                                  return (
+                                    <button
+                                      type="button"
+                                      className="deepdoc-chatbot-answer__evidence-link"
+                                      onClick={() => setModalCitation(citation)}
+                                    >
+                                      {children}
+                                    </button>
+                                  );
+                                }
+                                return <a href={href}>{children}</a>;
+                              },
                               code(props) {
                                 const { className, children, ...rest } = props;
                                 const content = String(children ?? '');
@@ -2548,7 +2667,7 @@ def _chatbot_panel_tsx() -> str:
                               },
                             }}
                           >
-                            {response.answer}
+                            {answerWithEvidenceLinks(response.answer)}
                           </ReactMarkdown>
                         </div>
                       </div>
@@ -2570,30 +2689,17 @@ def _chatbot_panel_tsx() -> str:
 
                   {loading ? <ChatbotSidebarSkeleton /> : null}
 
-                  {!loading && response?.file_inventory?.length ? (
-                    <div className="mb-5">
-                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Files considered</h3>
-                      <ul className="deepdoc-chatbot-citation-list">
-                        {response.file_inventory.map((entry) => (
-                          <li key={entry.file_path}>
-                            <strong>{entry.file_path}</strong>
-                            <span>Score {entry.score}{entry.reasons.length ? ` · ${entry.reasons.join(', ')}` : ''}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  ) : null}
-
-                  {!loading && response?.code_citations.length ? (
+                  {!loading && evidenceCitations.length ? (
                     <div className="mb-5">
                       <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">
-                        Code citations
+                        Source evidence
                         <span className="deepdoc-chatbot-section-hint"> — click to view</span>
                       </h3>
                       <ul className="deepdoc-chatbot-citation-list">
-                        {response.code_citations.map((citation) => (
+                        {evidenceCitations.map((citation) => (
                           <li
-                            key={`${citation.file_path}-${citation.start_line}`}
+                            id={citation.evidence_id ? `evidence-${citation.evidence_id}` : undefined}
+                            key={`${citation.evidence_id || citation.file_path}-${citation.start_line}`}
                             className={citation.text ? 'deepdoc-chatbot-citation-list__clickable' : ''}
                             onClick={() => citation.text && setModalCitation(citation)}
                             role={citation.text ? 'button' : undefined}
@@ -2607,8 +2713,11 @@ def _chatbot_panel_tsx() -> str:
                           >
                             <div className="deepdoc-chatbot-citation-list__row">
                               <div className="deepdoc-chatbot-citation-list__text">
-                                <strong>{citation.file_path}</strong>
-                                <span>{formatLines(citation.start_line, citation.end_line)}</span>
+                                <strong>
+                                  {citation.evidence_id ? `[${citation.evidence_id}] ` : ''}
+                                  {citation.file_path}
+                                </strong>
+                                <span>{formatLines(citation.start_line, citation.end_line)}{citation.reason ? ` · ${citation.reason}` : ''}</span>
                               </div>
                               {citation.text ? (
                                 <span className="deepdoc-chatbot-citation-list__action">Preview</span>
@@ -2620,53 +2729,32 @@ def _chatbot_panel_tsx() -> str:
                     </div>
                   ) : null}
 
-                  {!loading && response?.artifact_citations.length ? (
+                  {!loading && diagnostics.length ? (
                     <div className="mb-5">
-                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">
-                        Artifact citations
-                        <span className="deepdoc-chatbot-section-hint"> — click to view</span>
-                      </h3>
+                      <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Diagnostics</h3>
                       <ul className="deepdoc-chatbot-citation-list">
-                        {response.artifact_citations.map((citation) => (
-                          <li
-                            key={`${citation.file_path}-${citation.start_line}`}
-                            className={citation.text ? 'deepdoc-chatbot-citation-list__clickable' : ''}
-                            onClick={() => citation.text && setModalCitation(citation)}
-                            role={citation.text ? 'button' : undefined}
-                            tabIndex={citation.text ? 0 : undefined}
-                            onKeyDown={(e) => {
-                              if (citation.text && (e.key === 'Enter' || e.key === ' ')) {
-                                e.preventDefault();
-                                setModalCitation(citation);
-                              }
-                            }}
-                          >
-                            <div className="deepdoc-chatbot-citation-list__row">
-                              <div className="deepdoc-chatbot-citation-list__text">
-                                <strong>{citation.file_path}</strong>
-                                <span>{formatLines(citation.start_line, citation.end_line)}</span>
-                              </div>
-                              {citation.text ? (
-                                <span className="deepdoc-chatbot-citation-list__action">Preview</span>
-                              ) : null}
-                            </div>
+                        {diagnostics.map((message) => (
+                          <li key={message}>
+                            <span>{message}</span>
                           </li>
                         ))}
                       </ul>
                     </div>
                   ) : null}
 
-                  {!loading && response?.doc_links.length ? (
+                  {!loading && referenceItems.length ? (
                     <div>
                       <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-sm font-semibold">Read next</h3>
                       <ul className="deepdoc-chatbot-citation-list">
-                        {response.doc_links.map((link) => (
-                          <li key={link.url}>
+                        {referenceItems.map((link) => (
+                          <li key={`${link.doc_path}-${link.url}`}>
                             <strong>{link.title}</strong>
                             <span>{link.doc_path}</span>
-                            <Link className="mt-2 inline-flex text-sm underline" href={link.url}>
-                              Open docs
-                            </Link>
+                            {link.url && link.url !== '#' ? (
+                              <Link className="mt-2 inline-flex text-sm underline" href={link.url}>
+                                Open docs
+                              </Link>
+                            ) : null}
                           </li>
                         ))}
                       </ul>

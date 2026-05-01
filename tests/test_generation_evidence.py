@@ -1365,7 +1365,7 @@ def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:
     )
 
     assert "deepdoc_generated_at:" in updated
-    assert 'deepdoc_generated_version: "1.5.2"' in updated
+    assert 'deepdoc_generated_version: "1.6.0"' in updated
     assert 'deepdoc_status: "valid"' in updated
     assert "deepdoc_evidence_files:" in updated
 

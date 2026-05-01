@@ -21,7 +21,7 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **Grouped API Reference Docs** — High-level endpoint family pages are AI-planned and enriched from scanned runtime endpoints, avoiding one-page-per-route navigation spam. OpenAPI specs still stage canonical interactive `/api/*` pages when present.
 - **Integration Discovery** — Third-party systems like payment gateways, delivery providers, warehouse systems, and webhook integrations can be grouped into integration docs.
 - **Trust Signals & Coverage Reporting** — Generated pages include DeepDoc provenance frontmatter and a site badge with the source commit; generation also reports endpoint, file, and symbol coverage plus consistency warnings.
-- **Grounded Chatbot Abstention** — Out-of-scope questions return a short no-citation abstention instead of noisy unrelated evidence, and chatbot prompts forbid fabricated example code.
+- **Evidence-First Chatbot Answers** — Symbol chunks, lexical search, and semantic retrieval gather candidates, but final code proof is hydrated from archived source/config snippets with exact file paths, line ranges, evidence IDs, and validation.
 - **Incremental Updates** — `deepdoc update` uses persisted plan and ledger data to regenerate only stale or structurally affected docs.
 - **Full Refresh and Clean Rebuild Modes** — `generate --force` fully refreshes DeepDoc-managed docs and removes stale generated pages; `generate --clean --yes` wipes output and rebuilds from scratch.
 - **Safe Existing-Docs Behavior** — Plain `generate` refuses to run over an existing DeepDoc-managed docs set and will not silently mix into a non-DeepDoc `docs/` folder.
@@ -702,7 +702,7 @@ site:
 
 ## Chatbot
 
-DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using RAG (Retrieval-Augmented Generation). The chatbot indexes your source code, config artifacts, generated docs, and selected repo-authored docs into a FAISS vector store, then serves a FastAPI backend that your Fumadocs site talks to.
+DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using evidence-first RAG. Retrieval indexes find candidate files, but final code proof always comes from archived source/config snippets with exact file paths and line ranges. Generated docs and repo-authored docs can help explain concepts, but they are returned as references, not right-pane code evidence.
 
 If chatbot is disabled, DeepDoc keeps the generated site docs-only: it does not generate the `/ask` route, chatbot frontend components, or `chatbot_backend/` scaffold.
 
@@ -719,6 +719,27 @@ The chatbot has three independent model surfaces that you can mix across provide
 | `chatbot.embeddings.*` | Vector embeddings for retrieval | text-embedding-3-large, Gemini text-embedding-004 |
 
 `deepdoc serve` auto-starts the chatbot backend alongside the Fumadocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
+
+### Evidence-First Responses
+
+All chatbot endpoints now share one response contract:
+
+- `evidence[]` is the canonical source of right-pane code/config snippets. Each item has an ID like `E1`, `file_path`, `start_line`, `end_line`, and `snippet`.
+- `references[]` contains generated docs or repo-authored docs. These are read-next links, not implementation proof.
+- Legacy fields such as `code_citations`, `doc_links`, `code_workspace_citations`, and `file_inventory` are derived for compatibility.
+- SQLite FTS, FAISS vectors, symbol chunks, and relationship chunks are candidate retrieval artifacts only. A candidate becomes evidence only after it is hydrated from the source archive/catalog.
+- Generated/internal paths such as `.deepdoc*`, `docs/`, `site/`, and `chatbot_backend/` are excluded from source evidence.
+- The answer validator rejects invented source paths, `line unknown`, unknown evidence IDs, and docs used as implementation proof. If a retry still fails, the backend returns a conservative answer with diagnostics.
+
+Public endpoints remain stable:
+
+| Endpoint | Mode | Behavior |
+|----------|------|----------|
+| `POST /query` | Fast | Single-pass, index-first answer. Uses source/config evidence and optional doc references. |
+| `POST /deep-research` | Deep | Multi-step synthesis. May use docs for orientation, but implementation claims must be grounded in source/config evidence. |
+| `POST /code-deep` | Code Deep | Strict source-first answer with trace and file inventory compatibility fields. Missing exact evidence is reported as a gap. |
+| `POST /query-context` | Diagnostics | Returns selected candidates, hydrated `evidence[]`, `references[]`, and diagnostics without generating an answer. |
+| `POST /code-deep/stream` | Code Deep stream | Emits SSE trace events followed by the final evidence-first payload. |
 
 ### Provider Recipes
 
@@ -948,7 +969,7 @@ chatbot:
 |-----|---------|-------------|
 | **General** | | |
 | `chatbot.enabled` | `false` | Enable chatbot indexing and backend |
-| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for vector indexes and chunk data |
+| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
 | **Indexing** | | |
 | `chatbot.indexing.include_repo_docs` | `true` | Index selected repo-authored docs such as README/design notes in a separate corpus |
 | `chatbot.indexing.include_tests` | `false` | Allow test/example/fixture docs into the repo-doc corpus |

@@ -91,6 +91,15 @@ def test_fumadocs_builder_emits_chatbot_files_when_enabled(tmp_path: Path) -> No
         in config
     )
     assert "ReactMarkdown" in panel
+    assert "type EvidenceEntry" in panel
+    assert "response.evidence" in panel
+    assert "response.references" in panel
+    assert "citationFromEvidence" in panel
+    assert "workspaceCitations(response)" in panel
+    assert "answerWithEvidenceLinks(response.answer)" in panel
+    assert "evidence_id" in panel
+    assert "diagnosticsMessages(response)" in panel
+    assert "validation_failed_closed" in panel
     assert "Back to docs" in panel
     assert "deepdoc-chatbot-page__hero" not in panel
     assert "Grounded answer" not in panel

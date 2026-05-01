@@ -24,11 +24,12 @@ from .docs_summary import (
     build_repo_doc_chunks,
     discover_repo_doc_files,
 )
-from .persistence import corpus_paths, load_corpus, save_corpus
+from .persistence import corpus_paths, load_corpus, save_corpus, save_index_manifest
 from .providers import build_embedding_client
 from .scaffold import scaffold_chatbot_backend
 from .settings import chatbot_index_dir, get_chatbot_cfg, service_model_identity
 from .source_archive import build_source_archive, update_source_archive
+from .symbol_index import build_symbol_chunks
 from .types import ChunkRecord
 
 console = Console()
@@ -54,9 +55,10 @@ class ChatbotIndexer:
         has_openapi: bool = False,
     ) -> dict[str, Any]:
         console.print(
-            "[dim]Chatbot sync: building code/artifact/doc/repo-doc/relationship corpora...[/dim]"
+            "[dim]Chatbot sync: building code/symbol/artifact/doc/repo-doc/relationship corpora...[/dim]"
         )
         code_records = build_code_chunks(scan, plan, self.cfg)
+        symbol_records = build_symbol_chunks(scan, plan, self.cfg)
         artifact_records = build_artifact_chunks(
             self.repo_root, scan, plan, output_dir, self.cfg
         )
@@ -88,12 +90,13 @@ class ChatbotIndexer:
 
         console.print(
             "[dim]Chatbot sync: embedding and saving corpora "
-            f"({len(code_records)} code, {len(artifact_records)} artifact, "
+            f"({len(code_records)} code, {len(symbol_records)} symbol, {len(artifact_records)} artifact, "
             f"{len(doc_summary_records)} doc summary, {len(doc_full_records)} doc full, "
             f"{len(repo_doc_records)} repo doc, "
             f"{len(relationship_records)} relationship)...[/dim]"
         )
         self._save_records("code", code_records)
+        self._save_records("symbol", symbol_records)
         self._save_records("artifact", artifact_records)
         self._save_records("doc_summary", doc_summary_records)
         self._save_records("doc_full", doc_full_records)
@@ -101,10 +104,12 @@ class ChatbotIndexer:
         self._save_records("relationship", relationship_records)
         console.print("[dim]Chatbot sync: packing full source text archive...[/dim]")
         build_source_archive(self.repo_root, self.index_dir, self.cfg)
+        manifest = save_index_manifest(self.index_dir)
         console.print("[dim]Chatbot sync: scaffolding backend...[/dim]")
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         return {
             "code_chunks": len(code_records),
+            "symbol_chunks": len(symbol_records),
             "artifact_chunks": len(artifact_records),
             "doc_chunks": len(doc_summary_records),
             "doc_full_chunks": len(doc_full_records),
@@ -114,12 +119,14 @@ class ChatbotIndexer:
             "graph_relation_chunks": len(graph_chunks),
             "corpora_refreshed": [
                 "code",
+                "symbol",
                 "artifact",
                 "doc_summary",
                 "doc_full",
                 "repo_doc",
                 "relationship",
             ],
+            "artifact_manifest": manifest,
         }
 
     def sync_incremental(
@@ -158,6 +165,11 @@ class ChatbotIndexer:
 
         code_records = (
             build_code_chunks(scan, plan, self.cfg, files=code_targets)
+            if code_targets
+            else []
+        )
+        symbol_records = (
+            build_symbol_chunks(scan, plan, self.cfg, files=code_targets)
             if code_targets
             else []
         )
@@ -206,6 +218,7 @@ class ChatbotIndexer:
         # If a previous full sync failed midway, recover any corpus that is
         # still missing even when there are no changed files for it.
         rebuild_code = self._corpus_needs_rebuild("code")
+        rebuild_symbol = self._corpus_needs_rebuild("symbol")
         rebuild_artifact = self._corpus_needs_rebuild("artifact")
         rebuild_doc_summary = self._corpus_needs_rebuild("doc_summary")
         rebuild_doc_full = self._corpus_needs_rebuild("doc_full")
@@ -214,6 +227,8 @@ class ChatbotIndexer:
 
         if rebuild_code:
             code_records = build_code_chunks(scan, plan, self.cfg)
+        if rebuild_symbol:
+            symbol_records = build_symbol_chunks(scan, plan, self.cfg)
         if rebuild_artifact:
             artifact_records = build_artifact_chunks(
                 self.repo_root, scan, plan, output_dir, self.cfg
@@ -278,6 +293,15 @@ class ChatbotIndexer:
                 changed_keys=code_targets,
                 deleted_keys=deleted_files,
             )
+        if rebuild_symbol:
+            self._save_records("symbol", symbol_records)
+        else:
+            self._merge_records(
+                "symbol",
+                symbol_records,
+                changed_keys=code_targets,
+                deleted_keys=deleted_files,
+            )
         if rebuild_artifact:
             self._save_records("artifact", artifact_records)
         else:
@@ -332,12 +356,14 @@ class ChatbotIndexer:
             changed_files=changed_files,
             deleted_files=deleted_files,
         )
+        manifest = save_index_manifest(self.index_dir)
             
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         refreshed_corpora = [
             corpus
             for corpus, refreshed in (
                 ("code", rebuild_code or bool(code_targets)),
+                ("symbol", rebuild_symbol or bool(code_targets)),
                 ("artifact", rebuild_artifact or bool(artifact_targets)),
                 ("doc_summary", rebuild_doc_summary or bool(changed_doc_slugs)),
                 ("doc_full", rebuild_doc_full or bool(changed_doc_slugs)),
@@ -353,6 +379,7 @@ class ChatbotIndexer:
         ]
         return {
             "code_chunks": len(code_records),
+            "symbol_chunks": len(symbol_records),
             "artifact_chunks": len(artifact_records),
             "doc_chunks": len(doc_summary_records),
             "doc_full_chunks": len(doc_full_records),
@@ -360,6 +387,7 @@ class ChatbotIndexer:
             "relationship_chunks": len(relationship_records),
             "graph_relation_chunks": len(graph_chunks),
             "corpora_refreshed": refreshed_corpora,
+            "artifact_manifest": manifest,
         }
 
     def _save_records(self, corpus: str, records: list[ChunkRecord]) -> None:
@@ -461,6 +489,7 @@ def chatbot_index_needs_refresh(repo_root: Path, cfg: dict[str, Any]) -> bool:
         indexer._corpus_needs_rebuild(corpus)
         for corpus in (
             "code",
+            "symbol",
             "artifact",
             "doc_summary",
             "doc_full",

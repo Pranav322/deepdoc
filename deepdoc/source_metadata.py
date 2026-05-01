@@ -47,6 +47,12 @@ def classify_source_kind(rel_path: str) -> str:
     parts = [part for part in lowered.split("/") if part]
     name = parts[-1] if parts else lowered
 
+    if (
+        any(part in {".deepdoc", "site", "chatbot_backend"} for part in parts)
+        or lowered.startswith(".deepdoc")
+        or name.startswith(".deepdoc")
+    ):
+        return "generated"
     if any(part in {"fixtures", "fixture"} for part in parts):
         return "fixture"
     if any(part in {"examples", "example", "samples", "sample", "demo", "demos"} for part in parts):

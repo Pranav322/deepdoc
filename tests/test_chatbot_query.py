@@ -8,9 +8,13 @@ from unittest.mock import patch
 import pytest
 
 from deepdoc.chatbot.indexer import ChatbotIndexer
-from deepdoc.chatbot.persistence import save_corpus, save_source_archive
+from deepdoc.chatbot.persistence import (
+    save_corpus,
+    save_source_archive,
+    save_source_catalog,
+)
 from deepdoc.chatbot.service import ChatbotQueryService, create_fastapi_app
-from deepdoc.chatbot.types import ChunkRecord, RetrievedChunk
+from deepdoc.chatbot.types import ChunkRecord, RetrievedChunk, SourceCatalogEntry
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.persistence_v2 import save_plan
 from deepdoc.planner import scan_repo
@@ -37,6 +41,30 @@ class _FakeChatClient:
             ]
             return "\n".join("8" for _ in lines) if lines else "8"
         return "Grounded answer"
+
+
+class _ExactEvidenceChatClient:
+    def complete(self, system: str, user: str) -> str:
+        if "alternative search queries" in system:
+            return ""
+        if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+            return "8"
+        return "Login issues the token in `src/auth.py:1-2` [E1]."
+
+
+class _BadThenCorrectChatClient:
+    def __init__(self) -> None:
+        self.answer_calls = 0
+
+    def complete(self, system: str, user: str) -> str:
+        if "alternative search queries" in system:
+            return ""
+        if "relevance scorer" in system.lower() or "Rate each chunk" in user:
+            return "8"
+        self.answer_calls += 1
+        if "Your previous answer failed evidence validation" in user:
+            return "Login is implemented in `src/auth.py:1-2` [E1]."
+        return "Login is implemented in `src/missing.py:1-2` [E1]."
 
 
 class _FailingEmbedClient:
@@ -96,16 +124,15 @@ class _ContinuationAnswerChatClient:
                 "- It copies customer and shipping details into a new order draft.\n"
                 "- It writes a `ReshippingOrderLog` entry for traceability.\n\n"
                 "## Dependencies & Connections\n"
-                "- Imports: models are loaded from `models/Order.py`.\n"
+                "- Imports: order logic is visible in `src/orders.py:1-1` [E1].\n"
                 "- API Integration: `/api/v2/reshipping-order-creation` triggers creation.\n"
                 "- Data Flow: original order -> new reship order -> log record.\n"
                 "- Relationships:"
             )
         return (
-            "- `ReshippingOrderLog` links the original order id and new order id.\n\n"
+            "- `ReshippingOrderLog` links the original order id and new order id in `src/orders.py:1-1` [E1].\n\n"
             "## Sources\n"
-            "- `models/Order.py:1-120`\n"
-            "- `api/orders.py:55-110`\n\n"
+            "- `src/orders.py:1-1` [E1]\n\n"
             "## Summary\n"
             "Reshipping is implemented as a new order creation flow with explicit linkage to the original order."
         )
@@ -962,6 +989,308 @@ def test_fastapi_query_context_endpoint_returns_selected_citations(
     assert "answer" not in payload
 
 
+def test_source_archive_hydrates_exact_evidence_lines(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="stale chunk text should not become proof",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["login"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "symbol", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/auth.py": "def login(user):\n    return issue(user)\n"},
+    )
+    save_source_catalog(
+        index_dir,
+        [
+            SourceCatalogEntry(
+                file_path="src/auth.py",
+                content_hash="h",
+                source_kind="product",
+                language="python",
+                total_lines=2,
+                size_bytes=45,
+            )
+        ],
+    )
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_ExactEvidenceChatClient(),
+        ),
+    ):
+        result = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}}).query(
+            "Where is login implemented?"
+        )
+
+    assert result["evidence"][0]["id"] == "E1"
+    assert result["evidence"][0]["file_path"] == "src/auth.py"
+    assert result["evidence"][0]["start_line"] == 1
+    assert result["evidence"][0]["end_line"] == 2
+    assert result["evidence"][0]["snippet"] == "def login(user):\n    return issue(user)"
+    assert result["code_workspace_citations"][0]["evidence_id"] == "E1"
+    assert result["diagnostics"]["validation_errors"] == []
+
+
+def test_prompt_includes_numbered_source_evidence_blocks(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    record = ChunkRecord(
+        chunk_id="c1",
+        kind="code",
+        source_key="src/auth.py",
+        text="def login(user):\n    return issue(user)",
+        chunk_hash="h1",
+        file_path="src/auth.py",
+        start_line=1,
+        end_line=2,
+        symbol_names=["login"],
+    )
+    save_corpus(index_dir, "code", [record], [[1.0, 0.0]])
+    save_corpus(index_dir, "symbol", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/auth.py": "def login(user):\n    return issue(user)\n"},
+    )
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_FakeChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+        prompt = service._build_prompt(
+            "Where is login implemented?",
+            [],
+            [RetrievedChunk(record=record, score=1.0)],
+            [],
+            [],
+            [],
+        )
+
+    assert "Source/config evidence blocks" in prompt
+    assert "[E1] src/auth.py:1-2" in prompt
+    assert "return issue(user)" in prompt
+
+
+def test_generated_and_internal_files_are_references_not_evidence(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="generated-plan",
+                kind="code",
+                source_key=".deepdoc_plan.json",
+                text='{"buckets": []}',
+                chunk_hash="h1",
+                file_path=".deepdoc_plan.json",
+                start_line=1,
+                end_line=1,
+            ),
+            ChunkRecord(
+                chunk_id="generated-doc",
+                kind="code",
+                source_key="docs/index.mdx",
+                text="# Generated docs",
+                chunk_hash="h2",
+                file_path="docs/index.mdx",
+                start_line=1,
+                end_line=1,
+            ),
+        ],
+        [[1.0, 0.0], [1.0, 0.0]],
+    )
+    save_corpus(index_dir, "symbol", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_UnexpectedChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+        context = service.retrieve_context("what is this repo about", mode="fast")
+        selected = service._select_prompt_hits(
+            "what is this repo about",
+            context.get("code_hits", []),
+            context.get("artifact_hits", []),
+            context.get("doc_hits", []),
+            context.get("relationship_hits", []),
+            service._retrieval_profile("fast"),
+        )
+        result = {
+            "question": "what is this repo about",
+            "response_mode": "fast",
+            "code_citations": [
+                service._citation_payload(hit) for hit in selected.get("code_hits", [])
+            ],
+            "artifact_citations": [],
+            "doc_citations": [],
+            "repo_doc_citations": [],
+            "relationship_citations": [],
+            "doc_links": [],
+        }
+        result.update(service._workspace_payload("what is this repo about", result, mode="fast"))
+        result = service._apply_evidence_contract(result, mode="fast")
+
+    assert result["evidence"] == []
+    assert result["code_workspace_citations"] == []
+
+
+def test_answer_validation_retries_unbacked_source_path(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user):\n    return issue(user)",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+                start_line=1,
+                end_line=2,
+                symbol_names=["login"],
+            )
+        ],
+        [[1.0, 0.0]],
+    )
+    save_corpus(index_dir, "symbol", [], [])
+    save_corpus(index_dir, "artifact", [], [])
+    save_corpus(index_dir, "doc_summary", [], [])
+    save_source_archive(
+        index_dir,
+        {"src/auth.py": "def login(user):\n    return issue(user)\n"},
+    )
+    chat_client = _BadThenCorrectChatClient()
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=chat_client,
+        ),
+    ):
+        result = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}}).query(
+            "Where is login implemented?"
+        )
+
+    assert chat_client.answer_calls == 2
+    assert result["answer"] == "Login is implemented in `src/auth.py:1-2` [E1]."
+    assert result["diagnostics"]["validation_retried"] is True
+    assert result["diagnostics"]["validation_errors"] == []
+
+
+def test_research_finalize_adds_missing_evidence_ids(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_source_archive(
+        index_dir,
+        {
+            "js/app.js": "function flipCamera() {\n  return switchCamera();\n}\n",
+            "js/camera.js": "let currentFacingMode = 'user';\ncurrentFacingMode = 'environment';\n",
+        },
+    )
+
+    with (
+        patch(
+            "deepdoc.chatbot.service.build_embedding_client",
+            return_value=_FakeEmbedClient(),
+        ),
+        patch(
+            "deepdoc.chatbot.service.build_chat_client",
+            return_value=_FakeChatClient(),
+        ),
+    ):
+        service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
+        result = service._finalize_answer_response(
+            "how many camera modes are there",
+            {
+                "answer": (
+                    "There are two camera modes in js/camera.js. "
+                    "Runtime switching is triggered from js/app.js."
+                ),
+                "code_citations": [
+                    {
+                        "kind": "code",
+                        "file_path": "js/app.js",
+                        "start_line": 1,
+                        "end_line": 3,
+                        "text": "function flipCamera() {\n  return switchCamera();\n}",
+                    },
+                    {
+                        "kind": "code",
+                        "file_path": "js/camera.js",
+                        "start_line": 1,
+                        "end_line": 2,
+                        "text": "let currentFacingMode = 'user';\ncurrentFacingMode = 'environment';",
+                    },
+                ],
+                "artifact_citations": [],
+                "doc_citations": [],
+                "repo_doc_citations": [],
+                "relationship_citations": [],
+                "doc_links": [],
+            },
+            mode="code_deep",
+        )
+
+    assert "`js/app.js:1-3` [E1]" in result["answer"]
+    assert "`js/camera.js:1-2` [E2]" in result["answer"]
+    assert result["diagnostics"]["validation_errors"] == []
+
+
 def test_query_service_uses_lexical_retrieval_when_vector_search_misses(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -1090,7 +1419,8 @@ def test_deep_research_uses_live_repo_fallback_when_index_is_empty(
         service = ChatbotQueryService(repo_root, cfg)
         result = service.deep_research("How does `PAYMENTS_HOST` work?", max_rounds=1)
 
-    assert result["answer"] == "Deep answer grounded in `src/payments.py`."
+    assert result["answer"].startswith("Deep answer grounded in `src/payments.py`.")
+    assert "`src/payments.py:1-1` [E1]" in result["answer"]
     assert result["research_mode"] == "deep"
     assert "src/payments.py" in result["research_sources"]
     assert result["used_chunks"] > 0
@@ -1182,7 +1512,8 @@ def test_deep_research_handles_invalid_read_file_arguments(tmp_path: Path) -> No
         service = ChatbotQueryService(repo_root, cfg)
         result = service.deep_research("Explain PAYMENTS_HOST", max_rounds=1)
 
-    assert result["answer"] == "Deep answer grounded in `src/payments.py`."
+    assert result["answer"].startswith("Deep answer grounded in `src/payments.py`.")
+    assert "`src/payments.py:1-1` [E1]" in result["answer"]
     assert "src/payments.py" in result["research_sources"]
     assert chat_client.sub_question_calls >= 2
     assert all("\\n\\n" not in prompt for prompt in chat_client.sub_question_prompts)
@@ -1321,7 +1652,8 @@ def test_deep_research_grep_adds_matched_files_to_sources(tmp_path: Path) -> Non
         service = ChatbotQueryService(repo_root, cfg)
         result = service.deep_research("Where is PAYMENTS_HOST defined?", max_rounds=1)
 
-    assert result["answer"] == "Deep answer grounded in `src/payments.py`."
+    assert result["answer"].startswith("Deep answer grounded in `src/payments.py`.")
+    assert "`src/payments.py:1-1` [E1]" in result["answer"]
     assert "src/payments.py" in result["research_sources"]
 
 
@@ -1646,7 +1978,8 @@ def test_deep_research_schema_question_uses_original_question_retrieval(
         service = ChatbotQueryService(repo_root, cfg)
         result = service.deep_research("tell me all the schemabeing used", max_rounds=1)
 
-    assert result["answer"] == "Schema is defined in `src/models.py`."
+    assert result["answer"].startswith("Schema is defined in `src/models.py`.")
+    assert "`src/models.py:1-4` [E1]" in result["answer"]
     assert "src/models.py" in result["research_sources"]
 
 

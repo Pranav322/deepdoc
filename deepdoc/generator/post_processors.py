@@ -569,6 +569,7 @@ def escape_mdx_text_hazards(content: str) -> str:
             part = re.sub(r"<br\s*/?>", "<br />", part, flags=re.IGNORECASE)
             if "|" in line:
                 part = re.sub(r"<br\s*/?>", " / ", part, flags=re.IGNORECASE)
+            part = re.sub(r"<(?=[^A-Za-z/!])", "&lt;", part)
             part = re.sub(r"<(?=\d)", "&lt;", part)
             part = re.sub(
                 r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, .|/&;<>[\]-]*)>",
@@ -622,6 +623,7 @@ def escape_mdx_text_hazards(content: str) -> str:
                 lambda match: f"&#123;{match.group(1)}&#125;",
                 escaped,
             )
+            escaped = escaped.replace("{", "&#123;").replace("}", "&#125;")
         lines.append(escaped)
 
     return "\n".join(lines)

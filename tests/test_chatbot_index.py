@@ -9,7 +9,14 @@ from deepdoc.chatbot.docs_summary import (
     build_repo_doc_chunks,
 )
 from deepdoc.chatbot.indexer import CHATBOT_CORPUS_SCHEMA_VERSION, ChatbotIndexer
-from deepdoc.chatbot.persistence import load_corpus, save_corpus
+from deepdoc.chatbot.persistence import (
+    load_corpus,
+    load_index_manifest,
+    query_lexical_index,
+    save_corpus,
+    save_index_manifest,
+)
+from deepdoc.chatbot.symbol_index import build_symbol_chunks
 from deepdoc.chatbot.types import ChunkRecord
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import RepoScan
@@ -68,6 +75,23 @@ def test_code_chunks_use_symbol_line_ranges(tmp_path: Path) -> None:
     assert chunk.symbol_names == ["login"]
     assert chunk.related_doc_urls == ["/auth"]
     assert chunk.related_doc_paths == ["auth.mdx"]
+    assert "def login(user):" in chunk.text
+
+
+def test_symbol_chunks_create_precise_symbol_definition_records(tmp_path: Path) -> None:
+    scan = _scan_for(tmp_path)
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+
+    chunks = build_symbol_chunks(scan, plan, {"chatbot": {"enabled": True}})
+
+    assert len(chunks) == 1
+    chunk = chunks[0]
+    assert chunk.kind == "code"
+    assert chunk.file_path == "src/auth.py"
+    assert chunk.start_line == 1
+    assert chunk.end_line == 4
+    assert chunk.symbol_names == ["login"]
+    assert chunk.metadata["chunk_subtype"] == "symbol_definition"
     assert "def login(user):" in chunk.text
 
 
@@ -178,6 +202,11 @@ def test_giant_file_chunks_normalize_missing_cluster_end_lines(tmp_path: Path) -
 def test_artifact_chunks_cover_config_files(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "auth.py").write_text(
+        "def login(user):\n    token = issue(user)\n    return token\n",
+        encoding="utf-8",
+    )
     (repo_root / "package.json").write_text(
         '{"name":"demo","scripts":{"dev":"next dev"}}', encoding="utf-8"
     )
@@ -369,6 +398,100 @@ def test_incremental_sync_recovers_missing_doc_corpus(
     repo_doc_records, repo_doc_vectors = load_corpus(index_dir, "repo_doc")
     assert len(repo_doc_records) == stats["repo_doc_chunks"]
     assert len(repo_doc_vectors) == len(repo_doc_records)
+
+
+def test_incremental_sync_writes_symbol_corpus_and_manifest(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "auth.py").write_text(
+        "def login(user):\n    token = issue(user)\n    return token\n",
+        encoding="utf-8",
+    )
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+    scan = _scan_for(tmp_path)
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return [[float(len(text))] for text in texts]
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+
+    indexer = ChatbotIndexer(repo_root, {"chatbot": {"enabled": True}})
+    stats = indexer.sync_incremental(
+        plan=plan,
+        scan=scan,
+        output_dir=output_dir,
+        changed_files=["src/auth.py"],
+    )
+
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    symbol_records, symbol_vectors = load_corpus(index_dir, "symbol")
+    manifest = load_index_manifest(index_dir)
+    assert stats["symbol_chunks"] == 1
+    assert "symbol" in stats["corpora_refreshed"]
+    assert symbol_records[0].file_path == "src/auth.py"
+    assert len(symbol_vectors) == 1
+    assert manifest["artifacts"]["symbol"]["record_count"] == 1
+    assert manifest["artifacts"]["source_archive"]["record_count"] == 1
+
+
+def test_save_corpus_updates_sqlite_lexical_index(tmp_path: Path) -> None:
+    index_dir = tmp_path / "repo" / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/payments.py",
+                text='PAYMENTS_HOST = os.getenv("PAYMENTS_HOST")',
+                chunk_hash="h1",
+                file_path="src/payments.py",
+                start_line=1,
+                end_line=1,
+            )
+        ],
+        [[1.0]],
+    )
+
+    hits = query_lexical_index(index_dir, "code", "PAYMENTS_HOST", limit=5)
+
+    assert hits == ["c1"]
+
+
+def test_index_manifest_describes_artifacts_without_timestamps(tmp_path: Path) -> None:
+    index_dir = tmp_path / "repo" / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/auth.py",
+                text="def login(user): return issue(user)",
+                chunk_hash="h1",
+                file_path="src/auth.py",
+            )
+        ],
+        [[1.0]],
+    )
+
+    first = save_index_manifest(index_dir)
+    second = save_index_manifest(index_dir)
+
+    assert first == second
+    assert "generated_at" not in first
+    assert first["artifacts"]["code"]["record_count"] == 1
+    assert first["artifacts"]["lexical_index"]["record_count_by_corpus"]["code"] == 1
 
 
 def test_incremental_sync_removes_deleted_generated_doc_chunks(

@@ -3,11 +3,28 @@
 from __future__ import annotations
 
 import fnmatch
+import hashlib
 import os
 from pathlib import Path
 from typing import Any
 
-from .persistence import load_source_archive, save_source_archive
+from ..source_metadata import classify_source_kind
+from .persistence import load_source_archive, save_source_archive, save_source_catalog
+from .types import SourceCatalogEntry
+
+DEFAULT_SOURCE_ARCHIVE_EXCLUDES = [
+    ".deepdoc",
+    ".deepdoc/**",
+    ".deepdoc_plan.json",
+    ".deepdoc_file_map.json",
+    ".deepdoc*.json",
+    "docs",
+    "docs/**",
+    "site",
+    "site/**",
+    "chatbot_backend",
+    "chatbot_backend/**",
+]
 
 
 def build_source_archive(
@@ -55,6 +72,7 @@ def build_source_archive(
             archive_data[rel_path] = content
 
     save_source_archive(index_dir, archive_data)
+    save_source_catalog(index_dir, _source_catalog_entries(archive_data))
 
 
 def update_source_archive(
@@ -99,6 +117,52 @@ def update_source_archive(
         archive_data[rel_path] = content
 
     save_source_archive(index_dir, archive_data)
+    save_source_catalog(index_dir, _source_catalog_entries(archive_data))
+
+
+def _source_catalog_entries(archive_data: dict[str, str]) -> list[SourceCatalogEntry]:
+    entries: list[SourceCatalogEntry] = []
+    for rel_path, content in sorted(archive_data.items()):
+        encoded = content.encode("utf-8", errors="replace")
+        entries.append(
+            SourceCatalogEntry(
+                file_path=rel_path,
+                content_hash=hashlib.sha256(encoded).hexdigest(),
+                source_kind=classify_source_kind(rel_path),
+                language=_language_for_path(rel_path),
+                total_lines=len(content.splitlines()),
+                size_bytes=len(encoded),
+            )
+        )
+    return entries
+
+
+def _language_for_path(rel_path: str) -> str:
+    suffix = Path(rel_path).suffix.lower()
+    return {
+        ".py": "python",
+        ".js": "javascript",
+        ".jsx": "javascript",
+        ".ts": "typescript",
+        ".tsx": "typescript",
+        ".go": "go",
+        ".php": "php",
+        ".java": "java",
+        ".rb": "ruby",
+        ".rs": "rust",
+        ".vue": "vue",
+        ".svelte": "svelte",
+        ".html": "html",
+        ".css": "css",
+        ".scss": "scss",
+        ".sass": "sass",
+        ".json": "json",
+        ".toml": "toml",
+        ".yaml": "yaml",
+        ".yml": "yaml",
+        ".ini": "ini",
+        ".cfg": "ini",
+    }.get(suffix, suffix.lstrip("."))
 
 
 def _repo_has_archiveable_files(
@@ -138,7 +202,11 @@ def _repo_has_archiveable_files(
 
 def _source_archive_exclude_patterns(cfg: dict[str, Any]) -> list[str]:
     indexing_cfg = cfg.get("chatbot", {}).get("indexing", {})
-    return list(cfg.get("exclude", [])) + list(indexing_cfg.get("exclude_globs", []))
+    return (
+        list(DEFAULT_SOURCE_ARCHIVE_EXCLUDES)
+        + list(cfg.get("exclude", []))
+        + list(indexing_cfg.get("exclude_globs", []))
+    )
 
 
 def _read_archiveable_text(

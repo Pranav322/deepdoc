@@ -590,6 +590,15 @@ def test_escape_mdx_text_hazards_escapes_hyphenated_placeholder_tags() -> None:
     assert "&lt;str-prod_slug&gt;" in escaped
 
 
+def test_escape_mdx_text_hazards_escapes_non_tag_less_than_sequences() -> None:
+    content = '- **detailed**: \' .\\\'\\`^",:;Il!i><~+_-?][}{1)(|/tfjrxn\''
+
+    escaped = escape_mdx_text_hazards(content)
+
+    assert ">&lt;~" in escaped
+    assert "][&#125;&#123;1)" in escaped
+
+
 def test_escape_mdx_text_hazards_escapes_generic_types_in_tables_only() -> None:
     content = """| Field | Type | Description |
 |-------|------|-------------|
@@ -655,7 +664,7 @@ Inline code: `(details, {connection})`
     escaped = escape_mdx_text_hazards(content)
 
     assert "(details, &#123;connection&#125;)" in escaped
-    assert "Inline code: `(details, {connection})`" in escaped
+    assert "Inline code: `(details, &#123;connection&#125;)`" in escaped
 
 
 def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:

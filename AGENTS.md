@@ -52,10 +52,12 @@ This file might be stale and if that is the case please update it first
 - Database grouping should avoid one-file micro-pages when model estates are large; coalesce sparse singleton model groups into stable aggregate groups (for example `core-models`) so coverage remains complete without nav noise.
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - Preserve `source_kind` and `publication_tier` semantics consistently across planner, persistence, generation, smart update, and chatbot indexing.
-- Chatbot indexing now has a separate repo-doc corpus for selected repo-authored docs; keep raw repo docs distinct from generated MDX docs and continue excluding generated outputs from the repo-doc corpus.
-- Chatbot retrieval is hybrid: exact-match lexical search and embedding search both feed the candidate set, and exact-match code hits can stitch adjacent windows from the same file. Keep bounded live repo inspection limited to research modes (`/deep-research` and `/code-deep`); normal `/query` should remain index-only.
-- Query modes are intentional: `/query` runs fast mode (index-only, lower prompt budget, and LLM retrieval steps disabled by default), `/deep-research` runs richer synthesis with bounded live-repo fallback, and `/code-deep` runs code-aware deep retrieval with file inventory and trace output.
-- The chatbot backend also exposes `/query-context` for retrieval-only diagnostics (selected chunks/citations without answer generation); keep this endpoint aligned with fast-mode selection logic.
+- Chatbot responses are evidence-first: `evidence[]` is canonical for source/config proof and the generated right-pane code viewer; `references[]` is for generated docs and repo-authored docs only. Legacy fields (`code_citations`, `doc_links`, `code_workspace_citations`, `file_inventory`) should be derived from those canonical fields.
+- Chatbot indexing now has explicit source/archive artifacts plus separate corpora for code chunks, symbol chunks, config artifacts, generated docs, repo docs, and relationships. Keep generated/internal outputs (`.deepdoc*`, `docs/`, `site/`, `chatbot_backend/`) out of source evidence.
+- Chatbot retrieval is hybrid: SQLite FTS lexical search, symbol chunks, relationship chunks, and embedding search feed the candidate set, and exact-match code hits can stitch adjacent windows from the same file. These indexes are candidate retrieval only; hydrated source archive/catalog snippets are the proof.
+- Query modes are intentional: `/query` runs Fast mode (single-pass, index-first, lower prompt budget, LLM retrieval steps disabled by default), `/deep-research` runs richer synthesis with bounded archived-source fallback and doc references, and `/code-deep` runs strict source-first retrieval with trace output and no generated-doc code proof.
+- The chatbot backend also exposes `/query-context` for retrieval-only diagnostics (selected candidates, hydrated `evidence[]`, `references[]`, and diagnostics without answer generation); keep this endpoint aligned with fast-mode selection logic.
+- The backend validates answer grounding: no invented file paths, no unknown evidence IDs, no docs as implementation proof, and no `line unknown`. If a retry still fails, fail closed with diagnostics instead of fabricating right-pane evidence.
 - For realtime UX, `/code-deep/stream` emits SSE trace events during research followed by the final result payload.
 - Chatbot is an opt-in concern. When `chatbot.enabled` is false, keep the generated site docs-only: do not scaffold `/ask`, chatbot frontend components, or `chatbot_backend/` artifacts.
 - Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`, but scanned endpoints should enrich grouped endpoint-family pages instead of creating one generated MDX page per route. Keep per-route pages limited to canonical OpenAPI assets or legacy plans.
@@ -200,7 +202,7 @@ Single-test guidance:
 - The generated chatbot now supports three shared-context answer modes over one visible thread:
   - `POST /query` for fast retrieval answers
   - `POST /deep-research` for heavier synthesis using the same `question` + `history` request contract
-  - `POST /code-deep` for code-aware deep answers with `trace` and `file_inventory`
+  - `POST /code-deep` for code-aware deep answers with `trace`, canonical `evidence[]`, `references[]`, and compatibility `file_inventory`
 - For live progress updates, use `POST /code-deep/stream` (SSE) with the same `question` + `history` request contract.
 - The Start Here onboarding setup page uses the slug `local-development-setup`; keep the generic configuration page at `setup`.
 - If you change documented CLI behavior, update `README.md` in the same task.

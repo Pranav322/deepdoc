@@ -9,6 +9,27 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.6.0] - 2026-05-01
+
+DeepDoc 1.6.0 makes the chatbot more trustworthy for code questions by grounding answers in archived source evidence instead of raw retrieved chunks.
+
+### Added
+
+- Added a dedicated symbol corpus plus SQLite FTS lexical retrieval so chatbot search can blend exact identifier matches with semantic search.
+- Added source catalog and index manifest artifacts for deterministic evidence hydration and index inspection.
+- Added canonical chatbot `evidence[]`, `references[]`, and diagnostics payloads, plus `/query-context` alignment with the same evidence contract.
+
+### Changed
+
+- Updated chatbot answer assembly to hydrate proof from the source archive/catalog, exclude generated/internal paths from source evidence, and treat docs as references instead of implementation proof.
+- Updated generated chatbot UI to surface evidence IDs, reference links, diagnostics, and inline evidence navigation in the answer workspace.
+- Updated README and AGENTS guidance to match the evidence-first retrieval model, symbol indexing, lexical search, and validation behavior.
+
+### Fixed
+
+- Fixed answer-grounding gaps by validating cited evidence IDs and source paths, retrying invalid answers, and failing closed with conservative diagnostics when validation still fails.
+- Fixed MDX hazard escaping for additional raw brace and less-than sequences emitted by generated docs.
+
 ## [1.5.2] - 2026-04-27
 
 - Added trust hardening for generated docs: provenance frontmatter, generated-site commit badges, coverage reporting, local setup verification, and warning-only cross-page consistency artifacts.

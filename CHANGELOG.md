@@ -9,6 +9,22 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.7.0] - 2026-05-02
+
+DeepDoc 1.7.0 adds real token-by-token streaming to the chatbot's Fast and Deep Research modes, delivering the same live-answer experience already available in Code-aware mode.
+
+### Added
+
+- Added `POST /query/stream` SSE endpoint that streams the Fast mode answer token-by-token before emitting a final `result` event.
+- Added `POST /deep-research/stream` SSE endpoint that streams the Deep Research synthesis answer token-by-token before emitting a final `result` event.
+- Added `complete_stream()` method to `LiteLLMChatClient` using `litellm.completion(stream=True)`, yielding token strings as they arrive.
+- Added `token_callback` parameter to `_complete_with_continuation()`, `query()`, `deep_research()`, and `_run_research_mode()` so the final answer generation can push tokens to any caller.
+- Added `synthesis_token_callback` to `DeepResearcher` so only the synthesis step streams tokens (sub-question expansions remain non-streaming).
+
+### Changed
+
+- Updated the generated chatbot UI so Fast and Deep modes fetch from the new `/stream` endpoints and progressively render the answer with `ReactMarkdown` as tokens arrive, falling back to the non-streaming endpoints if the stream is unavailable.
+
 ## [1.6.0] - 2026-05-01
 
 DeepDoc 1.6.0 makes the chatbot more trustworthy for code questions by grounding answers in archived source evidence instead of raw retrieved chunks.

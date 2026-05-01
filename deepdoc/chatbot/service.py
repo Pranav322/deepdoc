@@ -319,6 +319,7 @@ class ChatbotQueryService:
         history: list[dict[str, str]] | None = None,
         *,
         mode: str = "default",
+        token_callback: "Callable[[str], None] | None" = None,
     ) -> dict[str, Any]:
         retrieval_cfg = self._retrieval_profile(mode)
         context = self.retrieve_context(question, history, mode=mode)
@@ -383,7 +384,7 @@ class ChatbotQueryService:
             selected_relationships,
             retrieval_cfg,
         )
-        answer = self._complete_with_continuation(self._system_prompt(), prompt)
+        answer = self._complete_with_continuation(self._system_prompt(), prompt, token_callback)
         all_selected_hits = (
             selected_code + selected_artifacts + selected_docs + selected_relationships
         )
@@ -579,6 +580,8 @@ class ChatbotQueryService:
         question: str,
         history: list[dict[str, str]] | None = None,
         max_rounds: int = 3,
+        *,
+        token_callback: "Callable[[str], None] | None" = None,
     ) -> dict[str, Any]:
         """Run a DeepResearch session: decompose → retrieve → synthesise.
 
@@ -599,6 +602,7 @@ class ChatbotQueryService:
             mode="deep",
             max_rounds=max_rounds,
             top_k=max(8, retrieval_cfg.get("deep_research_top_k", 10)),
+            token_callback=token_callback,
         )
         return response
 
@@ -662,6 +666,7 @@ class ChatbotQueryService:
         max_rounds: int,
         top_k: int,
         trace_callback: Callable[[dict[str, Any]], None] | None = None,
+        token_callback: "Callable[[str], None] | None" = None,
     ) -> tuple[Any, dict[str, Any]]:
         from .deep_research import DeepResearcher
 
@@ -673,6 +678,7 @@ class ChatbotQueryService:
             mode=mode,
             trace_callback=trace_callback,
         )
+        researcher.synthesis_token_callback = token_callback
         result = researcher.research(question, history=history or [])
         query_mode = "deep" if mode == "deep" else "code_deep"
         response = self.query(question, history, mode=query_mode)
@@ -1711,7 +1717,12 @@ class ChatbotQueryService:
             base["iterative_retrieval"] = False
         return base
 
-    def _complete_with_continuation(self, system: str, user: str) -> str:
+    def _complete_with_continuation(
+        self,
+        system: str,
+        user: str,
+        token_callback: "Callable[[str], None] | None" = None,
+    ) -> str:
         answer_cfg = self.chat_cfg.get("answer", {})
         max_retries = 0
         try:
@@ -1726,7 +1737,14 @@ class ChatbotQueryService:
         except (TypeError, ValueError):
             context_chars = 12000
 
-        answer = self.chat_client.complete(system, user)
+        if token_callback is not None:
+            chunks: list[str] = []
+            for token in self.chat_client.complete_stream(system, user):
+                token_callback(token)
+                chunks.append(token)
+            answer = "".join(chunks)
+        else:
+            answer = self.chat_client.complete(system, user)
         if not answer:
             return answer
 
@@ -3371,6 +3389,94 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
                     "detail": str(exc),
                 },
             )
+
+    @app.post("/query/stream")
+    def query_stream(request: QueryRequest = Body(...)):
+        tokens: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+
+        def on_token(text: str) -> None:
+            tokens.put(("token", {"text": text}))
+
+        def run() -> None:
+            try:
+                result = service.query(
+                    request.question,
+                    request.history,
+                    mode="fast",
+                    token_callback=on_token,
+                )
+                tokens.put(("result", result))
+            except Exception as exc:
+                tokens.put(("error", {"error": "chatbot_query_failed", "detail": str(exc)}))
+            finally:
+                tokens.put(("done", {"status": "done"}))
+                tokens.put(None)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+        def event_stream():
+            while True:
+                item = tokens.get()
+                if item is None:
+                    break
+                event_name, payload = item
+                yield f"event: {event_name}\n"
+                yield f"data: {json.dumps(payload)}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
+
+    @app.post("/deep-research/stream")
+    def deep_research_stream(request: DeepResearchRequest = Body(...)):
+        tokens: queue.Queue[tuple[str, dict[str, Any]] | None] = queue.Queue()
+
+        def on_token(text: str) -> None:
+            tokens.put(("token", {"text": text}))
+
+        def run() -> None:
+            try:
+                result = service.deep_research(
+                    request.question,
+                    request.history,
+                    max_rounds=request.max_rounds,
+                    token_callback=on_token,
+                )
+                tokens.put(("result", result))
+            except Exception as exc:
+                tokens.put(("error", {"error": "chatbot_deep_research_failed", "detail": str(exc)}))
+            finally:
+                tokens.put(("done", {"status": "done"}))
+                tokens.put(None)
+
+        thread = threading.Thread(target=run, daemon=True)
+        thread.start()
+
+        def event_stream():
+            while True:
+                item = tokens.get()
+                if item is None:
+                    break
+                event_name, payload = item
+                yield f"event: {event_name}\n"
+                yield f"data: {json.dumps(payload)}\n\n"
+
+        return StreamingResponse(
+            event_stream(),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Accel-Buffering": "no",
+            },
+        )
 
     @app.post("/code-deep")
     def code_deep(request: CodeDeepRequest = Body(...)) -> dict[str, Any]:

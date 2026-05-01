@@ -2462,6 +2462,7 @@ def _chatbot_panel_tsx() -> str:
           const [loadedQuestion, setLoadedQuestion] = useState('');
           const [loadedMode, setLoadedMode] = useState<'fast' | 'deep' | 'code'>('fast');
           const [liveTrace, setLiveTrace] = useState<TraceEntry[]>([]);
+          const [streamingAnswer, setStreamingAnswer] = useState('');
           const [modalCitation, setModalCitation] = useState<CitationEntry | null>(null);
           const [isDockVisible, setIsDockVisible] = useState(true);
           const latestRequestIdRef = useRef(0);
@@ -2545,6 +2546,7 @@ def _chatbot_panel_tsx() -> str:
             setError('');
             setResponse(null);
             setLiveTrace([]);
+            setStreamingAnswer('');
             try {
               if (nextMode === 'code') {
                 const streamRes = await fetch(`${chatbotConfig.apiBaseUrl}/code-deep/stream`, {
@@ -2633,8 +2635,8 @@ def _chatbot_panel_tsx() -> str:
                 return;
               }
 
-              const endpoint = nextMode === 'deep' ? '/deep-research' : '/query';
-              const res = await fetch(`${chatbotConfig.apiBaseUrl}${endpoint}`, {
+              const streamEndpoint = nextMode === 'deep' ? '/deep-research/stream' : '/query/stream';
+              const streamRes = await fetch(`${chatbotConfig.apiBaseUrl}${streamEndpoint}`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -2643,20 +2645,73 @@ def _chatbot_panel_tsx() -> str:
                   max_rounds: nextMode === 'deep' ? 3 : undefined,
                 }),
               });
-              if (!res.ok) {
-                throw new Error(`Request failed with ${res.status}`);
-              }
-              const data = (await res.json()) as ChatResponse;
-              if (latestRequestIdRef.current != requestId) {
+
+              if (!streamRes.ok || !streamRes.body) {
+                const fallbackEndpoint = nextMode === 'deep' ? '/deep-research' : '/query';
+                const fallbackRes = await fetch(`${chatbotConfig.apiBaseUrl}${fallbackEndpoint}`, {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    question: nextQuestion,
+                    history: nextHistory,
+                    max_rounds: nextMode === 'deep' ? 3 : undefined,
+                  }),
+                });
+                if (!fallbackRes.ok) {
+                  throw new Error(`Request failed with ${fallbackRes.status}`);
+                }
+                const fallbackData = (await fallbackRes.json()) as ChatResponse;
+                if (latestRequestIdRef.current != requestId) return;
+                setActiveQuestion(nextQuestion);
+                setMode(nextMode);
+                setResponse(fallbackData);
+                setHistory([
+                  ...nextHistory,
+                  { role: 'user', content: nextQuestion },
+                  { role: 'assistant', content: fallbackData.answer },
+                ]);
                 return;
               }
+
+              const reader = streamRes.body.getReader();
+              const decoder = new TextDecoder();
+              let buffer = '';
+              let streamResult: ChatResponse | null = null;
+
+              while (true) {
+                if (latestRequestIdRef.current != requestId) return;
+                const { done, value } = await reader.read();
+                if (done) break;
+                buffer += decoder.decode(value, { stream: true });
+                const parsed = parseSseChunk(buffer);
+                buffer = parsed.remainder;
+                for (const ev of parsed.events) {
+                  if (ev.event === 'token') {
+                    try {
+                      const payload = JSON.parse(ev.data) as { text: string };
+                      setStreamingAnswer(prev => prev + payload.text);
+                    } catch { /* ignore malformed token */ }
+                  } else if (ev.event === 'result') {
+                    streamResult = JSON.parse(ev.data) as ChatResponse;
+                  } else if (ev.event === 'error') {
+                    const payload = JSON.parse(ev.data) as { detail?: string };
+                    throw new Error(payload.detail || 'Request failed');
+                  }
+                }
+              }
+
+              if (!streamResult) {
+                throw new Error('Stream ended without a result');
+              }
+              if (latestRequestIdRef.current != requestId) return;
+              setStreamingAnswer('');
               setActiveQuestion(nextQuestion);
               setMode(nextMode);
-              setResponse(data);
+              setResponse(streamResult);
               setHistory([
                 ...nextHistory,
                 { role: 'user', content: nextQuestion },
-                { role: 'assistant', content: data.answer },
+                { role: 'assistant', content: streamResult.answer },
               ]);
             } catch (err) {
               if (latestRequestIdRef.current != requestId) {
@@ -2733,7 +2788,14 @@ def _chatbot_panel_tsx() -> str:
                         </ul>
                       </div>
                     ) : null}
-                    {loading ? (
+                    {loading && streamingAnswer ? (
+                      <div className="text-sm">
+                        <h3 className="deepdoc-chatbot-panel__section-title mb-3 text-base font-semibold">Answer</h3>
+                        <div className="deepdoc-chatbot-answer prose prose-sm max-w-none dark:prose-invert">
+                          <ReactMarkdown>{streamingAnswer}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ) : loading ? (
                       <ChatbotLoadingSkeleton />
                     ) : error ? (
                       <div className="deepdoc-chatbot-panel__empty text-red-600">{error}</div>

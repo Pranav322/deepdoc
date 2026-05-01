@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Iterator
 
 from ..llm.litellm_compat import prepare_litellm
 from .chunker import MAX_CHUNK_CHARS
@@ -49,6 +49,46 @@ class LiteLLMChatClient:
             hint = f" Check env var {key_env}." if key_env else ""
             raise RuntimeError(
                 f"Chat completion failed (model={model}).{hint} {exc}"
+            ) from exc
+
+    def complete_stream(self, system: str, user: str) -> Iterator[str]:
+        try:
+            litellm = prepare_litellm()
+
+            kwargs: dict[str, Any] = {
+                "model": self.service_cfg.get("model"),
+                "messages": [
+                    {"role": "system", "content": system},
+                    {"role": "user", "content": user},
+                ],
+                "temperature": self.service_cfg.get("temperature", 0.1),
+                "stream": True,
+            }
+            if self.service_cfg.get("max_tokens"):
+                kwargs["max_tokens"] = self.service_cfg["max_tokens"]
+            if self.service_cfg.get("base_url"):
+                kwargs["base_url"] = self.service_cfg["base_url"]
+            if self.service_cfg.get("api_version"):
+                kwargs["api_version"] = self.service_cfg["api_version"]
+            api_key = resolve_service_api_key(self.service_cfg)
+            if api_key:
+                kwargs["api_key"] = api_key
+
+            for chunk in litellm.completion(**kwargs):
+                delta = chunk.choices[0].delta
+                text = getattr(delta, "content", None) or ""
+                if text:
+                    yield text
+        except ImportError as exc:
+            raise RuntimeError(
+                "litellm not installed. Install deepdoc[chatbot]."
+            ) from exc
+        except Exception as exc:
+            model = self.service_cfg.get("model", "unknown")
+            key_env = self.service_cfg.get("api_key_env", "")
+            hint = f" Check env var {key_env}." if key_env else ""
+            raise RuntimeError(
+                f"Chat completion (stream) failed (model={model}).{hint} {exc}"
             ) from exc
 
 

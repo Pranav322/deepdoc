@@ -89,6 +89,7 @@ class DeepResearcher:
         self.max_rounds = max_rounds
         self.mode = mode
         self.trace_callback = trace_callback
+        self.synthesis_token_callback: "Callable[[str], None] | None" = None
 
     def _emit_trace(self, phase: str, message: str, **data: Any) -> None:
         callback = self.trace_callback
@@ -681,20 +682,25 @@ class DeepResearcher:
             "path, important related files, configuration, and any notable gaps in evidence."
         )
         try:
-            return self._complete_sub_question(system, user_msg)
+            return self._complete_sub_question(system, user_msg, token_callback=self.synthesis_token_callback)
         except Exception as e:
             logger.warning(f"[deep_research] Synthesis failed: {e}")
             # Fallback: concatenate step answers
             return " ".join(step.answer for step in steps)
 
-    def _complete_sub_question(self, system: str, prompt: str) -> str:
+    def _complete_sub_question(
+        self,
+        system: str,
+        prompt: str,
+        token_callback: "Callable[[str], None] | None" = None,
+    ) -> str:
         complete_with_continuation = getattr(
             self.service,
             "_complete_with_continuation",
             None,
         )
         if callable(complete_with_continuation):
-            return complete_with_continuation(system, prompt)
+            return complete_with_continuation(system, prompt, token_callback)
         return self.llm.complete(system, prompt)
 
     def _estimate_confidence(

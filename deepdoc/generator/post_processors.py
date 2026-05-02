@@ -966,3 +966,70 @@ def repair_mdx_component_blocks(content: str) -> str:
         content = content.rstrip() + (f"\n</{component}>" * deficit) + "\n"
 
     return content
+
+
+_PROVENANCE_KEYS = frozenset({
+    "deepdoc_generated_at",
+    "deepdoc_generated_commit",
+    "deepdoc_generated_version",
+    "deepdoc_status",
+    "deepdoc_evidence_files",
+    "deepdoc_generated_by",
+    "stub",
+})
+
+
+def strip_leaked_provenance_fields(content: str) -> str:
+    """Remove any deepdoc_* YAML-like fields that leaked into the document body."""
+    if not content:
+        return content
+    lines = content.splitlines()
+    in_frontmatter = False
+    result: list[str] = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        stripped = line.strip()
+        if i == 0 and stripped == "---":
+            in_frontmatter = True
+            result.append(line)
+            i += 1
+            continue
+        if in_frontmatter and stripped == "---":
+            in_frontmatter = False
+            result.append(line)
+            i += 1
+            continue
+        if not in_frontmatter:
+            key = stripped.split(":", 1)[0].strip()
+            if key in _PROVENANCE_KEYS:
+                i += 1
+                while i < len(lines) and re.match(r"^\s{2,}-\s", lines[i]):
+                    i += 1
+                continue
+        result.append(line)
+        i += 1
+    return "\n".join(result)
+
+
+def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> str:
+    """Inject a collapsible source-file list after the first H1 heading."""
+    if not content or not evidence_files:
+        return content
+    sorted_files = sorted(evidence_files)[:40]
+    files_md = "\n".join(f"- [{f}]({f})" for f in sorted_files)
+    disclosure = (
+        "\n<details>\n<summary>Relevant source files</summary>\n\n"
+        "The following files were used as context for generating this page:\n\n"
+        f"{files_md}\n\n</details>\n"
+    )
+    patched, count = re.subn(
+        r"(^#\s+[^\n]+\n)",
+        r"\1" + disclosure,
+        content,
+        count=1,
+        flags=re.MULTILINE,
+    )
+    return patched if count else content
+
+    return content

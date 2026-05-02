@@ -423,6 +423,8 @@ deepdoc deploy
 
 This runs `next build` inside `site/` and writes the static export to `site/out/`. You can deploy that directory to Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any static host.
 
+Before building, `deepdoc deploy` checks `.deepdoc/generation_quality.json` and generated MDX frontmatter. It refuses to deploy when the last generation has failed/invalid pages or when `docs/` still contains pages marked `deepdoc_status: "invalid"` or `stub: true`; rerun `deepdoc generate` after fixing those issues.
+
 If you want GitHub Pages specifically, this repo includes a workflow at `.github/workflows/github-pages.yml` that publishes the checked-in `site/out/` export through the official Pages Actions flow. That means you do not need to move the export into a branch `docs/` folder.
 
 ### `deepdoc config`
@@ -436,6 +438,7 @@ deepdoc config set llm.model gpt-4o                    # Switch model
 deepdoc config set llm.temperature 0.3                 # Adjust creativity
 deepdoc config set output_dir documentation            # Change output dir
 deepdoc config set llm.api_key_env AZURE_API_KEY       # Change API key env var
+deepdoc config set compatibility.deprecated_version_warning.enabled false
 ```
 
 ### `deepdoc benchmark`
@@ -697,6 +700,10 @@ site:
 | `site.repo_url` | `""` | Repo URL shown in the generated Fumadocs navigation |
 | `site.favicon` | `""` | Path to favicon |
 | `site.logo` | `""` | Path to logo |
+| **Compatibility** | | |
+| `compatibility.deprecated_version_warning.enabled` | `true` | Warn when existing generated docs were produced by a deprecated DeepDoc version |
+| `compatibility.deprecated_version_warning.minimum_version` | `1.0.0` | Minimum generated DeepDoc version before an upgrade warning appears |
+| `compatibility.deprecated_version_warning.upgrade_command` | `python3 -m pip install --upgrade deepdoc` | Command shown in the upgrade warning |
 
 ---
 

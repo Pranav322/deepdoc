@@ -9,6 +9,17 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.7.1] - 2026-05-02
+
+### Added
+
+- Added a `deepdoc deploy` quality gate that refuses to export docs when generation quality reports failed/invalid pages or generated MDX is still marked invalid/stub.
+- Added a configurable compatibility warning for repositories whose generated docs were produced by deprecated DeepDoc versions, including an upgrade command.
+
+### Fixed
+
+- Fixed Azure embedding retries so `maximum input length is 8192 tokens` errors split or trim oversized symbol corpus records instead of failing chatbot sync.
+
 ## [1.7.0] - 2026-05-02
 
 DeepDoc 1.7.0 adds real token-by-token streaming to the chatbot's Fast and Deep Research modes, delivering the same live-answer experience already available in Code-aware mode.

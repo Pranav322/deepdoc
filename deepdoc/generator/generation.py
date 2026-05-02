@@ -268,6 +268,8 @@ def _coverage_entry(
 
 def _merge_frontmatter_fields(content: str, fields: dict[str, Any]) -> str:
     """Merge generated provenance fields without dropping existing frontmatter."""
+    if not content:
+        content = ""
     stripped = content.lstrip()
     prefix = content[: len(content) - len(stripped)]
     body = stripped
@@ -603,6 +605,11 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
 
             # Step 8: Write to disk
+            content = strip_leaked_provenance_fields(content)
+            if evidence is not None and evidence.evidence_file_paths:
+                content = inject_source_files_disclosure(
+                    content, sorted(evidence.evidence_file_paths)
+                )
             content = self._add_provenance_frontmatter(
                 content,
                 bucket,
@@ -801,6 +808,16 @@ class BucketGenerationEngine:
                 "Remove or correct route claims that are not in scanned endpoint evidence: "
                 + ", ".join(f"`{route}`" for route in validation.unmatched_routes[:6])
             )
+            sample_valid = sorted(self.validator.known_route_paths)[:12]
+            if sample_valid:
+                instructions.append(
+                    "Only reference these registered API routes (replace invented ones): "
+                    + ", ".join(f"`{r}`" for r in sample_valid)
+                )
+            else:
+                instructions.append(
+                    "Remove route claims that are not registered in the scanned endpoint list."
+                )
         for warning in validation.warnings[:8]:
             if warning and not any(warning in item for item in instructions):
                 instructions.append(f"Address this validation issue: {warning}")

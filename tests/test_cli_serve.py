@@ -121,3 +121,52 @@ def test_deploy_refuses_invalid_generated_docs(monkeypatch, tmp_path: Path) -> N
     assert result.exit_code != 0
     assert "Refusing to deploy docs with unresolved quality issues" in result.output
     assert "invalid docs present: start-here" in result.output
+
+
+def test_deprecated_generated_version_warning_is_configurable(
+    tmp_path: Path,
+    capsys,
+) -> None:
+    repo_root = tmp_path
+    docs_dir = repo_root / "docs"
+    docs_dir.mkdir()
+    (docs_dir / "index.mdx").write_text(
+        '---\ndeepdoc_generated_version: "0.9.0"\n---\n# Docs\n',
+        encoding="utf-8",
+    )
+    cli._DEPRECATED_VERSION_WARNING_REPOS.clear()
+
+    cli._warn_if_deprecated_generated_version(
+        {
+            "output_dir": "docs",
+            "compatibility": {
+                "deprecated_version_warning": {
+                    "enabled": True,
+                    "minimum_version": "1.0.0",
+                    "upgrade_command": "deepdoc-upgrade",
+                }
+            },
+        },
+        repo_root,
+    )
+
+    output = capsys.readouterr().out
+    assert "DeepDoc upgrade recommended" in output
+    assert "0.9.0" in output
+    assert "deepdoc-upgrade" in output
+
+    cli._warn_if_deprecated_generated_version(
+        {
+            "output_dir": "docs",
+            "compatibility": {
+                "deprecated_version_warning": {
+                    "enabled": False,
+                    "minimum_version": "1.0.0",
+                    "upgrade_command": "deepdoc-upgrade",
+                }
+            },
+        },
+        repo_root,
+    )
+
+    assert capsys.readouterr().out == ""

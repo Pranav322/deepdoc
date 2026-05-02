@@ -150,10 +150,12 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         max_pages_instruction = f"- Maximum total buckets: {max_pages}"
     else:
         max_pages_instruction = (
-            "- No hard limit on bucket count, but aim for the fewest pages that still "
-            "cover every important concept thoroughly. Prefer 1 deep page over 3 shallow "
-            "ones. Typical range: 15-30 pages for most repos. Quality and depth per page "
-            "matter more than page count."
+            "- No hard limit. Generate a dedicated page for each meaningfully distinct "
+            "subsystem, feature domain, or integration. If a subsystem has a complex "
+            "internal architecture (e.g., multiple layers, a unique algorithm, or its own "
+            "config surface), give it its own page rather than merging it. "
+            "Typical range: 25-45 pages for a medium-large repo. "
+            "Never merge unrelated topics just to reduce page count."
         )
 
     propose_prompt = PROPOSE_PROMPT.format(

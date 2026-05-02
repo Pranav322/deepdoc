@@ -142,6 +142,9 @@ class PageValidator:
         # 11. Check overview grounding depth
         self._check_overview_grounding(content, bucket, result)
 
+        # 12. Warn on low citation coverage
+        self._check_citation_coverage(content, bucket, result)
+
         return result
 
     def _check_placeholder_sections(
@@ -368,15 +371,9 @@ class PageValidator:
                 f"References files outside assembled evidence: {', '.join(violations[:4])}"
             )
             hints = bucket.generation_hints or {}
-            invalid_threshold = 4
+            invalid_threshold = 8
             if hints.get("is_introduction_page") or bucket.section == "Start Here":
                 invalid_threshold = 999
-            elif bucket.bucket_type == "integration" or hints.get(
-                "include_integration_detail"
-            ):
-                invalid_threshold = 8
-            elif hints.get("is_endpoint_ref") or hints.get("is_endpoint_family"):
-                invalid_threshold = 8
 
             if len(violations) >= invalid_threshold:
                 result.is_valid = False
@@ -540,7 +537,7 @@ class PageValidator:
             result.warnings.append(
                 f"Unmatched route/path claims: {', '.join(unmatched[:4])}"
             )
-            if len(unmatched) >= 2 or any("health" in route for route in unmatched):
+            if len(unmatched) >= 4:
                 result.is_valid = False
 
     @staticmethod
@@ -905,3 +902,32 @@ class PageValidator:
             for token in re.findall(r"[a-z0-9]+", value.lower())
             if len(token) >= 3
         ]
+
+    def _check_citation_coverage(
+        self,
+        content: str,
+        bucket: DocBucket,
+        result: ValidationResult,
+    ) -> None:
+        """Warn when many code-entity mentions lack file:line citations."""
+        symbol_mentions = [
+            m for m in re.findall(r"`([A-Za-z_][A-Za-z0-9_]{3,}(?:\(\))?)`", content)
+            if "/" not in m and "." not in m
+        ]
+        if not symbol_mentions:
+            return
+        uncited = [
+            s for s in symbol_mentions
+            if not re.search(
+                re.escape(s) + r".{0,300}[a-zA-Z][a-zA-Z0-9_./-]+\.[a-zA-Z]{1,8}:\d+",
+                content,
+                re.DOTALL,
+            )
+        ]
+        pct = len(uncited) / len(symbol_mentions)
+        if pct > 0.6 and len(uncited) > 5:
+            result.warnings.append(
+                f"Low citation coverage: {len(uncited)}/{len(symbol_mentions)} "
+                f"code-entity mentions have no file:line citation nearby — "
+                f"add `filepath:line` after each function/class mention"
+            )

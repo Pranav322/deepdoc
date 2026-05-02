@@ -139,6 +139,10 @@ in the evidence.
 headings, or placeholder sections. If the evidence is insufficient to complete a required \
 section, say plainly what is knowable from the source and what must be confirmed with the team. \
 An incomplete grounded section is acceptable; a placeholder is not.
+15. **Never output metadata fields**: Do not write `deepdoc_generated_at`, `deepdoc_status`, \
+`deepdoc_evidence_files`, `stub`, or any other `deepdoc_*` fields anywhere in the document \
+body or frontmatter. These fields are injected by the system after generation. Writing them \
+yourself will corrupt the output.
 """
 
 

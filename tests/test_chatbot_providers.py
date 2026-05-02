@@ -56,8 +56,41 @@ def test_embedding_client_trims_single_oversized_text_on_retry(monkeypatch) -> N
     assert calls[-1].endswith("... [truncated for embedding]")
 
 
+def test_embedding_client_handles_azure_maximum_input_length_error(monkeypatch) -> None:
+    calls: list[list[str]] = []
+
+    class _FakeLiteLLM:
+        def embedding(self, **kwargs):
+            batch = kwargs["input"]
+            calls.append(list(batch))
+            if len(batch) > 1:
+                raise _FakeContextWindowError(
+                    "AzureException BadRequestError - {"
+                    "\"error\": {\"message\": \"Invalid 'input[11]': "
+                    "maximum input length is 8192 tokens.\"}}"
+                )
+            return SimpleNamespace(data=[{"embedding": [float(len(batch[0]))]}])
+
+    monkeypatch.setattr("deepdoc.chatbot.providers.prepare_litellm", lambda: _FakeLiteLLM())
+
+    client = LiteLLMEmbeddingClient(
+        {"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 24}
+    )
+    vectors = client.embed(["alpha", "beta", "gamma"])
+
+    assert vectors == [[5.0], [4.0], [5.0]]
+    assert calls[0] == ["alpha", "beta", "gamma"]
+    assert calls[1:] == [["alpha"], ["beta", "gamma"], ["beta"], ["gamma"]]
+
+
 def test_embedding_client_defaults_to_single_item_batches_for_azure() -> None:
     client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small"})
+
+    assert client.batch_size == 1
+
+
+def test_embedding_client_defaults_to_single_item_batches_for_azure_model() -> None:
+    client = LiteLLMEmbeddingClient({"model": "azure/text-embedding-3-small"})
 
     assert client.batch_size == 1
 

@@ -142,6 +142,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "dark": "",
         },
     },
+    "compatibility": {
+        "deprecated_version_warning": {
+            "enabled": True,
+            "minimum_version": "1.0.0",
+            "upgrade_command": "python3 -m pip install --upgrade deepdoc",
+        },
+    },
     "chatbot": {
         "enabled": False,
         "index_dir": ".deepdoc/chatbot",

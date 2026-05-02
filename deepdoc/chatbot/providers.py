@@ -98,7 +98,10 @@ class LiteLLMEmbeddingClient:
     def __init__(self, service_cfg: dict[str, Any]) -> None:
         self.service_cfg = service_cfg
         provider = (service_cfg.get("provider") or "").lower()
-        default_batch_size = 1 if provider == "azure" else 24
+        model = (service_cfg.get("model") or "").lower()
+        default_batch_size = (
+            1 if provider == "azure" or model.startswith("azure/") else 24
+        )
         self.batch_size = service_cfg.get("batch_size", default_batch_size)
 
     def embed(self, texts: list[str]) -> list[list[float]]:
@@ -161,8 +164,9 @@ class LiteLLMEmbeddingClient:
         return (
             "contextwindow" in message
             or "maximum context length" in message
-            or "requested" in message
-            and "tokens" in message
+            or "maximum input length" in message
+            or ("input length" in message and "tokens" in message)
+            or ("requested" in message and "tokens" in message)
         )
 
     def _trim_text_for_retry(self, text: str) -> str:

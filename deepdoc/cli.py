@@ -6,6 +6,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import shlex
 import shutil
 import socket
@@ -26,6 +27,7 @@ CONTEXT_SETTINGS = {
     "help_option_names": ["-h", "--help"],
     "max_content_width": 100,
 }
+_DEPRECATED_VERSION_WARNING_REPOS: set[Path] = set()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1184,7 +1186,81 @@ def _load_or_exit() -> dict:
             "[red]No .deepdoc.yaml found. Run [bold]deepdoc init[/bold] first.[/red]"
         )
         sys.exit(1)
-    return load_config(cfg_path)
+    cfg = load_config(cfg_path)
+    _warn_if_deprecated_generated_version(cfg, cfg_path.parent)
+    return cfg
+
+
+def _warn_if_deprecated_generated_version(cfg: dict, repo_root: Path) -> None:
+    warning_cfg = (
+        cfg.get("compatibility", {}).get("deprecated_version_warning", {})
+        if isinstance(cfg.get("compatibility"), dict)
+        else {}
+    )
+    if not warning_cfg.get("enabled", True):
+        return
+
+    minimum_version = str(warning_cfg.get("minimum_version") or "1.0.0")
+    generated_version = _detect_generated_deepdoc_version(
+        repo_root, repo_root / str(cfg.get("output_dir", "docs") or "docs")
+    )
+    if generated_version is None:
+        return
+    if _version_tuple(generated_version) >= _version_tuple(minimum_version):
+        return
+
+    resolved_root = repo_root.resolve()
+    if resolved_root in _DEPRECATED_VERSION_WARNING_REPOS:
+        return
+    _DEPRECATED_VERSION_WARNING_REPOS.add(resolved_root)
+
+    upgrade_command = str(
+        warning_cfg.get("upgrade_command")
+        or "python3 -m pip install --upgrade deepdoc"
+    )
+    console.print(
+        Panel.fit(
+            "[bold yellow]DeepDoc upgrade recommended[/bold yellow]\n\n"
+            f"This repository has generated docs from DeepDoc [bold]{generated_version}[/bold], "
+            f"which is older than the supported baseline [bold]{minimum_version}[/bold].\n"
+            "Upgrade the CLI before generating or updating docs:\n\n"
+            f"[bold]{upgrade_command}[/bold]\n\n"
+            "To change or disable this warning, update "
+            "`compatibility.deprecated_version_warning.*` in `.deepdoc.yaml`.",
+            border_style="yellow",
+        )
+    )
+
+
+def _detect_generated_deepdoc_version(repo_root: Path, output_dir: Path) -> str | None:
+    candidates = [output_dir]
+    docs_dir = repo_root / "docs"
+    if docs_dir != output_dir:
+        candidates.append(docs_dir)
+
+    for directory in candidates:
+        if not directory.exists():
+            continue
+        for doc_path in sorted(directory.rglob("*.mdx")):
+            try:
+                content = doc_path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            match = re.search(
+                r"^deepdoc_generated_version:\s*[\"']?([^\"'\n]+)[\"']?\s*$",
+                content,
+                flags=re.MULTILINE,
+            )
+            if match:
+                return match.group(1).strip()
+    return None
+
+
+def _version_tuple(value: str) -> tuple[int, int, int]:
+    parts = [int(part) for part in re.findall(r"\d+", value)[:3]]
+    while len(parts) < 3:
+        parts.append(0)
+    return tuple(parts[:3])
 
 
 def _find_repo_root() -> Path:

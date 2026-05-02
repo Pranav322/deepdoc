@@ -422,7 +422,7 @@ def _decompose_buckets(
     from concurrent.futures import ThreadPoolExecutor, as_completed
     from .heuristics import _llm_step
 
-    threshold = cfg.get("decompose_threshold", 7)
+    threshold = cfg.get("decompose_threshold", 5)
     new_buckets: list[DocBucket] = []
     new_nav = dict(plan.nav_structure)
     repo_profile_str = json.dumps(repo_profile, indent=2) if repo_profile else "unknown"
@@ -578,7 +578,7 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
     Runs after decompose to catch cases where decomposition or the proposal step
     created overlapping pages (e.g. "Vinculum Overview" + "Vinculum Workflow").
     """
-    threshold = cfg.get("consolidation_similarity_threshold", 0.55)
+    threshold = cfg.get("consolidation_similarity_threshold", 0.70)
     buckets = list(plan.buckets)
     merged_slugs: set[str] = set()
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from click.testing import CliRunner
+
 from deepdoc import cli
 
 
@@ -87,3 +89,35 @@ def test_start_chatbot_backend_skips_local_spawn_for_external_url(
 
     assert proc is None
     assert backend_url == "http://internal-chat:9000"
+
+
+def test_deploy_refuses_invalid_generated_docs(monkeypatch, tmp_path: Path) -> None:
+    repo_root = tmp_path
+    site_dir = repo_root / "site"
+    docs_dir = repo_root / "docs"
+    quality_dir = repo_root / ".deepdoc"
+    site_dir.mkdir()
+    docs_dir.mkdir()
+    quality_dir.mkdir()
+
+    (site_dir / "package.json").write_text("{}", encoding="utf-8")
+    (docs_dir / "start-here.mdx").write_text(
+        '---\ndeepdoc_status: "invalid"\n---\n', encoding="utf-8"
+    )
+    (quality_dir / "generation_quality.json").write_text(
+        '{"pages_failed": 0, "pages_invalid": 1}\n', encoding="utf-8"
+    )
+
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: {"output_dir": "docs", "chatbot": {"enabled": False}})
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: repo_root)
+
+    def _fail(*args, **kwargs):
+        raise AssertionError("build should not run when docs are invalid")
+
+    monkeypatch.setattr(cli.subprocess, "run", _fail)
+
+    result = CliRunner().invoke(cli.main, ["deploy"])
+
+    assert result.exit_code != 0
+    assert "Refusing to deploy docs with unresolved quality issues" in result.output
+    assert "invalid docs present: start-here" in result.output

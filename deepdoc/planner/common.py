@@ -45,6 +45,17 @@ TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]+")
 
 PROPOSAL_BUCKET_TOKEN_CACHE: dict[int, set[str]] = {}
 
+
+def _normalize_tokens(*values: str) -> set[str]:
+    tokens: set[str] = set()
+    for value in values:
+        for token in TOKEN_RE.findall(value or ""):
+            normalized = token.lower().strip("_-+")
+            if len(normalized) < 3 or normalized in STOPWORD_TOKENS:
+                continue
+            tokens.add(normalized)
+    return tokens
+
 ENTRY_POINT_NAMES = {
     "main.py",
     "app.py",

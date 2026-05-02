@@ -978,9 +978,10 @@ def _deploy():
       1. Run `deepdoc deploy`
       2. Publish `site/out/` to any static host
     """
-    _load_or_exit()
+    cfg = _load_or_exit()
     repo_root = _find_repo_root()
     site_dir = repo_root / "site"
+    output_dir = repo_root / str(cfg.get("output_dir", "docs") or "docs")
 
     package_json = site_dir / "package.json"
     if not package_json.exists():
@@ -988,6 +989,14 @@ def _deploy():
             "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
+
+    blockers = _deployment_quality_blockers(repo_root, output_dir)
+    if blockers:
+        raise click.ClickException(
+            "Refusing to deploy docs with unresolved quality issues:\n- "
+            + "\n- ".join(blockers)
+            + "\nRun `deepdoc generate` again after fixing the generation issues."
+        )
 
     console.print(
         Panel.fit(
@@ -1001,7 +1010,6 @@ def _deploy():
             border_style="green",
         )
     )
-    cfg = _load_or_exit()
     if cfg.get("chatbot", {}).get("enabled"):
         console.print(
             "[yellow]Chatbot mode is enabled.[/yellow] Deploy [bold]chatbot_backend/[/bold] "
@@ -1272,6 +1280,44 @@ def _add_gitignore_entries(repo_root: Path, entries: list[str]) -> None:
             f.write("\n# DeepDoc\n")
             for e in new_entries:
                 f.write(f"{e}\n")
+
+
+def _deployment_quality_blockers(repo_root: Path, output_dir: Path) -> list[str]:
+    blockers: list[str] = []
+
+    quality_path = repo_root / ".deepdoc" / "generation_quality.json"
+    if quality_path.exists():
+        try:
+            payload = json.loads(quality_path.read_text(encoding="utf-8"))
+        except Exception:
+            payload = {}
+        pages_failed = int(payload.get("pages_failed", 0) or 0)
+        pages_invalid = int(payload.get("pages_invalid", 0) or 0)
+        if pages_failed:
+            blockers.append(f"generation has {pages_failed} failed page(s)")
+        if pages_invalid:
+            blockers.append(f"generation has {pages_invalid} invalid page(s)")
+
+    if output_dir.exists():
+        invalid_pages: list[str] = []
+        stub_pages: list[str] = []
+        for doc_path in sorted(output_dir.glob("*.mdx")):
+            try:
+                content = doc_path.read_text(encoding="utf-8")
+            except Exception:
+                continue
+            if 'deepdoc_status: "invalid"' in content:
+                invalid_pages.append(doc_path.stem)
+            if "stub: true" in content:
+                stub_pages.append(doc_path.stem)
+        if invalid_pages:
+            blockers.append(
+                "invalid docs present: " + ", ".join(invalid_pages[:8])
+            )
+        if stub_pages:
+            blockers.append("stub docs present: " + ", ".join(stub_pages[:8]))
+
+    return blockers
 
 
 def _start_chatbot_backend(

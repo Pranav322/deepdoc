@@ -1227,6 +1227,60 @@ def test_validator_invalidates_strict_pages_with_hallucinated_paths(
     assert result.hallucinated_paths == ["orders/fake_one.py", "orders/fake_two.py"]
 
 
+def test_validator_matches_human_readable_start_here_headings(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scan = _make_scan(repo_root)
+    bucket = make_bucket(
+        "Start Here",
+        "start-here",
+        ["src/app.py"],
+        bucket_type="start_here_index",
+        section="Start Here",
+        generation_hints={"always_generate": True},
+    )
+    bucket.required_sections = [
+        "what_this_does",
+        "tech_at_a_glance",
+        "five_key_files",
+    ]
+    content = (
+        "# Start Here\n\n"
+        "## What This Service Does\n\n"
+        "`src/app.py` is the entrypoint for this generated overview. "
+        + "Grounded onboarding prose. " * 18
+        + "\n\n## Technology At a Glance\n\n"
+        + "Python powers the generator and `src/app.py` anchors this example. " * 10
+        + "\n\n## The 5 Files Every Developer Must Know\n\n"
+        + "Start with `src/app.py` before exploring the rest of the repository. " * 10
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket)
+
+    assert "what_this_does" not in result.missing_sections
+    assert "tech_at_a_glance" not in result.missing_sections
+    assert "five_key_files" not in result.missing_sections
+
+
+def test_validator_invalidates_unresolved_placeholder_sections(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    scan = _make_scan(repo_root)
+    bucket = make_bucket("Auth", "auth", ["src/app.py"])
+    content = (
+        "# Auth\n\n"
+        "`src/app.py` is referenced for grounding. "
+        + "Detailed prose for validator coverage. " * 20
+        + "\n\n## what_this_does\n\n"
+        + "*TODO: This section (what_this_does) needs to be filled in with details from the source files listed above.*\n"
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket)
+
+    assert result.is_valid is False
+    assert result.placeholder_sections == ["what_this_does"]
+
+
 def test_validator_flags_hallucinated_symbols_but_allows_known_symbols(
     tmp_path: Path,
 ) -> None:
@@ -1341,6 +1395,26 @@ def test_generation_quality_feedback_is_actionable(tmp_path: Path) -> None:
     assert "`fake/path.py`" in feedback
     assert "Remove or correct these symbol names" in feedback
     assert "`process_order`" in feedback
+
+
+def test_degradation_fixes_do_not_append_todo_sections(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bucket = make_bucket("Auth", "auth", ["src/auth.py"])
+    engine = BucketGenerationEngine(
+        repo_root,
+        dict(DEFAULT_CONFIG),
+        SimpleNamespace(),
+        _make_scan(repo_root),
+        make_plan([bucket]),
+        repo_root / "docs",
+    )
+    validation = ValidationResult(is_valid=False, missing_sections=["overview"])
+
+    degraded = engine._apply_degradation_fixes("# Auth\n\nBody", bucket, validation)
+
+    assert "TODO: This section" not in degraded
+    assert "## overview" not in degraded
 
 
 def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:

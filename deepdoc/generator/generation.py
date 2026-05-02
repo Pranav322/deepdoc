@@ -593,7 +593,7 @@ class BucketGenerationEngine:
                 except Exception:
                     pass
 
-            # Step 7: If validation fails badly, try graceful degradation
+            # Step 7: If validation fails badly, try non-placeholder degradation
             if not validation.is_valid:
                 degraded = True
                 content = self._apply_degradation_fixes(content, bucket, validation)
@@ -618,6 +618,11 @@ class BucketGenerationEngine:
             doc_path = self.output_dir / filename
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(content, encoding="utf-8")
+
+            if validation is not None and not validation.is_valid:
+                console.print(
+                    f"  [yellow]⚠ {bucket.title} still has validation issues after generation.[/yellow]"
+                )
 
             return GenerationResult(
                 bucket=bucket,
@@ -735,23 +740,15 @@ class BucketGenerationEngine:
         """Attempt to fix validation failures without re-calling the LLM.
 
         Strategies:
-        - Append missing sections as empty stubs
         - Remove hallucinated paths
         - Add a notice if page is very short
+        - Never fabricate completion markers for missing sections
         """
-        # Fix 1: Append stub sections for missing required sections
-        if validation.missing_sections:
-            content += "\n\n---\n\n"
-            for section in validation.missing_sections:
-                content += f"## {section}\n\n"
-                content += f"*TODO: This section ({section}) needs to be filled in with details "
-                content += f"from the source files listed above.*\n\n"
-
-        # Fix 2: Remove hallucinated file paths (replace with just path, no line num)
+        # Fix 1: Remove hallucinated file paths (replace with just path, no line num)
         for path in validation.hallucinated_paths:
             content = content.replace(f"`{path}", "`[path-not-found]")
 
-        # Fix 3: Add a notice for very short pages
+        # Fix 2: Add a notice for very short pages
         if validation.word_count < 100:
             notice = (
                 '\n\n<Callout type="warn">\n'
@@ -773,6 +770,11 @@ class BucketGenerationEngine:
             instructions.append(
                 "Add grounded content for these missing required sections: "
                 + ", ".join(validation.missing_sections[:6])
+            )
+        if validation.placeholder_sections:
+            instructions.append(
+                "Replace every unresolved placeholder section with grounded prose; never emit TODO markers for: "
+                + ", ".join(validation.placeholder_sections[:6])
             )
         if validation.missing_file_refs:
             instructions.append(

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from deepdoc.benchmark_v2 import score_plan
 from deepdoc.generator import PageValidator
@@ -13,6 +14,7 @@ from deepdoc.planner import (
     DocPlan,
     RepoScan,
     _apply_page_contracts,
+    _attach_orphans_semantically,
     _auto_generate_endpoint_refs,
     _build_heuristic_assignment,
     _decompose_buckets,
@@ -489,6 +491,104 @@ def test_start_here_setup_slug_and_section_are_preserved() -> None:
     )
     assert start_here_bucket.section == "Start Here"
     assert start_here_bucket.generation_hints["preserve_section"] is True
+
+
+def test_start_here_injection_filters_fixture_artifacts_and_debug_signals() -> None:
+    plan = DocPlan(
+        buckets=[],
+        nav_structure={"Start Here": []},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_api"}},
+    )
+    scan = _make_scan(
+        file_summaries={
+            "README.md": "overview",
+            "deepdoc/cli.py": "cli",
+            "settings.py": "config",
+            "tests/fixtures/demo/package.json": "fixture package",
+            "tests/fixtures/demo/server.js": "fixture runtime",
+        }
+    )
+    scan.config_files = ["settings.py", "tests/fixtures/demo/package.json"]
+    scan.entry_points = ["deepdoc/cli.py"]
+
+    artifact_scan = SimpleNamespace(
+        config_artifacts=["settings.py", "tests/fixtures/demo/package.json"],
+        setup_artifacts=["README.md", "tests/fixtures/demo/package.json"],
+        database_scan=None,
+    )
+    scan.artifact_scan = artifact_scan
+    scan.debug_signals = [
+        SimpleNamespace(
+            signal_type="health_endpoint",
+            name="fixture_health",
+            description="fixture only",
+            patterns=["/health"],
+            files=["tests/fixtures/demo/server.js"],
+            file_path="tests/fixtures/demo/server.js",
+        ),
+        SimpleNamespace(
+            signal_type="logger",
+            name="real_logging",
+            description="real log signal",
+            patterns=["warning"],
+            files=["deepdoc/cli.py"],
+            file_path="deepdoc/cli.py",
+        ),
+    ]
+
+    injected = _inject_start_here_and_debug_buckets(plan, scan, {})
+
+    start_here = next(bucket for bucket in injected.buckets if bucket.slug == "start-here")
+    setup = next(bucket for bucket in injected.buckets if bucket.slug == "local-development-setup")
+    debug = next(bucket for bucket in injected.buckets if bucket.slug == "debugging-observability")
+
+    assert "tests/fixtures/demo/package.json" not in start_here.artifact_refs
+    assert "tests/fixtures/demo/package.json" not in setup.artifact_refs
+    assert "tests/fixtures/demo/package.json" not in setup.owned_files
+    assert "tests/fixtures/demo/server.js" not in debug.owned_files
+    assert all(
+        signal["name"] != "fixture_health"
+        for signal in debug.generation_hints["debug_signals"]
+    )
+
+
+def test_orphan_attachment_skips_curated_start_here_buckets() -> None:
+    scan = _make_scan(
+        file_summaries={
+            "README.md": "overview",
+            "core-workflows/utilities.py": "helper",
+        }
+    )
+    plan = DocPlan(
+        buckets=[
+            DocBucket(
+                bucket_type="start_here_index",
+                title="Start Here",
+                slug="start-here",
+                section="Start Here",
+                description="Orientation",
+                owned_files=["README.md"],
+                generation_hints={"always_generate": True, "preserve_section": True},
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="Utilities",
+                slug="utilities",
+                section="Core Workflows",
+                description="Utility flows",
+                owned_files=[],
+            ),
+        ],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_api"}},
+    )
+
+    _attach_orphans_semantically(plan, scan, {})
+
+    start_here = next(bucket for bucket in plan.buckets if bucket.slug == "start-here")
+    assert "core-workflows/utilities.py" not in start_here.owned_files
 
 
 def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:

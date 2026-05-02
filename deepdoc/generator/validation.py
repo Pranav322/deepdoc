@@ -70,6 +70,7 @@ class ValidationResult:
     missing_runtime_entities: list[str] = field(default_factory=list)
     missing_config_keys: list[str] = field(default_factory=list)
     missing_integrations: list[str] = field(default_factory=list)
+    placeholder_sections: list[str] = field(default_factory=list)
 
 
 class PageValidator:
@@ -121,6 +122,9 @@ class PageValidator:
         self._check_config_grounding(content, bucket, evidence, result)
         self._check_integration_grounding(content, bucket, evidence, result)
 
+        # 7b. Refuse unresolved placeholder sections in publishable docs
+        self._check_placeholder_sections(content, result)
+
         # 8. Minimum content check
         if result.word_count < 100:
             result.warnings.append("Very short page (<100 words) — may be incomplete")
@@ -140,6 +144,28 @@ class PageValidator:
 
         return result
 
+    def _check_placeholder_sections(
+        self,
+        content: str,
+        result: ValidationResult,
+    ) -> None:
+        placeholders = sorted(
+            set(
+                re.findall(
+                    r"\*TODO: This section \(([^)]+)\) needs to be filled in",
+                    content,
+                )
+            )
+        )
+        if not placeholders:
+            return
+
+        result.placeholder_sections = placeholders
+        result.warnings.append(
+            "Unresolved placeholder sections: " + ", ".join(placeholders[:8])
+        )
+        result.is_valid = False
+
     def _check_sections(
         self, content: str, bucket: DocBucket, result: ValidationResult
     ):
@@ -153,12 +179,7 @@ class PageValidator:
             headings.add(match.group(1).strip().lower())
 
         for section in bucket.required_sections:
-            section_lower = section.lower()
-            # Fuzzy match: check if any heading contains the key words
-            found = any(
-                section_lower in h or all(word in h for word in section_lower.split())
-                for h in headings
-            )
+            found = any(self._section_matches_heading(section, heading) for heading in headings)
             if not found:
                 result.missing_sections.append(section)
 
@@ -166,6 +187,69 @@ class PageValidator:
             result.warnings.append(
                 f"Missing sections: {', '.join(result.missing_sections)}"
             )
+
+    @staticmethod
+    def _section_matches_heading(section: str, heading: str) -> bool:
+        section_norm = re.sub(r"[_-]+", " ", section.strip().lower())
+        heading_norm = re.sub(r"\s+", " ", heading.strip().lower())
+        if section_norm in heading_norm or heading_norm in section_norm:
+            return True
+
+        section_tokens = PageValidator._meaningful_tokens(section_norm)
+        heading_tokens = PageValidator._meaningful_tokens(heading_norm)
+        if not section_tokens or not heading_tokens:
+            return False
+
+        matched = 0
+        for section_token in section_tokens:
+            if any(
+                heading_token.startswith(section_token)
+                or section_token.startswith(heading_token)
+                for heading_token in heading_tokens
+            ):
+                matched += 1
+
+        required_matches = max(1, (len(section_tokens) + 1) // 2)
+        return matched >= required_matches
+
+    @staticmethod
+    def _meaningful_tokens(text: str) -> list[str]:
+        number_words = {
+            "0": "zero",
+            "1": "one",
+            "2": "two",
+            "3": "three",
+            "4": "four",
+            "5": "five",
+            "6": "six",
+            "7": "seven",
+            "8": "eight",
+            "9": "nine",
+            "10": "ten",
+        }
+        stopwords = {
+            "a",
+            "an",
+            "and",
+            "at",
+            "by",
+            "for",
+            "from",
+            "how",
+            "in",
+            "it",
+            "of",
+            "on",
+            "the",
+            "this",
+            "to",
+            "with",
+        }
+        return [
+            number_words.get(token, token)
+            for token in re.findall(r"[a-z0-9]+", text)
+            if token and number_words.get(token, token) not in stopwords
+        ]
 
     def _check_file_refs(
         self, content: str, bucket: DocBucket, result: ValidationResult

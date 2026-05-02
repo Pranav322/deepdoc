@@ -41,6 +41,25 @@ future.txt
 site/*
 !site/out/
 !site/out/**
+!web/
+web/*
+!web/*.json
+!web/*.mjs
+!web/*.d.ts
+!web/*.ts
+!web/*.tsx
+!web/content/
+!web/content/**
+!web/app/
+!web/app/**
+!web/lib/
+!web/lib/**
+!web/public/
+!web/public/**
+web/node_modules/
+web/.next/
+web/out/
+web/.source/
 
 
 .env

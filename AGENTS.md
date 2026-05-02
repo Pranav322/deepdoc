@@ -28,7 +28,11 @@ This file might be stale and if that is the case please update it first
 - `deepdoc/config.py`: defaults and `.deepdoc.yaml` helpers
 - `deepdoc/pipeline_v2.py`: end-to-end orchestration
 - `deepdoc/planner/engine.py`: repo scan entrypoint and bucket planning orchestration
-- `deepdoc/planner/heuristics.py`: bucket ownership, decomposition, and coverage attachment
+- `deepdoc/planner/heuristics.py`: public planning API — `_merge_plan`, `_build_heuristic_assignment`, `_llm_step` (keep here; tests mock it at this path)
+- `deepdoc/planner/nav_shaping.py`: nav structure, section ordering, endpoint reference nav
+- `deepdoc/planner/bucket_refinement.py`: bucket ownership, file attachment, decomposition, consolidation
+- `deepdoc/planner/bucket_injection.py`: start-here/debug/research-context bucket injection, publication tier assignment
+- `deepdoc/planner/endpoint_refs.py`: auto-generation of per-endpoint reference pages
 - `deepdoc/generator/generation.py`: page generation orchestration
 - `deepdoc/generator/evidence.py`: page evidence assembly
 - `deepdoc/generator/validation.py`: generated-page validation
@@ -36,8 +40,22 @@ This file might be stale and if that is the case please update it first
 - `deepdoc/smart_update_v2.py`: incremental update and replan logic
 - `deepdoc/parser/routes/`: route detection and repo-aware resolution
 - `deepdoc/scanner/`: runtime, integration, artifact, and data extraction helpers
-- `deepdoc/chatbot/`: chatbot corpora, retrieval, and backend scaffolding
-- `deepdoc/site/builder/`: generated site scaffolding and build/export flow
+- `deepdoc/chatbot/service.py`: `ChatbotQueryService` public API — `query`, `deep_research`, `code_deep`; re-exports `create_fastapi_app` and provider names (keep imports here; tests mock against this module)
+- `deepdoc/chatbot/retrieval_mixin.py`: all retrieval, search, rerank, expansion, and hit-selection methods
+- `deepdoc/chatbot/answer_mixin.py`: LLM answer generation, continuation, prompt building
+- `deepdoc/chatbot/live_fallback_mixin.py`: live filesystem fallback retrieval
+- `deepdoc/chatbot/routes.py`: FastAPI app factory (`create_fastapi_app`) and all HTTP route handlers
+- `deepdoc/chatbot/providers.py`: `LiteLLMChatClient` (including `complete_stream`), embedding clients
+- `deepdoc/chatbot/deep_research.py`: `DeepResearcher` multi-step research loop
+- `deepdoc/site/builder/scaffold_files.py`: non-chatbot scaffold file generators (package.json, tsconfig, CSS, layout TSX, etc.)
+- `deepdoc/site/builder/chatbot_components.py`: chatbot-specific TSX/TS generators (`_chatbot_panel_tsx`, `_chatbot_config_ts`, `_chatbot_toggle_tsx`)
+- `deepdoc/site/builder/templates.py`: re-export facade + any remaining orchestration; import from here for all scaffold functions
+- `deepdoc/prompts_v2.py`: re-export facade — all prompt constants and selectors live in `deepdoc/prompts/`
+- `deepdoc/prompts/system.py`: `SYSTEM_V2`, `CROSS_LINK_SECTION`
+- `deepdoc/prompts/page_types.py`: page-type prompt strings (overview, architecture, guide, module, api_reference, setup, deployment, integration)
+- `deepdoc/prompts/bucket_types.py`: bucket-type prompt strings (feature, endpoint, integration, database, runtime, graphql, start-here, glossary, runbook, etc.)
+- `deepdoc/prompts/update.py`: `UPDATE_PAGE_V2` incremental update prompt
+- `deepdoc/prompts/selectors.py`: `PROMPT_STYLE_TEMPLATES`, `get_prompt_for_bucket`, `get_prompt_for_page_type`
 - `tests/`: pytest suite and fixtures
 
 ## Architecture Notes

@@ -1,0 +1,31 @@
+kind = "web"
+previewPath = "/"
+title = "DeepDoc Website"
+version = "1.0.0"
+id = "artifacts/deepdoc-site"
+router = "path"
+
+[[integratedSkills]]
+name = "react-vite"
+version = "1.0.0"
+
+[[services]]
+name = "web"
+paths = [ "/" ]
+localPort = 18179
+
+[services.development]
+run = "pnpm --filter @workspace/deepdoc-site run dev"
+
+[services.production]
+build = [ "pnpm", "--filter", "@workspace/deepdoc-site", "run", "build" ]
+publicDir = "artifacts/deepdoc-site/dist/public"
+serve = "static"
+
+[[services.production.rewrites]]
+from = "/*"
+to = "/index.html"
+
+[services.env]
+PORT = "18179"
+BASE_PATH = "/"

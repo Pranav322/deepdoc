@@ -44,6 +44,7 @@ site/*
 !web/
 web/*
 !web/*.json
+!web/*.yaml
 !web/*.mjs
 !web/*.d.ts
 !web/*.ts
@@ -56,7 +57,13 @@ web/*
 !web/lib/**
 !web/public/
 !web/public/**
+!web/artifacts/
+!web/artifacts/**
+!web/scripts/
+!web/scripts/**
 web/node_modules/
+web/artifacts/**/node_modules/
+web/artifacts/**/dist/
 web/.next/
 web/out/
 web/.source/

@@ -233,6 +233,50 @@ Single-test guidance:
 - Prefer the smallest command that exercises the edited area first.
 
 
+## Web / Marketing Site (`web/`)
+
+The `web/` folder is a pnpm workspace containing the DeepDoc marketing/changelog site,
+deployed to Vercel. Key facts for agents working here:
+
+### Structure
+```
+web/
+  artifacts/deepdoc-site/   ← the Vite + React site (deploy target)
+  artifacts/api-server/     ← local API server (not deployed to Vercel)
+  artifacts/mockup-sandbox/ ← design sandbox (not deployed to Vercel)
+  lib/                      ← shared workspace libraries
+  scripts/                  ← build/codegen scripts
+  package.json              ← workspace root
+  pnpm-workspace.yaml       ← pnpm catalog + security settings
+```
+
+### History / Why it looks like this
+- Originally lived at `web/deep-doc-design/` (a Replit project with its own `.git`).
+- Migrated on 2026-05-03: the inner `.git` was removed and the contents were flattened
+  directly into `web/` so the parent repo (`codewiki`) tracks them.
+
+### Changelog automation
+`web/artifacts/deepdoc-site/src/pages/Changelog.tsx` **has no hardcoded release data**.
+It imports from `virtual:changelog-data`, a Vite virtual module defined in
+`web/artifacts/deepdoc-site/vite.config.ts` (`changelogPlugin`).
+
+The plugin reads `CHANGELOG.md` from the repo root at build time (path:
+`path.resolve(import.meta.dirname, "../../../CHANGELOG.md")`), parses every
+`## [x.y.z] - date` section, and bakes the result into the JS bundle.
+
+**Rule**: never hardcode release entries in `Changelog.tsx`. Only edit `CHANGELOG.md`.
+
+### Vercel deployment settings
+| Setting | Value |
+|---|---|
+| Root Directory | `web` |
+| Install Command | `pnpm install` |
+| Build Command | `pnpm --filter @workspace/deepdoc-site run build` |
+| Output Directory | `artifacts/deepdoc-site/dist/public` |
+
+If the CHANGELOG path in `vite.config.ts` ever breaks, count directory levels from
+`web/artifacts/deepdoc-site/` up to the repo root — currently **3 levels** (`../../../`).
+
 ## Notes from the creator 
 
 - i am creating it for my internal team , we mostly work with the mentioned languages (python , go ,php ,  js/ts - frameworks including fastify , express , laravel , django , falcon , go )

@@ -135,28 +135,14 @@ def _normalize_nav_section(section: str, primary: str) -> str:
     value = (section or "").strip() or _default_section_for_primary(primary)
     top, sep, rest = value.partition(" > ")
 
-    if top == "API Endpoints":
-        top = "API Reference"
-
-    backend_like = {
-        "backend_service",
-        "falcon_backend",
-        "hybrid",
-    }
-    if primary in backend_like:
-        top = {
-            "Data Layer": "Data Model",
-            "Database": "Data Model",
-            "Architecture": "Core Workflows",
-            "Subsystems": "Core Workflows",
-            "Modules": "Core Workflows",
-            "API": "API Reference",
-            "Getting Started": "Start Here",
-            "Research Context": "Design & Notes",
-        }.get(top, top)
-
-    if top == "Database":
-        top = "Data Model"
+    # Universal aliases — safe renames that never lose domain specificity
+    top = {
+        "API Endpoints": "API Reference",
+        "API": "API Reference",
+        "Database": "Data Model",
+        "Data Layer": "Data Model",
+        "Getting Started": "Start Here",
+    }.get(top, top)
 
     if sep:
         return f"{top} > {rest}"
@@ -234,32 +220,7 @@ def _default_section_for_primary(primary: str) -> str:
 
 
 def _section_rank(section: str, primary: str) -> int:
-    backend_like = {
-        "backend_service",
-        "falcon_backend",
-        "hybrid",
-    }
-    if primary in backend_like:
-        order = [
-            "Start Here",
-            "Overview",
-            "Core Workflows",
-            "API Reference",
-            "Data Model",
-            "Background Jobs",
-            "Integrations",
-            "Runtime & Frameworks",
-            "Interfaces",
-            "Operations",
-            "Design & Notes",
-            "Testing",
-            "CI/CD and Release",
-            "Supporting Material",
-        ]
-        if section in order:
-            return order.index(section)
-        return len(order) + 10
-
+    # research_training has stable, well-known section semantics — keep hardcoded order
     if primary == "research_training":
         order = [
             "Start Here",
@@ -280,20 +241,27 @@ def _section_rank(section: str, primary: str) -> int:
         ]
         if section in order:
             return order.index(section)
-        return len(order) + 10
+        return 10  # unknown sections float in the middle
 
-    order = [
-        "Start Here",
-        "Overview",
-        "Architecture",
-        "Core API",
-        "API Reference",
-        "Integrations",
-        "Operations",
-        "Testing",
-        "Design & Notes",
-        "Supporting Material",
-    ]
-    if section in order:
-        return order.index(section)
-    return len(order) + 10
+    # For all other repo types: only anchor the true system-controlled bookends.
+    # Everything the LLM names floats in the middle ordered by first-appearance
+    # (section_order tiebreaker in _shape_plan_nav).
+    _FIRST: dict[str, int] = {
+        "Start Here": 0,
+        "Overview": 1,
+        "Getting Started": 2,
+    }
+    # These sections are only ever assigned by publication_tier canonical logic,
+    # never named by the LLM — so it's safe to pin them at the tail.
+    _LAST: dict[str, int] = {
+        "Design & Notes": 60,
+        "Testing": 61,
+        "CI/CD and Release": 62,
+        "CI/CD & Release": 62,
+        "Supporting Material": 63,
+    }
+    if section in _FIRST:
+        return _FIRST[section]
+    if section in _LAST:
+        return _LAST[section]
+    return 10

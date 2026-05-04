@@ -395,7 +395,26 @@ def _assign_publication_tiers(
     return plan
 
 
+_GENERIC_PLACEHOLDER_SECTIONS = {
+    "",
+    "general",
+    "misc",
+    "miscellaneous",
+    "other",
+    "features",
+    "pages",
+}
+
+
 def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
+    # Supporting-tier buckets always get re-sectioned (Testing, CI/CD, etc.) regardless
+    # of whatever section the LLM assigned. For all other tiers, preserve the LLM's
+    # domain-specific section name rather than overriding with a generic canonical one.
+    if bucket.publication_tier != "supporting":
+        existing = (bucket.section or "").strip()
+        if existing and existing.lower() not in _GENERIC_PLACEHOLDER_SECTIONS:
+            return existing
+
     title_tokens = _bucket_semantic_tokens(bucket)
     if bucket.publication_tier == "supporting":
         supporting_section = supporting_section_for_kinds(bucket.source_kind_summary)

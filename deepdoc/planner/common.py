@@ -306,6 +306,9 @@ Based on this repository classification, propose documentation buckets.
 ## Ranked Topic Candidates
 {topic_candidates}
 
+## Flow Candidates (call graph + endpoints/runtime)
+{flow_candidates}
+
 ## Research / Markdown Context
 {research_context}
 
@@ -319,13 +322,19 @@ Based on this repository classification, propose documentation buckets.
 - If database models are detected, include a database bucket with is_introduction_page: false, \
   include_database_context: true, prompt_style: "database", and required_sections including \
   "er_diagram", "table_definitions", "relationships", "migrations"
+- If flow candidates exist, create dedicated "Core Workflows" buckets for the top flows.\
+  Each flow bucket should reference the entrypoints (routes/tasks) and the main call chain.
 - Group by business workflow or logical concern, NOT file directories
 - Endpoint family buckets should group by resource family, NOT one-per-route
 - Create as many buckets as needed for thorough coverage — prefer depth and completeness \
   over brevity. Every important area should have its own bucket.
 - Scanned endpoints will be attached to grouped API-reference pages in a follow-up step — \
   do NOT create single-endpoint reference buckets here.
-- Choose nav_structure section names that fit THIS repo. Do not force generic names.
+- Name nav sections after the business domains they cover (e.g. "Order Management", \
+  "Authentication & User Management", "Product Catalog"), NOT generic technical layers \
+  ("Core Workflows", "Subsystems", "Architecture", "API Reference", "Background Jobs"). \
+  The nav should read like a product feature list, not a software architecture diagram. \
+  Each section name should tell a reader what part of the product they are exploring.
 
 Return JSON:
 {{

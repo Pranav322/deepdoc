@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
+from deepdoc import __version__ as DEEPDOC_VERSION
 from deepdoc.call_graph import build_call_graph
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.generator import (
@@ -1596,7 +1597,7 @@ def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:
     )
 
     assert "deepdoc_generated_at:" in updated
-    assert 'deepdoc_generated_version: "1.7.1"' in updated
+    assert f'deepdoc_generated_version: "{DEEPDOC_VERSION}"' in updated
     assert 'deepdoc_status: "valid"' in updated
     assert "deepdoc_evidence_files:" in updated
 

@@ -9,6 +9,23 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.8.0] - 2026-05-04
+
+### Added
+
+- Added call flow pipeline: `FlowCandidate` and `EntryPoint` models in `deepdoc/planner/flow_candidates.py` trace endpoint families and runtime tasks/schedulers through the call graph to collect entrypoints, call chains, side effects (Celery/signal/event dispatches), and external touchpoints.
+- Added `_ensure_flow_buckets` and `_expand_flow_bucket_ownership` in the planner to automatically create "Core Workflows" documentation buckets for the top-scored flow candidates and enrich their file/symbol ownership from call chain evidence.
+- Added `flow_context` to `AssembledEvidence`; the evidence assembler renders a structured call flow section (entrypoints, call chain, side effects, external touchpoints) for any bucket with a `flow_id` generation hint.
+- Added `_check_flow_grounding` validator that marks pages invalid when a flow bucket omits required "Call Flow" or "Side Effects" sections despite flow context being present.
+- Added `{flow_context}` placeholder to all prompt templates in `bucket_types.py` and `page_types.py`.
+
+### Changed
+
+- Nav sections proposed by the LLM are now preserved as-is rather than being replaced with hardcoded generic labels. `_canonical_section_for_bucket` only overrides empty or placeholder sections; supporting-tier buckets (tests, CI/CD) still get properly re-sectioned.
+- `_section_rank` replaced with an anchor-only ordering model: Start Here and Overview are pinned first; Design & Notes, Testing, CI/CD and Release, and Supporting Material are pinned last; all other sections (LLM-named domain sections like "Order Management" or "Authentication & User Management") are ordered by first-appearance in the LLM's proposal.
+- `_normalize_nav_section` no longer aggressively remaps domain section names (Architecture → Core Workflows, Subsystems → Core Workflows, etc.); only safe universal aliases remain.
+- `PROPOSE_PROMPT` now instructs the LLM to name nav sections after business domains rather than generic technical layers.
+
 ## [1.7.1] - 2026-05-02
 
 ### Added

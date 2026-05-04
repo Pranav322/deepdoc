@@ -72,6 +72,7 @@ class PageGenerator:
         dependency_links: str,
         openapi_context: str = "",
         quality_feedback: str = "",
+        failure_prefix: str = "",
     ) -> str:
         """Generate the complete page from evidence. Returns markdown string."""
         bucket = evidence.bucket
@@ -173,6 +174,9 @@ class PageGenerator:
             sitemap_context=sitemap_context,
             dependency_links=dependency_links,
         )
+
+        if failure_prefix:
+            user_prompt = failure_prefix + "\n\n" + user_prompt
 
         if quality_feedback:
             user_prompt += (
@@ -597,7 +601,51 @@ class BucketGenerationEngine:
                 except Exception:
                     pass
 
-            # Step 7: If validation fails badly, try non-placeholder degradation
+            # Step 6.5: Full clean regeneration with structured failure context.
+            # The Step 6 retry appended feedback as a footnote ("revise this").
+            # If that didn't work, start completely fresh with the failure
+            # context promoted to the TOP of the prompt so the LLM cannot ignore it.
+            if not validation.is_valid:
+                failure_prefix = self._build_failure_prefix(validation)
+                try:
+                    console.print(
+                        f"  [dim]↺ {bucket.title}: full regeneration pass (failure context injected)...[/dim]"
+                    )
+                    content = self._call_with_retry(
+                        evidence,
+                        sitemap_context,
+                        dependency_links,
+                        openapi_context,
+                        failure_prefix=failure_prefix,
+                    )
+                    content = fix_mermaid_diagrams(content)
+                    content = fix_file_references(
+                        content,
+                        self.repo_root,
+                        self._repo_file_paths,
+                        bucket.owned_files,
+                    )
+                    content = normalize_html_code_blocks(content)
+                    content = normalize_code_fence_languages(content)
+                    content = repair_split_object_code_fences(content)
+                    content = repair_unbalanced_code_fences(content)
+                    content = normalize_explanatory_lines_outside_fences(content)
+                    content = repair_dangling_plain_fences(content)
+                    content = normalize_mdx_steps(content)
+                    content = repair_mdx_component_blocks(content)
+                    content = escape_mdx_route_params(content)
+                    content = escape_mdx_text_hazards(content)
+                    content = repair_internal_doc_links(
+                        content,
+                        self._valid_doc_urls,
+                        self._doc_title_to_url,
+                        self._doc_alias_map,
+                    )
+                    validation = self.validator.validate(content, bucket, evidence)
+                except Exception:
+                    pass
+
+            # Step 7: If validation still fails, apply text-only degradation fixes
             if not validation.is_valid:
                 degraded = True
                 content = self._apply_degradation_fixes(content, bucket, validation)
@@ -700,6 +748,7 @@ class BucketGenerationEngine:
         dependency_links: str,
         openapi_context: str,
         quality_feedback: str = "",
+        failure_prefix: str = "",
     ) -> str:
         """Call LLM with exponential backoff + jitter on transient errors."""
         import random
@@ -712,6 +761,7 @@ class BucketGenerationEngine:
                     dependency_links,
                     openapi_context,
                     quality_feedback=quality_feedback,
+                    failure_prefix=failure_prefix,
                 )
             except Exception as e:
                 err = str(e)
@@ -824,6 +874,137 @@ class BucketGenerationEngine:
             if warning and not any(warning in item for item in instructions):
                 instructions.append(f"Address this validation issue: {warning}")
         return "\n".join(f"- {item}" for item in instructions[:10])
+
+    def _build_failure_prefix(self, validation: ValidationResult) -> str:
+        """Build a structured failure report to prepend at the TOP of the regeneration prompt.
+
+        Unlike Step 6 which appends quality_feedback as a revision hint, this prefix is
+        placed BEFORE all evidence so the LLM encounters it first and treats this call
+        as a complete fresh generation, not a patch of a previous draft.
+        """
+        lines: list[str] = [
+            "## ⚠ PREVIOUS GENERATION FAILED — COMPLETE REGENERATION REQUIRED",
+            "",
+            "The documentation page you are about to generate was already attempted once.",
+            "That attempt was REJECTED by an automated validator. Do NOT revise a previous",
+            "draft — write this page entirely from scratch using the evidence below.",
+            "",
+            "### Why the previous attempt was rejected:",
+            "",
+        ]
+
+        if validation.missing_sections:
+            lines.append(
+                "**Missing required sections** (sections were either omitted or not populated):"
+            )
+            for s in validation.missing_sections[:8]:
+                lines.append(f"  - {s}")
+            lines.append(
+                "  → You MUST include ALL required sections with grounded, non-placeholder content."
+            )
+            lines.append("")
+
+        if validation.placeholder_sections:
+            lines.append(
+                "**Placeholder / TODO sections** (forbidden — page had unresolved stubs):"
+            )
+            for s in validation.placeholder_sections[:8]:
+                lines.append(f"  - {s}")
+            lines.append(
+                "  → Replace every TODO/placeholder with real content drawn from evidence."
+            )
+            lines.append("")
+
+        if validation.hallucinated_paths:
+            lines.append(
+                "**Hallucinated file paths** (paths referenced that do not exist in the repo):"
+            )
+            for p in validation.hallucinated_paths[:8]:
+                lines.append(f"  - `{p}`")
+            lines.append(
+                "  → Only reference file paths that appear verbatim in the provided evidence."
+            )
+            lines.append("")
+
+        if validation.missing_file_refs:
+            lines.append(
+                "**Missing file references** (assigned source files never mentioned):"
+            )
+            for p in validation.missing_file_refs[:8]:
+                lines.append(f"  - `{p}`")
+            lines.append(
+                "  → Reference each assigned source file at least once where it is relevant."
+            )
+            lines.append("")
+
+        if validation.hallucinated_symbols:
+            lines.append(
+                "**Hallucinated symbols** (function/class names not found in evidence):"
+            )
+            for sym in validation.hallucinated_symbols[:8]:
+                lines.append(f"  - `{sym}`")
+            lines.append(
+                "  → Only name symbols that appear exactly in the provided source evidence."
+            )
+            lines.append("")
+
+        if validation.unmatched_routes:
+            lines.append(
+                "**Unmatched API routes** (route claims not in scanned endpoint registry):"
+            )
+            for route in validation.unmatched_routes[:8]:
+                lines.append(f"  - `{route}`")
+            sample_valid = sorted(self.validator.known_route_paths)[:8]
+            if sample_valid:
+                lines.append(
+                    "  → Registered routes you MAY reference: "
+                    + ", ".join(f"`{r}`" for r in sample_valid)
+                )
+            else:
+                lines.append("  → Remove all invented route claims.")
+            lines.append("")
+
+        if validation.out_of_evidence_refs:
+            lines.append(
+                "**Out-of-scope file references** (files outside this page's evidence boundary):"
+            )
+            for p in validation.out_of_evidence_refs[:8]:
+                lines.append(f"  - `{p}`")
+            lines.append(
+                "  → Only discuss files that are explicitly part of this page's evidence set."
+            )
+            lines.append("")
+
+        if validation.warnings:
+            remaining = [
+                w for w in validation.warnings[:8]
+                if w and not any(
+                    kw in w
+                    for kw in ("missing section", "placeholder", "hallucinated", "route", "out-of-scope")
+                )
+            ]
+            if remaining:
+                lines.append("**Additional validator warnings:**")
+                for w in remaining[:6]:
+                    lines.append(f"  - {w}")
+                lines.append("")
+
+        lines += [
+            "### What you MUST do differently this time:",
+            "",
+            "1. Write the page COMPLETELY from scratch — do not patch or copy a previous draft.",
+            "2. Include ALL required sections listed above, each with substantive grounded content.",
+            "3. Reference ONLY file paths and symbol names that appear in the evidence below.",
+            "4. Never emit TODO, placeholder, or stub text.",
+            "5. Stay strictly within the evidence boundary provided — do not invent facts.",
+            "",
+            "---",
+            "",
+            "Now generate the complete, corrected page:",
+            "",
+        ]
+
+        return "\n".join(lines)
 
     def _generate_stub_page(self, bucket: DocBucket) -> str:
         """Generate a minimal stub page when LLM generation completely fails.

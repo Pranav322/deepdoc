@@ -9,6 +9,14 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.9.2] - 2026-05-04
+
+### Added
+
+- Added **Step 6.5** in the generation retry loop: when Step 6 (patch retry with appended quality feedback) still fails validation, Step 6.5 performs a complete clean regeneration with a structured failure report prepended at the very top of the prompt. The report lists each specific failure category (missing sections, hallucinated paths, missing file refs, unmatched routes, etc.) with concrete items, so the LLM cannot miss or deprioritise the constraints.
+- Added `BucketGenerationEngine._build_failure_prefix(validation)` — builds the top-of-prompt failure report with per-category breakdown and explicit "what you MUST do differently" instructions.
+- Added `failure_prefix` parameter to `PageGenerator.generate()` and `BucketGenerationEngine._call_with_retry()` — the prefix is injected before all evidence context so it is the first thing the model reads.
+
 ## [1.9.1] - 2026-05-04
 
 ### Fixed

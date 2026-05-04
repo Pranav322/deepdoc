@@ -9,6 +9,14 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.9.1] - 2026-05-04
+
+### Fixed
+
+- Fixed classify LLM echoing cluster IDs as section names (e.g. `new-src-api-services-order-index-ts`) instead of domain names. Added `_fix_slug_cluster_sections()` post-processing guard that detects all-lowercase-hyphenated section values and replaces them with the cluster's human name from the same LLM response.
+- Strengthened `CLASSIFY_PROMPT` section-naming rules with an explicit example table, a hard constraint against using cluster IDs as section values, and a target of 4–8 shared domain sections across all clusters.
+- Updated `_print_classification_summary()` to display named cluster count and unique sections instead of the stale "classified N source files" message (which was always 0 with the topology-based classify format).
+
 ## [1.9.0] - 2026-05-04
 
 DeepDoc 1.9.0 replaces the LLM-discovers-structure planning model with topology-driven nav planning: call graph analysis pre-computes cohesive domain clusters before any LLM call, the LLM names and describes them, and flows are embedded inside their owning domain pages instead of a separate "Core Workflows" section.

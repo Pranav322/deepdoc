@@ -9,6 +9,32 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.9.0] - 2026-05-04
+
+DeepDoc 1.9.0 replaces the LLM-discovers-structure planning model with topology-driven nav planning: call graph analysis pre-computes cohesive domain clusters before any LLM call, the LLM names and describes them, and flows are embedded inside their owning domain pages instead of a separate "Core Workflows" section.
+
+### Added
+
+- Added `deepdoc/planner/topology.py` — `build_topology_map()` derives a `TopologyMap` from the call graph without any LLM involvement. It computes per-file indegree and BFS call-depth from entry points, groups files into `TopologyCluster` objects via BFS + Jaccard-based merging (threshold 0.40), and identifies a foundational cluster for shared infrastructure files (indegree ≥ 8% of repo size).
+- Added `topology_map: TopologyMap | None` field to `RepoScan`; populated during Phase 2 scans immediately after call graph construction.
+- Added `_format_topology_clusters()` to `utils.py` — formats topology clusters with entry files, key symbols, owned file counts, side effects, and external calls for the classify prompt.
+- Added `_build_named_clusters_str()` to `utils.py` — merges LLM-assigned cluster names/sections/descriptions from the classify step with topology cluster file lists and call-graph signals into a rich context string for the propose step.
+- Added `_attach_flow_hints_to_cluster_buckets()` in `specializations.py` — instead of creating a separate "Core Workflows" bucket, attaches `flow_entrypoints`, `flow_id`, `flow_entry_kind`, and `sequence_diagram` hints directly to the domain bucket that owns the flow's entry files.
+- Added `_build_section_depth_map()` and `_section_sort_key()` in `nav_shaping.py` — order nav sections by topology cluster depth (entry-point-facing clusters appear first, foundational last) rather than by hardcoded section name lists.
+
+### Changed
+
+- **Classify step** now sends pre-computed topology clusters to the LLM instead of a compressed file tree. The LLM names each cluster and assigns it a domain section, returning a `cluster_names` dict rather than per-file classification.
+- **Propose step** now receives `named_clusters` (topology clusters enriched with LLM-assigned names/sections) instead of `classification_summary` + `flow_candidates`. Buckets are created from named clusters, not discovered from a compressed file-tree blob.
+- `_shape_plan_nav()` now accepts an optional `scan` argument and uses topology depth to order domain sections; the old hardcoded `_section_rank()` is replaced by `_section_sort_key()` which only pins `Start Here`/`Overview` at the front and `Testing`/`CI/CD`/`Supporting Material` at the tail.
+- `_default_section_for_primary()` no longer returns `"Core Workflows"` for `backend_service` repos — domain section names come from the LLM's cluster naming step instead.
+- Duplicate `_shape_plan_nav` definition removed from `heuristics.py`; the authoritative version in `nav_shaping.py` is now used throughout.
+- `_ensure_flow_buckets` and `_expand_flow_bucket_ownership` removed from the public planner API and replaced by `_attach_flow_hints_to_cluster_buckets`.
+
+### Fixed
+
+- Fixed `heuristics.py` importing `_section_rank` from `nav_shaping` after the function was replaced by `_section_sort_key`.
+
 ## [1.8.0] - 2026-05-04
 
 ### Added

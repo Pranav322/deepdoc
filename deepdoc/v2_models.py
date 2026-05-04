@@ -9,6 +9,7 @@ from .parser.base import ParsedFile
 
 if TYPE_CHECKING:
     from .call_graph import CallGraph
+    from .planner.topology import TopologyMap
     from .scanner import DebugSignal
 
 
@@ -130,6 +131,7 @@ class RepoScan:
     file_frameworks: dict[str, list[str]] = field(default_factory=dict)
     config_impacts: list[dict[str, Any]] = field(default_factory=list)
     call_graph: CallGraph | None = None
+    topology_map: TopologyMap | None = None
     debug_signals: list[DebugSignal] = field(default_factory=list)
     flow_candidates: list[Any] = field(default_factory=list)
 

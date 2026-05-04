@@ -681,7 +681,7 @@ def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
     sections = list(shaped.nav_structure.keys())
     assert sections[:3] == [
         "Start Here",
-        "Core Workflows",
+        "Architecture",
         "API Reference > Orders API",
     ]
     assert shaped.nav_structure["Start Here"] == [

@@ -3,8 +3,12 @@ from .bucket_refinement import _bucket_semantic_tokens
 from .bucket_injection import _canonical_section_for_bucket
 
 
-def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
-    """Normalize sections and build a repo-agnostic, reader-first nav flow."""
+def _shape_plan_nav(
+    plan: DocPlan,
+    classification: dict[str, Any],
+    scan: Any = None,
+) -> DocPlan:
+    """Normalize sections and build a topology-driven, reader-first nav flow."""
     primary = classification.get("repo_profile", {}).get("primary_type", "other")
     merged_utilities: list[DocBucket] = []
     new_buckets: list[DocBucket] = []
@@ -31,7 +35,10 @@ def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
             bucket_type="utility-group",
             title="Common Utilities & Configuration",
             slug="common-utilities-configuration",
-            section=_normalize_nav_section("Operations", primary),
+            section=_normalize_nav_section(
+                "Operations" if primary == "research_training" else "Supporting Infrastructure",
+                primary,
+            ),
             description="Shared low-level helpers and configuration utilities referenced across the repository",
             owned_files=sorted(
                 {f for bucket in merged_utilities for f in bucket.owned_files}
@@ -50,6 +57,9 @@ def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
     plan.buckets = sorted(new_buckets, key=lambda bucket: bucket.priority)
     plan.buckets = _merge_duplicate_setup_bucket(plan.buckets)
 
+    # Build section → min topology depth map for ordering
+    section_depth: dict[str, int] = _build_section_depth_map(plan.buckets, scan, classification)
+
     nav: dict[str, list[str]] = defaultdict(list)
     slug_to_bucket = {bucket.slug: bucket for bucket in plan.buckets}
 
@@ -66,7 +76,7 @@ def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
         hints = bucket.generation_hints or {}
         if hints.get("is_endpoint_family") or hints.get("is_endpoint_ref"):
             continue
-        section = bucket.section or _default_section_for_primary(primary)
+        section = bucket.section or "Architecture"
         _append_nav_slug(nav, section, bucket.slug)
 
     endpoint_nav = _build_endpoint_reference_nav(plan.buckets)
@@ -86,12 +96,7 @@ def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
     section_order = {section: idx for idx, section in enumerate(nav.keys())}
     ordered_sections = sorted(
         nav.keys(),
-        key=lambda section: (
-            _section_rank(_section_top(section), primary),
-            _section_top(section),
-            section_order[section],
-            section,
-        ),
+        key=lambda section: _section_sort_key(section, primary, section_depth, section_order),
     )
 
     plan.nav_structure = {
@@ -212,56 +217,87 @@ def _section_top(section: str) -> str:
 
 
 def _default_section_for_primary(primary: str) -> str:
-    if primary in {"backend_service", "falcon_backend", "hybrid"}:
-        return "Core Workflows"
     if primary == "research_training":
         return "Operations"
     return "Architecture"
 
 
-def _section_rank(section: str, primary: str) -> int:
-    # research_training has stable, well-known section semantics — keep hardcoded order
-    if primary == "research_training":
-        order = [
-            "Start Here",
-            "Overview",
-            "Model Architecture",
-            "Training",
-            "Optimization",
-            "Data Pipeline",
-            "Evaluation",
-            "Inference & Runtime",
-            "Interfaces",
-            "Operations",
-            "Research Context",
-            "Design & Notes",
-            "Testing",
-            "CI/CD and Release",
-            "Supporting Material",
-        ]
-        if section in order:
-            return order.index(section)
-        return 10  # unknown sections float in the middle
+def _build_section_depth_map(
+    buckets: list[DocBucket],
+    scan: Any,
+    classification: dict[str, Any],
+) -> dict[str, int]:
+    """Map each nav section to the minimum topology depth among its buckets.
 
-    # For all other repo types: only anchor the true system-controlled bookends.
-    # Everything the LLM names floats in the middle ordered by first-appearance
-    # (section_order tiebreaker in _shape_plan_nav).
-    _FIRST: dict[str, int] = {
-        "Start Here": 0,
-        "Overview": 1,
-        "Getting Started": 2,
-    }
-    # These sections are only ever assigned by publication_tier canonical logic,
-    # never named by the LLM — so it's safe to pin them at the tail.
-    _LAST: dict[str, int] = {
+    This lets _section_sort_key order sections by call-graph proximity to
+    entry points: shallow clusters (entry-point-facing) come first, deep /
+    foundational clusters come last.
+    """
+    tmap = getattr(scan, "topology_map", None) if scan else None
+    cluster_names: dict[str, dict] = classification.get("cluster_names", {}) if classification else {}
+
+    # Build section → cluster_id from classify output
+    section_to_cluster: dict[str, str] = {}
+    for cid, info in cluster_names.items():
+        if isinstance(info, dict) and info.get("section"):
+            section_to_cluster.setdefault(info["section"], cid)
+
+    if not tmap or not tmap.clusters:
+        return {}
+
+    cluster_depth: dict[str, int] = {c.cluster_id: c.min_depth for c in tmap.clusters}
+
+    # Build section → min_depth using the classify cluster→section mapping
+    section_depth: dict[str, int] = {}
+    for section, cid in section_to_cluster.items():
+        depth = cluster_depth.get(cid, 999)
+        top = _section_top(section)
+        if top not in section_depth or depth < section_depth[top]:
+            section_depth[top] = depth
+
+    return section_depth
+
+
+def _section_sort_key(
+    section: str,
+    primary: str,
+    section_depth: dict[str, int],
+    section_order: dict[str, int],
+) -> tuple:
+    """Sort key for nav sections.
+
+    For research_training: use the established domain-specific order.
+    For all other types: pin Start Here / Overview first and tail sections
+    last; order everything in between by topology depth (entry-point
+    clusters first, foundational last), falling back to first-appearance.
+    """
+    top = _section_top(section)
+
+    if primary == "research_training":
+        _RT_ORDER = [
+            "Start Here", "Overview", "Model Architecture", "Training",
+            "Optimization", "Data Pipeline", "Evaluation", "Inference & Runtime",
+            "Interfaces", "Operations", "Research Context", "Design & Notes",
+            "Testing", "CI/CD and Release", "Supporting Material",
+        ]
+        rank = _RT_ORDER.index(top) if top in _RT_ORDER else 10
+        return (rank, section_order.get(section, 999), section)
+
+    _FIRST = {"Start Here": 0, "Overview": 1, "Getting Started": 2}
+    _LAST = {
+        "Supporting Infrastructure": 55,
         "Design & Notes": 60,
         "Testing": 61,
         "CI/CD and Release": 62,
         "CI/CD & Release": 62,
         "Supporting Material": 63,
     }
-    if section in _FIRST:
-        return _FIRST[section]
-    if section in _LAST:
-        return _LAST[section]
-    return 10
+
+    if top in _FIRST:
+        return (_FIRST[top], section_order.get(section, 999), section)
+    if top in _LAST:
+        return (_LAST[top], section_order.get(section, 999), section)
+
+    # Middle sections: order by topology depth (3 = entry-facing, 50 = unknown)
+    depth = section_depth.get(top, 50)
+    return (3 + depth, section_order.get(section, 999), section)

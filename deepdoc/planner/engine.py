@@ -1,5 +1,4 @@
 from .common import *
-from .flow_candidates import build_flow_candidates
 
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     """Run the multi-step planner.
@@ -26,7 +25,6 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     giant_file_threshold = cfg.get("giant_file_lines", 2000)
 
     # Build shared context strings
-    file_tree_str = _format_file_tree_compressed(scan.file_tree, scan.file_summaries)
     file_summaries_str = _format_summaries_compressed(scan.file_summaries)
     published_endpoints = scan.published_api_endpoints
     endpoints_str = _format_endpoints(published_endpoints)
@@ -36,12 +34,18 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     )
     fw_str = ", ".join(scan.frameworks_detected) or "none detected"
 
-    # ── Step 1: Classify ─────────────────────────────────────────────────
+    # ── Step 1: Classify — name topology clusters ────────────────────────
     console.print(
         Panel(
-            "[bold]Planner Step 1/3: Classifying repository artifacts[/bold]",
+            "[bold]Planner Step 1/3: Naming topology clusters[/bold]",
             border_style="cyan",
         )
+    )
+
+    topology_clusters_str = _format_topology_clusters(scan)
+    has_topology = bool(
+        getattr(scan, "topology_map", None)
+        and scan.topology_map.clusters
     )
 
     classify_prompt = CLASSIFY_PROMPT.format(
@@ -51,8 +55,8 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         endpoint_count=len(published_endpoints),
         entry_points=", ".join(scan.entry_points[:10]) or "none",
         config_files=", ".join(scan.config_files[:15]) or "none",
-        file_tree=file_tree_str[:15000],
-        file_summaries=file_summaries_str[:20000],
+        topology_clusters=topology_clusters_str[:18000],
+        file_summaries=file_summaries_str[:8000],
         endpoints=endpoints_str[:5000],
         giant_file_threshold=giant_file_threshold,
     )
@@ -77,23 +81,15 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         )
     )
 
-    # Build classification summary for the proposal step
-    classification_summary = _build_classification_summary(classification)
     repo_profile = classification.get("repo_profile", {})
     repo_profile_str = json.dumps(repo_profile, indent=2) if repo_profile else "unknown"
-    step_start = time.perf_counter()
-    topic_candidates = _derive_topic_candidates(scan, classification)
-    scan.planner_timings["derive_topic_candidates"] = time.perf_counter() - step_start
-    topic_candidates_str = _format_topic_candidates(topic_candidates)
     research_context_str = _format_research_context(scan)
 
-    # Build flow candidates from call graph + endpoint/runtime evidence
-    step_start = time.perf_counter()
-    scan.flow_candidates = build_flow_candidates(scan)
-    scan.planner_timings["flow_candidates"] = time.perf_counter() - step_start
-    flow_candidates_str = _format_flow_candidates(scan.flow_candidates)
+    # Build named clusters string for the propose prompt
+    # cluster_names comes from classify step; merge with topology cluster file lists
+    named_clusters_str = _build_named_clusters_str(classification, scan)
 
-    # Enrich with Phase 2 results if available
+    # Integration signals from classification or Phase 2 identities
     if scan.integration_identities:
         integration_signals = "## Discovered Integration Identities (Phase 2)\n"
         for ident in scan.integration_identities:
@@ -117,7 +113,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
 
     cross_cutting = json.dumps(classification.get("cross_cutting", []), indent=2)
 
-    # Enrich giant files with cluster info from Phase 2
+    # Giant files with decomposition cluster info
     giant_files_list = classification.get("giant_files", [])
     giant_parts = []
     for f in giant_files_list:
@@ -125,12 +121,12 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         cluster_info = ""
         if f in scan.giant_file_clusters:
             analysis = scan.giant_file_clusters[f]
-            cluster_names = [c.cluster_name for c in analysis.clusters]
-            cluster_info = f" → clusters: {', '.join(cluster_names)}"
+            cluster_names_list = [c.cluster_name for c in analysis.clusters]
+            cluster_info = f" → clusters: {', '.join(cluster_names_list)}"
         giant_parts.append(f"- {f} ({lc} lines){cluster_info}")
     giant_files_str = "\n".join(giant_parts) or "(none)"
 
-    # Build database info from artifact_scan
+    # Database info from artifact_scan
     database_info = "(none detected)"
     if (
         scan.artifact_scan
@@ -152,7 +148,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
             db_parts.append(f"  Schema files: {', '.join(db_scan.schema_files)}")
         database_info = "\n".join(db_parts)
 
-    # Build max_pages instruction: 0 = no cap
+    # max_pages instruction
     if max_pages and max_pages > 0:
         max_pages_instruction = f"- Maximum total buckets: {max_pages}"
     else:
@@ -166,16 +162,14 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         )
 
     propose_prompt = PROPOSE_PROMPT.format(
-        classification_summary=classification_summary,
+        named_clusters=named_clusters_str[:18000],
         endpoint_count=len(published_endpoints),
-        endpoints=endpoints_str[:15000],
+        endpoints=endpoints_str[:12000],
         integration_signals=integration_signals,
         cross_cutting=cross_cutting,
         giant_files=giant_files_str,
         database_info=database_info,
-        topic_candidates=topic_candidates_str,
         research_context=research_context_str,
-        flow_candidates=flow_candidates_str,
         repo_profile=repo_profile_str,
         max_pages_instruction=max_pages_instruction,
     )
@@ -252,14 +246,13 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         include_endpoint_pages=cfg.get("include_endpoint_pages", True),
     )
     plan = _ensure_database_runtime_and_interface_buckets(plan, scan, cfg)
-    plan = _ensure_flow_buckets(plan, scan, cfg)
-    plan = _expand_flow_bucket_ownership(plan, scan, cfg)
+    plan = _attach_flow_hints_to_cluster_buckets(plan, scan, cfg)
 
     # ── Inject Start Here and Debug Runbook buckets ──────────────────────
     plan = _inject_start_here_and_debug_buckets(plan, scan, cfg)
 
     plan = _assign_publication_tiers(plan, scan, classification)
-    plan = _shape_plan_nav(plan, classification)
+    plan = _shape_plan_nav(plan, classification, scan)
     plan = _apply_page_contracts(plan, scan, classification)
 
     step_start = time.perf_counter()
@@ -666,6 +659,20 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> Rep
         f"{stats['signal_dispatch']} signals, {stats['event_dispatch']} events)"
     )
 
+    # 2.5b Topology analysis (derives nav structure from call graph)
+    from .topology import build_topology_map
+    console.print("  [bold]Analysing call graph topology...[/bold]")
+    scan.topology_map = build_topology_map(scan)
+    tmap = scan.topology_map
+    if tmap.clusters:
+        non_found = [c for c in tmap.clusters if not c.is_foundational]
+        console.print(
+            f"  [green]✓[/green] Topology: {len(non_found)} domain cluster(s), "
+            f"{len(tmap.foundational_files)} foundational file(s)"
+        )
+    else:
+        console.print("  [dim]No call graph topology detected — falling back to heuristic nav[/dim]")
+
     # 2.6 Debug signal discovery
     console.print("  [bold]Discovering debug signals...[/bold]")
     scan.debug_signals = discover_debug_signals(
@@ -695,5 +702,5 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
 
 
 from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _derive_topic_candidates, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
-from .utils import _build_classification_summary, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_topic_candidates, _format_flow_candidates, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
-from .specializations import _ensure_database_runtime_and_interface_buckets, _ensure_flow_buckets, _expand_flow_bucket_ownership
+from .utils import _build_classification_summary, _build_named_clusters_str, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_topic_candidates, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
+from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets

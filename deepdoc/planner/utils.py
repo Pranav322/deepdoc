@@ -382,6 +382,150 @@ def _format_research_context(scan: RepoScan) -> str:
     return "\n".join(lines)
 
 
+def _format_topology_clusters(scan: Any) -> str:
+    """Format topology clusters for the classify prompt.
+
+    Each cluster shows its entry files with key symbols, the files it owns,
+    side effects, and external calls — giving the LLM full context to name it.
+    Returns '(none)' when no topology map is available.
+    """
+    tmap = getattr(scan, "topology_map", None)
+    if not tmap or not tmap.clusters:
+        return "(none)"
+
+    lines: list[str] = []
+    for cluster in tmap.clusters:
+        if cluster.is_foundational:
+            lines.append(
+                f"\n[foundational — shared infrastructure]\n"
+                f"  Files ({len(cluster.all_files)}): "
+                + ", ".join(cluster.all_files[:8])
+                + (f" +{len(cluster.all_files) - 8} more" if len(cluster.all_files) > 8 else "")
+            )
+            continue
+
+        entry_parts: list[str] = []
+        for ef in cluster.entry_files[:3]:
+            syms = ""
+            pf = getattr(scan, "parsed_files", {}).get(ef)
+            if pf and pf.symbols:
+                sym_names = [s.name for s in pf.symbols[:4]]
+                syms = f" [{', '.join(sym_names)}]"
+            entry_parts.append(f"{ef}{syms}")
+        entry_str = "; ".join(entry_parts) or "(none)"
+
+        owned = cluster.all_files
+        owned_str = ", ".join(owned[:6])
+        if len(owned) > 6:
+            owned_str += f" +{len(owned) - 6} more"
+
+        extras: list[str] = []
+        if cluster.side_effects:
+            extras.append("side-effects: " + ", ".join(cluster.side_effects[:4]))
+        if cluster.external_calls:
+            extras.append("external: " + ", ".join(cluster.external_calls[:4]))
+        if cluster.shared_dep_files:
+            extras.append("uses-infra: " + ", ".join(cluster.shared_dep_files[:3]))
+        extras_str = (" | " + " | ".join(extras)) if extras else ""
+
+        lines.append(
+            f"\n[cluster:{cluster.cluster_id}]\n"
+            f"  Entry: {entry_str}\n"
+            f"  Files ({len(owned)}): {owned_str}"
+            + extras_str
+        )
+
+    return "\n".join(lines) if lines else "(none)"
+
+
+def _build_named_clusters_str(classification: dict, scan: Any) -> str:
+    """Build the named-clusters context string for the PROPOSE_PROMPT.
+
+    Merges:
+    - LLM cluster names/sections/descriptions from the classify step
+      (classification["cluster_names"][cluster_id] → {name, section, description, nav_position})
+    - Topology cluster file lists, entry files, side effects, and external calls
+      from scan.topology_map
+
+    Falls back to a file-summary-only blob when no topology map is available.
+    """
+    cluster_names: dict[str, dict] = classification.get("cluster_names", {})
+    tmap = getattr(scan, "topology_map", None)
+
+    if not tmap or not tmap.clusters:
+        # Graceful degradation: just echo the cluster_names from classify
+        if not cluster_names:
+            return _format_summaries_compressed(scan.file_summaries)
+        lines: list[str] = []
+        for cid, info in cluster_names.items():
+            lines.append(
+                f"\n[cluster:{cid}]\n"
+                f"  Name: {info.get('name', cid)}\n"
+                f"  Section: {info.get('section', '')}\n"
+                f"  Description: {info.get('description', '')}"
+            )
+        return "\n".join(lines)
+
+    lines = []
+    for cluster in tmap.clusters:
+        cid = cluster.cluster_id
+        info = cluster_names.get(cid, {})
+        name = info.get("name") or cid
+        section = info.get("section", "")
+        description = info.get("description", "")
+        nav_position = info.get("nav_position", "")
+
+        if cluster.is_foundational:
+            foundational_files_str = ", ".join(cluster.all_files[:8])
+            if len(cluster.all_files) > 8:
+                foundational_files_str += f" +{len(cluster.all_files) - 8} more"
+            lines.append(
+                f"\n[cluster:{cid}] {name} — foundational shared infrastructure\n"
+                f"  Section: {section or 'Supporting Infrastructure'}\n"
+                f"  Files ({len(cluster.all_files)}): {foundational_files_str}"
+            )
+            continue
+
+        # Entry files with symbol names
+        entry_parts: list[str] = []
+        for ef in cluster.entry_files[:3]:
+            syms = ""
+            pf = getattr(scan, "parsed_files", {}).get(ef)
+            if pf and pf.symbols:
+                sym_names = [s.name for s in pf.symbols[:4]]
+                syms = f" [{', '.join(sym_names)}]"
+            entry_parts.append(f"{ef}{syms}")
+        entry_str = "; ".join(entry_parts) or "(none)"
+
+        # All owned files
+        owned = cluster.all_files
+        owned_str = ", ".join(owned[:8])
+        if len(owned) > 8:
+            owned_str += f" +{len(owned) - 8} more"
+
+        # Extra signals
+        extras: list[str] = []
+        if cluster.side_effects:
+            extras.append("side-effects: " + ", ".join(cluster.side_effects[:4]))
+        if cluster.external_calls:
+            extras.append("external: " + ", ".join(cluster.external_calls[:4]))
+        if cluster.shared_dep_files:
+            extras.append("uses-infra: " + ", ".join(cluster.shared_dep_files[:3]))
+        extras_str = ("\n  Signals: " + " | ".join(extras)) if extras else ""
+
+        lines.append(
+            f"\n[cluster:{cid}] {name}\n"
+            f"  Section: {section}"
+            + (f" | nav_position: {nav_position}" if nav_position else "")
+            + f"\n  Description: {description}\n"
+            f"  Entry files: {entry_str}\n"
+            f"  Files ({len(owned)}): {owned_str}"
+            + extras_str
+        )
+
+    return "\n".join(lines) if lines else _format_summaries_compressed(scan.file_summaries)
+
+
 def _format_flow_candidates(candidates: list[Any]) -> str:
     if not candidates:
         return "(none)"

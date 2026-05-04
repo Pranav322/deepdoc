@@ -127,14 +127,10 @@ DOC_CONTEXT_FILENAMES = {
     "experiments.md",
 }
 
-CLASSIFY_SYSTEM = """\
-You are a senior software architect analyzing a repository. Classify every file \
-and artifact into categories. Respond with valid JSON only — no markdown, no \
-explanation.
+CLASSIFY_SYSTEM = """You are a senior software architect analyzing a repository. You are given pre-computed topology clusters derived from the call graph -- groups of files that are already structurally related. Your job is to NAME each cluster (give it a human-readable domain name and nav section) and identify cross-cutting concerns, integrations, and the repo profile. Respond with valid JSON only -- no markdown, no explanation.
 """
 
-CLASSIFY_PROMPT = """\
-Analyze this repository and classify all files/artifacts.
+CLASSIFY_PROMPT = """Analyze this repository and name its topology clusters.
 
 ## Repository Overview
 - **Languages**: {languages}
@@ -144,10 +140,10 @@ Analyze this repository and classify all files/artifacts.
 - **Entry points**: {entry_points}
 - **Config files**: {config_files}
 
-## Directory Structure
-{file_tree}
+## Topology Clusters (derived from call graph -- groups are already structurally correct)
+{topology_clusters}
 
-## File Summaries
+## File Summaries (for context on files not covered by clusters)
 {file_summaries}
 
 ## API Endpoints
@@ -155,16 +151,17 @@ Analyze this repository and classify all files/artifacts.
 
 ---
 
-Classify each source file into ONE primary category and optionally tag secondary roles.
+For each cluster give it a domain name and a nav section.
+For the foundational cluster, give it an appropriate infrastructure name.
 
 Return JSON:
 {{
-  "source_files": {{
-    "path/to/file.py": {{
-      "primary": "handler|service|model|validator|serializer|middleware|util|config|route|task|test|migration|constant|type_def|auth|other",
-      "secondary": ["integration_client", "webhook_handler", "queue_task", ...],
-      "domain_hint": "orders|auth|payments|users|...",
-      "line_count": 500
+  "cluster_names": {{
+    "<cluster_id>": {{
+      "name": "Human-readable domain name, e.g. Order Management",
+      "section": "Nav section name, e.g. Order Management or Payments > Gateway",
+      "description": "One sentence: what this cluster does",
+      "nav_position": "primary|secondary|infrastructure"
     }}
   }},
   "setup_artifacts": ["Dockerfile", "docker-compose.yml", ...],
@@ -193,100 +190,60 @@ Return JSON:
 }}
 
 Rules:
-- Every source file in {file_summaries} MUST appear in source_files.
-- giant_files = any source file with {giant_file_threshold}+ lines.
-- integration_signals: look for HTTP clients, SDK imports, env vars with API/URL/KEY \
-  suffixes, webhook handlers, named wrappers, queue tasks that sync with external systems.
-- cross_cutting: identify shared concerns that span multiple features — auth middleware, \
-  error handlers, logging setup, database connection, caching layer, etc.
-- domain_hint: your best guess at which business domain this file belongs to (orders, \
-  users, products, payments, inventory, shipping, etc.). Use "shared" for utilities.
-- repo_profile: Infer the repo's primary type from frameworks, entry points, and file patterns.
-  falcon_backend: Falcon app, add_route calls, responder classes, middleware chain, service/business logic.
-  backend_service: route handlers, middleware, request/response cycles, REST/GraphQL endpoints.
-  framework_library: libraries/frameworks/SDKs where core value is reusable APIs, rendering, plugins, parsers, or developer-facing abstractions.
-  frontend_admin: admin/front-end applications with UI/component/state-heavy structure.
+- cluster_names: name EVERY cluster id listed above, including "foundational".
+- section: use product/domain language -- "Order Management", "Payment Processing",
+  "Authentication", "Infrastructure & Shared Code". NOT technical-layer names
+  like "Services", "Controllers", "Core Workflows".
+- nav_position: "primary" for user-facing entry-point clusters, "secondary" for
+  internal feature clusters, "infrastructure" for the foundational cluster.
+- integration_signals: HTTP clients, SDK imports, env vars with API/URL/KEY suffixes,
+  webhook handlers, named wrappers, queue tasks that sync with external systems.
+- cross_cutting: shared concerns spanning multiple features (auth, logging, caching, etc.).
+- giant_files: any source file with {giant_file_threshold}+ lines.
+- repo_profile: infer from frameworks, entry points, and file patterns.
+  falcon_backend: Falcon app, add_route calls, responder classes, middleware chain.
+  backend_service: route handlers, middleware, request/response cycles, REST/GraphQL.
+  framework_library: reusable APIs, rendering, plugins, parsers, developer-facing abstractions.
+  frontend_admin: UI/component/state-heavy admin or frontend applications.
   platform_monorepo: multiple packages, build orchestration, shared infrastructure.
   cli_tooling: CLI-first repos, internal tooling, automation, developer workflow surfaces.
-  research_training: training loops, model definitions, optimizers, dataloaders, evaluation scripts.
-  hybrid: no single repo shape dominates; combine backend/frontend/tooling/platform concerns.
+  research_training: training loops, model definitions, optimizers, dataloaders, eval scripts.
+  hybrid: no single shape dominates.
   other: none of the above clearly dominates.
-  secondary_traits captures hybrid aspects — e.g. an ML repo with a web UI gets
-  primary_type "research_training" with secondary_traits ["has_frontend", "has_cli"].
 """
 
-PROPOSE_SYSTEM = """\
-You are a senior documentation architect. Given a classified repository, propose \
-documentation buckets. Respond with valid JSON only — no markdown, no explanation.
+PROPOSE_SYSTEM = """You are a senior documentation architect. Given a repository with pre-named topology clusters, propose documentation buckets for each cluster. The nav section names come from the cluster naming step -- do NOT invent new section names. Propose bucket granularity (how many pages a cluster needs) and what each page covers. Respond with valid JSON only -- no markdown, no explanation.
 
-bucket_type is a FREE-FORM label — you decide what categories fit this specific repo. \
-Common examples: "architecture", "setup", "feature", "endpoint-family", "integration", \
-"database", "deployment", "testing", "cli-commands", "sdk-module", "plugin", \
-"pipeline-stage", "package", "middleware", "auth", "config" — but invent your own \
-if the repo needs something different.
+bucket_type is a FREE-FORM label. Common examples: "architecture", "setup", "feature", "endpoint-family", "integration", "database", "deployment", "testing", "cli-commands", "sdk-module", "plugin", "pipeline-stage", "package", "middleware", "auth", "config" -- but invent your own if the repo needs it.
 
-Each bucket MUST also include a "generation_hints" object with these boolean flags \
-(set true only when applicable):
-- include_endpoint_detail: this bucket documents API endpoints (assemble endpoint listing)
-- is_endpoint_ref: this is a single-endpoint reference page (used only for canonical OpenAPI pages or legacy plans)
-- is_endpoint_family: this groups related endpoints (e.g. all /orders/* routes)
+Each bucket MUST include a "generation_hints" object with these flags (set true only when applicable):
+- include_endpoint_detail: this bucket documents API endpoints
+- is_endpoint_ref: single-endpoint reference page (OpenAPI pages only)
+- is_endpoint_family: groups related endpoints (all /orders/* routes)
 - include_openapi: inject OpenAPI spec context when generating
 - include_database_context: inject DB schema, ER diagrams, model definitions
 - include_integration_detail: full external-system integration context
-- is_introduction_page: this is the landing/overview page (becomes index.mdx)
-- prompt_style: selects writing-guidance template — one of "system", "feature", \
-  "endpoint", "endpoint_ref", "integration", "database", "training", \
-  "architecture_component", "data_pipeline", or "general"
-- icon: Heroicon name for nav (e.g. "server", "bolt", "globe-alt", "database", \
-  "puzzle-piece", "book-open", "command-line", "cube", "cog")
+- is_introduction_page: landing/overview page (becomes index.mdx)
+- prompt_style: one of "system", "feature", "endpoint", "endpoint_ref",   "integration", "database", "training", "architecture_component",   "data_pipeline", or "general"
+- icon: Heroicon name (e.g. "server", "bolt", "globe-alt", "database",   "puzzle-piece", "book-open", "command-line", "cube", "cog")
 
 Rules:
-- PREFER DEPTH OVER BREADTH: create the fewest buckets that still cover every \
-  important concept deeply. One rich, comprehensive page is better than three \
-  thin pages covering different angles of the same topic.
-- TARGET GRANULARITY: Each bucket should document ONE specific concept, algorithm,
-  component, or workflow — NOT a broad area. A bucket titled "Shared Logic & Utilities"
-  or "Common Helpers" is almost always too broad. Split it by concept instead.
-- NO DUPLICATION: Each concept should appear in exactly ONE bucket. Do NOT create \
-  separate pages for the same concept viewed from different angles (e.g. \
-  "Vinculum Overview" + "Vinculum Workflow" + "Vinculum Status Sync" should be \
-  a single "Vinculum Integration" page).
-- INTEGRATION BUCKETS: ONE page per external system unless it has 5+ dedicated \
-  files with genuinely distinct concerns. Most integrations fit in a single page.
-- BUCKET COUNT SANITY CHECK (not a quota — never create filler to hit a number):
-  Small repos (<20 files): ~8-15 buckets is typical
-  Medium repos (20-80 files): ~15-25 buckets is typical
-  Large repos (80+ files): ~25-40 buckets is typical
-  These are sanity ranges. Some repos genuinely deserve fewer pages. Never invent
-  pages just to hit a number. Fewer, richer pages are always preferred.
-- USE NESTED NAV SECTIONS freely via "Parent > Child" format.
-  Example: "Model Architecture > Attention Mechanisms", "Training > Optimization".
-  You may use up to 3 levels: "Parent > Child > Grandchild".
-- AVOID catch-all buckets: Do NOT create buckets named "Utilities", "Helpers",
-  "Common Logic", "Shared Code", or "Miscellaneous". Every file belongs to a
-  concept — find the concept.
+- SECTION NAMES: use the section names from cluster_names exactly.   Do NOT invent new sections. You may use "Parent > Child" sub-sections   within a cluster's section if the cluster is large.
+- FLOW PAGES: do NOT create separate "Core Workflows" or "Flow" pages.   Flow content (call chain, sequence diagram, side effects) belongs inside   the domain bucket that owns those entry-point files. Set   required_diagrams: ["sequence_diagram"] on any bucket with entry-point files.
+- PREFER DEPTH: fewest buckets that cover every concept deeply. One rich page   beats three thin pages.
+- NO DUPLICATION: each concept appears in exactly ONE bucket.
+- INTEGRATION BUCKETS: one page per external system (unless 5+ dedicated files).
+- BUCKET COUNT: Small (<20 files): ~8-15, Medium (20-80): ~15-25, Large (80+): ~25-40.   Never invent filler pages to hit a number.
+- AVOID catch-all buckets: no "Utilities", "Helpers", "Common Logic", "Miscellaneous".
 - Group by BUSINESS WORKFLOW or LOGICAL CONCERN, not by file path.
-- Endpoint family buckets cover a resource family (all /orders/* endpoints, not one per route). Do not create one generated MDX page per scanned route.
-- If an integration is trivial (used in one place, no setup complexity), embed it in the \
-  relevant bucket instead of creating a standalone one.
-- Every bucket MUST have required_sections and required_diagrams that make sense for \
-  its specific content — do NOT use generic sections for everything.
-- The nav_structure section names should fit this repo — do NOT force standard names \
-  like "Features" or "API Reference" if they don't fit. Use whatever makes sense.
-- DEMOTION RULES:
-  - Do NOT create single-file utility/helper buckets unless the file contains a substantial \
-    algorithm, protocol, or subsystem worth a standalone page.
-  - If primary_type is not backend_service or falcon_backend, treat health/stats/service wrappers and incidental \
-    HTTP usage as secondary details unless they are central runtime surfaces.
-  - For non-backend_service/falcon_backend repos, fold incidental HTTP/integration behavior into the relevant \
-    training, data, evaluation, or inference buckets instead of creating standalone pages.
+- Every bucket MUST have required_sections and required_diagrams specific to its content.
+- DEMOTION: do NOT create single-file utility buckets unless the file has a   substantial algorithm or subsystem.
 """
 
-PROPOSE_PROMPT = """\
-Based on this repository classification, propose documentation buckets.
+PROPOSE_PROMPT = """Based on these named topology clusters, propose documentation buckets.
 
-## Classification Summary
-{classification_summary}
+## Named Clusters (section names are FIXED -- use them verbatim)
+{named_clusters}
 
 ## API Endpoints ({endpoint_count} total)
 {endpoints}
@@ -303,12 +260,6 @@ Based on this repository classification, propose documentation buckets.
 ## Database / Schema Info
 {database_info}
 
-## Ranked Topic Candidates
-{topic_candidates}
-
-## Flow Candidates (call graph + endpoints/runtime)
-{flow_candidates}
-
 ## Research / Markdown Context
 {research_context}
 
@@ -317,24 +268,12 @@ Based on this repository classification, propose documentation buckets.
 
 ## Constraints
 {max_pages_instruction}
-- Must include at minimum: 1 bucket for architecture/overview (set is_introduction_page: true)
+- Must include: 1 introduction/overview bucket (is_introduction_page: true)
 - If setup artifacts exist, include a setup/getting-started bucket
-- If database models are detected, include a database bucket with is_introduction_page: false, \
-  include_database_context: true, prompt_style: "database", and required_sections including \
-  "er_diagram", "table_definitions", "relationships", "migrations"
-- If flow candidates exist, create dedicated "Core Workflows" buckets for the top flows.\
-  Each flow bucket should reference the entrypoints (routes/tasks) and the main call chain.
-- Group by business workflow or logical concern, NOT file directories
-- Endpoint family buckets should group by resource family, NOT one-per-route
-- Create as many buckets as needed for thorough coverage — prefer depth and completeness \
-  over brevity. Every important area should have its own bucket.
-- Scanned endpoints will be attached to grouped API-reference pages in a follow-up step — \
-  do NOT create single-endpoint reference buckets here.
-- Name nav sections after the business domains they cover (e.g. "Order Management", \
-  "Authentication & User Management", "Product Catalog"), NOT generic technical layers \
-  ("Core Workflows", "Subsystems", "Architecture", "API Reference", "Background Jobs"). \
-  The nav should read like a product feature list, not a software architecture diagram. \
-  Each section name should tell a reader what part of the product they are exploring.
+- If database models detected: include a database bucket with   include_database_context: true, prompt_style: "database",   required_sections: ["er_diagram", "table_definitions", "relationships", "migrations"]
+- Endpoint-entry-point buckets MUST have required_diagrams: ["sequence_diagram"]   to embed the call flow inline -- no separate flow pages
+- Group by business workflow, NOT file directories
+- Endpoint family buckets group by resource family, NOT one-per-route
 
 Return JSON:
 {{
@@ -343,16 +282,17 @@ Return JSON:
       "bucket_type": "your-chosen-category-label",
       "title": "Page Title",
       "slug": "page-slug",
-      "section": "Nav Section Name",
+      "section": "Exact section name from named_clusters above",
+      "cluster_id": "the cluster_id this bucket belongs to",
       "description": "What this page covers",
       "rationale": "Why this bucket exists and what it groups",
       "candidate_files": ["path/to/file.py", ...],
       "candidate_domains": ["orders", "payments"],
       "depends_on": ["other-bucket-slug"],
       "required_sections": ["overview", "main_workflows", "state_transitions", ...],
-      "required_diagrams": ["architecture_flow", "sequence_diagram", "er_diagram", ...],
-      "coverage_targets": ["OrderController checkout flow", "Juspay payment auth", ...],
-        "generation_hints": {{
+      "required_diagrams": ["sequence_diagram", "er_diagram", ...],
+      "coverage_targets": ["OrderController checkout flow", "payment auth", ...],
+      "generation_hints": {{
         "include_endpoint_detail": false,
         "is_endpoint_ref": false,
         "is_endpoint_family": false,
@@ -360,24 +300,14 @@ Return JSON:
         "include_database_context": false,
         "include_integration_detail": false,
         "is_introduction_page": false,
-        "prompt_style": "system|feature|endpoint|endpoint_ref|integration|database|training|architecture_component|data_pipeline|general",
+        "prompt_style": "system|feature|endpoint|integration|database|training|architecture_component|data_pipeline|general",
         "icon": "heroicon-name"
       }}
     }}
-  ],
-  "nav_structure": {{
-    "Section Name": ["slug-1", "slug-2"],
-    "Another Section": ["slug-3"]
-  }}
+  ]
 }}
 
-Examples of good nav structures (varies by repo type):
-- API service: "Overview" > "Core Features > Orders" > "Core Features > Payments" > "API Families" > "Integrations" > "Operations"
-- ML/AI training: "Overview" > "Model Architecture > Transformer" > "Model Architecture > Attention" > "Training > Base Training" > "Training > SFT" > "Optimization > Optimizer" > "Optimization > LR Schedules" > "Data Pipeline > Tokenizer" > "Data Pipeline > DataLoader" > "Evaluation" > "Inference"
-- Monorepo product: "Overview" > "Package: Core > Execution Engine" > "Package: Core > Node System" > "Package: CLI" > "Package: Frontend > Canvas" > "Shared Infrastructure" > "Build & Release"
-
 Repo profile: {repo_profile}
-Use the profile to guide your nav structure and bucket types. These examples are guidance, not templates.
 """
 
 ASSIGN_SYSTEM = """\

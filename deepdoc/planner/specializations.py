@@ -26,129 +26,95 @@ def _ensure_database_runtime_and_interface_buckets(
     return plan
 
 
-def _ensure_flow_buckets(
+def _attach_flow_hints_to_cluster_buckets(
     plan: DocPlan,
     scan: RepoScan,
     cfg: dict[str, Any],
 ) -> DocPlan:
+    """Embed flow context (call chain, entrypoints, side effects) into the
+    domain buckets that own the entry-point files.
+
+    Instead of creating a separate "Core Workflows" section, each flow
+    candidate's context is attached to whichever existing bucket already
+    owns the flow's entry files. If no owning bucket is found, the candidate
+    is skipped — the topology-based bucket assignment should cover it.
+    """
     candidates = list(getattr(scan, "flow_candidates", []) or [])
     if not candidates and scan.call_graph:
         from .flow_candidates import build_flow_candidates
-
         candidates = build_flow_candidates(scan)
         scan.flow_candidates = candidates
 
     if not candidates:
         return plan
 
-    max_flow_pages = int(cfg.get("max_flow_pages", 8))
-    existing_slugs = {bucket.slug for bucket in plan.buckets}
-    existing_flow_ids = {
-        bucket.generation_hints.get("flow_id")
-        for bucket in plan.buckets
-        if bucket.generation_hints
-    }
-    new_buckets: list[DocBucket] = []
-
-    for index, candidate in enumerate(candidates[:max_flow_pages]):
-        if candidate.flow_id in existing_slugs or candidate.flow_id in existing_flow_ids:
-            continue
-
-        entry_files = sorted(
-            {
-                ep.handler_file
-                for ep in candidate.entry_points
-                if ep.handler_file
-            }
-        )
-        entry_symbols = sorted(
-            {
-                ep.handler_symbol
-                for ep in candidate.entry_points
-                if ep.handler_symbol
-            }
-        )
-        entry_labels = [ep.label for ep in candidate.entry_points if ep.label]
-        entry_desc = ", ".join(entry_labels[:3]) if entry_labels else "runtime surface"
-
-        new_buckets.append(
-            DocBucket(
-                bucket_type="flow",
-                title=candidate.title,
-                slug=candidate.flow_id,
-                section="Core Workflows",
-                description=(
-                    f"End-to-end flow starting at {entry_desc} and tracing the main call chain."
-                ),
-                owned_files=entry_files,
-                owned_symbols=entry_symbols,
-                required_sections=[
-                    "overview",
-                    "entrypoints",
-                    "call_flow",
-                    "side_effects",
-                    "data_stores",
-                ],
-                required_diagrams=["sequence_diagram"],
-                generation_hints={
-                    "prompt_style": "feature",
-                    "icon": "bolt",
-                    "flow_id": candidate.flow_id,
-                    "flow_entry_kind": candidate.entry_kind,
-                    "flow_entrypoints": [
-                        {
-                            "kind": ep.kind,
-                            "label": ep.label,
-                            "file": ep.handler_file,
-                            "symbol": ep.handler_symbol,
-                            "family": ep.endpoint_family,
-                            "framework": ep.framework,
-                        }
-                        for ep in candidate.entry_points
-                    ],
-                },
-                priority=10 + index,
-            )
-        )
-
-    if new_buckets:
-        plan.buckets.extend(new_buckets)
-        plan.buckets = sorted(plan.buckets, key=lambda bucket: bucket.priority)
-    return plan
-
-
-def _expand_flow_bucket_ownership(
-    plan: DocPlan,
-    scan: RepoScan,
-    cfg: dict[str, Any],
-) -> DocPlan:
-    candidates = list(getattr(scan, "flow_candidates", []) or [])
-    if not candidates:
-        return plan
-
-    flow_by_id = {candidate.flow_id: candidate for candidate in candidates}
     max_flow_files = int(cfg.get("max_flow_files", 45))
     max_flow_symbols = int(cfg.get("max_flow_symbols", 80))
 
+    # Build entry-file → bucket index for fast lookup
+    file_to_bucket: dict[str, DocBucket] = {}
     for bucket in plan.buckets:
-        hints = bucket.generation_hints or {}
-        flow_id = hints.get("flow_id")
-        if not flow_id:
+        for f in bucket.owned_files:
+            file_to_bucket.setdefault(f, bucket)
+
+    for candidate in candidates:
+        entry_files = sorted({ep.handler_file for ep in candidate.entry_points if ep.handler_file})
+        entry_symbols = sorted({ep.handler_symbol for ep in candidate.entry_points if ep.handler_symbol})
+
+        # Find the bucket that owns the most entry files
+        score: dict[str, int] = {}
+        for f in entry_files:
+            b = file_to_bucket.get(f)
+            if b:
+                score[b.slug] = score.get(b.slug, 0) + 1
+        if not score:
             continue
-        candidate = flow_by_id.get(flow_id)
-        if not candidate:
+        best_slug = max(score, key=lambda s: score[s])
+        owner = next((b for b in plan.buckets if b.slug == best_slug), None)
+        if not owner:
             continue
 
+        hints = owner.generation_hints or {}
+
+        # Attach flow data — never overwrite existing explicit hints
+        if "flow_entrypoints" not in hints:
+            hints["flow_entrypoints"] = [
+                {
+                    "kind": ep.kind,
+                    "label": ep.label,
+                    "file": ep.handler_file,
+                    "symbol": ep.handler_symbol,
+                    "family": ep.endpoint_family,
+                    "framework": ep.framework,
+                }
+                for ep in candidate.entry_points
+            ]
+        if "flow_id" not in hints:
+            hints["flow_id"] = candidate.flow_id
+        if "flow_entry_kind" not in hints:
+            hints["flow_entry_kind"] = candidate.entry_kind
+
+        owner.generation_hints = hints
+
+        # Expand file and symbol ownership with the full call chain
         if candidate.involved_files:
-            bucket.owned_files = _merge_ordered(
-                bucket.owned_files,
+            owner.owned_files = _merge_ordered(
+                owner.owned_files,
                 candidate.involved_files[:max_flow_files],
             )
         if candidate.involved_symbols:
-            bucket.owned_symbols = _merge_ordered(
-                bucket.owned_symbols,
+            owner.owned_symbols = _merge_ordered(
+                owner.owned_symbols,
                 candidate.involved_symbols[:max_flow_symbols],
             )
+
+        # Ensure sequence diagram is in required_diagrams
+        if "sequence_diagram" not in (owner.required_diagrams or []):
+            owner.required_diagrams = list(owner.required_diagrams or []) + ["sequence_diagram"]
+
+        # Update file_to_bucket index for newly added files
+        for f in owner.owned_files:
+            file_to_bucket.setdefault(f, owner)
 
     return plan
 

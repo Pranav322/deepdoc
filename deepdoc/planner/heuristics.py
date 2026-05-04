@@ -14,7 +14,7 @@ from .bucket_injection import (
 from .nav_shaping import (
     _shape_plan_nav, _merge_duplicate_setup_bucket, _normalize_nav_section,
     _build_endpoint_reference_nav, _append_nav_slug, _section_top,
-    _default_section_for_primary, _section_rank,
+    _default_section_for_primary,
 )
 from .endpoint_refs import _auto_generate_endpoint_refs, _stable_specialized_slug
 
@@ -385,103 +385,6 @@ def _build_heuristic_assignment(proposal: dict[str, Any], scan: RepoScan) -> dic
     }
 
 
-
-
-def _shape_plan_nav(plan: DocPlan, classification: dict[str, Any]) -> DocPlan:
-    """Normalize sections and build a repo-agnostic, reader-first nav flow."""
-    primary = classification.get("repo_profile", {}).get("primary_type", "other")
-    merged_utilities: list[DocBucket] = []
-    new_buckets: list[DocBucket] = []
-
-    for bucket in plan.buckets:
-        title_lower = bucket.title.lower()
-        if (
-            primary == "research_training"
-            and len(bucket.owned_files) <= 2
-            and any(token in title_lower for token in ("utilities", "utility"))
-        ):
-            merged_utilities.append(bucket)
-            continue
-
-        hints = bucket.generation_hints or {}
-        if not hints.get("preserve_section"):
-            bucket.section = _canonical_section_for_bucket(bucket, primary)
-
-        bucket.section = _normalize_nav_section(bucket.section, primary)
-        new_buckets.append(bucket)
-
-    if merged_utilities:
-        merged = DocBucket(
-            bucket_type="utility-group",
-            title="Common Utilities & Configuration",
-            slug="common-utilities-configuration",
-            section=_normalize_nav_section("Operations", primary),
-            description="Shared low-level helpers and configuration utilities referenced across the repository",
-            owned_files=sorted(
-                {f for bucket in merged_utilities for f in bucket.owned_files}
-            ),
-            required_sections=[
-                "overview",
-                "shared_helpers",
-                "configuration",
-                "usage_patterns",
-            ],
-            generation_hints={"prompt_style": "general", "icon": "cube"},
-            priority=min(bucket.priority for bucket in merged_utilities),
-        )
-        new_buckets.append(merged)
-
-    plan.buckets = sorted(new_buckets, key=lambda bucket: bucket.priority)
-    plan.buckets = _merge_duplicate_setup_bucket(plan.buckets)
-
-    nav: dict[str, list[str]] = defaultdict(list)
-    slug_to_bucket = {bucket.slug: bucket for bucket in plan.buckets}
-
-    fixed_start_here = ["start-here", "local-development-setup", "domain-glossary"]
-    for slug in fixed_start_here:
-        if slug in slug_to_bucket:
-            _append_nav_slug(nav, "Start Here", slug)
-
-    endpoint_grouped: set[str] = set()
-
-    for bucket in plan.buckets:
-        if bucket.slug in fixed_start_here:
-            continue
-        hints = bucket.generation_hints or {}
-        if hints.get("is_endpoint_family") or hints.get("is_endpoint_ref"):
-            continue
-        section = bucket.section or _default_section_for_primary(primary)
-        _append_nav_slug(nav, section, bucket.slug)
-
-    endpoint_nav = _build_endpoint_reference_nav(plan.buckets)
-    for section_name, slugs in endpoint_nav.items():
-        for slug in slugs:
-            _append_nav_slug(nav, section_name, slug)
-            endpoint_grouped.add(slug)
-
-    for bucket in plan.buckets:
-        hints = bucket.generation_hints or {}
-        if not (hints.get("is_endpoint_family") or hints.get("is_endpoint_ref")):
-            continue
-        if bucket.slug in endpoint_grouped:
-            continue
-        _append_nav_slug(nav, "API Reference", bucket.slug)
-
-    section_order = {section: idx for idx, section in enumerate(nav.keys())}
-    ordered_sections = sorted(
-        nav.keys(),
-        key=lambda section: (
-            _section_rank(_section_top(section), primary),
-            _section_top(section),
-            section_order[section],
-            section,
-        ),
-    )
-
-    plan.nav_structure = {
-        section: nav[section] for section in ordered_sections if nav.get(section)
-    }
-    return plan
 
 
 def _merge_duplicate_setup_bucket(buckets: list[DocBucket]) -> list[DocBucket]:

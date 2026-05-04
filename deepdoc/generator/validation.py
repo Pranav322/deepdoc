@@ -71,6 +71,8 @@ class ValidationResult:
     missing_config_keys: list[str] = field(default_factory=list)
     missing_integrations: list[str] = field(default_factory=list)
     placeholder_sections: list[str] = field(default_factory=list)
+    missing_flow_entrypoints: list[str] = field(default_factory=list)
+    missing_flow_edges: list[str] = field(default_factory=list)
 
 
 class PageValidator:
@@ -121,6 +123,7 @@ class PageValidator:
         self._check_runtime_grounding(content, bucket, evidence, result)
         self._check_config_grounding(content, bucket, evidence, result)
         self._check_integration_grounding(content, bucket, evidence, result)
+        self._check_flow_grounding(content, bucket, evidence, result)
 
         # 7b. Refuse unresolved placeholder sections in publishable docs
         self._check_placeholder_sections(content, result)
@@ -539,6 +542,28 @@ class PageValidator:
             )
             if len(unmatched) >= 4:
                 result.is_valid = False
+
+    def _check_flow_grounding(
+        self,
+        content: str,
+        bucket: DocBucket,
+        evidence: AssembledEvidence | None,
+        result: ValidationResult,
+    ) -> None:
+        if not evidence or not evidence.flow_context:
+            return
+        if not (bucket.generation_hints or {}).get("flow_id"):
+            return
+
+        content_lower = content.lower()
+        if "call flow" not in content_lower:
+            result.missing_flow_edges.append("call_flow")
+        if "side effects" not in content_lower:
+            result.missing_flow_entrypoints.append("side_effects")
+
+        if result.missing_flow_edges or result.missing_flow_entrypoints:
+            result.warnings.append("Missing flow sections grounded by flow context")
+            result.is_valid = False
 
     @staticmethod
     def _normalize_route_path(path: str) -> str:

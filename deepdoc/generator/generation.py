@@ -98,6 +98,7 @@ class PageGenerator:
             full_source += (
                 f"\n\n## Runtime & Background Jobs\n{evidence.runtime_context}"
             )
+        # flow_context is injected via dedicated template placeholder
         if evidence.artifact_context:
             full_source += f"\n\n## Artifacts\n{evidence.artifact_context}"
         if evidence.graph_context:
@@ -162,6 +163,7 @@ class PageGenerator:
             ),
             frameworks=", ".join(self.cfg.get("frameworks") or []),
             source_context=full_source,
+            flow_context=evidence.flow_context or "",
             endpoints_detail=evidence.endpoints_detail,
             openapi_context=openapi_context,
             resource_group=resource_group,

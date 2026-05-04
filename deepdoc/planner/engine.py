@@ -1,4 +1,5 @@
 from .common import *
+from .flow_candidates import build_flow_candidates
 
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     """Run the multi-step planner.
@@ -86,6 +87,12 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
     topic_candidates_str = _format_topic_candidates(topic_candidates)
     research_context_str = _format_research_context(scan)
 
+    # Build flow candidates from call graph + endpoint/runtime evidence
+    step_start = time.perf_counter()
+    scan.flow_candidates = build_flow_candidates(scan)
+    scan.planner_timings["flow_candidates"] = time.perf_counter() - step_start
+    flow_candidates_str = _format_flow_candidates(scan.flow_candidates)
+
     # Enrich with Phase 2 results if available
     if scan.integration_identities:
         integration_signals = "## Discovered Integration Identities (Phase 2)\n"
@@ -168,6 +175,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         database_info=database_info,
         topic_candidates=topic_candidates_str,
         research_context=research_context_str,
+        flow_candidates=flow_candidates_str,
         repo_profile=repo_profile_str,
         max_pages_instruction=max_pages_instruction,
     )
@@ -244,6 +252,8 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         include_endpoint_pages=cfg.get("include_endpoint_pages", True),
     )
     plan = _ensure_database_runtime_and_interface_buckets(plan, scan, cfg)
+    plan = _ensure_flow_buckets(plan, scan, cfg)
+    plan = _expand_flow_bucket_ownership(plan, scan, cfg)
 
     # ── Inject Start Here and Debug Runbook buckets ──────────────────────
     plan = _inject_start_here_and_debug_buckets(plan, scan, cfg)
@@ -685,5 +695,5 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
 
 
 from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _derive_topic_candidates, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
-from .utils import _build_classification_summary, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_topic_candidates, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
-from .specializations import _ensure_database_runtime_and_interface_buckets
+from .utils import _build_classification_summary, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_topic_candidates, _format_flow_candidates, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
+from .specializations import _ensure_database_runtime_and_interface_buckets, _ensure_flow_buckets, _expand_flow_bucket_ownership

@@ -381,3 +381,20 @@ def _format_research_context(scan: RepoScan) -> str:
             lines.append(f"- {path}: {summary[:200]}")
     return "\n".join(lines)
 
+
+def _format_flow_candidates(candidates: list[Any]) -> str:
+    if not candidates:
+        return "(none)"
+    lines: list[str] = []
+    for candidate in candidates[:12]:
+        entry_labels = []
+        for ep in candidate.entry_points[:4]:
+            entry_labels.append(ep.label)
+        entries = ", ".join(entry_labels) or "(no entrypoints)"
+        files = ", ".join(candidate.involved_files[:5])
+        if len(candidate.involved_files) > 5:
+            files += f" +{len(candidate.involved_files) - 5} more"
+        lines.append(
+            f"- {candidate.title} [{candidate.flow_id}] :: entries: {entries} :: files: {files} :: score={candidate.score:.1f}"
+        )
+    return "\n".join(lines)

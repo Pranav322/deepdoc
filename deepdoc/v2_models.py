@@ -131,6 +131,7 @@ class RepoScan:
     config_impacts: list[dict[str, Any]] = field(default_factory=list)
     call_graph: CallGraph | None = None
     debug_signals: list[DebugSignal] = field(default_factory=list)
+    flow_candidates: list[Any] = field(default_factory=list)
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:

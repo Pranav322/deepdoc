@@ -26,6 +26,143 @@ def _ensure_database_runtime_and_interface_buckets(
     return plan
 
 
+def _ensure_flow_buckets(
+    plan: DocPlan,
+    scan: RepoScan,
+    cfg: dict[str, Any],
+) -> DocPlan:
+    candidates = list(getattr(scan, "flow_candidates", []) or [])
+    if not candidates and scan.call_graph:
+        from .flow_candidates import build_flow_candidates
+
+        candidates = build_flow_candidates(scan)
+        scan.flow_candidates = candidates
+
+    if not candidates:
+        return plan
+
+    max_flow_pages = int(cfg.get("max_flow_pages", 8))
+    existing_slugs = {bucket.slug for bucket in plan.buckets}
+    existing_flow_ids = {
+        bucket.generation_hints.get("flow_id")
+        for bucket in plan.buckets
+        if bucket.generation_hints
+    }
+    new_buckets: list[DocBucket] = []
+
+    for index, candidate in enumerate(candidates[:max_flow_pages]):
+        if candidate.flow_id in existing_slugs or candidate.flow_id in existing_flow_ids:
+            continue
+
+        entry_files = sorted(
+            {
+                ep.handler_file
+                for ep in candidate.entry_points
+                if ep.handler_file
+            }
+        )
+        entry_symbols = sorted(
+            {
+                ep.handler_symbol
+                for ep in candidate.entry_points
+                if ep.handler_symbol
+            }
+        )
+        entry_labels = [ep.label for ep in candidate.entry_points if ep.label]
+        entry_desc = ", ".join(entry_labels[:3]) if entry_labels else "runtime surface"
+
+        new_buckets.append(
+            DocBucket(
+                bucket_type="flow",
+                title=candidate.title,
+                slug=candidate.flow_id,
+                section="Core Workflows",
+                description=(
+                    f"End-to-end flow starting at {entry_desc} and tracing the main call chain."
+                ),
+                owned_files=entry_files,
+                owned_symbols=entry_symbols,
+                required_sections=[
+                    "overview",
+                    "entrypoints",
+                    "call_flow",
+                    "side_effects",
+                    "data_stores",
+                ],
+                required_diagrams=["sequence_diagram"],
+                generation_hints={
+                    "prompt_style": "feature",
+                    "icon": "bolt",
+                    "flow_id": candidate.flow_id,
+                    "flow_entry_kind": candidate.entry_kind,
+                    "flow_entrypoints": [
+                        {
+                            "kind": ep.kind,
+                            "label": ep.label,
+                            "file": ep.handler_file,
+                            "symbol": ep.handler_symbol,
+                            "family": ep.endpoint_family,
+                            "framework": ep.framework,
+                        }
+                        for ep in candidate.entry_points
+                    ],
+                },
+                priority=10 + index,
+            )
+        )
+
+    if new_buckets:
+        plan.buckets.extend(new_buckets)
+        plan.buckets = sorted(plan.buckets, key=lambda bucket: bucket.priority)
+    return plan
+
+
+def _expand_flow_bucket_ownership(
+    plan: DocPlan,
+    scan: RepoScan,
+    cfg: dict[str, Any],
+) -> DocPlan:
+    candidates = list(getattr(scan, "flow_candidates", []) or [])
+    if not candidates:
+        return plan
+
+    flow_by_id = {candidate.flow_id: candidate for candidate in candidates}
+    max_flow_files = int(cfg.get("max_flow_files", 45))
+    max_flow_symbols = int(cfg.get("max_flow_symbols", 80))
+
+    for bucket in plan.buckets:
+        hints = bucket.generation_hints or {}
+        flow_id = hints.get("flow_id")
+        if not flow_id:
+            continue
+        candidate = flow_by_id.get(flow_id)
+        if not candidate:
+            continue
+
+        if candidate.involved_files:
+            bucket.owned_files = _merge_ordered(
+                bucket.owned_files,
+                candidate.involved_files[:max_flow_files],
+            )
+        if candidate.involved_symbols:
+            bucket.owned_symbols = _merge_ordered(
+                bucket.owned_symbols,
+                candidate.involved_symbols[:max_flow_symbols],
+            )
+
+    return plan
+
+
+def _merge_ordered(existing: list[str], incoming: list[str]) -> list[str]:
+    seen = set(existing)
+    merged = list(existing)
+    for item in incoming:
+        if item and item not in seen:
+            merged.append(item)
+            seen.add(item)
+    return merged
+
+
 def _replace_specialized_buckets(
     buckets: list[DocBucket],
     *,

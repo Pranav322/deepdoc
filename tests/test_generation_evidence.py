@@ -20,6 +20,7 @@ from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import RepoScan
 from deepdoc.prompts_v2 import OVERVIEW_V2, get_prompt_for_bucket
 from deepdoc.scanner import RuntimeScan, RuntimeScheduler, RuntimeTask
+from deepdoc.planner.flow_candidates import FlowCandidate, EntryPoint
 from tests.conftest import make_bucket, make_plan
 
 
@@ -148,7 +149,85 @@ def _make_scan(repo_root: Path) -> RepoScan:
                 )
             ],
         ),
+        flow_candidates=[],
     )
+
+
+def test_flow_context_is_injected_and_validated(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "routes.py").write_text(
+        "def checkout():\n    return True\n", encoding="utf-8"
+    )
+
+    scan = _make_scan(repo_root)
+    scan.parsed_files["src/routes.py"] = ParsedFile(
+        path=Path("src/routes.py"),
+        language="python",
+        symbols=[
+            Symbol(
+                name="checkout",
+                kind="function",
+                signature="def checkout():",
+                start_line=1,
+                end_line=2,
+            )
+        ],
+        imports=[],
+    )
+    scan.file_summaries["src/routes.py"] = "summary"
+    scan.file_contents["src/routes.py"] = "def checkout():\n    return True\n"
+
+    flow = FlowCandidate(
+        flow_id="checkout-flow",
+        title="Checkout Flow",
+        entry_kind="endpoint_family",
+        entry_points=[
+            EntryPoint(
+                kind="endpoint",
+                label="POST /checkout",
+                handler_file="src/routes.py",
+                handler_symbol="checkout",
+            )
+        ],
+        involved_files=["src/routes.py"],
+        involved_symbols=["src/routes.py::checkout"],
+        score=10.0,
+    )
+    scan.flow_candidates = [flow]
+
+    bucket = make_bucket(
+        "Checkout Flow",
+        "checkout-flow",
+        ["src/routes.py"],
+        generation_hints={"flow_id": "checkout-flow", "prompt_style": "feature"},
+    )
+    plan = make_plan([bucket])
+    cfg = dict(DEFAULT_CONFIG)
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, cfg).assemble(bucket)
+    assert "## Call Flow" in evidence.flow_context
+
+    validator = PageValidator(repo_root, scan)
+    content = (
+        "# Checkout Flow\n\n"
+        "## Call Flow\n"
+        "This flow starts at the checkout handler in `src/routes.py` and moves through the core"
+        " service path. The entrypoint is POST /checkout and the primary call chain follows the"
+        " handler to downstream logic. This section describes the call sequence and the key"
+        " transition points in the flow.\n\n"
+        "## Side Effects\n"
+        "The checkout path can trigger side effects such as async dispatches or audit tasks."
+        " Document these when present, and link back to the originating function.\n\n"
+        "## Configuration & Environment\n"
+        "API_PREFIX (settings.py) controls the routing prefix and affects the checkout path."
+        " This configuration influences request routing and should be documented alongside"
+        " the handler in `src/routes.py` for clarity. This paragraph intentionally provides"
+        " enough detail to satisfy validation word count for the flow page."
+    )
+    result = validator.validate(content, bucket, evidence)
+    assert result.is_valid
 
 
 def test_evidence_assembler_compresses_overflow_files_instead_of_omitting(
@@ -824,6 +903,7 @@ def test_page_validator_flags_unmatched_routes_and_out_of_evidence_refs(
         cross_ref_context="",
         evidence_file_paths={"src/routes.py"},
         total_evidence_chars=0,
+        flow_context="",
     )
     content = """
 # Operations & Deployment
@@ -889,6 +969,7 @@ def test_page_validator_ignores_markup_noise_in_route_claim_detection(
         cross_ref_context="",
         evidence_file_paths={"src/routes.py"},
         total_evidence_chars=0,
+        flow_context="",
     )
     content = """
 # API Health
@@ -950,6 +1031,7 @@ def test_page_validator_normalizes_scheme_less_urls_in_route_claim_detection(
         cross_ref_context="",
         evidence_file_paths={"src/routes.py"},
         total_evidence_chars=0,
+        flow_context="",
     )
     content = """
 # Sync API
@@ -1015,6 +1097,7 @@ def test_page_validator_limits_integration_grounding_to_relevant_identity(
         cross_ref_context="",
         evidence_file_paths={"integrations/vinculum.py"},
         total_evidence_chars=0,
+        flow_context="",
     )
     content = """
 # Vinculum Integration
@@ -1026,6 +1109,78 @@ This page documents how Vinculum requests are validated, transformed, and retrie
 
     assert "Freshdesk" not in result.missing_integrations
     assert "Vinculum" not in result.missing_integrations
+
+
+def test_page_validator_flags_missing_flow_sections_when_flow_context_present(
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "routes.py").write_text(
+        "def checkout():\n    return True\n", encoding="utf-8"
+    )
+
+    scan = _make_scan(repo_root)
+    scan.parsed_files["src/routes.py"] = ParsedFile(
+        path=Path("src/routes.py"),
+        language="python",
+        symbols=[
+            Symbol(
+                name="checkout",
+                kind="function",
+                signature="def checkout():",
+                start_line=1,
+                end_line=2,
+            )
+        ],
+        imports=[],
+    )
+    scan.file_summaries["src/routes.py"] = "summary"
+    scan.file_contents["src/routes.py"] = "def checkout():\n    return True\n"
+
+    flow = FlowCandidate(
+        flow_id="checkout-flow",
+        title="Checkout Flow",
+        entry_kind="endpoint_family",
+        entry_points=[
+            EntryPoint(
+                kind="endpoint",
+                label="POST /checkout",
+                handler_file="src/routes.py",
+                handler_symbol="checkout",
+            )
+        ],
+        involved_files=["src/routes.py"],
+        involved_symbols=["src/routes.py::checkout"],
+        score=10.0,
+    )
+    scan.flow_candidates = [flow]
+
+    bucket = make_bucket(
+        "Checkout Flow",
+        "checkout-flow",
+        ["src/routes.py"],
+        generation_hints={"flow_id": "checkout-flow", "prompt_style": "feature"},
+    )
+    plan = make_plan([bucket])
+    cfg = dict(DEFAULT_CONFIG)
+    evidence = EvidenceAssembler(repo_root, scan, plan, cfg).assemble(bucket)
+
+    content = (
+        "# Checkout Flow\n\n"
+        "This flow page intentionally omits the required execution detail sections. "
+        "It describes the entrypoint and overall intent but avoids explicit headings so the "
+        "validator can detect the missing flow grounding. This paragraph is long enough to "
+        "avoid the short-page validation path. "
+        * 4
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket, evidence)
+
+    assert "call_flow" in result.missing_flow_edges
+    assert "side_effects" in result.missing_flow_entrypoints
+    assert result.is_valid is False
 
 
 def test_page_validator_flags_missing_runtime_and_config_grounding(
@@ -1098,6 +1253,7 @@ def test_page_validator_flags_missing_runtime_and_config_grounding(
         config_env_context="| Variable | Found In |\n|---|---|\n| `PAYMENTS_HOST` | `settings.py` |",
         evidence_file_paths={"jobs/tasks.py", "settings.py"},
         total_evidence_chars=0,
+        flow_context="",
     )
     content = """
 # Setup & Configuration
@@ -1163,6 +1319,7 @@ def test_page_validator_flags_missing_integration_grounding_for_integration_page
         cross_ref_context="",
         evidence_file_paths={"integrations/vinculum.py"},
         total_evidence_chars=0,
+        flow_context="",
     )
     content = """
 # Warehouse Integration

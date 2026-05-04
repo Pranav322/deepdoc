@@ -69,6 +69,7 @@ class AssembledEvidence:
     files_compressed: int = 0
     coverage_files_total: int = 0
     helper_context: str = ""  # resolved helper/utility function bodies
+    flow_context: str = ""  # call graph + flow evidence (entrypoints, chains, side effects)
     evidence_file_paths: set[str] = field(default_factory=set)
     config_env_context: str = ""  # extracted env var names and config keys
 
@@ -148,6 +149,7 @@ class EvidenceAssembler:
         cluster_ctx = self._build_cluster_context(bucket)
         artifact_ctx = self._build_artifact_context(bucket)
         graph_ctx = self._build_graph_context(bucket)
+        flow_ctx = self._build_flow_context(bucket)
         cross_ref_ctx = self._build_cross_ref_context(bucket)
         database_ctx = self._build_database_context(bucket)
         runtime_ctx = self._build_runtime_context(bucket)
@@ -172,6 +174,7 @@ class EvidenceAssembler:
                 cluster_ctx,
                 artifact_ctx,
                 graph_ctx,
+                flow_ctx,
                 cross_ref_ctx,
                 database_ctx,
                 runtime_ctx,
@@ -197,11 +200,12 @@ class EvidenceAssembler:
             runtime_context=runtime_ctx,
             plan_summary_context=plan_summary_ctx,
             repo_docs_context=repo_docs_ctx,
+            helper_context=helper_ctx,
+            flow_context=flow_ctx,
             total_evidence_chars=total,
             files_included_raw=files_included_raw,
             files_compressed=files_compressed,
             coverage_files_total=coverage_total,
-            helper_context=helper_ctx,
             evidence_file_paths=evidence_files,
             config_env_context=config_env_ctx,
         )
@@ -1251,6 +1255,54 @@ class EvidenceAssembler:
                 lines.append(f"    Symbols: {sym_list}{more}")
 
         return "\n".join(lines) if lines else ""
+
+
+    def _build_flow_context(self, bucket: DocBucket) -> str:
+        flow_id = (bucket.generation_hints or {}).get("flow_id")
+        if not flow_id:
+            return ""
+        flow_candidates = getattr(self.scan, "flow_candidates", []) or []
+        candidate = next(
+            (c for c in flow_candidates if getattr(c, "flow_id", "") == flow_id),
+            None,
+        )
+        if not candidate:
+            return ""
+
+        lines: list[str] = ["## Call Flow"]
+        if candidate.entry_points:
+            entry_lines = [
+                f"- {ep.kind}: {ep.label} ({ep.handler_file}:{ep.handler_symbol})"
+                if ep.handler_symbol
+                else f"- {ep.kind}: {ep.label} ({ep.handler_file})"
+                for ep in candidate.entry_points[:6]
+            ]
+            lines.append("### Entrypoints")
+            lines.extend(entry_lines)
+
+        if candidate.call_chain_edges:
+            lines.append("### Call Chain")
+            for depth, edge in candidate.call_chain_edges[:40]:
+                target = (
+                    f"{edge.callee_file}:{edge.callee_symbol}"
+                    if edge.callee_file
+                    else edge.callee_symbol
+                )
+                lines.append(
+                    f"- d{depth}: {edge.caller_file}:{edge.caller_symbol} -> {target} ({edge.call_kind})"
+                )
+
+        if candidate.side_effects:
+            lines.append("### Side Effects")
+            for effect in candidate.side_effects[:12]:
+                lines.append(f"- {effect}")
+
+        if candidate.external_touchpoints:
+            lines.append("### External Touchpoints")
+            for ext in candidate.external_touchpoints[:10]:
+                lines.append(f"- {ext}")
+
+        return "\n".join(lines)
 
     # ── Artifact context ─────────────────────────────────────────────────
 

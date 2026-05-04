@@ -16,6 +16,7 @@ Coverage targets: {coverage_targets}
 
 Repository-wide architecture and source evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write the single best starting page for a new internal developer. This page must explain
@@ -120,6 +121,7 @@ Description: {page_description}
 
 Source files and their symbols:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write detailed architecture documentation:
@@ -162,6 +164,7 @@ Description: {page_description}
 
 Source files and their symbols:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write a detailed guide:
@@ -211,6 +214,7 @@ Description: {page_description}
 
 Source files and their contents:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write module documentation:
@@ -266,6 +270,7 @@ Endpoints:
 
 Handler source code:
 {source_context}
+{flow_context}
 
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
@@ -343,6 +348,7 @@ Description: {page_description}
 
 Config and setup files:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write a practical setup guide:
@@ -389,6 +395,7 @@ Description: {page_description}
 
 Source files:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write deployment docs:
@@ -434,6 +441,7 @@ Description: {page_description}
 
 Source files:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write integration docs:

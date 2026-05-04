@@ -614,6 +614,7 @@ class PipelineV2:
             languages=", ".join(scan.languages.keys()),
             frameworks=", ".join(scan.frameworks_detected),
             source_context=source_context,
+            flow_context="",
             endpoints_detail=endpoints_detail,
             openapi_context=openapi_context,
             resource_group=resource_group,

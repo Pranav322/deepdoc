@@ -14,6 +14,7 @@ Coverage targets: {coverage_targets}
 
 Source files and their contents:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive feature documentation following this mandatory outline:
@@ -112,6 +113,8 @@ Endpoints in this bundle:
 
 Handler source code and evidence:
 {source_context}
+
+{flow_context}
 
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
@@ -224,6 +227,7 @@ Coverage targets: {coverage_targets}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive integration documentation following this mandatory outline:
@@ -283,6 +287,7 @@ Required diagrams: {required_diagrams}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive system documentation following this mandatory outline:
@@ -347,6 +352,7 @@ Required diagrams: {required_diagrams}
 
 ORM/Schema files and their contents:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive database documentation following this mandatory outline:
@@ -415,6 +421,7 @@ Required diagrams: {required_diagrams}
 
 ORM/Schema files and their contents:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write the top-level database map for the repository.
@@ -457,6 +464,7 @@ Required diagrams: {required_diagrams}
 
 ORM/Schema files and their contents:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write a complete, deeply grounded page for this subgroup only.
@@ -499,6 +507,7 @@ Required diagrams: {required_diagrams}
 
 Runtime/source evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 # {title}
@@ -531,6 +540,7 @@ Required diagrams: {required_diagrams}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 # {title}
@@ -571,6 +581,8 @@ Endpoint details:
 
 Handler source code and evidence:
 {source_context}
+
+{flow_context}
 
 {openapi_context}
 """ + CROSS_LINK_SECTION + """
@@ -678,6 +690,7 @@ Required diagrams: {required_diagrams}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive training documentation following this mandatory outline:
@@ -729,6 +742,7 @@ Required diagrams: {required_diagrams}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive component documentation following this mandatory outline:
@@ -788,6 +802,7 @@ Required diagrams: {required_diagrams}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write comprehensive pipeline documentation following this mandatory outline:
@@ -833,6 +848,7 @@ Required diagrams: {required_diagrams}
 
 Source files and evidence:
 {source_context}
+{flow_context}
 """ + CROSS_LINK_SECTION + """
 
 Write a grounded documentation page using only the supplied repository context.
@@ -867,6 +883,7 @@ orientation in 5 minutes of reading so they can navigate the rest of the docs on
 
 Repository evidence:
 {source_context}
+{flow_context}
 
 Sitemap context:
 {sitemap_context}
@@ -943,6 +960,8 @@ be blocked from understanding any other page until they read this one.
 Repository evidence:
 {source_context}
 
+{flow_context}
+
 OpenAPI and interface context:
 {openapi_context}
 
@@ -1009,6 +1028,8 @@ a runbook, not a tutorial. Be direct, specific, and operational.
 
 Repository evidence:
 {source_context}
+
+{flow_context}
 
 OpenAPI and interface context:
 {openapi_context}
@@ -1101,6 +1122,8 @@ from a clean machine to a running local environment WITHOUT asking anyone for he
 
 Repository evidence:
 {source_context}
+
+{flow_context}
 
 OpenAPI and interface context:
 {openapi_context}

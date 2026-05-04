@@ -265,15 +265,85 @@ def _build_classification_summary(classification: dict) -> str:
     return "\n".join(lines)
 
 
+_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9\-]*[a-z0-9]$")
+
+
+def _is_slug_section(section: str) -> bool:
+    """Return True if a section value looks like a file-path slug (not a domain name).
+
+    Slugs are all-lowercase with hyphens and no spaces — the same shape as
+    topology cluster_ids.  A legitimate section name like "Order Management"
+    always contains at least one space or uppercase letter.
+    """
+    if not section:
+        return False
+    if " " in section:
+        return False
+    # Title-cased words (e.g. "OrderManagement") are fine
+    if any(c.isupper() for c in section):
+        return False
+    return bool(_SLUG_RE.match(section))
+
+
+def _fix_slug_cluster_sections(classification: dict) -> dict:
+    """Post-processing guard: replace slug-like section values with derived names.
+
+    When the classify LLM echoes the cluster_id into the section field instead
+    of writing a domain name (e.g. "new-src-api-services-order-index-ts" instead
+    of "Order Management"), this function replaces it with the cluster's human
+    name so downstream nav building gets sensible section headings.
+
+    Clusters that already have a proper section name are left untouched.
+    """
+    cluster_names: dict[str, dict] = classification.get("cluster_names", {})
+    if not cluster_names:
+        return classification
+
+    for cid, info in cluster_names.items():
+        if not isinstance(info, dict):
+            continue
+        section = info.get("section", "")
+        # If the section is a slug (same as cluster_id or just all-lowercase-hyphenated)
+        if _is_slug_section(section) or section == cid:
+            # Derive a section from the human name the LLM DID assign
+            name = info.get("name", "").strip()
+            if name and not _is_slug_section(name):
+                info["section"] = name
+            else:
+                # Last resort: title-case the cluster_id path segments
+                parts = cid.replace("-", " ").split()
+                # Drop common filler tokens
+                filler = {"ts", "js", "py", "src", "new", "index", "main"}
+                meaningful = [p.title() for p in parts if p not in filler]
+                info["section"] = " ".join(meaningful[-3:]) if meaningful else "Architecture"
+
+    return classification
+
+
 def _print_classification_summary(classification: dict) -> None:
     """Print a rich summary of the classification step."""
-    source_files = classification.get("source_files", {})
+    cluster_names = classification.get("cluster_names", {})
     integrations = classification.get("integration_signals", [])
     cross_cutting = classification.get("cross_cutting", [])
     giant_files = classification.get("giant_files", [])
     repo_profile = classification.get("repo_profile", {})
 
-    console.print(f"  [green]✓[/green] Classified {len(source_files)} source files")
+    if cluster_names:
+        # Collect unique sections for a compact summary
+        sections: dict[str, int] = defaultdict(int)
+        for info in cluster_names.values():
+            if isinstance(info, dict) and info.get("section"):
+                sections[info["section"]] += 1
+        console.print(
+            f"  [green]✓[/green] Named {len(cluster_names)} topology cluster(s) "
+            f"across {len(sections)} section(s): "
+            + ", ".join(f"{s} ({n})" for s, n in sorted(sections.items()))
+        )
+    else:
+        # Fallback: old format had source_files
+        source_files = classification.get("source_files", {})
+        console.print(f"  [green]✓[/green] Classified {len(source_files)} source files")
+
     if repo_profile:
         primary = repo_profile.get("primary_type", "other")
         traits = ", ".join(repo_profile.get("secondary_traits", [])) or "none"

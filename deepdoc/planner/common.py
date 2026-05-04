@@ -154,12 +154,34 @@ CLASSIFY_PROMPT = """Analyze this repository and name its topology clusters.
 For each cluster give it a domain name and a nav section.
 For the foundational cluster, give it an appropriate infrastructure name.
 
+## SECTION NAMING — READ CAREFULLY
+The "section" field groups clusters into nav headings. It is a SHORT HUMAN-READABLE
+BUSINESS DOMAIN NAME. It is NOT the cluster_id. It is NOT a file path.
+
+Rules for "section":
+- 2-4 words, Title Case, business language.
+- MULTIPLE clusters MUST share the same section when they serve the same domain.
+  Target 4-8 unique section names total across all clusters.
+- NEVER put the cluster_id as the section value (e.g. "new-src-api-services-order-index-ts" is WRONG).
+- NEVER use pure layer names: "Services", "Controllers", "Utils", "Core", "Features".
+- DO use domain names: "Order Management", "Warehouse & Logistics", "Inventory Sync",
+  "Analytics & Reporting", "API Layer", "Background Processing".
+
+Example grouping for an e-commerce backend:
+  new-src-api-controllers-synccontroller-ts  -> section: "Sync & Inventory"
+  new-src-api-services-order-index-ts        -> section: "Order Management"
+  new-src-api-services-vinculum-index-ts     -> section: "Warehouse & Logistics"
+  new-src-api-services-clickpost-index-ts    -> section: "Warehouse & Logistics"
+  new-src-utils-scheduler-ts                 -> section: "Background Processing"
+  new-src-utils-logger-ts                    -> section: "Supporting Infrastructure"
+  foundational                               -> section: "Supporting Infrastructure"
+
 Return JSON:
 {{
   "cluster_names": {{
     "<cluster_id>": {{
       "name": "Human-readable domain name, e.g. Order Management",
-      "section": "Nav section name, e.g. Order Management or Payments > Gateway",
+      "section": "Domain section shared across related clusters, e.g. Order Management",
       "description": "One sentence: what this cluster does",
       "nav_position": "primary|secondary|infrastructure"
     }}
@@ -191,9 +213,6 @@ Return JSON:
 
 Rules:
 - cluster_names: name EVERY cluster id listed above, including "foundational".
-- section: use product/domain language -- "Order Management", "Payment Processing",
-  "Authentication", "Infrastructure & Shared Code". NOT technical-layer names
-  like "Services", "Controllers", "Core Workflows".
 - nav_position: "primary" for user-facing entry-point clusters, "secondary" for
   internal feature clusters, "infrastructure" for the foundational cluster.
 - integration_signals: HTTP clients, SDK imports, env vars with API/URL/KEY suffixes,

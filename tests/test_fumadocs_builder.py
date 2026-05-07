@@ -401,7 +401,7 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
     page_tree = (repo_root / "site" / "lib" / "page-tree.generated.ts").read_text(
         encoding="utf-8"
     )
-    assert '"name": "OpenAPI Operations"' in page_tree
+    assert '"name": "API Playground"' in page_tree
     assert '"url": "/api/get-http-localhost-3000-health"' in page_tree
     assert '"name": "GET /health"' in page_tree
 

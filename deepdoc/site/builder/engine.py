@@ -313,39 +313,19 @@ def _build_page_tree_from_plan(
         else:
             manifest_entries = load_openapi_manifest()
             if manifest_entries:
-                operations_folder = {
-                    "type": "folder",
-                    "name": "OpenAPI Operations",
-                    "children": [
-                        _page_tree_node(
-                            f"/api/{entry['slug']}",
-                            f"{entry['method']} {display_openapi_path(entry['path'])}",
-                        )
-                        for entry in manifest_entries
-                    ],
-                }
-
-                existing_api_folder = next(
-                    (
-                        child
-                        for child in root_children
-                        if child.get("type") == "folder"
-                        and child.get("name") == "API Reference"
-                    ),
-                    None,
+                root_children.append(
+                    {
+                        "type": "folder",
+                        "name": "API Playground",
+                        "children": [
+                            _page_tree_node(
+                                f"/api/{entry['slug']}",
+                                f"{entry['method']} {display_openapi_path(entry['path'])}",
+                            )
+                            for entry in manifest_entries
+                        ],
+                    }
                 )
-                if existing_api_folder:
-                    existing_api_folder.setdefault("children", []).append(
-                        operations_folder
-                    )
-                else:
-                    root_children.append(
-                        {
-                            "type": "folder",
-                            "name": "API Reference",
-                            "children": [operations_folder],
-                        }
-                    )
 
     return {"name": project_name, "children": root_children}
 

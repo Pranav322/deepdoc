@@ -112,6 +112,36 @@ def _endpoint_ref_slug(method: str, path: str) -> str:
     return f"{method.lower()}-{path_slug}"
 
 
+def _spec_base_path(spec: dict) -> str:
+    """Return the base path from the first server URL, e.g. '/api/v2'."""
+    from urllib.parse import urlparse
+    if "openapi" in spec:
+        servers = spec.get("servers", [])
+        if servers:
+            url = str(servers[0].get("url", "") or "").strip()
+            parsed = urlparse(url)
+            base = parsed.path if (parsed.scheme or parsed.netloc) else url
+            return base.rstrip("/")
+    elif "swagger" in spec:
+        return spec.get("basePath", "").rstrip("/")
+    return ""
+
+
+def _write_spec(dest: Path, spec: dict) -> None:
+    """Write spec dict to dest as YAML or JSON depending on suffix."""
+    if dest.suffix == ".json":
+        dest.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+    else:
+        try:
+            import yaml
+            dest.write_text(
+                yaml.dump(spec, allow_unicode=True, sort_keys=False, default_flow_style=False),
+                encoding="utf-8",
+            )
+        except ImportError:
+            dest.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+
+
 def stage_openapi_assets(
     repo_root: Path, openapi_paths: list[str] | None = None
 ) -> bool:
@@ -136,7 +166,6 @@ def stage_openapi_assets(
 
         spec_name = Path(spec_rel_path).name
         staged_spec = site_openapi_dir / spec_name
-        shutil.copy2(spec_src, staged_spec)
 
         spec = parse_openapi_spec(spec_src)
         if not spec:
@@ -144,6 +173,20 @@ def stage_openapi_assets(
                 f"[yellow]⚠[/yellow] Could not parse {spec_name} — skipping API pages"
             )
             return False
+
+        # Bake the server base path into each path key so Fumadocs can do a
+        # direct dict lookup (it does not prepend the server URL itself).
+        base_path = _spec_base_path(spec)
+        if base_path and not any(
+            k.startswith(base_path) for k in spec.get("paths", {})
+        ):
+            spec = {
+                **spec,
+                "paths": {base_path + k: v for k, v in spec["paths"].items()},
+                "servers": [{"url": "/"}],
+            }
+
+        _write_spec(staged_spec, spec)
 
         endpoints = extract_endpoints_from_spec(spec)
         manifest: list[dict[str, str]] = []

@@ -1439,10 +1439,42 @@ def _docs_page_tsx() -> str:
 
           const MDX = (page.data as { body: ComponentType<{ components?: ReturnType<typeof getMDXComponents> }> }).body;
           const toc = (page.data as { toc?: TOCItemType[] }).toc;
+          const meta = page.data as {
+            deepdoc_generated_at?: string;
+            deepdoc_generated_commit?: string;
+          };
+          const lastIndexed = meta.deepdoc_generated_at
+            ? new Intl.DateTimeFormat('en-GB', {
+                day: 'numeric',
+                month: 'long',
+                year: 'numeric',
+                timeZone: 'UTC',
+              }).format(new Date(meta.deepdoc_generated_at))
+            : null;
+          const commitId = meta.deepdoc_generated_commit?.trim() || null;
+          const lastIndexedLabel = lastIndexed && commitId
+            ? `Last indexed: ${lastIndexed} (${commitId})`
+            : lastIndexed
+              ? `Last indexed: ${lastIndexed}`
+              : commitId
+                ? `Last indexed: (${commitId})`
+                : null;
 
           return (
             <DocsPage toc={toc}>
               <DocsBody>
+                {lastIndexedLabel ? (
+                  <p
+                    style={{
+                      marginTop: 0,
+                      marginBottom: '1rem',
+                      fontSize: '0.875rem',
+                      color: 'var(--color-fd-muted-foreground)',
+                    }}
+                  >
+                    {lastIndexedLabel}
+                  </p>
+                ) : null}
                 <MDX components={getMDXComponents()} />
               </DocsBody>
             </DocsPage>

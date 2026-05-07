@@ -681,7 +681,7 @@ def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
     sections = list(shaped.nav_structure.keys())
     assert sections[:3] == [
         "Start Here",
-        "Architecture",
+        "Core Workflows",
         "API Reference > Orders API",
     ]
     assert shaped.nav_structure["Start Here"] == [
@@ -692,6 +692,78 @@ def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
     assert shaped.nav_structure["API Reference > Orders API"] == [
         "orders-api",
         "get-orders-id",
+    ]
+
+
+def test_shape_plan_nav_recategorizes_path_slug_backend_sections() -> None:
+    plan = DocPlan(
+        buckets=[
+            DocBucket(
+                bucket_type="feature",
+                title="Product Sync Service",
+                slug="product-sync-service",
+                section="new-src-api-services-sync-index-ts",
+                description="Product synchronization workflow",
+                owned_files=["src/api/services/sync/index.ts"],
+                priority=10,
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="Inventory Service",
+                slug="inventory-service",
+                section="new-src-api-services-inventory-index-ts",
+                description="Inventory updates and stock lookups",
+                owned_files=["src/api/services/inventory/index.ts"],
+                priority=11,
+            ),
+            DocBucket(
+                bucket_type="integration",
+                title="Vinculum Warehouse Management Integration",
+                slug="vinculum-warehouse-management-integration",
+                section="new-src-api-services-vinculum-index-ts",
+                description="Warehouse management integration",
+                owned_files=["src/api/services/vinculum/index.ts"],
+                priority=12,
+            ),
+            DocBucket(
+                bucket_type="utility",
+                title="Logging & Observability",
+                slug="logging-observability",
+                section="new-src-utils-logger-ts",
+                description="Logger setup and observability helpers",
+                owned_files=["src/utils/logger.ts"],
+                priority=13,
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="Authentication & Authorization",
+                slug="authentication-authorization",
+                section="new-src-api-middlewares-authmiddleware-ts",
+                description="Request auth middleware and permissions",
+                owned_files=["src/api/middlewares/authMiddleware.ts"],
+                priority=14,
+            ),
+        ],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+
+    shaped = _shape_plan_nav(
+        plan, {"repo_profile": {"primary_type": "backend_service"}}
+    )
+
+    assert not any(section.startswith("new-src-") for section in shaped.nav_structure)
+    assert shaped.nav_structure["Core Workflows"] == [
+        "product-sync-service",
+        "inventory-service",
+    ]
+    assert shaped.nav_structure["Integrations"] == [
+        "vinculum-warehouse-management-integration"
+    ]
+    assert shaped.nav_structure["Operations"] == ["logging-observability"]
+    assert shaped.nav_structure["Supporting Infrastructure"] == [
+        "authentication-authorization"
     ]
 
 
@@ -891,7 +963,7 @@ def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtim
     )
     assert order_bucket.parent_slug == "database-schema"
     assert order_bucket.generation_hints["database_group_key"] == "orders"
-    assert order_bucket.section == "Database > Database & Schema"
+    assert order_bucket.section == "Data Model"
 
 
 def test_specialized_bucket_injection_adds_django_and_laravel_runtime_groups() -> None:

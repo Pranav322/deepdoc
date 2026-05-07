@@ -9,6 +9,35 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [1.9.3] - 2026-05-07
+
+DeepDoc 1.9.3 fixes backend navigation quality for real-world repos: path-slug sections produced by the classify LLM (e.g. `new-src-api-services-order-index-ts`) are now detected and replaced with proper domain sections, database and runtime buckets use flat canonical section names, and OpenAPI specs are rewritten so Fumadocs can resolve paths directly.
+
+### Added
+
+- Added `_looks_like_path_slug_section()` in `bucket_injection.py` and `nav_shaping.py` — detects all-lowercase-hyphenated section values that look like file path cluster IDs (e.g. `new-src-api-services-sync-index-ts`) so they are always recategorized rather than preserved.
+- Added `_is_backend_placeholder_section()` in `bucket_injection.py` — rejects generic placeholder section names (`Architecture`, `Core`, `Features`, `Services`, `Subsystems`, `Runtime & Frameworks`) for backend repos so they are replaced with a specific domain section.
+- Added `_BACKEND_INTEGRATION_TOKENS`, `_BACKEND_OPERATION_TOKENS`, and `_BACKEND_RUNTIME_TOKENS` token sets in `bucket_injection.py` for finer-grained backend section routing (Integrations, Operations, Background Jobs).
+- Added a dedicated `_BACKEND_ORDER` section ranking list in `nav_shaping.py` — backend repos now get a fixed reader-first ordering: `Start Here` → `Overview` → `Core Workflows` → `API Reference` → `Data Model` → `Background Jobs` → `Integrations` → `Operations` → `Supporting Infrastructure` → tail sections.
+- Added `_spec_base_path()` and `_write_spec()` helpers in `pipeline_v2.py` — `_spec_base_path` extracts the server base path from OpenAPI 3 `servers[]` or Swagger 2 `basePath`; `_write_spec` writes the rewritten spec as YAML or JSON depending on file suffix.
+- Added "Last indexed" provenance badge to the generated Fumadocs docs page (`scaffold_files.py`) — reads `deepdoc_generated_at` and `deepdoc_generated_commit` from page frontmatter and renders a muted timestamp + short commit ID above the page body.
+
+### Changed
+
+- `_canonical_section_for_bucket()` now rejects path-slug sections and backend placeholder sections before preserving the existing section, so classify-step noise no longer leaks into final nav.
+- Backend bucket section routing reordered: `Data Layer` check moved before runtime/integration checks; `Subsystems` fallback replaced with `Core Workflows`; added explicit `Operations` bucket for config/logging/monitoring tokens; `Supporting Infrastructure` replaces the old `Runtime & Frameworks` catch-all for middleware/auth/route/controller buckets.
+- Normalized all database bucket sections from `Database > Database & Schema` to flat `Data Model` (`specializations.py`).
+- Normalized all runtime bucket sections from `Background Jobs > Background Jobs & Runtime` to flat `Background Jobs` (`specializations.py`).
+- OpenAPI staging in `pipeline_v2.py` now rewrites the spec before saving: bakes the server base path into every path key and resets `servers` to `[{"url": "/"}]` so Fumadocs can do a direct dict lookup without prepending the server origin.
+- OpenAPI nav entries are now placed under a top-level `API Playground` folder instead of being nested inside the existing `API Reference` folder (`engine.py`).
+
+### Tests
+
+- Added `test_shape_plan_nav_recategorizes_path_slug_backend_sections` — verifies that `new-src-*` path-slug sections are all replaced and buckets land in `Core Workflows`, `Integrations`, `Operations`, and `Supporting Infrastructure` as appropriate.
+- Updated `test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup` section assertion from `Architecture` to `Core Workflows` to match new routing.
+- Updated `test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtime_pages` assertion from `Database > Database & Schema` to `Data Model`.
+- Updated `test_build_fumadocs_from_plan_creates_site_scaffold` to assert provenance badge fields (`deepdoc_generated_at`, `deepdoc_generated_commit`, `Last indexed:`, `Intl.DateTimeFormat`) are present in the generated docs page.
+
 ## [1.9.2] - 2026-05-04
 
 ### Added

@@ -2,6 +2,18 @@ from .common import *
 from .bucket_refinement import _bucket_semantic_tokens
 from .bucket_injection import _canonical_section_for_bucket
 
+_PATH_SECTION_PREFIXES = (
+    "new-src-",
+    "src-",
+    "app-",
+    "lib-",
+    "packages-",
+    "services-",
+    "controllers-",
+    "middlewares-",
+    "utils-",
+)
+
 
 def _shape_plan_nav(
     plan: DocPlan,
@@ -24,7 +36,7 @@ def _shape_plan_nav(
             continue
 
         hints = bucket.generation_hints or {}
-        if not hints.get("preserve_section"):
+        if not hints.get("preserve_section") or _is_path_slug_section(bucket.section):
             bucket.section = _canonical_section_for_bucket(bucket, primary)
 
         bucket.section = _normalize_nav_section(bucket.section, primary)
@@ -150,8 +162,25 @@ def _normalize_nav_section(section: str, primary: str) -> str:
     }.get(top, top)
 
     if sep:
+        if rest.strip() == top:
+            return top
         return f"{top} > {rest}"
     return top
+
+
+def _is_path_slug_section(section: str) -> bool:
+    """Return True when the section looks like a file path cluster id."""
+    value = (section or "").strip()
+    if not value:
+        return False
+    if " > " in value or "/" in value or "\\" in value:
+        return False
+    lower = value.lower()
+    if lower != value or "-" not in lower:
+        return False
+    if lower.endswith(("-ts", "-js", "-tsx", "-jsx", "-py", "-php", "-go")):
+        return True
+    return lower.startswith(_PATH_SECTION_PREFIXES) and lower.count("-") >= 2
 
 
 def _build_endpoint_reference_nav(buckets: list[DocBucket]) -> dict[str, list[str]]:
@@ -282,6 +311,27 @@ def _section_sort_key(
         ]
         rank = _RT_ORDER.index(top) if top in _RT_ORDER else 10
         return (rank, section_order.get(section, 999), section)
+
+    if primary in {"backend_service", "backend_api", "falcon_backend"}:
+        _BACKEND_ORDER = [
+            "Start Here",
+            "Overview",
+            "Core Workflows",
+            "API Reference",
+            "Data Model",
+            "Background Jobs",
+            "Integrations",
+            "Operations",
+            "Runtime & Frameworks",
+            "Supporting Infrastructure",
+            "Design & Notes",
+            "Testing",
+            "CI/CD and Release",
+            "Supporting Material",
+        ]
+        rank = _BACKEND_ORDER.index(top) if top in _BACKEND_ORDER else 8
+        child_rank = 0 if section == top else 1
+        return (rank, child_rank, section_order.get(section, 999), section)
 
     _FIRST = {"Start Here": 0, "Overview": 1, "Getting Started": 2}
     _LAST = {

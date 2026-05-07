@@ -182,7 +182,7 @@ def _build_database_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBuck
             bucket_type="database",
             title="Database & Schema",
             slug="database-schema",
-            section="Database > Database & Schema",
+            section="Data Model",
             description="Database overview, storage topology, schema groups, migrations, and cross-group relationships",
             owned_files=db_files,
             required_sections=[
@@ -221,7 +221,7 @@ def _build_database_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBuck
                 bucket_type="database-group",
                 title=f"{group.label} Data Model",
                 slug=slug,
-                section="Database > Database & Schema",
+                section="Data Model",
                 description=f"Complete schema documentation for the {group.label} data group",
                 owned_files=group.file_paths,
                 required_sections=[
@@ -257,7 +257,7 @@ def _build_database_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBuck
                 bucket_type="database-support",
                 title="Migrations & Query Patterns",
                 slug=slug,
-                section="Database > Database & Schema",
+                section="Data Model",
                 description="Migration workflow, schema evolution, and notable query patterns",
                 owned_files=db_scan.migration_files[:20]
                 + sorted(
@@ -316,7 +316,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
             bucket_type="runtime",
             title="Background Jobs & Runtime",
             slug="background-jobs",
-            section="Background Jobs > Background Jobs & Runtime",
+            section="Background Jobs",
             description="Overview of asynchronous tasks, schedulers, and realtime surfaces",
             owned_files=sorted({*task_files, *scheduler_files, *realtime_files}),
             required_sections=[
@@ -345,7 +345,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
                 bucket_type="runtime-group",
                 title="Celery Tasks & Producers",
                 slug="background-jobs-celery",
-                section="Background Jobs > Background Jobs & Runtime",
+                section="Background Jobs",
                 description="Task definitions, queues, retries, producers, and schedule sources",
                 owned_files=task_files,
                 required_sections=[
@@ -381,7 +381,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
                 bucket_type="runtime-group",
                 title="Django Commands & Signals",
                 slug="background-jobs-django",
-                section="Background Jobs > Background Jobs & Runtime",
+                section="Background Jobs",
                 description="Management commands, signal handlers, and other Django runtime surfaces",
                 owned_files=django_task_files,
                 required_sections=[
@@ -422,7 +422,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
                 bucket_type="runtime-group",
                 title="Laravel Jobs, Events & Scheduler",
                 slug="background-jobs-laravel",
-                section="Background Jobs > Background Jobs & Runtime",
+                section="Background Jobs",
                 description="Queued jobs, events, listeners, and scheduler registrations for Laravel services",
                 owned_files=laravel_task_files,
                 required_sections=[
@@ -460,7 +460,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
                 bucket_type="runtime-group",
                 title="Workers & Async Runners",
                 slug="background-jobs-workers",
-                section="Background Jobs > Background Jobs & Runtime",
+                section="Background Jobs",
                 description="Background workers, async consumers, and non-framework-specific runtime loops",
                 owned_files=generic_task_files,
                 required_sections=[
@@ -489,7 +489,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
                 bucket_type="runtime-group",
                 title="Schedulers & Cron",
                 slug="background-jobs-schedulers",
-                section="Background Jobs > Background Jobs & Runtime",
+                section="Background Jobs",
                 description="Cron schedules, task cadence, and scheduler ownership",
                 owned_files=scheduler_files,
                 required_sections=[
@@ -517,7 +517,7 @@ def _build_runtime_buckets(scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucke
                 bucket_type="runtime-group",
                 title="Realtime & WebSockets",
                 slug="background-jobs-realtime",
-                section="Background Jobs > Background Jobs & Runtime",
+                section="Background Jobs",
                 description="Realtime consumers, websocket routing, groups, and auth path",
                 owned_files=realtime_files,
                 required_sections=[

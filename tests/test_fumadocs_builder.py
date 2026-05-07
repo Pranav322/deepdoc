@@ -163,6 +163,10 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     assert "ComponentType" in docs_page
     assert "TOCItemType" in docs_page
     assert "page.data as { body:" in docs_page
+    assert "deepdoc_generated_at" in docs_page
+    assert "deepdoc_generated_commit" in docs_page
+    assert "Last indexed:" in docs_page
+    assert "Intl.DateTimeFormat('en-GB'" in docs_page
     assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
     assert "satisfies PageTree.Root" in page_tree
     assert "APIPage as FumadocsAPIPage" in api_page_component

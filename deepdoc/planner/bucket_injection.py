@@ -405,6 +405,64 @@ _GENERIC_PLACEHOLDER_SECTIONS = {
     "pages",
 }
 
+_BACKEND_INTEGRATION_TOKENS = {
+    "cdn",
+    "clickpost",
+    "express",
+    "gateway",
+    "integration",
+    "provider",
+    "third",
+    "vinculum",
+    "warehouse",
+    "wms",
+}
+
+_BACKEND_OPERATION_TOKENS = {
+    "config",
+    "cron",
+    "debug",
+    "health",
+    "log",
+    "logger",
+    "logging",
+    "metric",
+    "monitor",
+    "observability",
+    "scheduler",
+    "utility",
+    "utilities",
+}
+
+_BACKEND_RUNTIME_TOKENS = {
+    "agenda",
+    "async",
+    "background",
+    "celery",
+    "command",
+    "consumer",
+    "cron",
+    "django",
+    "job",
+    "queue",
+    "scheduler",
+    "signal",
+    "task",
+    "worker",
+}
+
+_PATH_SECTION_PREFIXES = (
+    "new-src-",
+    "src-",
+    "app-",
+    "lib-",
+    "packages-",
+    "services-",
+    "controllers-",
+    "middlewares-",
+    "utils-",
+)
+
 
 def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
     # Supporting-tier buckets always get re-sectioned (Testing, CI/CD, etc.) regardless
@@ -412,7 +470,12 @@ def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
     # domain-specific section name rather than overriding with a generic canonical one.
     if bucket.publication_tier != "supporting":
         existing = (bucket.section or "").strip()
-        if existing and existing.lower() not in _GENERIC_PLACEHOLDER_SECTIONS:
+        if (
+            existing
+            and existing.lower() not in _GENERIC_PLACEHOLDER_SECTIONS
+            and not _looks_like_path_slug_section(existing)
+            and not _is_backend_placeholder_section(existing, primary_type)
+        ):
             return existing
 
     title_tokens = _bucket_semantic_tokens(bucket)
@@ -572,21 +635,23 @@ def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
             return "API Reference"
         if any(
             token in title_tokens
-            for token in {"middleware", "auth", "route", "controller", "handler"}
-        ):
-            return "Runtime & Frameworks"
-        if any(
-            token in title_tokens
             for token in {"model", "schema", "migration", "database"}
         ):
             return "Data Layer"
-        if any(
-            token in title_tokens for token in {"provider", "gateway", "integration"}
+        if bucket.bucket_type in {"runtime", "runtime-group"} or any(
+            token in title_tokens for token in _BACKEND_RUNTIME_TOKENS
         ):
-            return "Integrations"
-        if any(token in title_tokens for token in {"queue", "task", "worker", "sync"}):
             return "Background Jobs"
-        return "Subsystems"
+        if any(token in title_tokens for token in _BACKEND_INTEGRATION_TOKENS):
+            return "Integrations"
+        if any(token in title_tokens for token in _BACKEND_OPERATION_TOKENS):
+            return "Operations"
+        if any(
+            token in title_tokens
+            for token in {"middleware", "auth", "route", "controller", "handler"}
+        ):
+            return "Supporting Infrastructure"
+        return "Core Workflows"
     if bucket.generation_hints.get("is_introduction_page"):
         return "Overview"
     if bucket.generation_hints.get("is_endpoint_family") or bucket.generation_hints.get(
@@ -605,3 +670,30 @@ def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
     ):
         return "Operations"
     return "Architecture"
+
+
+def _looks_like_path_slug_section(section: str) -> bool:
+    value = (section or "").strip()
+    if not value:
+        return False
+    if " > " in value or "/" in value or "\\" in value:
+        return False
+    lower = value.lower()
+    if lower != value or "-" not in lower:
+        return False
+    if lower.endswith(("-ts", "-js", "-tsx", "-jsx", "-py", "-php", "-go")):
+        return True
+    return lower.startswith(_PATH_SECTION_PREFIXES) and lower.count("-") >= 2
+
+
+def _is_backend_placeholder_section(section: str, primary_type: str) -> bool:
+    if primary_type not in {"backend_service", "backend_api", "falcon_backend"}:
+        return False
+    return section.strip().lower() in {
+        "architecture",
+        "core",
+        "features",
+        "runtime & frameworks",
+        "services",
+        "subsystems",
+    }

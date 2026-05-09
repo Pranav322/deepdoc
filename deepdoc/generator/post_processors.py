@@ -973,7 +973,13 @@ def repair_mdx_component_blocks(content: str) -> str:
 
 
 def _repair_accordion_nesting(content: str) -> str:
-    """Insert missing </Accordion> tags immediately before </Accordions>."""
+    """Fix Accordion nesting issues emitted by the LLM.
+
+    Two cases handled:
+    1. Missing </Accordion> before </Accordions> — inserts them in the right place.
+    2. Swapped order (</Accordions> then </Accordion>) — strips the orphaned
+       </Accordion> that appears after </Accordions> with no matching open tag.
+    """
     import re as _re
 
     def _fix_block(m: re.Match) -> str:
@@ -983,14 +989,19 @@ def _repair_accordion_nesting(content: str) -> str:
         deficit = opens - closes
         if deficit <= 0:
             return block
-        # Insert the missing closes right before </Accordions>
         return block[:-len("</Accordions>")] + ("</Accordion>\n" * deficit) + "</Accordions>"
 
-    return re.sub(
-        r"<Accordions>[\s\S]*?</Accordions>",
+    content = re.sub(
+        r"<Accordions(?:\s[^>]*)?>[\s\S]*?</Accordions>",
         _fix_block,
         content,
     )
+
+    # Strip orphaned </Accordion> tags that appear after </Accordions>
+    # (the LLM sometimes emits </Accordions>\n</Accordion> in the wrong order)
+    content = re.sub(r"(</Accordions>)(\s*</Accordion>)+", r"\1", content)
+
+    return content
 
 
 _PROVENANCE_KEYS = frozenset({

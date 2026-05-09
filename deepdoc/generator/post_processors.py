@@ -957,6 +957,10 @@ def repair_mdx_component_blocks(content: str) -> str:
 
         content = pattern.sub(_rewrite, content)
 
+    # Fix Accordion nesting first (inserts missing </Accordion> before </Accordions>)
+    # so the subsequent count-based repair sees balanced tags and doesn't double-add.
+    content = _repair_accordion_nesting(content)
+
     for component in multiline_components:
         open_count = len(re.findall(rf"<{component}(?:\s[^>]*)?>", content))
         close_count = len(re.findall(rf"</{component}>", content))
@@ -966,6 +970,27 @@ def repair_mdx_component_blocks(content: str) -> str:
         content = content.rstrip() + (f"\n</{component}>" * deficit) + "\n"
 
     return content
+
+
+def _repair_accordion_nesting(content: str) -> str:
+    """Insert missing </Accordion> tags immediately before </Accordions>."""
+    import re as _re
+
+    def _fix_block(m: re.Match) -> str:
+        block = m.group(0)
+        opens = len(_re.findall(r"<Accordion(?:\s[^>]*)?>", block))
+        closes = len(_re.findall(r"</Accordion>", block))
+        deficit = opens - closes
+        if deficit <= 0:
+            return block
+        # Insert the missing closes right before </Accordions>
+        return block[:-len("</Accordions>")] + ("</Accordion>\n" * deficit) + "</Accordions>"
+
+    return re.sub(
+        r"<Accordions>[\s\S]*?</Accordions>",
+        _fix_block,
+        content,
+    )
 
 
 _PROVENANCE_KEYS = frozenset({

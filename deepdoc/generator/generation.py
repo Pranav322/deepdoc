@@ -1072,6 +1072,7 @@ Re-run `deepdoc generate` to retry.
             "deepdoc_generated_version": DEEPDOC_VERSION,
             "deepdoc_status": status_value,
             "deepdoc_evidence_files": evidence_files[:50],
+            "deepdoc_prereqs": bucket.depends_on,
         }
         return _merge_frontmatter_fields(content, fields)
 

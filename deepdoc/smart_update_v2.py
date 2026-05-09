@@ -37,12 +37,14 @@ from .manifest import Manifest
 from .parser import supported_extensions
 from .persistence_v2 import (
     ENGINE_FINGERPRINT,
+    cleanup_stale_generated_files,
     find_stale_buckets,
     ledger_summary,
     load_generation_ledger,
     load_plan,
     load_scan_cache,
     load_sync_state,
+    prune_generation_ledger,
     save_all,
     save_sync_receipt,
     save_sync_state,

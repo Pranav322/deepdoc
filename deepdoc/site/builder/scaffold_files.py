@@ -1421,7 +1421,9 @@ def _docs_page_tsx() -> str:
         """\
         import { notFound } from 'next/navigation';
         import { DocsBody, DocsPage } from 'fumadocs-ui/page';
+        import { findNeighbour } from 'fumadocs-core/server';
         import { docsSource } from '@/lib/source';
+        import { pageTree } from '@/lib/page-tree.generated';
         import { getMDXComponents } from '@/mdx-components';
         import type { ComponentType } from 'react';
         import type { TOCItemType } from 'fumadocs-core/server';
@@ -1442,6 +1444,7 @@ def _docs_page_tsx() -> str:
           const meta = page.data as {
             deepdoc_generated_at?: string;
             deepdoc_generated_commit?: string;
+            deepdoc_prereqs?: string[];
           };
           const lastIndexed = meta.deepdoc_generated_at
             ? new Intl.DateTimeFormat('en-GB', {
@@ -1459,10 +1462,32 @@ def _docs_page_tsx() -> str:
               : commitId
                 ? `Last indexed: (${commitId})`
                 : null;
+          const prereqs = meta.deepdoc_prereqs ?? [];
+          const { previous, next } = findNeighbour(pageTree, page.url);
 
           return (
-            <DocsPage toc={toc}>
+            <DocsPage toc={toc} prev={previous ?? false} next={next ?? false}>
               <DocsBody>
+                {prereqs.length > 0 ? (
+                  <p
+                    style={{
+                      marginTop: 0,
+                      marginBottom: '0.5rem',
+                      fontSize: '0.875rem',
+                      color: 'var(--color-fd-muted-foreground)',
+                    }}
+                  >
+                    {'Read first: '}
+                    {prereqs.map((slug: string, i: number) => (
+                      <span key={slug}>
+                        <a href={`/${slug}`} style={{ textDecoration: 'underline' }}>
+                          {slug.replace(/-/g, ' ').replace(/\\b\\w/g, (c: string) => c.toUpperCase())}
+                        </a>
+                        {i < prereqs.length - 1 ? ', ' : ''}
+                      </span>
+                    ))}
+                  </p>
+                ) : null}
                 {lastIndexedLabel ? (
                   <p
                     style={{

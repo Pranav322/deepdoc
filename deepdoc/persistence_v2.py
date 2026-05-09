@@ -37,6 +37,8 @@ LEDGER_FILE = "ledger.json"
 FILE_MAP_FILE = "file_map.json"
 STATE_FILE = "state.json"
 SYNC_RECEIPT_FILE = "sync_receipt.json"
+CHANGELOG_FILE = "changelog.json"
+CHANGELOG_MAX_ENTRIES = 50
 ENGINE_FINGERPRINT = "routes_repo_resolution_v2_trimmed_scope"
 
 # Legacy top-level files (kept for backwards-compat)
@@ -106,6 +108,31 @@ def load_sync_state(repo_root: Path) -> dict[str, Any] | None:
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return None
+
+
+def append_changelog_entry(repo_root: Path, entry: dict[str, Any]) -> None:
+    """Append one entry to .deepdoc/changelog.json, capped at CHANGELOG_MAX_ENTRIES."""
+    path = _state_dir(repo_root) / CHANGELOG_FILE
+    entries: list[dict[str, Any]] = []
+    if path.exists():
+        try:
+            entries = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            entries = []
+    entries.insert(0, entry)
+    entries = entries[:CHANGELOG_MAX_ENTRIES]
+    path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+
+
+def load_changelog(repo_root: Path) -> list[dict[str, Any]]:
+    """Read .deepdoc/changelog.json. Returns empty list if not present or corrupt."""
+    path = _state_dir(repo_root) / CHANGELOG_FILE
+    if not path.exists():
+        return []
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
 
 
 def save_sync_receipt(repo_root: Path, receipt: dict[str, Any]) -> None:

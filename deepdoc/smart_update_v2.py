@@ -35,6 +35,7 @@ from .generator import summarize_generation_results
 from .llm import LLMClient
 from .manifest import Manifest
 from .parser import supported_extensions
+from .changelog_writer import record_and_write as _record_changelog
 from .persistence_v2 import (
     ENGINE_FINGERPRINT,
     cleanup_stale_generated_files,
@@ -323,6 +324,8 @@ class SmartUpdater:
                 plan=plan,
             )
         self._save_update_sync_receipt(sync_plan, run_result)
+        if executed_strategy != "noop":
+            self._append_changelog(sync_plan, run_result)
 
         console.print(
             Panel.fit(
@@ -1176,6 +1179,36 @@ class SmartUpdater:
                 "pages_skipped": run_result.pages_skipped,
                 "replanned": run_result.replanned,
             },
+        )
+
+    def _append_changelog(
+        self,
+        sync_plan: UpdateSyncPlan,
+        run_result: UpdateRunResult,
+    ) -> None:
+        """Append a changelog entry and regenerate whats-changed.mdx."""
+        try:
+            import git as _git
+
+            repo = _git.Repo(self.repo_root)
+            commit_obj = repo.commit(sync_plan.target_commit)
+            commit_message = commit_obj.message.strip().splitlines()[0]
+            commit_date = commit_obj.committed_datetime.strftime("%Y-%m-%d")
+        except Exception:
+            commit_message = "update"
+            commit_date = ""
+
+        _record_changelog(
+            self.repo_root,
+            self.output_dir,
+            commit=sync_plan.target_commit,
+            commit_message=commit_message,
+            commit_date=commit_date,
+            strategy=run_result.strategy,
+            pages_updated=list(run_result.updated_slugs),
+            files_changed=list(
+                sync_plan.change_set.changed_files + sync_plan.change_set.new_files
+            ),
         )
 
     def _resolve_head_commit(self) -> str:

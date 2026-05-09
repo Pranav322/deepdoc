@@ -51,8 +51,10 @@ from .openapi import (
     parse_openapi_spec,
     spec_to_context_string,
 )
+from .changelog_writer import record_and_write as _record_changelog
 from .persistence_v2 import (
     cleanup_stale_generated_files,
+    load_changelog,
     load_generation_ledger,
     prune_generation_ledger,
     save_all,
@@ -423,6 +425,19 @@ class PipelineV2:
                     "pages_skipped": generation_summary.skipped,
                     "replanned": True,
                 },
+            )
+            changelog_exists = bool(load_changelog(self.repo_root))
+            _commit_obj = _repo.head.commit
+            _record_changelog(
+                self.repo_root,
+                self.output_dir,
+                commit=head_sha,
+                commit_message=_commit_obj.message.strip().splitlines()[0],
+                commit_date=_commit_obj.committed_datetime.strftime("%Y-%m-%d"),
+                strategy="full_generate",
+                pages_updated=[b.slug for b in plan.buckets],
+                files_changed=[],
+                is_initial=not changelog_exists,
             )
         except Exception:
             pass  # Not a git repo or detached HEAD — skip silently

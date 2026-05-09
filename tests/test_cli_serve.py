@@ -151,9 +151,9 @@ def test_deprecated_generated_version_warning_is_configurable(
     )
 
     output = capsys.readouterr().out
-    assert "DeepDoc upgrade recommended" in output
+    assert "Docs need regeneration" in output
     assert "0.9.0" in output
-    assert "deepdoc-upgrade" in output
+    assert "deepdoc generate" in output
 
     cli._warn_if_deprecated_generated_version(
         {

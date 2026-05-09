@@ -9,6 +9,28 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.0.0] - 2026-05-09
+
+DeepDoc 2.0.0 introduces precise incremental updates (no more full replans on large commits), a commit changelog page, and MDX quality improvements.
+
+### Added
+
+- **Incremental-only updates** — `deepdoc update` no longer triggers a full replan regardless of how many files changed. Deleted files are handled in-place: orphaned buckets are cleaned up, partially-emptied buckets are marked stale and regenerated. Full replan is only triggered by an explicit `--force` flag or an engine fingerprint mismatch.
+- **Commit changelog** — every `generate` and `update` run appends an entry to `.deepdoc/changelog.json` (newest-first, capped at 50). A `docs/whats-changed.mdx` page is regenerated automatically after each run, showing date, commit message, pages updated, and files changed per run. The `whats-changed` slug is auto-injected into the `Start Here` nav section.
+- **Directional navigation** — generated pages include prev/next arrows (wired to `findNeighbour` from `fumadocs-core`) and a "Read first:" callout for pages that have prerequisites (`depends_on` on the bucket).
+- **`deepdoc_prereqs` frontmatter** — prerequisite slugs are written into MDX frontmatter so the site scaffold can render them as callout links.
+
+### Fixed
+
+- **MDX `<Accordion>` nesting** — `repair_mdx_component_blocks` now inserts missing `</Accordion>` tags immediately before `</Accordions>` rather than appending them at document tail (which produced valid tag counts but invalid nesting). Also strips orphaned `</Accordion>` that the LLM sometimes emits after `</Accordions>`. `<Accordions type="single">` and other attribute variants are now matched correctly.
+- **Stale page cleanup on deletion** — deleting source files now immediately removes orphaned `.mdx` pages and prunes the ledger rather than waiting for a full reconcile run.
+- **Version warning** — the "upgrade recommended" panel now fires only when the docs' major version differs from the installed CLI's major version, and the message correctly says "run `deepdoc generate`" rather than "upgrade the CLI" (the CLI is already current; the docs need regenerating).
+
+### Changed
+
+- `ChangeSet.strategy` no longer returns `full_replan` for any number of changed/new/deleted files or endpoint structure changes — all such cases route to `incremental` or `targeted_replan`.
+- `_handle_deleted_files` is now a first-class pre-step inside `_targeted_replan`, handling both partial deletions (file removed from bucket's owned list) and full orphan removal (bucket + MDX + ledger entry deleted).
+
 ## [1.9.3] - 2026-05-07
 
 DeepDoc 1.9.3 fixes backend navigation quality for real-world repos: path-slug sections produced by the classify LLM (e.g. `new-src-api-services-order-index-ts`) are now detected and replaced with proper domain sections, database and runtime buckets use flat canonical section names, and OpenAPI specs are rewritten so Fumadocs can resolve paths directly.

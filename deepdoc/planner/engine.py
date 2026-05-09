@@ -289,9 +289,21 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     Enhanced from v1: also records line counts and parsed files for
     giant-file detection and symbol-level bucket assignment.
     """
-    exclude = cfg.get("exclude", [])
+    exclude = list(cfg.get("exclude", []))
     include = cfg.get("include", [])
     extensions = supported_extensions()
+
+    # Always exclude DeepDoc's own generated/state directories regardless of
+    # user config — scanning these produces noise and giant-file false positives.
+    _DEEPDOC_GENERATED = {
+        ".deepdoc",
+        "site",
+        "chatbot_backend",
+        str(cfg.get("output_dir") or "docs"),  # configurable docs output dir
+    }
+    for _d in _DEEPDOC_GENERATED:
+        if _d not in exclude:
+            exclude.append(_d)
 
     file_tree: dict[str, list[str]] = defaultdict(list)
     file_summaries: dict[str, str] = {}

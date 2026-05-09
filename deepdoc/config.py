@@ -124,6 +124,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # ── Infra / containers ─────────────────────────────────────────────
         ".docker",
         ".terraform",
+        # ── DeepDoc generated outputs (never scan our own scaffold/state) ───
+        ".deepdoc",
+        "site",
+        "chatbot_backend",
         # ── Project-specific ───────────────────────────────────────────────
         "backend-tss-api_v2/backend-tss-api_v2-docs/",
     ],

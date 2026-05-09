@@ -53,7 +53,7 @@ def test_new_file_after_commits(tmp_repo_with_plan):
 
     assert len(cs.new_files) == 3
     assert set(cs.new_files) == {"feature_0.py", "feature_1.py", "feature_2.py"}
-    assert cs.strategy == "full_replan"
+    assert cs.strategy == "targeted_replan"
 
 
 def test_committed_new_file_triggers_targeted_replan(tmp_repo_with_plan):
@@ -125,7 +125,7 @@ def test_untracked_generated_site_files_are_ignored(tmp_repo_with_plan):
 
 
 def test_deleted_file(tmp_repo_with_plan):
-    """Deleting a file owned by a bucket → deleted_files populated, strategy=full_replan."""
+    """Deleting a file owned by a bucket → deleted_files populated, strategy=targeted_replan."""
     root, plan = tmp_repo_with_plan
 
     (root / "payment.py").unlink()
@@ -136,7 +136,7 @@ def test_deleted_file(tmp_repo_with_plan):
     cs = updater._classify_changes(plan, "HEAD~1")
 
     assert "payment.py" in cs.deleted_files
-    assert cs.strategy == "full_replan"
+    assert cs.strategy == "targeted_replan"
 
 
 def test_renamed_file(tmp_repo_with_plan):
@@ -156,21 +156,17 @@ def test_renamed_file(tmp_repo_with_plan):
     )
 
 
-def test_replan_threshold_triggers(tmp_repo_with_plan):
-    """Changing >20% of plan files → strategy=full_replan via REPLAN_THRESHOLD."""
+def test_replan_threshold_no_longer_triggers_full_replan(tmp_repo_with_plan):
+    """Changing many existing files → strategy=incremental (stale detection handles it)."""
     root, plan = tmp_repo_with_plan
 
-    # Plan has 3 files: auth.py, payment.py, utils.py
-    # Changing 1 file = 33% > 20% threshold
-    # But deleted_files takes precedence in strategy. So let's test with
-    # the ChangeSet directly to isolate threshold logic.
+    # Any number of changed existing files goes to incremental — no threshold.
     cs = ChangeSet()
     cs.total_plan_files = 10
-    cs.changed_files = ["a.py", "b.py", "c.py"]  # 3/10 = 30% > 20%
+    cs.changed_files = ["a.py", "b.py", "c.py"]  # 30% — no longer triggers replan
 
-    assert cs.strategy == "full_replan"
+    assert cs.strategy == "incremental"
 
-    # Exactly at threshold: 2/10 = 20% — NOT over
     cs2 = ChangeSet()
     cs2.total_plan_files = 10
     cs2.changed_files = ["a.py", "b.py"]

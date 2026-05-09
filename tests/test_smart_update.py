@@ -47,8 +47,8 @@ def test_incremental_update_only_regenerates_stale(tmp_repo_with_plan):
     )  # at minimum auth must be there
 
 
-def test_full_replan_on_mass_deletion(tmp_repo_with_plan):
-    """Deleting files triggers full_replan and detects orphaned buckets."""
+def test_mass_deletion_triggers_targeted_replan(tmp_repo_with_plan):
+    """Deleting files triggers targeted_replan (not full_replan) and detects orphaned buckets."""
     root, plan = tmp_repo_with_plan
 
     # Delete both payment files — orphans the payment bucket
@@ -62,7 +62,7 @@ def test_full_replan_on_mass_deletion(tmp_repo_with_plan):
 
     assert "payment.py" in cs.deleted_files or "utils.py" in cs.deleted_files
     assert "payment" in cs.orphaned_bucket_slugs
-    assert cs.strategy == "full_replan"
+    assert cs.strategy == "targeted_replan"
 
 
 def test_ledger_preserves_good_record_on_failure(tmp_repo_with_plan):
@@ -143,31 +143,32 @@ def test_targeted_replan_partial_failure_does_not_advance_baseline(tmp_repo_with
     assert receipt["status"] == "partial"
 
 
-def test_full_replan_update_uses_reconcile_cleanup(tmp_repo_with_plan):
-    """Update-triggered full replans should run with reconcile cleanup enabled."""
+def test_deletion_routes_to_targeted_replan_not_full(tmp_repo_with_plan):
+    """Deleting a file should route to targeted_replan, not full_replan."""
     root, plan = tmp_repo_with_plan
 
     (root / "payment.py").unlink()
     _run_git(root, "add", ".")
     _run_git(root, "commit", "-m", "remove payment")
 
+    updater = _make_updater(root)
     with (
-        patch("deepdoc.pipeline_v2.LLMClient", return_value=MagicMock()),
-        patch(
-            "deepdoc.pipeline_v2.PipelineV2.run",
-            return_value={
-                "pages_generated": 2,
-                "pages_failed": 0,
-                "pages_skipped": 0,
-                "status": "success",
-            },
-        ) as run_mock,
+        patch.object(
+            SmartUpdater,
+            "_targeted_replan",
+            return_value=UpdateRunResult(
+                strategy="targeted_replan",
+                pages_updated=1,
+                pages_failed=0,
+                replanned=True,
+            ),
+        ) as targeted_mock,
+        patch.object(SmartUpdater, "_rebuild_nav", return_value=None),
     ):
-        updater = _make_updater(root)
         stats = updater.update(since="HEAD~1")
 
-    assert stats["strategy"] == "full_replan"
-    assert run_mock.call_args.kwargs["reconcile"] is True
+    assert stats["strategy"] == "targeted_replan"
+    targeted_mock.assert_called_once()
 
 
 def test_artifact_only_change_is_not_noop(tmp_repo_with_plan):
@@ -346,8 +347,8 @@ def test_semantic_endpoint_metadata_change_expands_stale_buckets(tmp_repo_with_p
     assert cs.strategy == "incremental"
 
 
-def test_semantic_endpoint_identity_change_forces_full_replan(tmp_repo_with_plan):
-    """Endpoint method/path changes should escalate update to a full replan."""
+def test_semantic_endpoint_identity_change_triggers_targeted_replan(tmp_repo_with_plan):
+    """Endpoint method/path changes should trigger targeted_replan (not full_replan)."""
     root, plan = tmp_repo_with_plan
 
     (root / "config.py").write_text("API_PREFIX = '/api/v2'\n")
@@ -367,4 +368,86 @@ def test_semantic_endpoint_identity_change_forces_full_replan(tmp_repo_with_plan
         cs = updater._classify_changes(plan, "HEAD~1")
 
     assert cs.endpoint_structure_changed is True
-    assert cs.strategy == "full_replan"
+    assert cs.strategy == "targeted_replan"
+
+
+# ── _handle_deleted_files unit tests ─────────────────────────────────────────
+
+
+def test_handle_deleted_files_removes_file_from_owned_files(tmp_repo_with_plan):
+    """Partially deleted bucket loses the deleted file but stays in plan, marked stale."""
+    from deepdoc.smart_update_v2 import ChangeSet
+    from .conftest import make_bucket, make_plan
+
+    root, _plan = tmp_repo_with_plan
+    bucket = make_bucket("Payment System", "payment", ["payment.py", "utils.py"])
+    plan = make_plan([bucket])
+    plan.nav_structure = {"Core": ["payment"]}
+
+    cs = ChangeSet(deleted_files=["payment.py"])
+    updater = _make_updater(root)
+    updated_plan = updater._handle_deleted_files(plan, cs)
+
+    payment_bucket = next(b for b in updated_plan.buckets if b.slug == "payment")
+    assert "payment.py" not in payment_bucket.owned_files
+    assert "utils.py" in payment_bucket.owned_files
+    assert "payment" in cs.stale_bucket_slugs
+
+
+def test_handle_deleted_files_removes_orphaned_bucket_and_mdx(tmp_repo_with_plan):
+    """When all files in a bucket are gone, the bucket and its MDX are removed."""
+    from deepdoc.smart_update_v2 import ChangeSet
+    from deepdoc.persistence_v2 import save_plan
+    from .conftest import make_bucket, make_plan, write_ledger
+
+    root, _plan = tmp_repo_with_plan
+    output_dir = root / "docs"
+    output_dir.mkdir(exist_ok=True)
+
+    # Create the MDX file that should be deleted
+    mdx_file = output_dir / "payment.mdx"
+    mdx_file.write_text("# Payment\n", encoding="utf-8")
+
+    bucket = make_bucket("Payment System", "payment", ["payment.py", "utils.py"])
+    plan = make_plan([bucket])
+    plan.nav_structure = {"Core": ["payment"]}
+    save_plan(plan, root)
+
+    # Write a ledger entry so cleanup_stale_generated_files knows about payment.mdx
+    write_ledger(root, {
+        "payment": {
+            "slug": "payment",
+            "title": "Payment System",
+            "bucket_type": "system",
+            "section": "core",
+            "doc_path": "payment.mdx",
+            "success": True,
+            "word_count": 100,
+            "file_hashes": {"payment.py": "abc", "utils.py": "def"},
+        }
+    })
+
+    cs = ChangeSet(orphaned_bucket_slugs=["payment"])
+    updater = _make_updater(root)
+    updated_plan = updater._handle_deleted_files(plan, cs)
+
+    assert not any(b.slug == "payment" for b in updated_plan.buckets)
+    assert not mdx_file.exists()
+    assert "payment" not in updated_plan.nav_structure.get("Core", [])
+
+
+def test_handle_deleted_files_noop_when_nothing_deleted(tmp_repo_with_plan):
+    """When no deletions, plan is returned unchanged."""
+    from deepdoc.smart_update_v2 import ChangeSet
+    from .conftest import make_bucket, make_plan
+
+    root, _plan = tmp_repo_with_plan
+    bucket = make_bucket("Auth System", "auth", ["auth.py"])
+    plan = make_plan([bucket])
+
+    cs = ChangeSet()
+    updater = _make_updater(root)
+    updated_plan = updater._handle_deleted_files(plan, cs)
+
+    assert len(updated_plan.buckets) == 1
+    assert updated_plan.buckets[0].slug == "auth"

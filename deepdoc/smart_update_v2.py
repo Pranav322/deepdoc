@@ -53,10 +53,6 @@ from .v2_models import DocPlan, endpoint_owned_files, tracked_bucket_files
 
 console = Console()
 
-# What fraction of total files changed triggers a replan
-REPLAN_THRESHOLD = 0.20
-# New files added beyond this count also triggers replan
-NEW_FILES_REPLAN_THRESHOLD = 5
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -100,19 +96,13 @@ class ChangeSet:
             and not self.orphaned_bucket_slugs
         ):
             return "noop"
-        if self.deleted_files or self.orphaned_bucket_slugs:
-            return "full_replan"
-        if len(self.new_files) >= NEW_FILES_REPLAN_THRESHOLD:
-            return "full_replan"
-        # If total changes exceed the percentage threshold, replan
         if (
-            self.total_plan_files > 0
-            and self.total_changes / self.total_plan_files > REPLAN_THRESHOLD
+            self.new_files
+            or self.new_integration_signals
+            or self.deleted_files
+            or self.orphaned_bucket_slugs
+            or self.endpoint_structure_changed
         ):
-            return "full_replan"
-        if self.endpoint_structure_changed:
-            return "full_replan"
-        if self.new_files or self.new_integration_signals:
             return "targeted_replan"
         return "incremental"
 
@@ -259,11 +249,12 @@ class SmartUpdater:
             return stats
 
         elif sync_plan.strategy == "full_replan":
+            # Only reachable via engine_mismatch or explicit force_replan override
+            # in _build_sync_plan — never auto-triggered by ChangeSet.strategy.
             console.print(
                 Panel(
                     "[bold yellow]Strategy: Full Replan[/bold yellow]\n"
-                    f"Reason: {len(change_set.new_files)} new files, "
-                    f"{len(change_set.deleted_files)} deleted files",
+                    "Reason: engine fingerprint changed or replan explicitly forced",
                     border_style="yellow",
                 )
             )
@@ -278,6 +269,12 @@ class SmartUpdater:
                     f"{len(change_set.new_integration_signals)} new integration signal(s): "
                     f"{', '.join(change_set.new_integration_signals[:5])}"
                 )
+            if change_set.deleted_files:
+                reasons.append(f"{len(change_set.deleted_files)} deleted file(s)")
+            if change_set.orphaned_bucket_slugs:
+                reasons.append(f"{len(change_set.orphaned_bucket_slugs)} orphaned bucket(s)")
+            if change_set.endpoint_structure_changed:
+                reasons.append("endpoint structure changed")
             console.print(
                 Panel(
                     "[bold cyan]Strategy: Targeted Replan[/bold cyan]\n"
@@ -310,12 +307,13 @@ class SmartUpdater:
         stats["chatbot_failed"] = run_result.chatbot_failed
 
         # ── Step 4: Rebuild site nav ───────────────────────────────────
-        if executed_strategy not in {"noop", "full_replan"}:
+        if executed_strategy != "noop":
             updated_plan = load_plan(self.repo_root) or plan
             self._rebuild_nav(updated_plan)
 
         # ── Step 5: Persist sync baseline ──────────────────────────────
-        # full_replan already saves via pipeline_v2.py, so skip it here
+        # When full_replan fires (engine_mismatch / force_replan), pipeline_v2
+        # already saves state internally — skip double-save only for that case.
         if executed_strategy != "full_replan":
             self._save_update_sync_state(
                 target_commit=sync_plan.target_commit,
@@ -392,6 +390,54 @@ class SmartUpdater:
             chatbot_failed=bool(result.get("chatbot_error")),
         )
 
+    def _handle_deleted_files(
+        self, plan: DocPlan, change_set: ChangeSet
+    ) -> DocPlan:
+        """Remove deleted files from bucket owned_files; clean up fully empty buckets."""
+        if not change_set.deleted_files and not change_set.orphaned_bucket_slugs:
+            return plan
+
+        deleted_set = set(change_set.deleted_files)
+        orphaned_set = set(change_set.orphaned_bucket_slugs)
+        updated_buckets = []
+        removed_slugs: list[str] = []
+
+        for bucket in plan.buckets:
+            if bucket.slug in orphaned_set:
+                removed_slugs.append(bucket.slug)
+                continue
+            if any(f in deleted_set for f in bucket.owned_files):
+                bucket.owned_files = [
+                    f for f in bucket.owned_files if f not in deleted_set
+                ]
+                if bucket.slug not in change_set.stale_bucket_slugs:
+                    change_set.stale_bucket_slugs.append(bucket.slug)
+            updated_buckets.append(bucket)
+
+        if removed_slugs:
+            keep_slugs = {b.slug for b in updated_buckets}
+            deleted_paths = cleanup_stale_generated_files(
+                self.repo_root, self.output_dir, keep_slugs
+            )
+            prune_generation_ledger(self.repo_root, keep_slugs)
+            if deleted_paths:
+                console.print(
+                    f"  [dim]Removed {len(deleted_paths)} doc(s) for deleted bucket(s): "
+                    f"{', '.join(removed_slugs)}[/dim]"
+                )
+            plan.nav_structure = {
+                section: [s for s in slugs if s not in removed_slugs]
+                for section, slugs in plan.nav_structure.items()
+            }
+            plan.nav_structure = {
+                section: slugs
+                for section, slugs in plan.nav_structure.items()
+                if slugs
+            }
+
+        plan.buckets = updated_buckets
+        return plan
+
     def _targeted_replan(self, plan: DocPlan, change_set: ChangeSet) -> UpdateRunResult:
         """Replan only to discover new buckets for new integrations/files,
         then merge with existing plan and regenerate stale buckets.
@@ -404,6 +450,9 @@ class SmartUpdater:
         from .planner import (
             scan_repo as bucket_scan_repo,
         )
+
+        # Step 0: clean up deleted files and orphaned buckets before any LLM work
+        plan = self._handle_deleted_files(plan, change_set)
 
         # Invalidate call graph cache if source files changed
         _invalidate_call_graph_cache(
@@ -436,9 +485,8 @@ class SmartUpdater:
 
         if change_set.new_files and not added:
             console.print(
-                "[yellow]⚠ New files did not map cleanly to new buckets — escalating to full replan[/yellow]"
+                "[yellow]⚠ New files did not map to new buckets — they will be picked up on the next explicit replan[/yellow]"
             )
-            return self._full_replan_and_generate()
 
         if added:
             console.print(f"  [green]+{len(added)} new bucket(s) discovered:[/green]")

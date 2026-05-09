@@ -33,11 +33,13 @@ This file might be stale and if that is the case please update it first
 - `deepdoc/planner/bucket_refinement.py`: bucket ownership, file attachment, decomposition, consolidation
 - `deepdoc/planner/bucket_injection.py`: start-here/debug/research-context bucket injection, publication tier assignment
 - `deepdoc/planner/endpoint_refs.py`: auto-generation of per-endpoint reference pages
-- `deepdoc/generator/generation.py`: page generation orchestration
+- `deepdoc/generator/generation.py`: page generation orchestration; writes `deepdoc_prereqs` frontmatter from `bucket.depends_on`
+- `deepdoc/generator/post_processors.py`: MDX repair pipeline; `repair_mdx_component_blocks` now calls `_repair_accordion_nesting` first to fix `</Accordion>` nesting before the count-based tail-append pass
 - `deepdoc/generator/evidence.py`: page evidence assembly
 - `deepdoc/generator/validation.py`: generated-page validation
-- `deepdoc/persistence_v2.py`: `.deepdoc/` state, plan, ledger, sync baseline
-- `deepdoc/smart_update_v2.py`: incremental update and replan logic
+- `deepdoc/persistence_v2.py`: `.deepdoc/` state, plan, ledger, sync baseline, changelog (`append_changelog_entry`, `load_changelog`)
+- `deepdoc/smart_update_v2.py`: incremental update and replan logic; `_handle_deleted_files` cleans orphaned buckets/MDX in-place; `_append_changelog` writes a changelog entry after every non-noop run
+- `deepdoc/changelog_writer.py`: `record_and_write` appends to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.mdx`; `_ensure_in_nav` injects the `whats-changed` slug into `Start Here`
 - `deepdoc/parser/routes/`: route detection and repo-aware resolution
 - `deepdoc/scanner/`: runtime, integration, artifact, and data extraction helpers
 - `deepdoc/chatbot/service.py`: `ChatbotQueryService` public API — `query`, `deep_research`, `code_deep`; re-exports `create_fastapi_app` and provider names (keep imports here; tests mock against this module)
@@ -47,7 +49,7 @@ This file might be stale and if that is the case please update it first
 - `deepdoc/chatbot/routes.py`: FastAPI app factory (`create_fastapi_app`) and all HTTP route handlers
 - `deepdoc/chatbot/providers.py`: `LiteLLMChatClient` (including `complete_stream`), embedding clients
 - `deepdoc/chatbot/deep_research.py`: `DeepResearcher` multi-step research loop
-- `deepdoc/site/builder/scaffold_files.py`: non-chatbot scaffold file generators (package.json, tsconfig, CSS, layout TSX, etc.)
+- `deepdoc/site/builder/scaffold_files.py`: non-chatbot scaffold file generators (package.json, tsconfig, CSS, layout TSX, etc.); `_docs_page_tsx` wires `findNeighbour` from `fumadocs-core` for prev/next arrows and renders a "Read first:" callout from `deepdoc_prereqs` frontmatter
 - `deepdoc/site/builder/chatbot_components.py`: chatbot-specific TSX/TS generators (`_chatbot_panel_tsx`, `_chatbot_config_ts`, `_chatbot_toggle_tsx`)
 - `deepdoc/site/builder/templates.py`: re-export facade + any remaining orchestration; import from here for all scaffold functions
 - `deepdoc/prompts_v2.py`: re-export facade — all prompt constants and selectors live in `deepdoc/prompts/`
@@ -69,6 +71,11 @@ This file might be stale and if that is the case please update it first
 - Planner nav shaping is reader-first and repo-agnostic: preserve deterministic specialized sections where needed, but normalize backend docs toward a natural flow (`Start Here` → `Core Workflows` → `API Reference` → `Data Model` → runtime/integrations/ops) instead of raw bucket order.
 - Database grouping should avoid one-file micro-pages when model estates are large; coalesce sparse singleton model groups into stable aggregate groups (for example `core-models`) so coverage remains complete without nav noise.
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
+- `ChangeSet.strategy` never returns `full_replan` for normal changes — all code/file/endpoint changes route to `incremental` or `targeted_replan`. Full replan is only triggered by an explicit `force_replan=True` or an engine fingerprint mismatch in saved state.
+- `_handle_deleted_files` in `SmartUpdater` is the single place that cleans up orphaned buckets: removes the bucket from the plan, deletes its MDX, prunes the ledger entry, and cleans `nav_structure`. Do not duplicate this logic in pipeline or planner code.
+- After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `docs/whats-changed.mdx` is regenerated. Do not skip these calls when adding new execution paths to `update()` or `pipeline_v2.run()`.
+- The deprecated-version warning in `cli.py` now compares major versions only (`generated_major < cli_major`). It no longer uses a static `minimum_version` config value. Keep this in sync with any future major version bumps.
+- Generated pages carry `deepdoc_prereqs` frontmatter (list of prerequisite slugs from `bucket.depends_on`). The scaffold reads this to render the "Read first:" callout. Keep `_add_provenance_frontmatter` and the DocsPage template in sync if prereq semantics change.
 - Preserve `source_kind` and `publication_tier` semantics consistently across planner, persistence, generation, smart update, and chatbot indexing.
 - Chatbot responses are evidence-first: `evidence[]` is canonical for source/config proof and the generated right-pane code viewer; `references[]` is for generated docs and repo-authored docs only. Legacy fields (`code_citations`, `doc_links`, `code_workspace_citations`, `file_inventory`) should be derived from those canonical fields.
 - Chatbot indexing now has explicit source/archive artifacts plus separate corpora for code chunks, symbol chunks, config artifacts, generated docs, repo docs, and relationships. Keep generated/internal outputs (`.deepdoc*`, `docs/`, `site/`, `chatbot_backend/`) out of source evidence.
@@ -78,7 +85,7 @@ This file might be stale and if that is the case please update it first
 - The backend validates answer grounding: no invented file paths, no unknown evidence IDs, no docs as implementation proof, and no `line unknown`. If a retry still fails, fail closed with diagnostics instead of fabricating right-pane evidence.
 - For realtime UX, `/code-deep/stream` emits SSE trace events during research followed by the final result payload.
 - Chatbot is an opt-in concern. When `chatbot.enabled` is false, keep the generated site docs-only: do not scaffold `/ask`, chatbot frontend components, or `chatbot_backend/` artifacts.
-- CLI commands that load repo config emit a configurable compatibility warning when existing generated docs were produced by a deprecated DeepDoc version. Keep `compatibility.deprecated_version_warning.*` behavior and README/CHANGELOG documentation in sync when changing this warning.
+- CLI commands that load repo config emit a compatibility warning when existing generated docs were produced by a different major version of DeepDoc. The warning fires when `generated_major < cli_major` and says "run `deepdoc generate`" — not "upgrade the CLI". Keep this behavior and README/CHANGELOG in sync when making major version bumps.
 - The generated docs pages still use Fumadocs MDX rendering, but the custom chatbot answer pane and right-pane code modal share their own lazy Prism highlighter via `react-syntax-highlighter`; keep those custom surfaces visually aligned without replacing the Fumadocs docs-page path.
 - Published API docs should come from validated runtime endpoints via `RepoScan.published_api_endpoints`, but scanned endpoints should enrich grouped endpoint-family pages instead of creating one generated MDX page per route. Keep per-route pages limited to canonical OpenAPI assets or legacy plans.
 - Generated Fumadocs output must stay MDX-safe and GitHub-Pages-safe: preserve explicit site base-path support in the scaffold and escape raw destructured brace args in markdown tables before writing docs.
@@ -91,6 +98,7 @@ This file might be stale and if that is the case please update it first
 ## Generated And Derived Files
 Treat these as generated or persisted outputs unless the task is specifically about their format:
 - `.deepdoc/` contents and legacy files like `.deepdoc_plan.json` and `.deepdoc_file_map.json`
+- `.deepdoc/changelog.json` — append-only run log written by `changelog_writer.py`; do not hand-edit
 - `.deepdoc/scan_cache.json`, including runtime summaries, database groups, GraphQL interface summaries, and Knex artifact summaries
 - `.deepdoc/generation_quality.json`
 - `.deepdoc/consistency_warnings.json`

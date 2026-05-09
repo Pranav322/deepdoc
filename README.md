@@ -367,13 +367,13 @@ deepdoc update --deploy           # Update + deploy
 1. Loads the saved sync baseline, plan, and generation ledger from `.deepdoc/`.
 2. Diffs committed changes from the last synced commit to the current `HEAD`.
 3. Chooses a strategy automatically:
-   - incremental update
-   - targeted replan
-   - full replan
+   - **incremental** — regenerate only the stale bucket pages
+   - **targeted replan** — new/deleted files or endpoint structure changes; re-plans affected buckets then regenerates them. Full replan is never triggered automatically for normal code changes.
 4. Compares the saved scan cache with the current scan so semantic endpoint changes can refresh impacted docs even when ownership files do not line up directly.
-5. Regenerates only the affected bucket pages when safe.
-6. Incrementally refreshes the chatbot corpora from the same update run.
-7. Rebuilds site config and nav afterward.
+5. Regenerates only the affected bucket pages. Deleted files are cleaned up in-place: orphaned buckets and their MDX pages are removed, partially-emptied buckets are marked stale and regenerated.
+6. Appends an entry to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.mdx` so the docs site always shows a current commit-by-commit change log.
+7. Incrementally refreshes the chatbot corpora from the same update run.
+8. Rebuilds site config and nav afterward.
 
 If git is unavailable, it falls back to hash-based staleness detection for recovery.
 
@@ -382,7 +382,7 @@ Generation writes quality artifacts under `.deepdoc/`:
 - `.deepdoc/generation_quality.json` records invalid/degraded pages, coverage metrics, local setup warnings, and consistency summary data.
 - `.deepdoc/consistency_warnings.json` records warning-only cross-page identifier consistency findings.
 
-Generated MDX pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, and `deepdoc_evidence_files`. The generated Fumadocs site renders a subtle "Last generated from commit ..." badge when this metadata is present.
+Generated MDX pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, and `deepdoc_prereqs` (prerequisite page slugs). The generated Fumadocs site renders a subtle "Last generated from commit ..." badge and wires prev/next navigation arrows automatically. Pages with prerequisites show a "Read first:" callout at the top.
 
 **Options:**
 
@@ -701,9 +701,7 @@ site:
 | `site.favicon` | `""` | Path to favicon |
 | `site.logo` | `""` | Path to logo |
 | **Compatibility** | | |
-| `compatibility.deprecated_version_warning.enabled` | `true` | Warn when existing generated docs were produced by a deprecated DeepDoc version |
-| `compatibility.deprecated_version_warning.minimum_version` | `1.0.0` | Minimum generated DeepDoc version before an upgrade warning appears |
-| `compatibility.deprecated_version_warning.upgrade_command` | `python3 -m pip install --upgrade deepdoc` | Command shown in the upgrade warning |
+| `compatibility.deprecated_version_warning.enabled` | `true` | Warn when existing generated docs were produced by a different major version of DeepDoc (e.g. docs from v1.x with CLI v2.x). Suppressed for minor/patch version gaps. |
 
 ---
 

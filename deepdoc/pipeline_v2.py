@@ -321,6 +321,11 @@ class PipelineV2:
             Panel("[bold]Phase 5/5: Building site[/bold]", border_style="blue")
         )
         phase_start = time.perf_counter()
+        # Inject whats-changed into nav before the site is built so the page
+        # appears in the sidebar from the very first generate run.
+        _wc_section = plan.nav_structure.setdefault("Start Here", [])
+        if "whats-changed" not in _wc_section:
+            _wc_section.append("whats-changed")
         self._build_site(plan, has_openapi=openapi_ready)
         phase_timings["build_site"] = time.perf_counter() - phase_start
         stats["site"] = 1

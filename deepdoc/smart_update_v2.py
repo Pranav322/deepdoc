@@ -307,12 +307,17 @@ class SmartUpdater:
         stats["chatbot_corpora"] = list(run_result.refreshed_corpora)
         stats["chatbot_failed"] = run_result.chatbot_failed
 
-        # ── Step 4: Rebuild site nav ───────────────────────────────────
+        # ── Step 4: Changelog — must run before nav rebuild so whats-changed
+        #            is in plan.nav_structure when the site nav is written ────
+        if executed_strategy != "noop":
+            self._append_changelog(sync_plan, run_result)
+
+        # ── Step 5: Rebuild site nav ───────────────────────────────────
         if executed_strategy != "noop":
             updated_plan = load_plan(self.repo_root) or plan
             self._rebuild_nav(updated_plan)
 
-        # ── Step 5: Persist sync baseline ──────────────────────────────
+        # ── Step 6: Persist sync baseline ──────────────────────────────
         # When full_replan fires (engine_mismatch / force_replan), pipeline_v2
         # already saves state internally — skip double-save only for that case.
         if executed_strategy != "full_replan":
@@ -324,8 +329,6 @@ class SmartUpdater:
                 plan=plan,
             )
         self._save_update_sync_receipt(sync_plan, run_result)
-        if executed_strategy != "noop":
-            self._append_changelog(sync_plan, run_result)
 
         console.print(
             Panel.fit(

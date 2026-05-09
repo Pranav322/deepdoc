@@ -4,6 +4,13 @@ from pathlib import Path
 
 from .persistence_v2 import append_changelog_entry, load_changelog, load_plan, save_plan
 
+_STRATEGY_LABEL = {
+    "incremental": "Incremental update",
+    "targeted_replan": "Targeted replan",
+    "full_replan": "Full replan",
+    "full_generate": "Full generation",
+}
+
 
 def record_and_write(
     repo_root: Path,
@@ -44,45 +51,93 @@ def _build_mdx(entries: list[dict]) -> str:
     lines = [
         "---",
         'title: "What\'s Changed"',
-        'description: "Documentation changes per commit"',
+        'description: "A commit-by-commit log of every documentation update — which pages changed, which source files triggered the change, and how the update was handled."',
         "---",
         "",
         "# What's Changed",
         "",
+        "Every time you run `deepdoc generate` or `deepdoc update`, this page is regenerated automatically.",
+        "Each entry shows the commit that triggered the run, the strategy DeepDoc chose, the pages that were",
+        "updated, and the source files that caused the change.",
+        "",
     ]
 
     if not entries:
-        lines.append("No changes recorded yet — this is the initial documentation.")
+        lines.append(
+            "<Callout>No changelog entries yet. Run `deepdoc generate` to create the first entry.</Callout>"
+        )
         return "\n".join(lines)
 
     lines.append("<Accordions>")
     for entry in entries:
         date = entry.get("date", "")
-        msg = entry.get("commit_message", "update")[:80]
+        msg = entry.get("commit_message", "update")
         sha = entry.get("commit", "")
         pages = entry.get("pages_updated", [])
         files = entry.get("files_changed", [])
+        strategy = entry.get("strategy", "")
         is_initial = entry.get("is_initial", False)
+        strategy_label = _STRATEGY_LABEL.get(strategy, strategy)
 
-        title = f"{date} — {msg} ({sha})"
+        title = f"{date} — {msg[:72]} ({sha})"
         lines.append(f'<Accordion title="{title}">')
         lines.append("")
 
-        if is_initial:
-            lines.append(f"**{len(pages)} pages generated** — initial documentation run.")
-        else:
-            if pages:
-                page_links = ", ".join(f"[{_slug_to_title(s)}](/{s})" for s in pages)
-                lines.append(f"**{len(pages)} page(s) updated:** {page_links}")
-            else:
-                lines.append("No pages regenerated.")
+        # Commit metadata row
+        lines.append("| | |")
+        lines.append("|---|---|")
+        lines.append(f"| **Commit** | `{sha}` |")
+        lines.append(f"| **Date** | {date} |")
+        lines.append(f"| **Strategy** | {strategy_label} |")
+        lines.append(f"| **Message** | {msg} |")
+        lines.append("")
 
-        if files and not is_initial:
-            file_list = ", ".join(f"`{f}`" for f in files[:10])
-            if len(files) > 10:
-                file_list += f" +{len(files) - 10} more"
+        if is_initial:
+            lines.append(
+                f"**Initial generation** — {len(pages)} page(s) created from scratch."
+            )
+            if pages:
+                lines.append("")
+                lines.append("**Pages generated:**")
+                lines.append("")
+                for s in pages:
+                    lines.append(f"- [{_slug_to_title(s)}](/{s})")
+        else:
+            # Pages updated
+            if pages:
+                lines.append(f"**{len(pages)} page(s) updated:**")
+                lines.append("")
+                for s in pages:
+                    lines.append(f"- [{_slug_to_title(s)}](/{s})")
+            else:
+                lines.append(
+                    "<Callout type='info'>No pages were regenerated — only metadata or chatbot corpora were refreshed.</Callout>"
+                )
+
+            # Source files that changed
+            if files:
+                lines.append("")
+                lines.append(f"**Source files that triggered this update ({len(files)}):**")
+                lines.append("")
+                for f in files[:20]:
+                    lines.append(f"- `{f}`")
+                if len(files) > 20:
+                    lines.append(f"- *...and {len(files) - 20} more*")
+
+            # What the strategy means
             lines.append("")
-            lines.append(f"**Files changed:** {file_list}")
+            if strategy == "incremental":
+                lines.append(
+                    "> **Incremental update** — only the pages whose source files changed were regenerated. All other pages were left untouched."
+                )
+            elif strategy == "targeted_replan":
+                lines.append(
+                    "> **Targeted replan** — new or deleted files were detected. DeepDoc re-evaluated which buckets own those files, updated the plan, and regenerated affected pages."
+                )
+            elif strategy == "full_replan":
+                lines.append(
+                    "> **Full replan** — the engine schema changed or a force-replan was requested. All buckets were re-planned and regenerated."
+                )
 
         lines.append("")
         lines.append("</Accordion>")

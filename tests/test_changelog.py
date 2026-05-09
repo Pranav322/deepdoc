@@ -70,5 +70,7 @@ def test_write_whats_changed_page_generates_mdx(tmp_path):
     assert "<Accordions>" in content
     assert "feat: change 2" in content
     assert "feat: change 1" in content
-    assert "initial documentation run" in content
+    assert "created from scratch" in content
     assert "[Page 2](/page-2)" in content
+    assert "[Page 1](/page-1)" in content
+    assert "Incremental update" in content

@@ -299,11 +299,11 @@ def _merge_frontmatter_fields(content: str, fields: dict[str, Any]) -> str:
     merged = ["---", *kept]
     for key, value in fields.items():
         if isinstance(value, list):
-            merged.append(f"{key}:")
             if value:
+                merged.append(f"{key}:")
                 merged.extend(f"  - {json.dumps(item)}" for item in value)
             else:
-                merged.append("  []")
+                merged.append(f"{key}: []")
         else:
             merged.append(f"{key}: {json.dumps(value)}")
     merged.append("---")

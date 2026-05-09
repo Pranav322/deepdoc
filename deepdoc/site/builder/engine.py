@@ -204,6 +204,21 @@ def _build_page_tree_from_plan(
         return path
 
     slug_to_page = {page.slug: page for page in plan.pages if page_exists(page)}
+
+    # whats-changed is a special generated page (not a DocBucket) — inject a
+    # synthetic entry so it's found during the nav_structure loop below.
+    if (output_dir / "whats-changed.mdx").exists() and "whats-changed" not in slug_to_page:
+        from .._legacy_types import DocPage as _DocPage
+        _wc = _DocPage(
+            title="What's Changed",
+            slug="whats-changed",
+            page_type="changelog",
+            description="Documentation changes per commit",
+            source_files=[],
+            section="Start Here",
+        )
+        slug_to_page["whats-changed"] = _wc
+
     root_children: list[dict[str, Any]] = []
 
     overview_page = next(

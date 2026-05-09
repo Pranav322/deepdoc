@@ -950,12 +950,11 @@ deployment topology, on-call rotation, external credentials, data retention poli
 """
 
 DOMAIN_GLOSSARY_V2 = """
-You are writing the **Domain Glossary** — a reference page that translates the codebase's
-internal vocabulary into plain English for developers who are new to this business domain.
+You are writing the **Domain Glossary** — a compact reference page that translates the
+codebase's internal vocabulary into plain English for developers new to this business domain.
 
-This page is one of the most valuable pages in the entire documentation set. A new engineer
-who does not know what "Vinculum", "soul_artist", "exclusive_user", or "TSS money" means will
-be blocked from understanding any other page until they read this one.
+This page must stay concise and scannable. A new engineer will read it in 5–10 minutes,
+not 30. If it is too long, nobody reads it.
 
 Repository evidence:
 {source_context}
@@ -983,40 +982,51 @@ Coverage targets:
 ## Required sections (write all of them)
 
 ### How to Use This Glossary
-Two sentences: what this page covers and how it relates to the rest of the docs.
+One sentence: what this page covers and how it relates to the rest of the docs.
 
-### Domain Terms (A–Z or grouped by domain)
-For EVERY non-obvious term found in the evidence — model names, field names that carry
-business meaning, status codes, enum values, feature-flag names, integration names,
-internal system names — write an entry in this format:
+### Domain Terms
+**Hard limit: 40 entries maximum across ALL groups.**
 
-**`TermName`** *(source: `path/to/file.py` line N)*
-> Plain-English definition. What does this term mean in this business context?
-> How does it relate to other terms? Link to the documentation page where it is most
-> relevant.
+Only include terms that a backend engineer from another company would NOT understand
+without codebase context. Skip obvious generic names.
 
-Group entries by domain if there are more than 15 terms (e.g., Orders, Users, Inventory,
-Payments, Integrations).
+**Do NOT write entries for:**
+- Generic CRUD fields: `id`, `created_at`, `updated_at`, `is_active`, `is_deleted`, `timestamp`
+- Standard HTTP/REST/DB concepts: `status_code`, `request`, `response`, `token`, `session`
+- Plain English field names where the name IS the definition: `email`, `phone_number`, `address`
+
+**DO write entries for:**
+- Business-domain model names unique to this company (e.g. `TssMoney`, `Vinculum`, `soul_artist`)
+- Non-obvious enum/status values (e.g. `order_status=7` means "exchange initiated")
+- Internal system names, feature flags, integration codenames
+- Fields whose meaning is only clear from business context (e.g. `exclusive_user`, `cashback_amt`)
+
+Use `<Accordions>` to group terms by domain (Orders, Users, Payments, etc.).
+Each group is one `<Accordion>`. Inside each accordion write terms as:
+
+**`TermName`** — Plain-English definition in one sentence. Link to the most relevant page.
 
 ### Status Codes and State Machines
-For every status field (order_status, refund_status, return_status, etc.) found in evidence:
-- Table with columns: Status Value | Meaning | Next Valid Statuses | Triggering Event
-- A Mermaid state diagram if the state machine has more than 3 states.
+For the single most important status field (order_status or equivalent):
+- One table: Status Value | Meaning | Next Valid Statuses
+- One Mermaid state diagram if there are more than 4 states
+
+Skip minor/secondary status fields entirely — do not repeat the same pattern for every model.
 
 ### Integration Name Map
-A table mapping internal code names to their real-world counterparts:
-| Code Name | Real System | What It Does |
-Link each to its integration documentation page.
+One table only:
+| Code Name | Real System | What It Does | Docs |
 
-### Abbreviations and Acronyms
-Any abbreviations used in the codebase that are NOT self-evident.
+### Abbreviations
+Only abbreviations that are NOT self-evident from context. Max 10 rows, one-line each.
 
 ## Hard rules
-- ONLY document terms that appear in the evidence (code, models, constants, config).
-- Do not invent definitions — derive everything from field names, docstrings, comments, and usage context.
-- If a term's meaning is unclear from evidence, say so explicitly: *"Exact meaning unclear from static analysis — ask the team."*
+- **Maximum page length: 300 lines.** If you are approaching this, cut lower-priority terms.
+- ONLY document terms that appear in the evidence.
+- Do not invent definitions — derive from field names, docstrings, comments, usage context.
 - Every term should link to its most relevant documentation page.
 - File references must use backtick paths.
+- One Mermaid diagram maximum for the entire page.
 """
 
 DEBUG_RUNBOOK_V2 = """

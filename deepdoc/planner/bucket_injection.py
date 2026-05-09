@@ -187,7 +187,7 @@ def _inject_start_here_and_debug_buckets(
             slug="domain-glossary",
             section="Start Here",
             description="Plain-English definitions of every domain-specific term, model name, status code, and internal system name used in this codebase.",
-            owned_files=db_model_files[:30] if db_model_files else all_files[:20],
+            owned_files=db_model_files[:10] if db_model_files else all_files[:8],
             artifact_refs=[],
             required_sections=[
                 "how_to_use",

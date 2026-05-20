@@ -329,7 +329,7 @@ def _resolve_js_file_prefixes(
         for parent_file, parent_obj, mount_prefix in info.incoming_mounts:
             parent_info = js_index.get(parent_file)
             local_parent_prefixes = (
-                resolve_js_prefixes(parent_obj, parent_info.local_fastify_mounts)
+                resolve_js_prefixes(parent_obj, parent_info.local_mounts)
                 if parent_info
                 else [""]
             )

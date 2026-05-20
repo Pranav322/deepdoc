@@ -18,18 +18,29 @@ def detect_nestjs(context: RouteResolverContext) -> list[APIEndpoint]:
     if "@Controller" not in content:
         return []
 
-    endpoints: list[APIEndpoint] = []
-    ctrl_match = NESTJS_CONTROLLER.search(content)
-    base_path = ctrl_match.group(1) if ctrl_match else ""
-    if base_path and not base_path.startswith("/"):
-        base_path = "/" + base_path
+    # Build a sorted list of (offset, base_path) for each @Controller
+    controller_spans: list[tuple[int, str]] = []
+    for ctrl_match in NESTJS_CONTROLLER.finditer(content):
+        base = ctrl_match.group(1)
+        if base and not base.startswith("/"):
+            base = "/" + base
+        controller_spans.append((ctrl_match.start(), base))
 
+    def base_path_for_offset(offset: int) -> str:
+        result = ""
+        for ctrl_offset, ctrl_base in controller_spans:
+            if ctrl_offset <= offset:
+                result = ctrl_base
+        return result
+
+    endpoints: list[APIEndpoint] = []
     lines = content.splitlines()
     for match in NESTJS_METHOD.finditer(content):
         method = match.group(1).upper()
         sub_path = match.group(2) or ""
         if sub_path and not sub_path.startswith("/"):
             sub_path = "/" + sub_path
+        base_path = base_path_for_offset(match.start())
         full_path = base_path + sub_path
         line_num = line_number_for_offset(content, match.start())
 

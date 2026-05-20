@@ -135,8 +135,11 @@ def _refine_proposal(
         nav_structure.setdefault("Operations", []).append(utilities_slug)
 
     if primary not in {"backend_service", "falcon_backend"}:
+        merge_target_slugs: set[str] = set()
         for bucket in list(buckets):
             if not _is_incidental_http_bucket(bucket):
+                continue
+            if bucket.get("slug") in merge_target_slugs:
                 continue
             target = _best_proposal_merge_target(
                 bucket,
@@ -153,6 +156,7 @@ def _refine_proposal(
             )
             if not target:
                 continue
+            merge_target_slugs.add(target.get("slug", ""))
             target.setdefault("candidate_files", []).extend(
                 bucket.get("candidate_files", [])
             )

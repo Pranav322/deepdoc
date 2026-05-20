@@ -775,6 +775,7 @@ class AnswerMixin:
         for text in texts:
             for raw_path, raw_start, raw_end in pattern.findall(str(text or "")):
                 path = raw_path.strip("`'\".,:;()[]{}")
+                path = re.sub(r"^\./", "", path)
                 if self._is_reference_doc_path(path):
                     continue
                 if not self._is_code_workspace_path(path, allow_config=True):

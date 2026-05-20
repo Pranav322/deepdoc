@@ -623,7 +623,20 @@ def escape_mdx_text_hazards(content: str) -> str:
                 lambda match: f"&#123;{match.group(1)}&#125;",
                 escaped,
             )
-            escaped = escaped.replace("{", "&#123;").replace("}", "&#125;")
+            # Broad-escape remaining braces, but preserve ={...} JSX prop expressions.
+            # Stash each ={...} span (one level of nesting) as a NUL-keyed placeholder,
+            # escape everything else, then restore the stashed spans.
+            _jsx_slots: list[str] = []
+
+            def _stash_jsx(m: re.Match) -> str:
+                _jsx_slots.append(m.group(0))
+                return f"\x00{len(_jsx_slots) - 1}\x00"
+
+            protected = re.sub(r"=\{(?:[^{}]|\{[^{}]*\})*\}", _stash_jsx, escaped)
+            protected = protected.replace("{", "&#123;").replace("}", "&#125;")
+            for _idx, _val in enumerate(_jsx_slots):
+                protected = protected.replace(f"\x00{_idx}\x00", _val)
+            escaped = protected
         lines.append(escaped)
 
     return "\n".join(lines)

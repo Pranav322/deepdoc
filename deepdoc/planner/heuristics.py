@@ -418,38 +418,6 @@ def _merge_duplicate_setup_bucket(buckets: list[DocBucket]) -> list[DocBucket]:
     return [bucket for bucket in buckets if bucket.slug != "setup"]
 
 
-def _normalize_nav_section(section: str, primary: str) -> str:
-    value = (section or "").strip() or _default_section_for_primary(primary)
-    top, sep, rest = value.partition(" > ")
-
-    if top == "API Endpoints":
-        top = "API Reference"
-
-    backend_like = {
-        "backend_service",
-        "falcon_backend",
-        "hybrid",
-    }
-    if primary in backend_like:
-        top = {
-            "Data Layer": "Data Model",
-            "Database": "Data Model",
-            "Architecture": "Core Workflows",
-            "Subsystems": "Core Workflows",
-            "Modules": "Core Workflows",
-            "API": "API Reference",
-            "Getting Started": "Start Here",
-            "Research Context": "Design & Notes",
-        }.get(top, top)
-
-    if top == "Database":
-        top = "Data Model"
-
-    if sep:
-        return f"{top} > {rest}"
-    return top
-
-
 def _build_endpoint_reference_nav(buckets: list[DocBucket]) -> dict[str, list[str]]:
     families = [
         bucket

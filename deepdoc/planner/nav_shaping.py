@@ -152,7 +152,7 @@ def _normalize_nav_section(section: str, primary: str) -> str:
     value = (section or "").strip() or _default_section_for_primary(primary)
     top, sep, rest = value.partition(" > ")
 
-    # Universal aliases — safe renames that never lose domain specificity
+    # Universal aliases
     top = {
         "API Endpoints": "API Reference",
         "API": "API Reference",
@@ -160,6 +160,23 @@ def _normalize_nav_section(section: str, primary: str) -> str:
         "Data Layer": "Data Model",
         "Getting Started": "Start Here",
     }.get(top, top)
+
+    # Backend-specific remaps
+    backend_like = {"backend_service", "falcon_backend", "hybrid"}
+    if primary in backend_like:
+        top = {
+            "Data Layer": "Data Model",
+            "Database": "Data Model",
+            "Architecture": "Core Workflows",
+            "Subsystems": "Core Workflows",
+            "Modules": "Core Workflows",
+            "API": "API Reference",
+            "Getting Started": "Start Here",
+            "Research Context": "Design & Notes",
+        }.get(top, top)
+
+    if top == "Database":
+        top = "Data Model"
 
     if sep:
         if rest.strip() == top:

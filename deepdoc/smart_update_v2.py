@@ -459,6 +459,12 @@ class SmartUpdater:
 
         # Step 0: clean up deleted files and orphaned buckets before any LLM work
         plan = self._handle_deleted_files(plan, change_set)
+        # Remove orphaned slugs from stale set — they've been deleted, not stale
+        orphaned_set = set(change_set.orphaned_bucket_slugs)
+        if orphaned_set:
+            change_set.stale_bucket_slugs = [
+                s for s in change_set.stale_bucket_slugs if s not in orphaned_set
+            ]
 
         # Invalidate call graph cache if source files changed
         _invalidate_call_graph_cache(
@@ -504,6 +510,9 @@ class SmartUpdater:
             buckets=merged_buckets,
             nav_structure=self._merge_nav(plan.nav_structure, new_plan.nav_structure),
             skipped_files=list(set(plan.skipped_files + new_plan.skipped_files)),
+            orphaned_files=plan.orphaned_files,
+            integration_candidates=plan.integration_candidates,
+            classification=plan.classification,
         )
 
         # Mark all stale + new buckets for regeneration

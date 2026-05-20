@@ -380,6 +380,9 @@ class BucketGenerationEngine:
         failed_count = 0
         stub_slugs: list[str] = []  # track pages that fell back to stubs
 
+        from ..manifest import Manifest
+        _manifest = Manifest(self.output_dir)
+
         with Progress(
             SpinnerColumn(),
             TextColumn("[progress.description]{task.description}"),
@@ -404,7 +407,7 @@ class BucketGenerationEngine:
                         )
 
                         # Check staleness
-                        if not force and not self._bucket_is_stale(bucket):
+                        if not force and not self._bucket_is_stale(bucket, _manifest):
                             results.append(
                                 GenerationResult(bucket=bucket, content=None)
                             )
@@ -1347,11 +1350,12 @@ Re-run `deepdoc generate` to retry.
 
         return "\n".join(lines)
 
-    def _bucket_is_stale(self, bucket: DocBucket) -> bool:
+    def _bucket_is_stale(self, bucket: DocBucket, manifest: Any = None) -> bool:
         """Check if any source file for this bucket has changed since last generation."""
-        from ..manifest import Manifest, file_hash as compute_hash
+        from ..manifest import Manifest
 
-        manifest = Manifest(self.output_dir)
+        if manifest is None:
+            manifest = Manifest(self.output_dir)
 
         for src_file in tracked_bucket_files(bucket):
             src_path = self.repo_root / src_file

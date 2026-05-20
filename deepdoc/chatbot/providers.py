@@ -202,6 +202,7 @@ def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:
                 "model": llm_model,
                 "api_key_env": llm_cfg.get("api_key_env") or answer_cfg.get("api_key_env", ""),
                 "base_url": llm_cfg.get("base_url") or answer_cfg.get("base_url", ""),
+                "api_version": llm_cfg.get("api_version") or answer_cfg.get("api_version", ""),
             }
             provider, model = llm_provider, llm_model
 
@@ -230,6 +231,35 @@ def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:
             "║    https://docs.litellm.ai/docs/providers                            ║\n"
             "╚══════════════════════════════════════════════════════════════════════╝\n"
         )
+    is_azure = provider.lower() == "azure" or model.lower().startswith("azure/")
+    if is_azure:
+        base_url = (answer_cfg.get("base_url") or "").strip()
+        api_version = (answer_cfg.get("api_version") or "").strip()
+        missing = []
+        if not base_url or base_url.startswith("https://<"):
+            missing.append("base_url  (your Azure OpenAI endpoint URL)")
+        if not api_version:
+            missing.append("api_version  (e.g. 2024-02-01)")
+        if missing:
+            items = "\n".join(f"║    • {item:<64}║" for item in missing)
+            raise ValueError(
+                "\n\n"
+                "╔══════════════════════════════════════════════════════════════════════╗\n"
+                "║         AZURE CHATBOT NOT FULLY CONFIGURED — ACTION REQUIRED        ║\n"
+                "╠══════════════════════════════════════════════════════════════════════╣\n"
+                "║                                                                      ║\n"
+                "║  Azure OpenAI requires additional settings that are missing:         ║\n"
+                "║                                                                      ║\n"
+                f"{items}\n"
+                "║                                                                      ║\n"
+                "║  Add them to .deepdoc.yaml under llm: or chatbot.answer:             ║\n"
+                "║                                                                      ║\n"
+                "║    llm:                                                               ║\n"
+                "║      base_url: https://<resource>.openai.azure.com                   ║\n"
+                "║      api_version: 2024-02-01                                         ║\n"
+                "╚══════════════════════════════════════════════════════════════════════╝\n"
+            )
+
     return LiteLLMChatClient(answer_cfg)
 
 

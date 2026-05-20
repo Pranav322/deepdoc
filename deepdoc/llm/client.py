@@ -20,6 +20,7 @@ class LLMClient:
         self.max_tokens = llm_cfg.get("max_tokens", None)
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = llm_cfg.get("base_url")
+        self.api_version = llm_cfg.get("api_version")
 
         provider = (llm_cfg.get("provider") or "").strip()
         model = (self.model or "").strip()
@@ -56,6 +57,40 @@ class LLMClient:
                 "║    https://docs.litellm.ai/docs/providers                            ║\n"
                 "╚══════════════════════════════════════════════════════════════════════╝\n"
             )
+
+        is_azure = provider.lower() == "azure" or model.lower().startswith("azure/")
+        if is_azure:
+            base_url = (llm_cfg.get("base_url") or "").strip()
+            api_version = (llm_cfg.get("api_version") or "").strip()
+            missing = []
+            if not base_url:
+                missing.append("llm.base_url  (your Azure OpenAI endpoint URL)")
+            if not api_version:
+                missing.append("llm.api_version  (e.g. 2024-02-01)")
+            if missing:
+                items = "\n".join(f"║    • {item:<64}║" for item in missing)
+                raise ValueError(
+                    "\n\n"
+                    "╔══════════════════════════════════════════════════════════════════════╗\n"
+                    "║         AZURE OPENAI NOT FULLY CONFIGURED — ACTION REQUIRED         ║\n"
+                    "╠══════════════════════════════════════════════════════════════════════╣\n"
+                    "║                                                                      ║\n"
+                    "║  Azure OpenAI requires additional settings that are missing:         ║\n"
+                    "║                                                                      ║\n"
+                    f"{items}\n"
+                    "║                                                                      ║\n"
+                    "║  Add them to your .deepdoc.yaml:                                     ║\n"
+                    "║                                                                      ║\n"
+                    "║    llm:                                                               ║\n"
+                    "║      provider: azure                                                  ║\n"
+                    "║      model: azure/gpt-4o          # your deployment name             ║\n"
+                    "║      base_url: https://<resource>.openai.azure.com  # endpoint URL   ║\n"
+                    "║      api_version: 2024-02-01      # Azure API version                ║\n"
+                    "║      api_key_env: AZURE_API_KEY   # env var holding your key         ║\n"
+                    "║                                                                      ║\n"
+                    "║  Or re-run:  deepdoc init --provider azure                           ║\n"
+                    "╚══════════════════════════════════════════════════════════════════════╝\n"
+                )
 
         if api_key_env and not os.environ.get(api_key_env):
             pad = max(0, 34 - len(api_key_env))
@@ -99,6 +134,8 @@ class LLMClient:
                 kwargs["max_tokens"] = self.max_tokens
             if self.base_url:
                 kwargs["base_url"] = self.base_url
+            if self.api_version:
+                kwargs["api_version"] = self.api_version
 
             response = litellm.completion(**kwargs)
             return response.choices[0].message.content or ""
@@ -128,6 +165,8 @@ class LLMClient:
                 kwargs["max_tokens"] = self.max_tokens
             if self.base_url:
                 kwargs["base_url"] = self.base_url
+            if self.api_version:
+                kwargs["api_version"] = self.api_version
 
             for chunk in litellm.completion(**kwargs):
                 delta = chunk.choices[0].delta

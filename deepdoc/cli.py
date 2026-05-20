@@ -215,6 +215,9 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     if provider == "ollama":
         cfg["llm"]["base_url"] = "http://localhost:11434"
         cfg["llm"]["api_key_env"] = ""
+    if provider == "azure":
+        cfg["llm"]["base_url"] = "https://<your-resource>.openai.azure.com"
+        cfg["llm"]["api_version"] = "2024-02-01"
     if with_chatbot:
         from .chatbot.settings import DEFAULT_CHATBOT_CONFIG
 
@@ -240,7 +243,25 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     next_steps = [
         "  1. Review config:     [bold]deepdoc config show[/bold]",
     ]
-    if cfg["llm"]["api_key_env"]:
+    if provider == "azure":
+        next_steps.append(
+            "  2. Edit [cyan].deepdoc.yaml[/cyan] and fill in Azure-specific fields:"
+        )
+        next_steps.append(
+            "       [bold]llm.base_url[/bold]    → your Azure OpenAI endpoint URL"
+        )
+        next_steps.append(
+            "       [bold]llm.api_version[/bold] → Azure API version (e.g. 2024-02-01)"
+        )
+        next_steps.append(
+            "       [bold]llm.model[/bold]       → your deployment name (e.g. azure/my-gpt4o)"
+        )
+        next_steps.append(
+            f"  3. Set your API key:  [bold]export {cfg['llm']['api_key_env']}=...[/bold]"
+        )
+        next_steps.append("  4. Generate docs:     [bold]deepdoc generate[/bold]")
+        next_steps.append("  5. Preview locally:   [bold]deepdoc serve[/bold]")
+    elif cfg["llm"]["api_key_env"]:
         next_steps.append(
             f"  2. Set your API key:  [bold]export {cfg['llm']['api_key_env']}=...[/bold]"
         )

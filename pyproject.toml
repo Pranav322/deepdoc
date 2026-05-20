@@ -57,6 +57,9 @@ Issues = "https://github.com/tss-pranavkumar/deepdoc/issues"
 where = ["."]
 include = ["deepdoc*"]
 
+[tool.setuptools.package-data]
+"deepdoc.generator.mdx_validator" = ["validate.mjs", "package.json"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

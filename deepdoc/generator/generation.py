@@ -50,6 +50,7 @@ console = Console()
 
 
 from .evidence import AssembledEvidence, EvidenceAssembler
+from .mdx_compile_gate import GateOutcome, apply_mdx_compile_gate
 from .validation import PageValidator, ValidationResult
 from .post_processors import *
 # ═════════════════════════════════════════════════════════════════════════════
@@ -212,6 +213,10 @@ class GenerationResult:
     elapsed_seconds: float = 0.0
     retries: int = 0
     degraded: bool = False
+    mdx_compile_failed: bool = False
+    mdx_compile_retries: int = 0
+    mdx_fallback_applied: bool = False
+    mdx_last_error: str | None = None
 
 
 @dataclass
@@ -227,6 +232,9 @@ class GenerationSummary:
     warnings_total: int = 0
     invalid_slugs: list[str] = field(default_factory=list)
     degraded_slugs: list[str] = field(default_factory=list)
+    mdx_compile_retries_total: int = 0
+    mdx_compile_retried_slugs: list[str] = field(default_factory=list)
+    mdx_fallback_slugs: list[str] = field(default_factory=list)
 
     @property
     def status(self) -> str:
@@ -253,6 +261,12 @@ def summarize_generation_results(results: list[GenerationResult]) -> GenerationS
             if getattr(result, "degraded", False):
                 summary.degraded += 1
                 summary.degraded_slugs.append(result.bucket.slug)
+            retries = getattr(result, "mdx_compile_retries", 0) or 0
+            if retries:
+                summary.mdx_compile_retries_total += retries
+                summary.mdx_compile_retried_slugs.append(result.bucket.slug)
+            if getattr(result, "mdx_fallback_applied", False):
+                summary.mdx_fallback_slugs.append(result.bucket.slug)
         else:
             summary.skipped += 1
     return summary
@@ -669,6 +683,25 @@ class BucketGenerationEngine:
                 validation,
                 evidence,
             )
+
+            # Step 8.5: MDX compile gate — last-line guarantee that the file
+            # will parse. Reprompts the LLM on compile error, falls back to
+            # JSX-stripped Markdown if retries are exhausted.
+            gate_outcome = self._run_mdx_compile_gate(content, bucket)
+            content = gate_outcome.content
+            if gate_outcome.fallback_applied:
+                degraded = True
+                console.print(
+                    f"  [yellow]⚠ {bucket.title}: MDX did not compile after "
+                    f"{gate_outcome.retries} retry(ies); shipping JSX-stripped "
+                    f"Markdown fallback.[/yellow]"
+                )
+            elif gate_outcome.retries:
+                console.print(
+                    f"  [dim]✓ {bucket.title}: recovered MDX after "
+                    f"{gate_outcome.retries} fix retry(ies).[/dim]"
+                )
+
             bucket_hints = bucket.generation_hints or {}
             filename = (
                 "index.mdx"
@@ -690,6 +723,14 @@ class BucketGenerationEngine:
                 validation=validation,
                 elapsed_seconds=elapsed,
                 degraded=degraded,
+                mdx_compile_failed=gate_outcome.compile_failed,
+                mdx_compile_retries=gate_outcome.retries,
+                mdx_fallback_applied=gate_outcome.fallback_applied,
+                mdx_last_error=(
+                    gate_outcome.last_error.short()
+                    if gate_outcome.last_error is not None
+                    else None
+                ),
             )
 
         except Exception as e:
@@ -783,6 +824,27 @@ class BucketGenerationEngine:
                 else:
                     raise
         raise RuntimeError(f"Max retries exceeded for {evidence.bucket.title}")
+
+    # ── MDX compile gate ─────────────────────────────────────────────────
+
+    def _run_mdx_compile_gate(
+        self, content: str, bucket: DocBucket
+    ) -> GateOutcome:
+        """Run the MDX compile gate on a single page.
+
+        Wrapped in a try/except so environment failures (missing Node, npm
+        install failure) downgrade to "skip the gate, ship as-is" rather than
+        aborting the whole generation run. The downstream `pnpm build` will
+        still surface MDX problems if any slip through.
+        """
+        try:
+            return apply_mdx_compile_gate(content, self.llm, bucket)
+        except Exception as exc:
+            console.print(
+                f"  [yellow]⚠ MDX compile gate unavailable for "
+                f"{bucket.title}: {exc}. Shipping page unverified.[/yellow]"
+            )
+            return GateOutcome(content=content)
 
     # ── Graceful degradation ─────────────────────────────────────────────
 

@@ -9,6 +9,8 @@ scripts/
 /docs/
 /build/
 /site/node_modules/
+deepdoc/generator/mdx_validator/node_modules/
+deepdoc/generator/mdx_validator/package-lock.json
 /site/.next/
 /site/.source/
 /site/out/
@@ -85,3 +87,7 @@ split_generator.py
 .deepdoc.yaml
 #terminal
 .omc
+
+
+
+node_modules

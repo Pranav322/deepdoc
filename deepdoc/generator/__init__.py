@@ -6,6 +6,14 @@ from .generation import (
     summarize_generation_results,
     BucketGenerationEngine,
 )
+from .mdx_compile_gate import GateOutcome, apply_mdx_compile_gate
+from .mdx_validator import (
+    MdxCompileError,
+    ValidationOutcome,
+    bootstrap_validator,
+    ensure_node_available,
+    validate_mdx,
+)
 from .validation import ValidationResult, PageValidator
 from .post_processors import (
     _fix_mermaid_diagram,

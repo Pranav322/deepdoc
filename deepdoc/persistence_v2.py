@@ -624,6 +624,10 @@ def save_generation_ledger(
             "generated_at": _now_iso(),
             "elapsed_seconds": round(result.elapsed_seconds, 2),
             "retries": getattr(result, "retries", 0),
+            "mdx_compile_failed": bool(getattr(result, "mdx_compile_failed", False)),
+            "mdx_compile_retries": int(getattr(result, "mdx_compile_retries", 0) or 0),
+            "mdx_fallback_applied": bool(getattr(result, "mdx_fallback_applied", False)),
+            "mdx_last_error": getattr(result, "mdx_last_error", None),
         }
 
         # Word + diagram counts

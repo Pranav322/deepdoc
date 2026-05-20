@@ -287,9 +287,14 @@ class PipelineV2:
         stats["pages_invalid"] = generation_summary.invalid
         stats["pages_degraded"] = generation_summary.degraded
         stats["page_warnings"] = generation_summary.warnings_total
+        stats["mdx_compile_retries_total"] = generation_summary.mdx_compile_retries_total
+        stats["mdx_compile_retried_slugs"] = generation_summary.mdx_compile_retried_slugs
+        stats["mdx_fallback_slugs"] = generation_summary.mdx_fallback_slugs
         stats["quality_report"] = {
             "invalid_slugs": generation_summary.invalid_slugs,
             "degraded_slugs": generation_summary.degraded_slugs,
+            "mdx_compile_retried_slugs": generation_summary.mdx_compile_retried_slugs,
+            "mdx_fallback_slugs": generation_summary.mdx_fallback_slugs,
         }
         stats["status"] = generation_summary.status
 
@@ -1554,11 +1559,22 @@ class PipelineV2:
             stats.get("pages_invalid")
             or stats.get("pages_degraded")
             or stats.get("page_warnings")
+            or stats.get("mdx_compile_retries_total")
+            or stats.get("mdx_fallback_slugs")
         ):
+            mdx_retries = int(stats.get("mdx_compile_retries_total", 0) or 0)
+            mdx_fallbacks = len(stats.get("mdx_fallback_slugs", []) or [])
+            mdx_line = ""
+            if mdx_retries or mdx_fallbacks:
+                mdx_line = (
+                    f"  MDX fix retries:  [cyan]{mdx_retries}[/cyan]\n"
+                    f"  MDX fallbacks:    [cyan]{mdx_fallbacks}[/cyan]\n"
+                )
             quality_line = (
                 f"  Invalid pages:    [cyan]{stats.get('pages_invalid', 0)}[/cyan]\n"
                 f"  Degraded pages:   [cyan]{stats.get('pages_degraded', 0)}[/cyan]\n"
                 f"  Warnings:         [cyan]{stats.get('page_warnings', 0)}[/cyan]\n"
+                f"{mdx_line}"
             )
 
         console.print()
@@ -1588,6 +1604,9 @@ class PipelineV2:
             "pages_invalid": stats.get("pages_invalid", 0),
             "pages_degraded": stats.get("pages_degraded", 0),
             "page_warnings": stats.get("page_warnings", 0),
+            "mdx_compile_retries_total": stats.get("mdx_compile_retries_total", 0),
+            "mdx_compile_retried_slugs": stats.get("mdx_compile_retried_slugs", []),
+            "mdx_fallback_slugs": stats.get("mdx_fallback_slugs", []),
             "quality_report": stats.get("quality_report", {}),
         }
         (state_dir / "generation_quality.json").write_text(

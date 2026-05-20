@@ -8,29 +8,36 @@ Auto-generate deep engineering documentation from real codebases using AI.
 
 DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich MDX pages with Mermaid diagrams, and builds a local-first Fumadocs site with Orama search.
 
+## Contents
+
+- [Quick Start](#quick-start)
+- [Chatbot in 5 Minutes](#chatbot-in-5-minutes)
+- [Installation](#installation)
+- [Commands](#commands)
+- [LLM Provider Setup](#llm-provider-setup)
+- [Configuration](#configuration)
+- [Chatbot](#chatbot)
+- [Supported Languages & Frameworks](#supported-languages--frameworks)
+- [Architecture](#architecture)
+- [Generated Files](#generated-files)
+- [GitHub Actions CI/CD](#github-actions-cicd)
+- [Requirements](#requirements)
+- [Contributing & Release Flow](./CONTRIBUTING.md)
+
 ---
 
 ## Features
 
-- **Bucket-Based Documentation Architecture** — Docs are planned as system, feature, endpoint, endpoint reference, integration, and database buckets instead of noisy one-file-per-page output.
-- **Five-Phase Pipeline** — Scan, plan, generate, playground, build. Planning and generation are separated so large repos and large files are handled more cleanly.
-- **Multi-Step AI Planner** — The planner classifies the repo, proposes buckets, then assigns files, symbols, artifacts, and dependencies into the final doc structure.
-- **Giant-File Handling** — Large files are decomposed into feature-aligned clusters so giant controllers or service files can feed multiple doc pages.
-- **Reader-First Repo-Agnostic Nav** — The planner normalizes bucket output into a natural onboarding flow (for backend repos: Start Here → Core Workflows → API Reference → Data Model → runtime/integrations/ops) while preserving full coverage.
-- **Large-Database Anti-Noise Grouping** — Sparse singleton model files are coalesced into stable aggregate groups (for example `core-models`) so huge schemas stay complete without one-file-per-page nav spam.
-- **Grouped API Reference Docs** — High-level endpoint family pages are AI-planned and enriched from scanned runtime endpoints, avoiding one-page-per-route navigation spam. OpenAPI specs still stage canonical interactive `/api/*` pages when present.
-- **Integration Discovery** — Third-party systems like payment gateways, delivery providers, warehouse systems, and webhook integrations can be grouped into integration docs.
-- **Trust Signals & Coverage Reporting** — Generated pages include DeepDoc provenance frontmatter and a site badge with the source commit; generation also reports endpoint, file, and symbol coverage plus consistency warnings.
-- **Evidence-First Chatbot Answers** — Symbol chunks, lexical search, and semantic retrieval gather candidates, but final code proof is hydrated from archived source/config snippets with exact file paths, line ranges, evidence IDs, and validation.
-- **Incremental Updates** — `deepdoc update` uses persisted plan and ledger data to regenerate only stale or structurally affected docs.
-- **Full Refresh and Clean Rebuild Modes** — `generate --force` fully refreshes DeepDoc-managed docs and removes stale generated pages; `generate --clean --yes` wipes output and rebuilds from scratch.
-- **Safe Existing-Docs Behavior** — Plain `generate` refuses to run over an existing DeepDoc-managed docs set and will not silently mix into a non-DeepDoc `docs/` folder.
-- **Multi-Language Support** — JavaScript/TypeScript, Python, Go, PHP/Laravel with tree-sitter AST parsing and regex fallback.
-- **Configurable LLM** — Works with Anthropic, OpenAI, Azure OpenAI, Ollama, and other LiteLLM-compatible providers.
-- **Mermaid Diagrams** — Generated pages can include architecture, flow, and request-sequence diagrams.
-- **OpenAPI-Aware API Docs** — Auto-detects OpenAPI/Swagger specs and stages canonical interactive `/api/*` pages in the generated site.
-- **Local-First Fumadocs Site** — Generates a `site/` Next.js app with Fumadocs UI, Mermaid rendering, and built-in Orama search.
-- **Static Export** — `deepdoc deploy` exports a static site to `site/out/` for any static host.
+- **Bucket-based documentation architecture** — system, feature, endpoint, integration, and database buckets instead of one-file-per-page noise.
+- **Multi-step AI planner** — classifies the repo, proposes buckets, then assigns files, symbols, artifacts, and dependencies into a final reader-first plan.
+- **Giant-file handling** — large files are decomposed into feature-aligned clusters so a single controller can feed multiple doc pages.
+- **MDX compile gate** — every page is compile-checked before being written; broken MDX is auto-fixed via LLM retry or degraded to safe Markdown rather than shipped.
+- **Evidence-first chatbot answers** — final code proof is hydrated from archived source snippets with exact file paths and line ranges, not just retrieval guesses.
+- **Incremental updates** — `deepdoc update` regenerates only stale or structurally affected docs against the last synced commit.
+- **OpenAPI-aware API docs** — auto-detects OpenAPI/Swagger specs and stages interactive `/api/*` pages in the generated site.
+- **Local-first Fumadocs site** — generates a `site/` Next.js app with Fumadocs UI, Mermaid rendering, and built-in search; `deepdoc deploy` exports a static site to any host.
+
+Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider. Parses Python, JavaScript/TypeScript, Go, PHP, and Vue.
 
 ---
 
@@ -71,12 +78,15 @@ pip install click litellm gitpython rich pyyaml jinja2
 pip install -e . --no-deps
 ```
 
+You will also need **Node 18+** on `PATH`. DeepDoc uses Node at generate time to compile-check each MDX page before writing it, and at `serve`/`deploy` time for the Fumadocs site. The small set of MDX validation dependencies installs into `deepdoc/generator/mdx_validator/node_modules/` automatically on first `deepdoc generate`.
+
 ### Verify installation
 
 ```bash
 deepdoc --version
 deepdoc --help
 python -m deepdoc --help
+node --version    # must report 18 or higher
 ```
 
 If you installed the chatbot extra, you can verify those dependencies with:
@@ -89,128 +99,85 @@ pip show faiss-cpu fastapi uvicorn
 
 ## Quick Start
 
-DeepDoc has two separate model surfaces:
-
-- `llm.*` powers planning and doc generation.
-- `chatbot.answer.*` and `chatbot.embeddings.*` power the optional chatbot.
-
-If you only want generated docs, configure `llm.*` and skip the chatbot sections.
-If you want docs plus chatbot, install `deepdoc[chatbot]` and configure both.
-
-When `chatbot.enabled` is `false`, DeepDoc now generates a docs-only site: no chatbot route, no chatbot UI components, and no `chatbot_backend/` scaffold.
-
-### Docs Only
+### Docs only
 
 ```bash
-# 1. Go to your project
 cd /path/to/your-project
-
-# 2. Initialize DeepDoc
 deepdoc init --provider anthropic
-
-# 3. Set your API key
 export ANTHROPIC_API_KEY=sk-ant-...
-
-# 4. Generate docs
 deepdoc generate
-
-# 5. Preview locally
-deepdoc serve
-# → Open http://localhost:3000
+deepdoc serve   # → http://localhost:3000
 ```
 
-### Docs + Chatbot
+### Docs + chatbot — one env var
 
-If you also want the AI chatbot, see **[Chatbot in 5 Minutes](#chatbot-in-5-minutes)** right below for complete copy-paste setup for every major provider.
+```bash
+cd /path/to/your-project
+pip install "deepdoc[chatbot]"
+deepdoc init --with-chatbot --provider anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+deepdoc generate
+deepdoc serve   # → http://localhost:3000  •  chatbot at /ask
+```
+
+The chatbot reuses your doc-gen LLM and runs embeddings locally via `fastembed`. **No extra keys, no extra config.** Swap `--provider anthropic` for `openai`, `gemini`, `azure`, or `ollama` to use a different LLM.
+
+When `chatbot.enabled` is `false`, DeepDoc generates a docs-only site: no chatbot route, no chatbot UI components, and no `chatbot_backend/` scaffold.
 
 ---
 
 ## Chatbot in 5 Minutes
 
-Pick your provider and copy-paste the entire block. Each recipe gets you from zero to a working chatbot at `localhost:3000/ask`.
+> **Defaults work out of the box.** The chatbot inherits your `llm.*` config and runs embeddings locally via `fastembed`. The recipes below only add config when you actually need to override the defaults (Azure endpoints, custom Ollama base URL, or mixing providers).
 
-> **You do not need to tune anything.** The defaults for retrieval, chunking, and reranking all work out of the box. Advanced configuration is in the [Chatbot](#chatbot) section further down.
+### Single provider — one key for everything
 
-### OpenAI — One Key for Everything
-
-Simplest setup. One API key powers docs, answers, and embeddings.
+This is the path 95% of users want. Anthropic shown; swap `--provider` for `openai`, `gemini`, etc.
 
 ```bash
 pip install "deepdoc[chatbot]"
 cd /path/to/your-project
 
-export OPENAI_API_KEY=sk-...
-
-deepdoc init --with-chatbot --provider openai --model gpt-4o
-
-# Wire chatbot to the same OpenAI key
-deepdoc config set chatbot.answer.provider openai
-deepdoc config set chatbot.answer.model gpt-4o-mini
-deepdoc config set chatbot.answer.api_key_env OPENAI_API_KEY
-deepdoc config set chatbot.embeddings.provider openai
-deepdoc config set chatbot.embeddings.model text-embedding-3-large
-deepdoc config set chatbot.embeddings.api_key_env OPENAI_API_KEY
+deepdoc init --with-chatbot --provider anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
 
 deepdoc generate
 deepdoc serve
 # → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
 ```
 
-### Claude + OpenAI Embeddings
+### Mix providers — different LLM for chat than for docs
 
-Claude for docs and answers, OpenAI for embeddings (Anthropic doesn't offer embedding models).
+Use Claude for docs (great long-form), GPT-4o-mini for chat answers (fast + cheap), local embeddings.
 
 ```bash
 pip install "deepdoc[chatbot]"
 cd /path/to/your-project
 
+deepdoc init --with-chatbot --provider anthropic
 export ANTHROPIC_API_KEY=sk-ant-...
 export OPENAI_API_KEY=sk-...
 
-deepdoc init --with-chatbot --provider anthropic
+deepdoc config set chatbot.answer.provider openai
+deepdoc config set chatbot.answer.model gpt-4o-mini
+deepdoc config set chatbot.answer.api_key_env OPENAI_API_KEY
 
-deepdoc config set chatbot.answer.provider anthropic
-deepdoc config set chatbot.answer.model claude-3-5-sonnet-20241022
-deepdoc config set chatbot.answer.api_key_env ANTHROPIC_API_KEY
+deepdoc generate
+deepdoc serve
+```
+
+Want cloud embeddings instead of local? Add:
+
+```bash
+deepdoc config set chatbot.embeddings.backend litellm
 deepdoc config set chatbot.embeddings.provider openai
 deepdoc config set chatbot.embeddings.model text-embedding-3-large
 deepdoc config set chatbot.embeddings.api_key_env OPENAI_API_KEY
-
-deepdoc generate
-deepdoc serve
-# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
-```
-
-### Google Gemini — One Key for Everything
-
-One Gemini API key for docs, answers, and embeddings. Keep the `gemini/` prefix.
-
-```bash
-pip install "deepdoc[chatbot]"
-cd /path/to/your-project
-
-export GEMINI_API_KEY=...
-
-deepdoc init --with-chatbot
-deepdoc config set llm.provider gemini
-deepdoc config set llm.model gemini/gemini-2.0-flash
-deepdoc config set llm.api_key_env GEMINI_API_KEY
-
-deepdoc config set chatbot.answer.provider gemini
-deepdoc config set chatbot.answer.model gemini/gemini-2.0-flash
-deepdoc config set chatbot.answer.api_key_env GEMINI_API_KEY
-deepdoc config set chatbot.embeddings.provider gemini
-deepdoc config set chatbot.embeddings.model gemini/text-embedding-004
-deepdoc config set chatbot.embeddings.api_key_env GEMINI_API_KEY
-
-deepdoc generate
-deepdoc serve
-# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
 ```
 
 ### Azure OpenAI
 
-Replace `YOUR-RESOURCE` and deployment names with your actual Azure values.
+Azure deployments need explicit endpoint + API-version values. Replace `YOUR-RESOURCE` and deployment names with your actual values.
 
 ```bash
 pip install "deepdoc[chatbot]"
@@ -222,11 +189,8 @@ export AZURE_API_BASE=https://YOUR-RESOURCE.openai.azure.com
 deepdoc init --with-chatbot --provider azure --model azure/gpt-4o
 deepdoc config set llm.base_url $AZURE_API_BASE
 
-deepdoc config set chatbot.answer.provider azure
-deepdoc config set chatbot.answer.model azure/gpt-4o-mini
-deepdoc config set chatbot.answer.api_key_env AZURE_API_KEY
-deepdoc config set chatbot.answer.base_url $AZURE_API_BASE
-deepdoc config set chatbot.answer.api_version 2024-02-01
+# Only embeddings need separate Azure config (different deployment)
+deepdoc config set chatbot.embeddings.backend litellm
 deepdoc config set chatbot.embeddings.provider azure
 deepdoc config set chatbot.embeddings.model azure/text-embedding-3-large
 deepdoc config set chatbot.embeddings.api_key_env AZURE_API_KEY
@@ -235,10 +199,11 @@ deepdoc config set chatbot.embeddings.api_version 2024-02-01
 
 deepdoc generate
 deepdoc serve
-# → Docs at http://localhost:3000  •  Chatbot at http://localhost:3000/ask
 ```
 
-### Ollama — Fully Local, No API Keys
+The answer LLM inherits `llm.*` (Azure deployment + base URL + key) automatically.
+
+### Ollama — Fully local, no API keys
 
 Free and private. Runs everything on your machine.
 
@@ -250,11 +215,7 @@ cd /path/to/your-project
 ollama pull llama3.2
 
 deepdoc init --with-chatbot --provider ollama --model ollama/llama3.2
-
-deepdoc config set chatbot.answer.provider ollama
-deepdoc config set chatbot.answer.model ollama/llama3.2
-deepdoc config set chatbot.answer.base_url http://localhost:11434
-deepdoc config set chatbot.embeddings.backend fastembed
+deepdoc config set llm.base_url http://localhost:11434
 
 deepdoc generate
 deepdoc serve
@@ -334,7 +295,7 @@ deepdoc generate --exclude "tests/**"
 
 1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
-3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route.
+3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through an MDX compile-check (with bounded LLM-driven retry on failure) before being written to disk.
 4. **Phase 4: API Ref** — Stage OpenAPI assets for the generated Fumadocs `/api/*` pages when a spec exists.
 5. **Phase 5: Build** — Write the generated `site/` Fumadocs scaffold, page tree, search route, and static assets from the generated plan.
 
@@ -710,9 +671,11 @@ site:
 
 DeepDoc can generate an AI-powered chatbot that answers questions about your codebase using evidence-first RAG. Retrieval indexes find candidate files, but final code proof always comes from archived source/config snippets with exact file paths and line ranges. Generated docs and repo-authored docs can help explain concepts, but they are returned as references, not right-pane code evidence.
 
+> **Defaults you should know.** The chatbot **inherits** `provider`, `model`, and `api_key_env` from your `llm.*` config when `chatbot.answer.*` is empty (the scaffolded default). Embeddings default to `fastembed` — fully local, no API key. You only need extra config if (a) you want a different LLM for chat than for docs, or (b) you want cloud embeddings.
+
 If chatbot is disabled, DeepDoc keeps the generated site docs-only: it does not generate the `/ask` route, chatbot frontend components, or `chatbot_backend/` scaffold.
 
-> **Already running?** If you followed the [Chatbot in 5 Minutes](#chatbot-in-5-minutes) guide above, your chatbot is already configured and working. Everything below is for advanced configuration, tuning, and production deployment. **The defaults work well out of the box** — most users never need to change the settings below.
+> **Already running?** If you followed the [Chatbot in 5 Minutes](#chatbot-in-5-minutes) guide above, your chatbot is already configured and working. Everything below is for advanced configuration, tuning, and production deployment.
 
 ### How the Model Surfaces Work
 
@@ -749,98 +712,69 @@ Public endpoints remain stable:
 
 ### Provider Recipes
 
-#### Claude For Docs + Chatbot Answers
+These are advanced recipes that override the inheritance defaults — e.g. mixing providers or using cloud embeddings. For the simple "one key for everything" path, see [Chatbot in 5 Minutes](#chatbot-in-5-minutes) above.
 
-Anthropic works well for doc generation and chatbot answers, but you still need a separate embeddings provider.
+#### Claude for docs, OpenAI for embeddings
+
+Claude doesn't offer embedding models, so cloud embeddings need a separate provider. (Or just keep the default `fastembed` and skip this entirely.)
 
 ```bash
 export ANTHROPIC_API_KEY=...
 export OPENAI_API_KEY=...
-export DEEPDOC_CHAT_API_KEY=$ANTHROPIC_API_KEY
-export DEEPDOC_EMBED_API_KEY=$OPENAI_API_KEY
 
 deepdoc config set llm.provider anthropic
 deepdoc config set llm.model claude-3-5-sonnet-20241022
 deepdoc config set llm.api_key_env ANTHROPIC_API_KEY
 
 deepdoc config set chatbot.enabled true
-deepdoc config set chatbot.answer.provider anthropic
-deepdoc config set chatbot.answer.model claude-3-5-sonnet-20241022
-deepdoc config set chatbot.answer.api_key_env DEEPDOC_CHAT_API_KEY
-
+deepdoc config set chatbot.embeddings.backend litellm
 deepdoc config set chatbot.embeddings.provider openai
 deepdoc config set chatbot.embeddings.model text-embedding-3-large
-deepdoc config set chatbot.embeddings.api_key_env DEEPDOC_EMBED_API_KEY
+deepdoc config set chatbot.embeddings.api_key_env OPENAI_API_KEY
 ```
 
-#### OpenAI For Docs + Chatbot
+The chatbot answer LLM inherits `llm.*` (Claude) automatically.
+
+#### Different model for chat than for docs
+
+Claude for docs, GPT-4o-mini for cheaper/faster chat answers. Embeddings stay local.
 
 ```bash
+export ANTHROPIC_API_KEY=...
 export OPENAI_API_KEY=...
-export DEEPDOC_CHAT_API_KEY=$OPENAI_API_KEY
-export DEEPDOC_EMBED_API_KEY=$OPENAI_API_KEY
 
-deepdoc config set llm.provider openai
-deepdoc config set llm.model gpt-4o
-deepdoc config set llm.api_key_env OPENAI_API_KEY
+deepdoc config set llm.provider anthropic
+deepdoc config set llm.model claude-3-5-sonnet-20241022
+deepdoc config set llm.api_key_env ANTHROPIC_API_KEY
 
 deepdoc config set chatbot.enabled true
 deepdoc config set chatbot.answer.provider openai
 deepdoc config set chatbot.answer.model gpt-4o-mini
-deepdoc config set chatbot.answer.api_key_env DEEPDOC_CHAT_API_KEY
-
-deepdoc config set chatbot.embeddings.provider openai
-deepdoc config set chatbot.embeddings.model text-embedding-3-large
-deepdoc config set chatbot.embeddings.api_key_env DEEPDOC_EMBED_API_KEY
+deepdoc config set chatbot.answer.api_key_env OPENAI_API_KEY
 ```
 
-#### Google Gemini For Docs + Chatbot
+#### Azure with separate embedding deployment
 
-With Google AI Studio, keep the `gemini/` prefix in model names and use `GEMINI_API_KEY`.
-
-```bash
-export GEMINI_API_KEY=...
-export DEEPDOC_CHAT_API_KEY=$GEMINI_API_KEY
-export DEEPDOC_EMBED_API_KEY=$GEMINI_API_KEY
-
-deepdoc config set llm.provider gemini
-deepdoc config set llm.model gemini/gemini-2.0-flash
-deepdoc config set llm.api_key_env GEMINI_API_KEY
-
-deepdoc config set chatbot.enabled true
-deepdoc config set chatbot.answer.provider gemini
-deepdoc config set chatbot.answer.model gemini/gemini-2.0-flash
-deepdoc config set chatbot.answer.api_key_env DEEPDOC_CHAT_API_KEY
-
-deepdoc config set chatbot.embeddings.provider gemini
-deepdoc config set chatbot.embeddings.model gemini/text-embedding-004
-deepdoc config set chatbot.embeddings.api_key_env DEEPDOC_EMBED_API_KEY
-```
-
-#### Azure For Docs + Chatbot
+Azure deployments need explicit `base_url` + `api_version`, and embeddings typically live on a different deployment.
 
 ```bash
-export AZURE_OPENAI_API_KEY=...
-export AZURE_EMBEDDING_API_KEY=...
+export AZURE_API_KEY=...
 
 deepdoc config set llm.provider azure
 deepdoc config set llm.model azure/gpt-4.1
-deepdoc config set llm.api_key_env AZURE_OPENAI_API_KEY
+deepdoc config set llm.api_key_env AZURE_API_KEY
 deepdoc config set llm.base_url https://YOUR-RESOURCE.openai.azure.com/
 
 deepdoc config set chatbot.enabled true
-deepdoc config set chatbot.answer.provider azure
-deepdoc config set chatbot.answer.model azure/gpt-4.1
-deepdoc config set chatbot.answer.api_key_env AZURE_OPENAI_API_KEY
-deepdoc config set chatbot.answer.base_url https://YOUR-RESOURCE.openai.azure.com/
-deepdoc config set chatbot.answer.api_version 2024-02-15-preview
-
+deepdoc config set chatbot.embeddings.backend litellm
 deepdoc config set chatbot.embeddings.provider azure
 deepdoc config set chatbot.embeddings.model azure/text-embedding-3-small
-deepdoc config set chatbot.embeddings.api_key_env AZURE_EMBEDDING_API_KEY
+deepdoc config set chatbot.embeddings.api_key_env AZURE_API_KEY
 deepdoc config set chatbot.embeddings.base_url https://YOUR-RESOURCE.openai.azure.com/
 deepdoc config set chatbot.embeddings.api_version 2024-02-15-preview
 ```
+
+The answer LLM inherits `llm.*` (Azure deployment, base URL, version, key) automatically — no `chatbot.answer.*` config needed for Azure.
 
 ### Installation
 
@@ -971,10 +905,15 @@ chatbot:
 
 ### Chatbot Configuration Reference
 
+The defaults work for almost every project. Expand below only when you need to tune a specific knob.
+
+<details>
+<summary><strong>Full chatbot configuration reference (60+ keys)</strong></summary>
+
 | Key | Default | Description |
 |-----|---------|-------------|
 | **General** | | |
-| `chatbot.enabled` | `false` | Enable chatbot indexing and backend |
+| `chatbot.enabled` | `false` | Enable chatbot indexing and backend (set automatically by `deepdoc init --with-chatbot`) |
 | `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
 | **Indexing** | | |
 | `chatbot.indexing.include_repo_docs` | `true` | Index selected repo-authored docs such as README/design notes in a separate corpus |
@@ -1060,6 +999,8 @@ chatbot:
 | `chatbot.chunking.artifact_chunk_overlap` | `20` | Overlap lines between artifact chunks |
 | `chatbot.chunking.max_doc_summary_chunks_per_page` | `4` | Doc summary chunks extracted per page |
 | `chatbot.chunking.max_doc_summary_chars` | `4000` | Max chars per doc summary chunk |
+
+</details>
 
 ### Chatbot Provider Examples
 
@@ -1473,99 +1414,9 @@ Add your API key to repo Settings → Secrets → Actions → `ANTHROPIC_API_KEY
 
 ---
 
-## Releasing
+## Contributing & Releases
 
-DeepDoc now supports automated releases through GitHub Actions.
-
-### Release tracks
-
-This repository now has two independent release tracks:
-
-- **Python package (`deepdoc`)**: controlled by `pyproject.toml`, root `CHANGELOG.md`, and `.github/workflows/release.yml`.
-- **VS Code extension (`vscode-extension/`)**: controlled by `vscode-extension/package.json`, `vscode-extension/CHANGELOG.md`, and `.github/workflows/release-vscode-extension.yml`.
-
-Keep versions and changelog entries separated by track.
-
-### What happens automatically
-
-When you push to `main`, the release workflow checks the version in `pyproject.toml`.
-If that version does not already have a matching Git tag like `v0.1.1`, GitHub Actions will:
-
-- build the package
-- publish it to PyPI
-- create the Git tag
-- create a GitHub Release and attach the built files
-- use the matching section from `CHANGELOG.md` as the release notes when present
-
-### Your release flow
-
-1. Update `version = "..."` in `pyproject.toml`
-2. Update `__version__ = "..."` in `deepdoc/__init__.py`
-3. Add a matching section to `CHANGELOG.md`
-4. Commit your changes
-5. Push to `main`
-
-That is it. You do not need to manually create tags or GitHub Releases anymore.
-
-### Changelog format
-
-The release workflow looks for a section in `CHANGELOG.md` that matches the version in `pyproject.toml`.
-These heading styles all work:
-
-- `## 0.1.2`
-- `## [0.1.2]`
-- `## v0.1.2`
-- `## [0.1.2] - 2026-04-03`
-
-Example:
-
-```md
-## [0.1.2] - 2026-04-03
-
-- Added automated GitHub releases
-- Improved PyPI metadata
-- Documented `deepdoc[chatbot]` installation
-```
-
-If the matching version section is missing, GitHub falls back to auto-generated release notes.
-
-### One-time setup
-
-1. On PyPI, open the `deepdoc` project
-2. Go to `Publishing`
-3. Add a Trusted Publisher for GitHub Actions with:
-   - owner: `tss-pranavkumar`
-   - repository: `deepdoc`
-   - workflow filename: `release.yml`
-   - environment name: `pypi`
-4. In GitHub, open Settings → Actions → General
-5. Set Workflow permissions to `Read and write permissions`
-
-After that, every new version pushed to `main` can publish without a PyPI token.
-
-### VS Code extension release flow
-
-The VS Code extension release is automated from `main` when files under `vscode-extension/` change.
-
-What the extension workflow does:
-
-- reads `vscode-extension/package.json` version
-- checks whether tag `vscode-extension-v<version>` already exists
-- builds and packages the extension
-- publishes to Marketplace using `VSCE_PAT`
-- creates and pushes the matching git tag
-- creates a GitHub release with notes from `vscode-extension/CHANGELOG.md` (fallback to generated notes)
-
-One-time setup for extension publishing:
-
-1. Create a VS Code Marketplace PAT with Manage scope for publisher `Pranawww`
-2. Add repo secret `VSCE_PAT` in GitHub Actions secrets
-
-Extension release flow on each version:
-
-1. Update `vscode-extension/package.json` version
-2. Add matching section to `vscode-extension/CHANGELOG.md`
-3. Commit and push to `main`
+Release flow for the Python package and the VS Code extension, plus repo layout and test-running notes, lives in [CONTRIBUTING.md](./CONTRIBUTING.md). Both tracks publish automatically when you push a version bump to `main`.
 
 ---
 
@@ -1611,6 +1462,7 @@ deepdoc generate --force           # Full regen with new model
 ## Requirements
 
 - Python 3.10+
+- **Node 18+** on `PATH` — used at generate time for MDX compile validation, and at `serve`/`deploy` time for the Fumadocs site
 - Git (for `deepdoc update` and `deepdoc deploy`)
 - An LLM API key (or Ollama running locally)
 

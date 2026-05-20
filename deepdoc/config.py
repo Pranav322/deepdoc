@@ -37,11 +37,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "include_integration_pages": True,
     # ── LLM ──────────────────────────────────────────────────────────────
     "llm": {
-        "provider": "anthropic",  # anthropic | openai | ollama | any litellm alias
-        "model": "claude-3-5-sonnet-20241022",
-        "api_key_env": "ANTHROPIC_API_KEY",  # env var that holds the key
-        "base_url": None,  # for Ollama / custom endpoints
-        "max_tokens": None,  # None = let the model decide (recommended); set a number to cap output
+        "provider": "",  # must be set in .deepdoc.yaml — run: deepdoc init
+        "model": "",
+        "api_key_env": "",
+        "base_url": None,
+        "max_tokens": None,
         "temperature": 0.2,
     },
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
@@ -129,7 +129,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "site",
         "chatbot_backend",
         # ── Project-specific ───────────────────────────────────────────────
-        "backend-tss-api_v2/backend-tss-api_v2-docs/",
+        # Add project-specific excludes here in .deepdoc.yaml under the "exclude:" key.
     ],
     "github_pages": {
         "enabled": False,
@@ -164,8 +164,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
             ],
         },
         "answer": {
-            "provider": "azure",
-            "model": "azure/gpt-4o-mini",
+            "provider": "",
+            "model": "",
             "api_key_env": "DEEPDOC_CHAT_API_KEY",
             "base_url": "",
             "api_version": "",
@@ -175,11 +175,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "continuation_context_chars": 12000,
         },
         "embeddings": {
-            "backend": "litellm",
+            "backend": "fastembed",
+            # Local model — runs offline, no API key. This is an explicit choice; swap to any model from:
+            # https://qdrant.github.io/fastembed/examples/Supported_Models/
             "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",
             "fastembed_batch_size": 4,
-            "provider": "azure",
-            "model": "azure/text-embedding-3-large",
+            "provider": "",
+            "model": "",
             "api_key_env": "DEEPDOC_EMBED_API_KEY",
             "base_url": "",
             "api_version": "",

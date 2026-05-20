@@ -190,6 +190,7 @@ class PageValidator:
                 result.missing_sections.append(section)
 
         if result.missing_sections:
+            result.is_valid = False
             result.warnings.append(
                 f"Missing sections: {', '.join(result.missing_sections)}"
             )

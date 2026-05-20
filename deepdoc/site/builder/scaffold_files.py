@@ -218,7 +218,7 @@ def _app_layout_tsx(project_name: str, chatbot_enabled: bool = False) -> str:
         import type {{ ReactNode }} from 'react';
 
         export const metadata: Metadata = {{
-          title: '{project_name}',
+          title: '{project_name.replace("'", "\\'")}',
           description: 'Auto-generated developer documentation',
           icons: {{
             icon: 'favicon.svg',
@@ -1673,11 +1673,12 @@ def _source_ts() -> str:
 
 def _layout_options_ts(project_name: str, repo_url: str) -> str:
     links = f"[{{ text: 'GitHub', url: '{repo_url}' }}]" if repo_url else "[]"
+    safe_name = project_name.replace("'", "\\'")
     return dedent(
         f"""\
         export const layoutOptions = {{
           nav: {{
-            title: '{project_name}',
+            title: '{safe_name}',
             url: '/',
           }},
           links: {links},

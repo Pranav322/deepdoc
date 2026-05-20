@@ -213,7 +213,7 @@ class RetrievalMixin:
             hits = [
                 RetrievedChunk(
                     record=by_chunk_id[chunk_id],
-                    score=max(1.0, self._lexical_score(by_chunk_id[chunk_id], query_signals)),
+                    score=self._lexical_score(by_chunk_id[chunk_id], query_signals),
                 )
                 for chunk_id in chunk_ids
                 if chunk_id in by_chunk_id

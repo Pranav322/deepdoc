@@ -647,9 +647,7 @@ def save_generation_ledger(
         # File hashes at generation time (for smart invalidation)
         file_hashes: dict[str, str] = {}
         for src_file in tracked_bucket_files(bucket):
-            src_path = (
-                output_dir.parent / src_file
-            )  # output_dir is docs/, repo is parent
+            src_path = repo_root / src_file
             if src_path.exists():
                 try:
                     content = src_path.read_text(encoding="utf-8", errors="replace")

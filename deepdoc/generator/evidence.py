@@ -1097,11 +1097,7 @@ class EvidenceAssembler:
                             else ""
                         )
                         lines.append(f"    - `{eu.file_path}` ({eu.role}){syms}")
-                    # Also add evidence files to source context by injecting them into owned_files
-                    # (non-destructive: only for this assembly run)
-                    for eu in matched_bundle.evidence:
-                        if eu.file_path not in bucket.owned_files:
-                            bucket.owned_files.append(eu.file_path)
+
                 if matched_bundle.integration_edges:
                     lines.append(
                         f"  Integrations touched: {', '.join(matched_bundle.integration_edges)}"

@@ -185,7 +185,52 @@ class LiteLLMEmbeddingClient:
 
 
 def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:
-    return LiteLLMChatClient(get_chatbot_cfg(cfg).get("answer", {}))
+    answer_cfg = get_chatbot_cfg(cfg).get("answer", {})
+    provider = (answer_cfg.get("provider") or "").strip()
+    model = (answer_cfg.get("model") or "").strip()
+
+    # If chatbot.answer is not explicitly configured, inherit from the doc-gen llm.* config.
+    # This means a single deepdoc init --provider X covers both doc generation and chatbot.
+    if not provider or not model:
+        llm_cfg = cfg.get("llm", {})
+        llm_provider = (llm_cfg.get("provider") or "").strip()
+        llm_model = (llm_cfg.get("model") or "").strip()
+        if llm_provider and llm_model:
+            answer_cfg = {
+                **answer_cfg,
+                "provider": llm_provider,
+                "model": llm_model,
+                "api_key_env": llm_cfg.get("api_key_env") or answer_cfg.get("api_key_env", ""),
+                "base_url": llm_cfg.get("base_url") or answer_cfg.get("base_url", ""),
+            }
+            provider, model = llm_provider, llm_model
+
+    if not provider or not model:
+        raise ValueError(
+            "\n\n"
+            "╔══════════════════════════════════════════════════════════════════════╗\n"
+            "║         CHATBOT NOT CONFIGURED — ACTION REQUIRED                    ║\n"
+            "╠══════════════════════════════════════════════════════════════════════╣\n"
+            "║                                                                      ║\n"
+            "║  No LLM is configured for the chatbot.                               ║\n"
+            "║                                                                      ║\n"
+            "║  OPTION 1 — reuse your doc-gen LLM (zero extra config):              ║\n"
+            "║    Just make sure llm.provider and llm.model are set.                ║\n"
+            "║    The chatbot will automatically use the same provider and key.      ║\n"
+            "║                                                                      ║\n"
+            "║  OPTION 2 — use a separate (e.g. cheaper) model for chat:            ║\n"
+            "║                                                                      ║\n"
+            "║    chatbot:                                                           ║\n"
+            "║      answer:                                                          ║\n"
+            "║        provider: <your-provider>    # openai, anthropic, azure, etc. ║\n"
+            "║        model: <your-model>          # matching model name            ║\n"
+            "║        api_key_env: <YOUR_KEY_ENV>  # env var holding your key       ║\n"
+            "║                                                                      ║\n"
+            "║  Any LiteLLM-compatible provider works:                              ║\n"
+            "║    https://docs.litellm.ai/docs/providers                            ║\n"
+            "╚══════════════════════════════════════════════════════════════════════╝\n"
+        )
+    return LiteLLMChatClient(answer_cfg)
 
 
 def build_embedding_client(
@@ -198,8 +243,36 @@ def build_embedding_client(
 
     if backend == "fastembed":
         return FastembedEmbeddingClient(embeddings_cfg)
-    else:
-        return LiteLLMEmbeddingClient(embeddings_cfg)
+
+    provider = (embeddings_cfg.get("provider") or "").strip()
+    model = (embeddings_cfg.get("model") or "").strip()
+    if not provider or not model:
+        raise ValueError(
+            "\n\n"
+            "╔══════════════════════════════════════════════════════════════════════╗\n"
+            "║         EMBEDDINGS NOT CONFIGURED — ACTION REQUIRED                 ║\n"
+            "╠══════════════════════════════════════════════════════════════════════╣\n"
+            "║                                                                      ║\n"
+            "║  chatbot.embeddings.backend is set to 'litellm' but               ║\n"
+            "║  chatbot.embeddings.provider and .model are not set.                ║\n"
+            "║                                                                      ║\n"
+            "║  Either switch to the local (no-API-key) backend:                   ║\n"
+            "║                                                                      ║\n"
+            "║    chatbot:                                                           ║\n"
+            "║      embeddings:                                                      ║\n"
+            "║        backend: fastembed    # runs locally, no key needed           ║\n"
+            "║                                                                      ║\n"
+            "║  Or configure a cloud embedding provider:                            ║\n"
+            "║                                                                      ║\n"
+            "║    chatbot:                                                           ║\n"
+            "║      embeddings:                                                      ║\n"
+            "║        backend: litellm                                               ║\n"
+            "║        provider: <your-provider>   # e.g. openai, azure              ║\n"
+            "║        model: <your-model>         # e.g. text-embedding-3-large     ║\n"
+            "║        api_key_env: <YOUR_KEY_ENV> # env var holding your key        ║\n"
+            "╚══════════════════════════════════════════════════════════════════════╝\n"
+        )
+    return LiteLLMEmbeddingClient(embeddings_cfg)
 
 
 class FastembedEmbeddingClient:
@@ -207,6 +280,8 @@ class FastembedEmbeddingClient:
 
     def __init__(self, service_cfg: dict[str, Any]) -> None:
         self.service_cfg = service_cfg
+        # Fallback model if not set in config — explicit choice, not a vendor endorsement.
+        # Full model list: https://qdrant.github.io/fastembed/examples/Supported_Models/
         self.model = service_cfg.get(
             "fastembed_model", "nomic-ai/nomic-embed-text-v1.5"
         )

@@ -46,8 +46,8 @@ def discover_database_schema(
         ],
         "eloquent": [
             re.compile(r"extends Model\b"),
-            re.compile(r"\\$fillable|\\$guarded|\\$casts"),
-            re.compile(r"Illuminate\\Database"),
+            re.compile(r"\$fillable|\$guarded|\$casts"),
+            re.compile(r"Illuminate\\\\Database"),
         ],
         "mongoose": [
             re.compile(r"mongoose\.Schema\("),

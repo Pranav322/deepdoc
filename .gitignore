@@ -80,3 +80,8 @@ mass_replace*.py
 split_*_safe.py
 split_generator.py
 *_functions.json
+
+#docs
+.deepdoc.yaml
+#terminal
+.omc

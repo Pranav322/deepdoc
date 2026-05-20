@@ -668,7 +668,7 @@ def test_corpus_does_not_rebuild_when_schema_version_matches(
         ],
         [[1.0]],
         meta={
-            "embedding_model": "fastembed|azure|nomic-ai/nomic-embed-text-v1.5||",
+            "embedding_model": "fastembed||nomic-ai/nomic-embed-text-v1.5||",
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
         },
     )

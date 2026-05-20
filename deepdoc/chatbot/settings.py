@@ -20,8 +20,8 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         ],
     },
     "answer": {
-        "provider": "azure",
-        "model": "azure/gpt-4o-mini",
+        "provider": "",  # must be set in .deepdoc.yaml — run: deepdoc init --with-chatbot
+        "model": "",
         "api_key_env": "DEEPDOC_CHAT_API_KEY",
         "base_url": "",
         "api_version": "",
@@ -31,11 +31,13 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "continuation_context_chars": 12000,
     },
     "embeddings": {
-        "backend": "litellm",  # default: use configured litellm model (text-embedding-3-small, Azure, etc.)
-        "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",  # only use if backend="fastembed"; 8192-token context, 768-dim
+        "backend": "fastembed",  # local by default — no API key needed; set to "litellm" for cloud embeddings
+        # Local model — runs offline, no API key. Explicit choice; swap to any model from:
+        # https://qdrant.github.io/fastembed/examples/Supported_Models/
+        "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",
         "fastembed_batch_size": 4,
-        "provider": "azure",
-        "model": "azure/text-embedding-3-large",
+        "provider": "",  # only required when backend="litellm"
+        "model": "",
         "api_key_env": "DEEPDOC_EMBED_API_KEY",
         "base_url": "",
         "api_version": "",

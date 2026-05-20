@@ -8,7 +8,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from .settings import chatbot_allowed_origins
 
@@ -18,6 +18,13 @@ class QueryRequest(BaseModel):
 
     question: str
     history: list[dict[str, str]] = Field(default_factory=list)
+
+    @field_validator("question")
+    @classmethod
+    def question_not_empty(cls, v: str) -> str:
+        if not v or not v.strip():
+            raise ValueError("question must not be empty")
+        return v
 
 
 class DeepResearchRequest(QueryRequest):

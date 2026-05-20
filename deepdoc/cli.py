@@ -137,10 +137,9 @@ def _autoload_repo_env(start: Path) -> Path | None:
 )
 @click.option(
     "--provider",
-    default="anthropic",
-    show_default=True,
-    type=click.Choice(["anthropic", "openai", "ollama", "azure"], case_sensitive=False),
-    help="LLM provider to configure for the first run.",
+    default="",
+    show_default=False,
+    help="LLM provider (openai, anthropic, azure, ollama, or any LiteLLM alias). Required.",
 )
 @click.option(
     "--model",
@@ -172,6 +171,18 @@ def init(name, description, provider, model, output_dir, with_chatbot):
       deepdoc init --output-dir documentation
     """
     cwd = Path.cwd()
+
+    if not provider:
+        raise click.UsageError(
+            "\n\n"
+            "  --provider is required. Choose the LLM provider you want to use:\n\n"
+            "    deepdoc init --provider openai\n"
+            "    deepdoc init --provider anthropic\n"
+            "    deepdoc init --provider azure\n"
+            "    deepdoc init --provider ollama\n\n"
+            "  Any LiteLLM-compatible provider works. See:\n"
+            "    https://docs.litellm.ai/docs/providers"
+        )
 
     if (cwd / CONFIG_FILE).exists():
         console.print(
@@ -1377,7 +1388,7 @@ def _deployment_quality_blockers(repo_root: Path, output_dir: Path) -> list[str]
     if output_dir.exists():
         invalid_pages: list[str] = []
         stub_pages: list[str] = []
-        for doc_path in sorted(output_dir.glob("*.mdx")):
+        for doc_path in sorted(output_dir.rglob("*.mdx")):
             try:
                 content = doc_path.read_text(encoding="utf-8")
             except Exception:

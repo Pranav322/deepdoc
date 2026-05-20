@@ -535,13 +535,6 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
             trace_callback=emit,
         )
         response["trace"] = trace
-        response["file_inventory"] = self._collect_file_inventory(
-            question,
-            response,
-            result.all_sources,
-            retrieval_cfg,
-            trace,
-        )
         response["response_mode"] = "code_deep"
         response["research_mode"] = "code_deep"
         response = self._finalize_answer_response(question, response, mode="code_deep")

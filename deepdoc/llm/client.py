@@ -15,17 +15,71 @@ class LLMClient:
     def __init__(self, cfg: dict[str, Any]) -> None:
         self.cfg = cfg
         llm_cfg = cfg.get("llm", {})
-        self.model = llm_cfg.get("model", "claude-3-5-sonnet-20241022")
+        self.model = llm_cfg.get("model", "")
         # max_tokens=None means don't cap — let the model use its full output capacity
         self.max_tokens = llm_cfg.get("max_tokens", None)
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = llm_cfg.get("base_url")
 
+        provider = (llm_cfg.get("provider") or "").strip()
+        model = (self.model or "").strip()
+        api_key_env = (llm_cfg.get("api_key_env") or "").strip()
+
+        if not provider or not model:
+            raise ValueError(
+                "\n\n"
+                "╔══════════════════════════════════════════════════════════════════════╗\n"
+                "║         LLM NOT CONFIGURED — ACTION REQUIRED                        ║\n"
+                "╠══════════════════════════════════════════════════════════════════════╣\n"
+                "║                                                                      ║\n"
+                "║  llm.provider and llm.model are not set in your .deepdoc.yaml.       ║\n"
+                "║  DeepDoc cannot generate documentation without an LLM configured.    ║\n"
+                "║                                                                      ║\n"
+                "║  QUICKEST FIX — run the interactive setup:                           ║\n"
+                "║    deepdoc init                                                       ║\n"
+                "║                                                                      ║\n"
+                "║  OR add the following to your .deepdoc.yaml manually:                ║\n"
+                "║                                                                      ║\n"
+                "║    llm:                                                               ║\n"
+                "║      provider: <your-provider>    # see examples below               ║\n"
+                "║      model: <your-model>          # matching model name              ║\n"
+                "║      api_key_env: <YOUR_KEY_ENV>  # name of env var holding key      ║\n"
+                "║                                                                      ║\n"
+                "║  Provider / model examples:                                          ║\n"
+                "║    openai    → gpt-4o, gpt-4o-mini                                   ║\n"
+                "║    anthropic → claude-3-5-sonnet-20241022, claude-haiku-4-5-20251001 ║\n"
+                "║    azure     → azure/gpt-4o  (also set base_url, api_version)        ║\n"
+                "║    ollama    → ollama/llama3.2  (local, no API key needed)            ║\n"
+                "║    groq      → groq/llama-3.1-8b-instant                             ║\n"
+                "║                                                                      ║\n"
+                "║  Any provider supported by LiteLLM works:                            ║\n"
+                "║    https://docs.litellm.ai/docs/providers                            ║\n"
+                "╚══════════════════════════════════════════════════════════════════════╝\n"
+            )
+
+        if api_key_env and not os.environ.get(api_key_env):
+            pad = max(0, 34 - len(api_key_env))
+            export_pad = max(0, 33 - len(api_key_env))
+            raise ValueError(
+                "\n\n"
+                "╔══════════════════════════════════════════════════════════════════════╗\n"
+                "║         API KEY NOT SET — ACTION REQUIRED                           ║\n"
+                "╠══════════════════════════════════════════════════════════════════════╣\n"
+                "║                                                                      ║\n"
+                f"║  Environment variable '{api_key_env}' is not set.{' ' * pad}║\n"
+                "║  DeepDoc needs this to authenticate with your LLM provider.          ║\n"
+                "║                                                                      ║\n"
+                "║  Set it in your shell before running deepdoc:                        ║\n"
+                f"║    export {api_key_env}=<your-api-key>{' ' * export_pad}║\n"
+                "║                                                                      ║\n"
+                "║  Get your API key from your provider's dashboard or console.         ║\n"
+                "╚══════════════════════════════════════════════════════════════════════╝\n"
+            )
+
         # Set API key in environment so LiteLLM picks it up automatically
         api_key = resolve_api_key(cfg)
-        if api_key:
-            env_var = llm_cfg.get("api_key_env", "ANTHROPIC_API_KEY")
-            os.environ[env_var] = api_key
+        if api_key and api_key_env:
+            os.environ[api_key_env] = api_key
 
     def complete(self, system: str, user: str) -> str:
         """Send a chat completion request and return the response text."""

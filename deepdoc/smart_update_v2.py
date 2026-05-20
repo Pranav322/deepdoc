@@ -470,7 +470,7 @@ class SmartUpdater:
 
         console.print("[dim]Re-scanning repo for targeted replan...[/dim]")
         scan = bucket_scan_repo(self.repo_root, self.cfg)
-        run_phase2_scans(scan, self.cfg, self.llm)
+        scan = run_phase2_scans(scan, self.cfg, self.llm)
 
         console.print("[dim]Running planner on new files only...[/dim]")
         # Build a mini-config scoped to new + changed files

@@ -810,10 +810,12 @@ class SmartUpdater:
                 continue
             status_code = parts[0][0]  # First char: M/A/D/R/C
             if status_code == "R" and len(parts) >= 3:
-                # Rename: treat as delete old + add new
-                old_path, new_path = parts[1], parts[2]
-                merge_change(old_path, "D", overwrite=True)
-                merge_change(new_path, "A", overwrite=True)
+                # Rename: source is gone — delete old, add new
+                merge_change(parts[1], "D", overwrite=True)
+                merge_change(parts[2], "A", overwrite=True)
+            elif status_code == "C" and len(parts) >= 3:
+                # Copy: source still exists — only add the new path
+                merge_change(parts[2], "A", overwrite=True)
             else:
                 merge_change(parts[-1], status_code, overwrite=True)
 
@@ -1118,7 +1120,7 @@ class SmartUpdater:
             )
             return
 
-        if pages_failed <= 0 and pages_updated > 0:
+        if pages_failed == 0 and pages_updated > 0:
             # Full success — advance baseline
             save_sync_state(
                 self.repo_root,

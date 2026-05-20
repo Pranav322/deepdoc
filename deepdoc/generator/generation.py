@@ -777,15 +777,8 @@ class BucketGenerationEngine:
                         f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"
                     )
                     time.sleep(wait)
-                elif is_last:
-                    raise
                 else:
-                    # Non-rate-limit error — short pause and retry once more
-                    console.print(
-                        f"    [yellow]⚠ LLM error for {evidence.bucket.title} "
-                        f"(attempt {attempt + 1}/{MAX_RETRIES}): {e}[/yellow]"
-                    )
-                    time.sleep(1 + random.uniform(0, 0.5))
+                    raise
         raise RuntimeError(f"Max retries exceeded for {evidence.bucket.title}")
 
     # ── Graceful degradation ─────────────────────────────────────────────

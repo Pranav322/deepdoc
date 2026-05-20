@@ -440,7 +440,7 @@ def similarity_search(
             return [
                 RetrievedChunk(record=records[idx], score=float(score))
                 for score, idx in zip(scores[0], order[0], strict=False)
-                if idx >= 0 and idx < len(records)
+                if idx >= 0 and idx < len(records) and score > -0.5
             ]
         except Exception:
             pass

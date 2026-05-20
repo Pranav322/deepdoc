@@ -159,7 +159,7 @@ class EvidenceAssembler:
 
         evidence_files = set(tracked_bucket_files(bucket))
         evidence_files.update(helper_files)
-        if bucket.generation_hints.get("is_introduction_page"):
+        if (bucket.generation_hints or {}).get("is_introduction_page"):
             evidence_files.update(self.scan.entry_points)
             evidence_files.update(self.scan.config_files)
         evidence_files.update(repo_doc_files)

@@ -1067,5 +1067,3 @@ def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> s
         flags=re.MULTILINE,
     )
     return patched if count else content
-
-    return content

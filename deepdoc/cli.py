@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+from typing import Any
 import shlex
 import shutil
 import socket
@@ -1522,12 +1523,24 @@ def _flatten_config(cfg: dict, prefix: str, table) -> None:
             table.add_row(key, str(v) if v is not None else "[dim]null[/dim]")
 
 
+def _lookup_default(keys: list[str]) -> Any:
+    """Return the default value for a key path from DEFAULT_CONFIG, or None if not found."""
+    node: Any = DEFAULT_CONFIG
+    for key in keys:
+        if not isinstance(node, dict):
+            return None
+        node = node.get(key)
+    return node
+
+
 def _set_nested(d: dict, keys: list[str], value: str) -> None:
     for key in keys[:-1]:
         d = d.setdefault(key, {})
     last = keys[-1]
-    # Type coercion
+    # Type coercion: prefer the existing value's type; fall back to DEFAULT_CONFIG type
     existing = d.get(last)
+    if existing is None:
+        existing = _lookup_default(keys)
     if isinstance(existing, bool):
         d[last] = value.lower() in ("true", "1", "yes")
     elif isinstance(existing, int):

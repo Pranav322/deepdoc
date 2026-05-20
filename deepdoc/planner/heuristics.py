@@ -239,7 +239,7 @@ def _llm_step(llm: LLMClient, system: str, prompt: str, step_name: str) -> dict 
             if cleaned.startswith("```"):
                 lines = cleaned.splitlines()
                 lines = [l for l in lines if not l.strip().startswith("```")]
-                cleaned = "\n".join(lines)
+                cleaned = "\n".join(lines).lstrip("﻿").strip()
             return json.loads(cleaned)
         except Exception:
             return None
@@ -921,7 +921,11 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
     for victim_slug, target_slug in merge_map.items():
         # Follow chains: if target was also merged, find the final target
         final_target = target_slug
+        visited: set[str] = set()
         while final_target in merge_map:
+            if final_target in visited:
+                break
+            visited.add(final_target)
             final_target = merge_map[final_target]
 
         target = slug_to_bucket[final_target]
@@ -1481,7 +1485,13 @@ def _validate_coverage(plan: DocPlan, scan: RepoScan) -> DocPlan:
                         title = f"{group_name.replace('_', ' ').replace('-', ' ').title()} Module"
 
                     title = _clean_fallback_bucket_title(title, group_name)
-                    slug = f"{group_name.lower().replace(' ', '-').replace('_', '-')}-module"
+                    base_slug = f"{group_name.lower().replace(' ', '-').replace('_', '-')}-module"
+                    existing_slugs = {b.slug for b in plan.buckets}
+                    slug = base_slug
+                    _counter = 2
+                    while slug in existing_slugs:
+                        slug = f"{base_slug}-{_counter}"
+                        _counter += 1
                     section = _fallback_module_section(plan)
                     plan.buckets.append(
                         DocBucket(

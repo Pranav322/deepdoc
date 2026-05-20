@@ -60,7 +60,7 @@ def _normalize_import(imp: str) -> list[str]:
     if m:
         path = m.group(1)
         # Remove ./ ../ prefixes for matching
-        path = re.sub(r"^\.{1,2}/", "", path)
+        path = re.sub(r"^(?:\.\.?/)+", "", path)
         hints.append(path)
         return hints
 
@@ -68,7 +68,7 @@ def _normalize_import(imp: str) -> list[str]:
     m = JS_REQUIRE_RE.search(imp)
     if m:
         path = m.group(1)
-        path = re.sub(r"^\.{1,2}/", "", path)
+        path = re.sub(r"^(?:\.\.?/)+", "", path)
         hints.append(path)
         return hints
 

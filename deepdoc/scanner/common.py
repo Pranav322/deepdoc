@@ -337,7 +337,7 @@ _MONITORING_RE = re.compile(
 )
 
 _REDIS_KEY_RE = re.compile(
-    r"""(?:cache|redis|r|client)\.(?:set|get|delete|exists|hset|hget|lpush|rpush)\s*\(\s*[f'"]([^'"]{3,80})""",
+    r"""(?:cache|redis|client)\.(?:set|get|delete|exists|hset|hget|lpush|rpush)\s*\(\s*[f'"]([^'"]{3,80})""",
 )
 
 _RETRY_RE = re.compile(

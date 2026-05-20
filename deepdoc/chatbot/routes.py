@@ -117,7 +117,11 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
 
         def event_stream():
             while True:
-                item = tokens.get()
+                try:
+                    item = tokens.get(timeout=30)
+                except queue.Empty:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
                 if item is None:
                     break
                 event_name, payload = item
@@ -161,7 +165,11 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
 
         def event_stream():
             while True:
-                item = tokens.get()
+                try:
+                    item = tokens.get(timeout=30)
+                except queue.Empty:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
                 if item is None:
                     break
                 event_name, payload = item
@@ -230,7 +238,11 @@ def create_fastapi_app(repo_root: Path, cfg: dict[str, Any]):
 
         def event_stream():
             while True:
-                item = events.get()
+                try:
+                    item = events.get(timeout=30)
+                except queue.Empty:
+                    yield "event: ping\ndata: {}\n\n"
+                    continue
                 if item is None:
                     break
                 event_name, payload = item

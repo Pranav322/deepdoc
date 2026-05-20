@@ -36,7 +36,7 @@ def discover_config_impacts(
         ),
     ]
 
-    for file_path, content in file_contents.items():
+    for file_path, content in sorted(file_contents.items()):
         if not content:
             continue
         nearby_files = _config_related_files(content, file_path, file_contents)

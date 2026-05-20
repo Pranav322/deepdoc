@@ -570,13 +570,14 @@ class AnswerMixin:
                 reason="mentioned_source",
             )
 
-        by_path: dict[str, dict[str, Any]] = {}
+        seen_ranges: set[tuple[str, int, int]] = set()
+        result: list[dict[str, Any]] = []
         for row in rows:
-            path = row["file_path"]
-            existing = by_path.get(path)
-            if not existing or float(row.get("score", 0.0)) > float(existing.get("score", 0.0)):
-                by_path[path] = row
-        return list(by_path.values())[:8]
+            key = (row["file_path"], row.get("start_line", 0), row.get("end_line", 0))
+            if key not in seen_ranges:
+                seen_ranges.add(key)
+                result.append(row)
+        return result[:8]
 
     def _apply_evidence_contract(
         self,

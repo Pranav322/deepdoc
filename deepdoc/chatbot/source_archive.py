@@ -9,7 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from ..source_metadata import classify_source_kind
-from .persistence import load_source_archive, save_source_archive, save_source_catalog
+from .persistence import (
+    load_source_archive,
+    load_source_catalog,
+    save_source_archive,
+    save_source_catalog,
+)
 from .types import SourceCatalogEntry
 
 DEFAULT_SOURCE_ARCHIVE_EXCLUDES = [
@@ -101,6 +106,14 @@ def update_source_archive(
         build_source_archive(repo_root, index_dir, cfg)
         return
 
+    for rel_path in list(archive_data):
+        if not source_path_is_archiveable(
+            repo_root,
+            rel_path,
+            cfg,
+        ):
+            archive_data.pop(rel_path, None)
+
     for rel_path in deleted_files:
         archive_data.pop(rel_path, None)
 
@@ -118,6 +131,64 @@ def update_source_archive(
 
     save_source_archive(index_dir, archive_data)
     save_source_catalog(index_dir, _source_catalog_entries(archive_data))
+
+
+def source_archive_needs_rebuild(
+    repo_root: Path,
+    index_dir: Path,
+    cfg: dict[str, Any],
+) -> bool:
+    """Return whether the source archive or catalog is missing/stale."""
+    archive_path = index_dir / "source_archive.json.gz"
+    catalog_path = index_dir / "source_catalog.json"
+    if not archive_path.exists():
+        return True
+
+    indexing_cfg = cfg.get("chatbot", {}).get("indexing", {})
+    max_file_bytes = int(indexing_cfg.get("max_file_bytes", 250000))
+    exclude_patterns = _source_archive_exclude_patterns(cfg)
+
+    archive_data = load_source_archive(index_dir)
+    if not archive_data:
+        return _repo_has_archiveable_files(
+            repo_root,
+            max_file_bytes=max_file_bytes,
+            exclude_patterns=exclude_patterns,
+        )
+
+    if not catalog_path.exists():
+        return True
+
+    catalog_entries = load_source_catalog(index_dir)
+    catalog_paths = {entry.file_path for entry in catalog_entries}
+    if catalog_paths != set(archive_data):
+        return True
+
+    for rel_path in archive_data:
+        if not source_path_is_archiveable(repo_root, rel_path, cfg):
+            return True
+
+    return False
+
+
+def source_path_is_archiveable(
+    repo_root: Path,
+    rel_path: str,
+    cfg: dict[str, Any],
+) -> bool:
+    """Return whether a repo path is currently allowed in source-backed indexes."""
+    indexing_cfg = cfg.get("chatbot", {}).get("indexing", {})
+    max_file_bytes = int(indexing_cfg.get("max_file_bytes", 250000))
+    exclude_patterns = _source_archive_exclude_patterns(cfg)
+    return (
+        _read_archiveable_text(
+            repo_root,
+            rel_path,
+            max_file_bytes=max_file_bytes,
+            exclude_patterns=exclude_patterns,
+        )
+        is not None
+    )
 
 
 def _source_catalog_entries(archive_data: dict[str, str]) -> list[SourceCatalogEntry]:

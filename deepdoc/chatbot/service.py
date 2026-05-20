@@ -6,11 +6,14 @@ from copy import deepcopy
 import fnmatch
 import hashlib
 import json
+import logging
 from pathlib import Path
 import queue
 import re
 import threading
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 from pydantic import BaseModel, Field
 
@@ -137,6 +140,17 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
         self._similarity_search = similarity_search
 
         self.source_archive = load_source_archive(self.index_dir)
+        if not self.source_archive and (
+            self.code_records
+            or self.artifact_records
+            or self.repo_doc_records
+        ):
+            logger.warning(
+                "Source archive empty or unreadable at %s while indexed corpora "
+                "exist. Live-fallback, evidence verification, and code-deep file "
+                "inventory will be degraded. Run `deepdoc update` to rebuild.",
+                self.index_dir / "source_archive.json.gz",
+            )
         self.source_catalog = load_source_catalog(self.index_dir)
         self._source_catalog_by_path: dict[str, SourceCatalogEntry] = {
             entry.file_path: entry for entry in self.source_catalog

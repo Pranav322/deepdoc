@@ -539,7 +539,19 @@ def update(since, deploy, replan):
 
         updater = SmartUpdater(repo_root, cfg)
         stats = updater.update(since=since, force_replan=replan)
+        pages_failed = int(stats.get("pages_failed", 0) or 0)
+        chatbot_failed = bool(stats.get("chatbot_failed"))
         count = stats.get("pages_updated", 0)
+        if chatbot_failed:
+            raise click.ClickException(
+                "Chatbot index refresh failed during update. "
+                "Fix the issue reported above and re-run `deepdoc update`."
+            )
+        if deploy and pages_failed > 0:
+            raise click.ClickException(
+                "Refusing to deploy after an update with failed page work. "
+                "Run `deepdoc update` again after fixing the reported issue."
+            )
     else:
         console.print(
             Panel.fit(

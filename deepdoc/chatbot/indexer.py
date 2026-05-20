@@ -28,7 +28,12 @@ from .persistence import corpus_paths, load_corpus, save_corpus, save_index_mani
 from .providers import build_embedding_client
 from .scaffold import scaffold_chatbot_backend
 from .settings import chatbot_index_dir, get_chatbot_cfg, service_model_identity
-from .source_archive import build_source_archive, update_source_archive
+from .source_archive import (
+    build_source_archive,
+    source_archive_needs_rebuild,
+    source_path_is_archiveable,
+    update_source_archive,
+)
 from .symbol_index import build_symbol_chunks
 from .types import ChunkRecord
 
@@ -479,12 +484,41 @@ class ChatbotIndexer:
             vector_count = len(vectors)
         if not records:
             return vector_count != 0
-        return vector_count != len(records)
+        if vector_count != len(records):
+            return True
+        return self._corpus_has_unindexable_source_records(corpus, records)
+
+    def _corpus_has_unindexable_source_records(
+        self,
+        corpus: str,
+        records: list[ChunkRecord],
+    ) -> bool:
+        source_backed_corpora = {
+            "code",
+            "symbol",
+            "artifact",
+            "repo_doc",
+            "relationship",
+        }
+        if corpus not in source_backed_corpora:
+            return False
+
+        for record in records:
+            rel_path = record.source_key or record.file_path
+            if rel_path and not source_path_is_archiveable(
+                self.repo_root,
+                rel_path,
+                self.cfg,
+            ):
+                return True
+        return False
 
 
 def chatbot_index_needs_refresh(repo_root: Path, cfg: dict[str, Any]) -> bool:
     """Return whether any chatbot corpus is missing or inconsistent."""
     indexer = ChatbotIndexer(repo_root, cfg)
+    if source_archive_needs_rebuild(repo_root, indexer.index_dir, cfg):
+        return True
     return any(
         indexer._corpus_needs_rebuild(corpus)
         for corpus in (

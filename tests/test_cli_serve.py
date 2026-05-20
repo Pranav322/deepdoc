@@ -123,6 +123,98 @@ def test_deploy_refuses_invalid_generated_docs(monkeypatch, tmp_path: Path) -> N
     assert "invalid docs present: start-here" in result.output
 
 
+def test_update_deploy_refuses_partial_chatbot_update(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: {"output_dir": "docs"})
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: repo_root)
+
+    class _FakeUpdater:
+        def __init__(self, repo_root, cfg):
+            pass
+
+        def update(self, *, since, force_replan=False):
+            return {
+                "strategy": "incremental",
+                "pages_updated": 1,
+                "pages_failed": 1,
+                "chatbot_failed": True,
+            }
+
+    def _fail_deploy(*args, **kwargs):
+        raise AssertionError("deploy should not run after a partial update")
+
+    monkeypatch.setattr("deepdoc.smart_update_v2.SmartUpdater", _FakeUpdater)
+    monkeypatch.setattr(cli, "_deploy", _fail_deploy)
+
+    result = CliRunner().invoke(cli.main, ["update", "--since", "HEAD", "--deploy"])
+
+    assert result.exit_code != 0
+    assert "Chatbot index refresh failed" in result.output
+
+
+def test_update_without_deploy_fails_on_chatbot_error(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: {"output_dir": "docs"})
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: repo_root)
+
+    class _FakeUpdater:
+        def __init__(self, repo_root, cfg):
+            pass
+
+        def update(self, *, since, force_replan=False):
+            return {
+                "strategy": "incremental",
+                "pages_updated": 1,
+                "pages_failed": 1,
+                "chatbot_failed": True,
+            }
+
+    monkeypatch.setattr("deepdoc.smart_update_v2.SmartUpdater", _FakeUpdater)
+
+    result = CliRunner().invoke(cli.main, ["update", "--since", "HEAD"])
+
+    assert result.exit_code != 0
+    assert "Chatbot index refresh failed" in result.output
+
+
+def test_update_deploy_refuses_partial_doc_update(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    repo_root = tmp_path
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: {"output_dir": "docs"})
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: repo_root)
+
+    class _FakeUpdater:
+        def __init__(self, repo_root, cfg):
+            pass
+
+        def update(self, *, since, force_replan=False):
+            return {
+                "strategy": "incremental",
+                "pages_updated": 1,
+                "pages_failed": 1,
+                "chatbot_failed": False,
+            }
+
+    def _fail_deploy(*args, **kwargs):
+        raise AssertionError("deploy should not run after a partial update")
+
+    monkeypatch.setattr("deepdoc.smart_update_v2.SmartUpdater", _FakeUpdater)
+    monkeypatch.setattr(cli, "_deploy", _fail_deploy)
+
+    result = CliRunner().invoke(cli.main, ["update", "--since", "HEAD", "--deploy"])
+
+    assert result.exit_code != 0
+    assert "Refusing to deploy" in result.output
+
+
 def test_deprecated_generated_version_warning_is_configurable(
     tmp_path: Path,
     capsys,

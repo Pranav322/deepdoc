@@ -8,7 +8,11 @@ from deepdoc.chatbot.docs_summary import (
     build_doc_summary_chunks,
     build_repo_doc_chunks,
 )
-from deepdoc.chatbot.indexer import CHATBOT_CORPUS_SCHEMA_VERSION, ChatbotIndexer
+from deepdoc.chatbot.indexer import (
+    CHATBOT_CORPUS_SCHEMA_VERSION,
+    ChatbotIndexer,
+    chatbot_index_needs_refresh,
+)
 from deepdoc.chatbot.persistence import (
     load_corpus,
     load_index_manifest,
@@ -494,6 +498,28 @@ def test_index_manifest_describes_artifacts_without_timestamps(tmp_path: Path) -
     assert first["artifacts"]["lexical_index"]["record_count_by_corpus"]["code"] == 1
 
 
+def test_chatbot_index_needs_refresh_checks_source_archive(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return []
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+    monkeypatch.setattr(
+        ChatbotIndexer,
+        "_corpus_needs_rebuild",
+        lambda self, corpus: False,
+    )
+
+    assert chatbot_index_needs_refresh(repo_root, {"chatbot": {"enabled": True}})
+
+
 def test_incremental_sync_removes_deleted_generated_doc_chunks(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -652,6 +678,8 @@ def test_corpus_does_not_rebuild_when_schema_version_matches(
 ) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "auth.py").write_text("demo code\n", encoding="utf-8")
     index_dir = repo_root / ".deepdoc" / "chatbot"
     save_corpus(
         index_dir,
@@ -694,6 +722,58 @@ def test_corpus_does_not_rebuild_when_schema_version_matches(
     )
 
     assert indexer._corpus_needs_rebuild("code") is False
+
+
+def test_corpus_needs_rebuild_when_existing_source_is_now_excluded(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "secret.py").write_text("TOKEN = 'abc'\n", encoding="utf-8")
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    save_corpus(
+        index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="c1",
+                kind="code",
+                source_key="src/secret.py",
+                text="TOKEN = 'abc'",
+                chunk_hash="hashc1",
+                file_path="src/secret.py",
+            )
+        ],
+        [[1.0]],
+        meta={
+            "embedding_model": "fastembed||nomic-ai/nomic-embed-text-v1.5||",
+            "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+        },
+    )
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+    indexer = ChatbotIndexer(
+        repo_root,
+        {
+            "chatbot": {
+                "enabled": True,
+                "embeddings": {
+                    "backend": "fastembed",
+                    "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",
+                },
+                "indexing": {"exclude_globs": ["src/secret.py"]},
+            }
+        },
+    )
+
+    assert indexer._corpus_needs_rebuild("code") is True
 
 
 def test_relationship_merge_replaces_existing_call_graph_chunks(

@@ -376,6 +376,7 @@ deepdoc update --deploy           # Update + deploy
 8. Rebuilds site config and nav afterward.
 
 If git is unavailable, it falls back to hash-based staleness detection for recovery.
+When `--deploy` is used, DeepDoc deploys only after a fully successful update; failed page generation or chatbot sync blocks deployment.
 
 Generation writes quality artifacts under `.deepdoc/`:
 
@@ -390,7 +391,7 @@ Generated MDX pages include provenance frontmatter such as `deepdoc_generated_co
 |------|---------|-------------|
 | `--since` | last synced commit | Git ref to diff against |
 | `--replan` | off | Force a full replan even if the change set looks incremental |
-| `--deploy` | off | Deploy after updating |
+| `--deploy` | off | Deploy after a fully successful update |
 
 ### `deepdoc status`
 

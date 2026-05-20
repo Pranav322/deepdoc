@@ -273,7 +273,8 @@ def init(name, description, provider, model, output_dir, with_chatbot):
         next_steps.append("  4. Preview locally:   [bold]deepdoc serve[/bold]")
     if with_chatbot:
         next_steps.append(
-            "  5. Set chatbot keys:  [bold]export DEEPDOC_CHAT_API_KEY=... DEEPDOC_EMBED_API_KEY=...[/bold]"
+            "  [dim]Chatbot reuses the key above; embeddings run locally via "
+            "fastembed. See the README for advanced configs.[/dim]"
         )
 
     console.print(

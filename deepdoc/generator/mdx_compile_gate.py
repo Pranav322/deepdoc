@@ -52,6 +52,7 @@ class GateOutcome:
     content: str
     retries: int = 0
     fallback_applied: bool = False
+    fallback_also_failed: bool = False
     last_error: MdxCompileError | None = None
     compile_failed: bool = False
 
@@ -121,11 +122,13 @@ def apply_mdx_compile_gate(
         last_error = next_outcome.error
 
     fallback = _strip_jsx_to_markdown(current)
+    fallback_outcome = validate(fallback)
     return GateOutcome(
         content=fallback,
         retries=retries,
         fallback_applied=True,
-        last_error=last_error,
+        fallback_also_failed=not fallback_outcome.ok,
+        last_error=fallback_outcome.error if not fallback_outcome.ok else last_error,
         compile_failed=True,
     )
 

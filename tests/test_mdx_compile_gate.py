@@ -216,6 +216,49 @@ def test_strip_banner_inserted_after_frontmatter() -> None:
     assert banner_idx == 3
 
 
+def test_gate_fallback_also_fails_sets_flag() -> None:
+    """When the JSX-strip fallback also fails to compile, fallback_also_failed is True
+    and last_error reflects the fallback's compile error, not the original."""
+    bucket = make_bucket("Test", "test", owned_files=[])
+    original_error = MdxCompileError(message="unknown JSX component <Fancy>", line=5)
+    fallback_error = MdxCompileError(message="stray brace expression {x}", line=3)
+    verdicts = [
+        ValidationOutcome(ok=False, error=original_error),  # initial check
+        ValidationOutcome(ok=False, error=fallback_error),   # fallback check
+    ]
+    outcome = apply_mdx_compile_gate(
+        "broken {x} content",
+        llm=None,
+        bucket=bucket,
+        max_retries=0,
+        validate=_make_validator(verdicts),
+    )
+    assert outcome.fallback_applied is True
+    assert outcome.fallback_also_failed is True
+    assert outcome.compile_failed is True
+    assert outcome.last_error == fallback_error
+
+
+def test_gate_fallback_passes_validation_not_flagged() -> None:
+    """When the fallback compiles cleanly, fallback_also_failed is False."""
+    bucket = make_bucket("Test", "test", owned_files=[])
+    error = MdxCompileError(message="unclosed JSX", line=1)
+    verdicts = [
+        ValidationOutcome(ok=False, error=error),  # initial
+        ValidationOutcome(ok=True),                # fallback check passes
+    ]
+    outcome = apply_mdx_compile_gate(
+        "<Callout>broken</Callout>",
+        llm=None,
+        bucket=bucket,
+        max_retries=0,
+        validate=_make_validator(verdicts),
+    )
+    assert outcome.fallback_applied is True
+    assert outcome.fallback_also_failed is False
+    assert outcome.compile_failed is True
+
+
 def test_ensure_node_available_raises_when_missing(monkeypatch) -> None:
     import shutil as _shutil
     from deepdoc.generator import mdx_validator

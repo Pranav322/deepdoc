@@ -689,6 +689,13 @@ class BucketGenerationEngine:
             # JSX-stripped Markdown if retries are exhausted.
             gate_outcome = self._run_mdx_compile_gate(content, bucket)
             content = gate_outcome.content
+            if gate_outcome.fallback_also_failed:
+                err = gate_outcome.last_error
+                raise RuntimeError(
+                    f"MDX compile gate: JSX-strip fallback also failed to compile for "
+                    f"{bucket.title!r}: {err.short() if err else 'unknown error'}. "
+                    "Page will be written as a stub to avoid a broken site build."
+                )
             if gate_outcome.fallback_applied:
                 degraded = True
                 console.print(

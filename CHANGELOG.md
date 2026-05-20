@@ -9,6 +9,62 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.1.0] - 2026-05-20
+
+DeepDoc 2.1.0 is a quality and reliability release — no new pipeline stages, but a broad set of correctness fixes across the scanner, planner, generator, chatbot, and CLI that address real-world failures observed after the 2.0.0 launch.
+
+### Fixed
+
+#### Scanner
+- **Deepdoc-generated dirs excluded from scan** — `site/`, `.deepdoc/`, `chatbot_backend/`, and the configured `output_dir` were being scanned as source files, causing giant-file warnings on scaffold files like `chatbot-panel.tsx`. These dirs are now excluded both in `config.py` defaults and as a hardcoded implicit guard in `scan_repo()`.
+- **Redis false-positive reduced** — bare `r` was included in the Redis connection-variable pattern in `scanner/common.py`, causing almost any single-letter variable to match. Removed; pattern now requires `cache`, `redis`, or `client`.
+- **Artifact scan is now deterministic** — `artifacts.py` iterates `file_contents` in sorted order so artifact detection results are stable across runs.
+- **Path stripping handles stacked prefixes** — `scanner/utils.py` now strips all leading `./` segments (e.g. `../../foo`) rather than only the first one.
+- **NestJS multi-controller support** — `detect_nestjs` previously used `.search()` so only the first `@Controller` in a file was found. Now uses `.finditer()` with a sorted controller-span list; each `@Get`/`@Post`/etc. is assigned the base path of the nearest preceding `@Controller`.
+- **Fastify mount attribute fix** — `repo_resolver.py` referenced the non-existent `parent_info.local_fastify_mounts`; corrected to `parent_info.local_mounts`.
+
+#### Planner
+- **Bucket slug collision guard** — fallback slug generation now checks for existing slugs and appends a counter suffix (`-2`, `-3`, …) to avoid silent collisions where two buckets resolve to the same slug and one overwrites the other in the plan.
+- **Consolidation cycle guard** — added a `visited` set to the bucket-consolidation while-loop; a bucket that has already been considered as a merge target cannot be merged again, preventing infinite loops when the merge-candidate graph has a cycle.
+- **Unified nav section normalizer** — `_normalize_nav_section` was defined in both `heuristics.py` and `nav_shaping.py` with diverging logic (the `heuristics.py` copy had backend-specific remaps the `nav_shaping.py` copy lacked). The duplicate is removed; the canonical version in `nav_shaping.py` now includes all remaps for universal and backend-specific cases.
+- **Duplicate `_decompose_buckets` removed** — `heuristics.py` both imported `_decompose_buckets` from `bucket_refinement` and redefined it locally (~158 lines). The local shadow is deleted; all callers resolve to the single canonical version in `bucket_refinement.py`.
+- **Terminal corruption during parallel decompose fixed** — `_llm_step` wrapped every LLM call in a `Rich.Live()` context on the shared module-level `console`. With up to 6 concurrent `ThreadPoolExecutor` workers each opening a `Live` context simultaneously, terminal output was corrupted (garbled progress bars, interleaved escape sequences). The `Live` context manager has been removed entirely.
+- **Incidental HTTP bucket double-merge prevented** — `bucket_refinement.py` now tracks absorbed slugs in a `merge_target_slugs` set; a bucket that has already absorbed another cannot itself be absorbed again in the same pass.
+- **Smart-update `merged_plan` was incomplete** — the `DocPlan` constructor call in `smart_update_v2.py` omitted `orphaned_files`, `integration_candidates`, and `classification`. These are now propagated so incremental replans retain full plan context.
+- **Orphaned slugs removed from stale set** — after `_handle_deleted_files` runs, slugs for fully-orphaned buckets are now filtered out of `change_set.stale_bucket_slugs` to prevent a redundant regeneration attempt on pages that have already been deleted.
+- **Copy-renamed files trigger regeneration** — the incremental update stale check used `status_code == "R"` (rename only); now checks `status_code in ("R", "C")` to also catch copy operations.
+- **Update success requires zero failures** — `pages_failed <= 0` (always true since the count is non-negative) replaced with the correct `pages_failed == 0`.
+
+#### Generator
+- **Null guard on `generation_hints`** — `evidence.py` accessed `bucket.generation_hints.get(...)` directly; if the field was `None` this raised `AttributeError`. Now guarded with `(bucket.generation_hints or {}).get(...)`.
+- **Manifest loaded once per run** — `generation.py` was loading the on-disk manifest once per bucket inside the stale check. The manifest is now loaded once in `generate_all` and passed into `_bucket_is_stale`, eliminating redundant I/O in large repos.
+- **Non-transient LLM errors no longer retry** — the generation retry loop was sleeping and retrying on all exceptions. Auth failures, invalid model names, and quota errors now raise immediately; only rate-limit and transient errors trigger the backoff retry.
+- **MDX brace escaping skips JSX prop lines** — the broad `{…}` → `&#123;…&#125;` escape in `post_processors.py` was mangling JSX prop assignments like `component={MyComp}`. Lines containing `={` are now excluded from broad brace escaping.
+- **Dead unreachable `return` removed** — an unreachable `return content` statement at the end of a branch in `post_processors.py` was silently masking the actual return path. Deleted.
+- **Empty list YAML frontmatter** — `_merge_frontmatter_fields` was writing empty lists as `key:\n  []` (block-style), which gray-matter/Fumadocs rejected. Empty lists are now written as `key: []` (flow-style).
+
+#### Chatbot
+- **FAISS invalid-embedding filter** — `chatbot/persistence.py` now filters out results with `score <= -0.5`, preventing corrupted or zero-magnitude embeddings from appearing as top search hits.
+- **SSE streams no longer hang** — all three SSE endpoints (`/stream`, `/deep-research/stream`, `/code-deep/stream`) used a blocking `tokens.get()` with no timeout; a silently-dead generator thread would stall the HTTP response forever. Each endpoint now uses `tokens.get(timeout=30)` and emits a `ping` keepalive event on timeout.
+- **Citation dedup by range, not just path** — `answer_mixin.py` was deduplicating citations by file path only, collapsing distinct line ranges in the same file to a single entry. The dedup key is now `(path, start_line, end_line)`.
+- **Leading `./` stripped from citation paths** — regex-matched file paths in `answer_mixin.py` now have any leading `./` stripped before lookup, matching how paths are stored in the index.
+- **Azure `api_version` propagated to chatbot** — when the chatbot inherits its LLM config from `llm.*`, `api_version` is now included in the inherited config alongside `base_url` and `api_key_env`.
+
+#### CLI / Config
+- **`deepdoc config set` type inference uses defaults** — `_set_nested` used the *existing* config value to infer the target type; if the value was `None` (key not yet set), it fell through to a plain string assignment. It now walks `DEFAULT_CONFIG` as a type oracle when the existing value is absent.
+- **Azure provider validated before generation starts** — selecting `--provider azure` previously wrote a config that caused generation to start and then fail silently mid-run because LiteLLM couldn't reach the endpoint. `LLMClient.__init__` now validates that `base_url` and `api_version` are both present and non-empty before any LLM call is made, raising a loud box error that names exactly what is missing and shows the correct YAML snippet to fix it. The same check runs in `build_chat_client` for chatbot Azure configs. `deepdoc init --provider azure` now writes placeholder values for both fields into `.deepdoc.yaml` and shows Azure-specific next steps so users know what to fill in before running `generate`.
+
+#### Nav / Site
+- **`whats-changed` page appears in nav on first run** — two ordering bugs prevented the changelog page from appearing in the sidebar on the very first `generate`: (1) `pipeline_v2.py` was calling `_build_site()` before `_record_changelog()`, so the nav was built without the slug; (2) `smart_update_v2.py` was calling `_append_changelog()` after `_rebuild_nav()`, so the updated plan nav was never written to the site. Both fixed by reordering the calls.
+- **`whats-changed` synthetic page registered before nav loop** — `engine.py` now injects a synthetic `DocPage` for `whats-changed` into `slug_to_page` before the nav-structure loop, so it isn't silently skipped (it isn't a `DocBucket` so `plan.pages` never contains it).
+
+#### Glossary
+- **Glossary evidence cap** — `bucket_injection.py` was feeding up to 30 model files as evidence for the domain-glossary bucket; capped at 10.
+- **Glossary length limits enforced** — the domain-glossary prompt now enforces a 40-term hard cap, an explicit skip-list for generic fields (`id`, `created_at`, `email`, etc.), grouped output via `<Accordions>`, a single Mermaid diagram maximum, and a 300-line page length limit. Previously the LLM wrote individual entries for every model field, producing pages that exceeded 5 000 lines.
+
+#### Changelog page
+- **Richer changelog entries** — `changelog_writer.py` now generates commit metadata tables, bulleted page lists with links, source file lists, and strategy explanation blocks per entry, replacing the previous one-liner accordion entries.
+
 ## [2.0.0] - 2026-05-09
 
 DeepDoc 2.0.0 introduces precise incremental updates (no more full replans on large commits), a commit changelog page, and MDX quality improvements.

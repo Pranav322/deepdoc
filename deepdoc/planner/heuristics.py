@@ -206,24 +206,12 @@ def _normalize_repo_profile(
 
 def _llm_step(llm: LLMClient, system: str, prompt: str, step_name: str) -> dict | None:
     """Execute a single LLM planning step with error handling."""
-    from rich.live import Live
-    from rich.text import Text
-
     response = None
-    with Live(
-        Text(
-            f"⠋ Running planner step: {step_name}... (may take 15-30s)",
-            style="bold cyan",
-        ),
-        console=console,
-        refresh_per_second=10,
-        transient=True,
-    ):
-        try:
-            response = llm.complete(system, prompt)
-        except Exception as e:
-            console.print(f"[red]✗ LLM call failed for {step_name}: {e}[/red]")
-            return None
+    try:
+        response = llm.complete(system, prompt)
+    except Exception as e:
+        console.print(f"[red]✗ LLM call failed for {step_name}: {e}[/red]")
+        return None
 
     if not response:
         return None
@@ -659,166 +647,6 @@ def _should_decompose(bucket: DocBucket, scan: RepoScan, threshold: int) -> bool
 
     giant_count = sum(1 for f in bucket.owned_files if f in scan.giant_file_clusters)
     return giant_count >= 1
-
-
-def _decompose_buckets(
-    plan: DocPlan,
-    scan: RepoScan,
-    cfg: dict,
-    llm: LLMClient,
-    repo_profile: dict,
-) -> DocPlan:
-    """Decompose broad buckets into focused sub-topics (parallelized LLM calls)."""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-
-    threshold = cfg.get("decompose_threshold", 5)
-    new_buckets: list[DocBucket] = []
-    new_nav = dict(plan.nav_structure)
-    repo_profile_str = json.dumps(repo_profile, indent=2) if repo_profile else "unknown"
-    existing_slugs = {b.slug for b in plan.buckets}
-
-    # Build existing bucket context for overlap avoidance
-    all_bucket_titles = [
-        f"- {b.title} ({b.slug}) — {b.description[:80]}" for b in plan.buckets
-    ]
-
-    # Separate buckets into those needing decompose and those that don't
-    candidates: list[DocBucket] = []
-    for bucket in plan.buckets:
-        if not _should_decompose(bucket, scan, threshold):
-            new_buckets.append(bucket)
-        else:
-            candidates.append(bucket)
-
-    if not candidates:
-        return plan
-
-    # Build all prompts upfront
-    prompts: dict[str, tuple[DocBucket, str]] = {}
-    for bucket in candidates:
-        other_buckets_str = "\n".join(
-            line for line in all_bucket_titles if f"({bucket.slug})" not in line
-        )
-        file_summaries = _build_file_summaries_for_bucket(bucket, scan)
-        prompt = DECOMPOSE_PROMPT.format(
-            title=bucket.title,
-            section=bucket.section,
-            bucket_type=bucket.bucket_type,
-            description=bucket.description,
-            file_count=len(bucket.owned_files),
-            file_list="\n".join(
-                f"  - {f} ({scan.file_line_counts.get(f, 0)} lines)"
-                for f in bucket.owned_files
-            ),
-            file_summaries=file_summaries[:15000],
-            existing_buckets=other_buckets_str or "(none)",
-            repo_profile=repo_profile_str,
-        )
-        prompts[bucket.slug] = (bucket, prompt)
-
-    # Fire all decompose LLM calls in parallel
-    max_workers = min(cfg.get("max_parallel_workers", 6), len(candidates))
-    console.print(
-        f"  [dim]Decomposing {len(candidates)} bucket(s) with {max_workers} workers...[/dim]"
-    )
-    decompose_results: dict[str, dict | None] = {}
-
-    def _decompose_one(slug: str, prompt: str) -> tuple[str, dict | None]:
-        return slug, _llm_step(llm, DECOMPOSE_SYSTEM, prompt, f"decompose-{slug}")
-
-    with ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(_decompose_one, slug, prompt): slug
-            for slug, (_, prompt) in prompts.items()
-        }
-        for future in as_completed(futures):
-            slug, result = future.result()
-            decompose_results[slug] = result
-
-    # Process results sequentially (modifies shared state: existing_slugs, new_nav)
-    for bucket in candidates:
-        result = decompose_results.get(bucket.slug)
-
-        if not result or not result.get("sub_topics") or len(result["sub_topics"]) < 2:
-            new_buckets.append(bucket)
-            continue
-
-        nav_section = result.get("nav_section", f"{bucket.section} > {bucket.title}")
-        keep_parent = result.get("keep_parent_overview", False)
-        sub_slugs: list[str] = []
-        hints = bucket.generation_hints or {}
-
-        if keep_parent:
-            overview_bucket = DocBucket(
-                bucket_type=bucket.bucket_type,
-                title=f"{bucket.title} Overview",
-                slug=bucket.slug,
-                section=nav_section,
-                description=f"Overview of {bucket.title} — how the sub-components fit together",
-                depends_on=bucket.depends_on,
-                owned_files=bucket.owned_files[:3],
-                owned_symbols=[],
-                artifact_refs=bucket.artifact_refs,
-                required_sections=["overview", "architecture", "component_summary"],
-                required_diagrams=bucket.required_diagrams or ["architecture_flow"],
-                coverage_targets=[],
-                generation_hints={
-                    **{k: v for k, v in hints.items() if k != "is_introduction_page"},
-                    "prompt_style": "system",
-                },
-                priority=bucket.priority,
-            )
-            new_buckets.append(overview_bucket)
-            sub_slugs.append(bucket.slug)
-
-        for i, sub in enumerate(result["sub_topics"]):
-            sub_slug = sub["slug"]
-            if sub_slug in existing_slugs:
-                sub_slug = f"{sub_slug}-{bucket.slug[:8]}"
-            if sub_slug in existing_slugs:
-                sub_slug = f"{sub_slug}-{i}"
-            existing_slugs.add(sub_slug)
-
-            sub_bucket = DocBucket(
-                bucket_type=bucket.bucket_type,
-                title=sub["title"],
-                slug=sub_slug,
-                section=nav_section,
-                description=sub.get("description", ""),
-                depends_on=bucket.depends_on,
-                owned_files=sub.get("owned_files", []),
-                owned_symbols=sub.get("owned_symbols", []),
-                artifact_refs=[],
-                required_sections=sub.get("required_sections", ["overview", "details"]),
-                required_diagrams=sub.get("required_diagrams", []),
-                coverage_targets=[],
-                generation_hints={
-                    **{k: v for k, v in hints.items() if k != "is_introduction_page"},
-                    "prompt_style": sub.get(
-                        "prompt_style", hints.get("prompt_style", "general")
-                    ),
-                },
-                priority=bucket.priority + i + 1,
-                parent_slug=bucket.slug,
-            )
-            new_buckets.append(sub_bucket)
-            sub_slugs.append(sub_slug)
-
-        for section_name, slugs in list(new_nav.items()):
-            if bucket.slug in slugs:
-                slugs.remove(bucket.slug)
-                if not slugs:
-                    del new_nav[section_name]
-        new_nav.setdefault(nav_section, []).extend(sub_slugs)
-
-        console.print(
-            f"[cyan]  ↳ Decomposed '{bucket.title}' into {len(result['sub_topics'])} sub-topics"
-            f"{' + overview' if keep_parent else ''}[/cyan]"
-        )
-
-    plan.buckets = new_buckets
-    plan.nav_structure = new_nav
-    return plan
 
 
 def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:

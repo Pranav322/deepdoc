@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
+import re
 from typing import TYPE_CHECKING, Any
 
 from .parser.base import ParsedFile
@@ -34,6 +36,34 @@ class DocBucket:
     parent_slug: str | None = None
     publication_tier: str = "core"
     source_kind_summary: dict[str, int] = field(default_factory=dict)
+    semantic_id: str = ""
+    origin: str = "planner"
+    confidence: float = 1.0
+    evidence_anchors: list[str] = field(default_factory=list)
+    planner_schema_version: str = "v2"
+
+    def __post_init__(self) -> None:
+        if not self.semantic_id:
+            self.semantic_id = build_bucket_semantic_id(self)
+
+
+def build_bucket_semantic_id(bucket: DocBucket) -> str:
+    """Build a deterministic identity used to merge replanned buckets."""
+    hints = bucket.generation_hints or {}
+    explicit = hints.get("semantic_id") or hints.get("endpoint_family")
+    if explicit:
+        raw = f"{bucket.bucket_type}:{explicit}"
+    elif bucket.parent_slug:
+        raw = f"{bucket.bucket_type}:{bucket.parent_slug}:{bucket.slug}"
+    elif bucket.owned_files:
+        files = ",".join(sorted(bucket.owned_files)[:20])
+        digest = hashlib.sha1(files.encode("utf-8")).hexdigest()[:12]
+        raw = f"{bucket.bucket_type}:{bucket.section}:{digest}"
+    else:
+        # No files to hash — falls back to slug, which is stable as long as the
+        # LLM produces the same slug across replans (enforced by slug-stability rules).
+        raw = f"{bucket.bucket_type}:{bucket.section}:{bucket.slug}"
+    return re.sub(r"[^a-z0-9:_-]+", "-", raw.lower()).strip("-")
 
 
 @dataclass
@@ -134,6 +164,8 @@ class RepoScan:
     topology_map: TopologyMap | None = None
     debug_signals: list[DebugSignal] = field(default_factory=list)
     flow_candidates: list[Any] = field(default_factory=list)
+    service_boundaries: list[dict[str, Any]] = field(default_factory=list)
+    file_services: dict[str, str] = field(default_factory=dict)
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:
@@ -160,6 +192,7 @@ __all__ = [
     "DocPlan",
     "RepoScan",
     "_BucketAsPage",
+    "build_bucket_semantic_id",
     "tracked_bucket_files",
     "endpoint_owned_files",
 ]

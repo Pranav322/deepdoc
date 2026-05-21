@@ -245,6 +245,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         plan,
         scan,
         include_endpoint_pages=cfg.get("include_endpoint_pages", True),
+        cfg=cfg,
     )
     plan = _ensure_database_runtime_and_interface_buckets(plan, scan, cfg)
     plan = _attach_flow_hints_to_cluster_buckets(plan, scan, cfg)
@@ -321,6 +322,8 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
     file_frameworks: dict[str, list[str]] = {}
+    service_boundaries = _detect_service_boundaries(repo_root, cfg)
+    file_services: dict[str, str] = {}
 
     ext_to_lang = {
         ".py": "python",
@@ -369,6 +372,9 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
 
             progress.update(task, description=f"[dim]Scanning {rel}[/dim]")
             source_kind_by_file[rel] = classify_source_kind(rel)
+            service = _service_for_path(rel, service_boundaries)
+            if service:
+                file_services[rel] = service
 
             # Detect config files
             if fname in CONFIG_FILE_PATTERNS or any(
@@ -529,7 +535,69 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
         research_contexts=research_contexts,
         source_kind_by_file=source_kind_by_file,
         file_frameworks=file_frameworks,
+        service_boundaries=service_boundaries,
+        file_services=file_services,
     )
+
+
+def _detect_service_boundaries(repo_root: Path, cfg: dict[str, Any]) -> list[dict[str, Any]]:
+    """Detect or load monorepo service roots for service-aware planning."""
+    configured = cfg.get("services") or []
+    boundaries: list[dict[str, Any]] = []
+    for item in configured:
+        if isinstance(item, str):
+            root = item.strip().strip("/")
+            if root:
+                boundaries.append({"name": Path(root).name, "root": root, "source": "config"})
+        elif isinstance(item, dict):
+            root = str(item.get("root") or item.get("path") or "").strip().strip("/")
+            if root:
+                boundaries.append(
+                    {
+                        "name": str(item.get("name") or Path(root).name),
+                        "root": root,
+                        "source": "config",
+                    }
+                )
+    if boundaries:
+        return boundaries
+
+    candidates: list[dict[str, Any]] = []
+    marker_names = {
+        "pyproject.toml",
+        "package.json",
+        "go.mod",
+        "composer.json",
+        "manage.py",
+        "Dockerfile",
+    }
+    for parent_name in ("services", "apps", "packages"):
+        parent = repo_root / parent_name
+        if not parent.exists() or not parent.is_dir():
+            continue
+        for child in sorted(p for p in parent.iterdir() if p.is_dir()):
+            if any((child / marker).exists() for marker in marker_names):
+                root = child.relative_to(repo_root).as_posix()
+                candidates.append(
+                    {"name": child.name, "root": root, "source": "auto"}
+                )
+            else:
+                # depth-2: e.g. apps/web/packages/ui
+                for grandchild in sorted(p for p in child.iterdir() if p.is_dir()):
+                    if any((grandchild / marker).exists() for marker in marker_names):
+                        root = grandchild.relative_to(repo_root).as_posix()
+                        candidates.append(
+                            {"name": grandchild.name, "root": root, "source": "auto"}
+                        )
+    return candidates
+
+
+def _service_for_path(rel_path: str, boundaries: list[dict[str, Any]]) -> str:
+    for service in sorted(boundaries, key=lambda item: -len(str(item.get("root", "")))):
+        root = str(service.get("root", "")).rstrip("/")
+        if rel_path == root or rel_path.startswith(root + "/"):
+            return str(service.get("name") or Path(root).name)
+    return ""
 
 
 def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> RepoScan:

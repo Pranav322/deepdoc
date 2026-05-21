@@ -4,6 +4,18 @@
 [![Python versions](https://img.shields.io/pypi/pyversions/deepdoc)](https://pypi.org/project/deepdoc/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
 
+## Repository Layout
+
+| Directory | What it is | Where to start |
+|---|---|---|
+| [`deepdoc/`](./deepdoc/) | The Python package — CLI, pipeline, planner, generator, chatbot, and site builder. This is the core product. | [`deepdoc/README.md`](./deepdoc/README.md) |
+| [`web/`](./web/) | Marketing and changelog site built with Astro 5 + Tailwind. Deployed to the public DeepDoc website. | [`web/README.md`](./web/README.md) |
+| [`vscode-extension/`](./vscode-extension/) | VS Code extension — explains selected code snippets in Fast or Deep mode and inserts AI-generated comments inline. | [`vscode-extension/README.md`](./vscode-extension/README.md) |
+| [`tests/`](./tests/) | pytest test suite for the Python package. | Run `python3 -m pytest -q` from repo root. |
+| [`scripts/`](./scripts/) | One-off release and maintenance scripts. | — |
+
+---
+
 Auto-generate deep engineering documentation from real codebases using AI.
 
 DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich MDX pages with Mermaid diagrams, and builds a local-first Fumadocs site with Orama search.

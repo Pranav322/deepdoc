@@ -724,4 +724,185 @@ Important:
 """
 
 
+ENDPOINT_DOMAIN_KEYWORDS: dict[str, set[str]] = {
+    "auth": {
+        "account",
+        "applelogin",
+        "auth",
+        "blacklist",
+        "block",
+        "email",
+        "facebooklogin",
+        "forgetpassword",
+        "googlelogin",
+        "login",
+        "logout",
+        "otp",
+        "password",
+        "profile",
+        "register",
+        "resendotp",
+        "resetpassword",
+        "sendotp",
+        "tfa",
+        "token",
+        "user",
+        "verifyotp",
+        "whitelist",
+    },
+    "orders": {
+        "cancel",
+        "checkout",
+        "exchange",
+        "hyperlocal",
+        "order",
+        "processorder",
+        "purchase",
+        "return",
+        "survey",
+        "thank",
+        "undelivered",
+    },
+    "payments": {
+        "cashback",
+        "coupon",
+        "discount",
+        "giftvoucher",
+        "pay",
+        "payment",
+        "refund",
+        "tssmoney",
+        "upi",
+        "voucher",
+        "wallet",
+    },
+    "products": {
+        "artist",
+        "catalog",
+        "category",
+        "feed",
+        "gallery",
+        "inventory",
+        "listing",
+        "price",
+        "pricelist",
+        "product",
+        "rating",
+        "search",
+        "sitemap",
+        "syncproduct",
+        "tag",
+        "theme",
+        "variant",
+        "wwe",
+    },
+    "cart": {
+        "address",
+        "cart",
+        "checkout",
+        "coupon",
+        "giftvoucher",
+        "wishlist",
+    },
+    "shipping": {
+        "clickpost",
+        "countries",
+        "deliver",
+        "delivery",
+        "fulfillment",
+        "location",
+        "pincode",
+        "reshipping",
+        "ship",
+        "shipment",
+        "warehouse",
+        "zone",
+    },
+    "support": {
+        "callback",
+        "contact",
+        "feedback",
+        "haptik",
+        "notify",
+        "notification",
+        "nps",
+        "question",
+        "support",
+        "ticket",
+    },
+    "loyalty": {
+        "cashback",
+        "climes",
+        "exclusive",
+        "loyalty",
+        "point",
+        "reward",
+        "saving",
+        "tss",
+        "tssmoney",
+    },
+    "integrations": {
+        "bittersweet",
+        "bot",
+        "cataloguemgmt",
+        "convozen",
+        "erp",
+        "external",
+        "firebase",
+        "gmetri",
+        "haptik",
+        "omnichannel",
+        "pos",
+        "sync",
+        "webhook",
+    },
+    "graphql": {"cmsgraphql", "graphql", "mutation", "query", "schema"},
+    "cache": {
+        "cache",
+        "invalidate",
+        "redis",
+        "reset",
+    },
+}
+
+
+def _first_meaningful_segment(path: str) -> str:
+    """Extract the first non-version, non-api path segment. /api/v2/orders -> orders"""
+    import re as _re
+    clean = _re.sub(r"^/?(api/)?v\d+/", "", (path or "").lstrip("/"))
+    seg = clean.split("/")[0].lower().strip()
+    return seg if len(seg) >= 2 and not seg.startswith("{") else ""
+
+
+def _build_repo_endpoint_keywords(
+    scan: RepoScan,
+    cfg: dict[str, Any],
+) -> dict[str, set[str]]:
+    """Build endpoint domain keyword map from repo scan + user config.
+
+    Three-layer merge (highest priority first):
+    1. cfg["endpoint_groups"] — explicit user overrides
+    2. Families observed in this repo's actual endpoints
+    3. ENDPOINT_DOMAIN_KEYWORDS — hardcoded fallback
+    """
+    merged: dict[str, set[str]] = {
+        domain: set(keywords)
+        for domain, keywords in ENDPOINT_DOMAIN_KEYWORDS.items()
+    }
+
+    # Layer 2: seed a group for every endpoint_family observed by the scanner.
+    # Raw path segments are intentionally excluded — they would prevent small
+    # unrelated groups from collapsing to the "supporting" fallback page.
+    for bundle in (getattr(scan, "endpoint_bundles", None) or []):
+        family = (getattr(bundle, "endpoint_family", None) or "").lower().strip()
+        if family and len(family) >= 2:
+            merged.setdefault(family, set()).add(family)
+
+    # Layer 1: user config wins
+    for group_name, keywords in (cfg.get("endpoint_groups") or {}).items():
+        merged[group_name] = merged.get(group_name, set()) | set(keywords)
+
+    return {k: v for k, v in merged.items() if v}
+
+
 __all__ = [k for k in list(globals().keys()) if not k.startswith('__')]

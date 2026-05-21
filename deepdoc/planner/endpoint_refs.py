@@ -14,6 +14,7 @@ def _auto_generate_endpoint_refs(
     plan: DocPlan,
     scan: RepoScan,
     include_endpoint_pages: bool = True,
+    cfg: dict[str, Any] | None = None,
 ) -> DocPlan:
     """Attach scanned endpoint details to grouped API-reference buckets.
 
@@ -40,146 +41,7 @@ def _auto_generate_endpoint_refs(
         "/sitemap.xml",
     }
     NOISE_SUFFIXES = (".svg", ".png", ".jpg", ".ico", ".css", ".js", ".map")
-    ENDPOINT_DOMAIN_KEYWORDS: dict[str, set[str]] = {
-        "auth": {
-            "account",
-            "applelogin",
-            "auth",
-            "blacklist",
-            "block",
-            "email",
-            "facebooklogin",
-            "forgetpassword",
-            "googlelogin",
-            "login",
-            "logout",
-            "otp",
-            "password",
-            "profile",
-            "register",
-            "resendotp",
-            "resetpassword",
-            "sendotp",
-            "tfa",
-            "token",
-            "user",
-            "verifyotp",
-            "whitelist",
-        },
-        "orders": {
-            "cancel",
-            "checkout",
-            "exchange",
-            "hyperlocal",
-            "order",
-            "processorder",
-            "purchase",
-            "return",
-            "survey",
-            "thank",
-            "undelivered",
-        },
-        "payments": {
-            "cashback",
-            "coupon",
-            "discount",
-            "giftvoucher",
-            "pay",
-            "payment",
-            "refund",
-            "tssmoney",
-            "upi",
-            "voucher",
-            "wallet",
-        },
-        "products": {
-            "artist",
-            "catalog",
-            "category",
-            "feed",
-            "gallery",
-            "inventory",
-            "listing",
-            "price",
-            "pricelist",
-            "product",
-            "rating",
-            "search",
-            "sitemap",
-            "syncproduct",
-            "tag",
-            "theme",
-            "variant",
-            "wwe",
-        },
-        "cart": {
-            "address",
-            "cart",
-            "checkout",
-            "coupon",
-            "giftvoucher",
-            "wishlist",
-        },
-        "shipping": {
-            "clickpost",
-            "countries",
-            "deliver",
-            "delivery",
-            "fulfillment",
-            "location",
-            "pincode",
-            "reshipping",
-            "ship",
-            "shipment",
-            "warehouse",
-            "zone",
-        },
-        "support": {
-            "callback",
-            "contact",
-            "feedback",
-            "haptik",
-            "notify",
-            "notification",
-            "nps",
-            "question",
-            "support",
-            "ticket",
-        },
-        "loyalty": {
-            "cashback",
-            "climes",
-            "exclusive",
-            "loyalty",
-            "point",
-            "reward",
-            "saving",
-            "tss",
-            "tssmoney",
-        },
-        "integrations": {
-            "bittersweet",
-            "bot",
-            "cataloguemgmt",
-            "convozen",
-            "erp",
-            "external",
-            "firebase",
-            "gmetri",
-            "haptik",
-            "omnichannel",
-            "pos",
-            "sync",
-            "webhook",
-        },
-        "graphql": {"cmsgraphql", "graphql", "mutation", "query", "schema"},
-        "cache": {
-            "cache",
-            "invalidate",
-            "redis",
-            "reset",
-        },
-    }
+    endpoint_domain_keywords = _build_repo_endpoint_keywords(scan, cfg or {})
 
     endpoints = scan.published_api_endpoints
     if not include_endpoint_pages or not endpoints:
@@ -231,7 +93,7 @@ def _auto_generate_endpoint_refs(
 
     def _domain_labels(tokens: set[str]) -> set[str]:
         labels: set[str] = set()
-        for label, keywords in ENDPOINT_DOMAIN_KEYWORDS.items():
+        for label, keywords in endpoint_domain_keywords.items():
             matched = False
             for token in tokens:
                 for keyword in keywords:
@@ -354,7 +216,7 @@ def _auto_generate_endpoint_refs(
             grouped[_resource_from_path(ep.get("path", "/unknown"))].append(ep)
 
         for group_key, group_eps in list(grouped.items()):
-            if len(group_eps) < 3 and group_key not in ENDPOINT_DOMAIN_KEYWORDS:
+            if len(group_eps) < 3 and group_key not in endpoint_domain_keywords:
                 sparse.extend(group_eps)
                 del grouped[group_key]
 

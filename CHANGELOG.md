@@ -9,6 +9,29 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.2.0] - 2026-05-22
+
+DeepDoc 2.2.0 is an infrastructure and planning reliability release focused on data safety, incremental update correctness, and multi-spec API support.
+
+### New Features
+
+#### Persistence & Safety
+- **Atomic writes across all state files** — every `.deepdoc/` write now goes through `atomic_write_text` / `atomic_write_json` (mkstemp → fsync → os.replace), eliminating partial-write corruption on crash or SIGKILL.
+- **Exclusive process lock** — `deepdoc_state_lock` uses an fcntl file lock so concurrent `generate` or `update` runs on the same repo are detected and rejected immediately with a clear error message instead of silently overwriting each other's state.
+
+#### Planning
+- **DocBucket semantic identity** — `DocBucket` gains `semantic_id`, `origin`, `confidence`, `evidence_anchors`, and `planner_schema_version` fields. `build_bucket_semantic_id()` derives a deterministic, slug-stable key from endpoint family, parent slug, or owned-file fingerprint. Serialized to and from the `.deepdoc/plan.json` ledger.
+- **Targeted incremental plan merge** — `SmartUpdater` replaces its naive slug-append strategy with `_merge_targeted_plan()`, which matches replanned buckets against existing ones by slug then semantic ID. Matched buckets are mutated in-place (files, hints, confidence merged) and queued for regeneration only when their ownership actually changed, avoiding unnecessary regeneration of unchanged pages.
+- **Monorepo service boundary detection** — `scan_repo` now runs `_detect_service_boundaries()`, which reads an explicit `services:` list from config or auto-discovers service roots by looking for `pyproject.toml`, `package.json`, `go.mod`, `Dockerfile`, etc. one level under `services/`, `apps/`, and `packages/`. Every scanned file is tagged with its owning service in `RepoScan.file_services`.
+- **Endpoint keyword map is now config-extensible** — `ENDPOINT_DOMAIN_KEYWORDS` moved to `planner/common.py` and `_build_repo_endpoint_keywords()` applies a three-layer merge: user `endpoint_groups` config wins, then families observed by the scanner, then the hardcoded fallback. Honoured in both `heuristics.py` and `endpoint_refs.py`.
+
+#### Pipeline & CLI
+- **`--strict-quality` flag** — `deepdoc generate` and `deepdoc update` now accept `--strict-quality`, which reads `pages_failed`, `pages_invalid`, `pages_degraded`, and `mdx_fallback_slugs` from the run stats and raises a `ClickException` listing all blockers. Designed for CI pipelines that should fail-fast on degraded output.
+- **Multi-spec OpenAPI staging** — `stage_openapi_assets` now stages all detected specs instead of stopping at the first. Each spec gets a collision-safe `deepdoc-openapi-{n}-{stem}-{sha1}` filename and a single combined `manifest.json` is written.
+- **LLM token usage in quality report** — token usage from the LLM client is captured into stats and persisted to `generation_quality.json` after every run.
+- **Quality-driven staleness** — `_doc_quality_requires_regeneration` marks any page whose ledger record shows `is_valid: false`, `mdx_fallback_applied`, or whose content contains `stub: true` / `deepdoc_status: invalid` as stale so it is regenerated automatically on the next incremental run without a `--force`.
+- **Duplicate changelog guard** — `append_changelog_entry` skips writing when the incoming commit matches the most recent entry's commit, preventing duplicate entries from rapid pipeline retries on the same SHA.
+
 ## [2.1.0] - 2026-05-20
 
 DeepDoc 2.1.0 is a quality and reliability release — no new pipeline stages, but a broad set of correctness fixes across the scanner, planner, generator, chatbot, and CLI that address real-world failures observed after the 2.0.0 launch.

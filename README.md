@@ -320,6 +320,7 @@ deepdoc update                    # Normal ongoing refresh
 deepdoc update --since HEAD~3     # Changes in last 3 commits
 deepdoc update --since main       # All changes since branching from main
 deepdoc update --replan           # Force a full replan
+deepdoc update --strict-quality   # Fail if generated docs are invalid/degraded
 deepdoc update --deploy           # Update + deploy
 ```
 
@@ -1393,7 +1394,7 @@ jobs:
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
-          deepdoc update --deploy
+          deepdoc update --strict-quality --deploy
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -1411,6 +1412,54 @@ jobs:
 ```
 
 Add your API key to repo Settings → Secrets → Actions → `ANTHROPIC_API_KEY`.
+
+If you self-host and just want docs kept fresh without deploying to GitHub Pages, use this minimal variant instead — it commits the refreshed `docs/` and `.deepdoc/` state back to the branch:
+
+```yaml
+# .github/workflows/deepdoc-refresh.yml
+name: Refresh Docs
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # Full history needed for git diff
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deepdoc
+        run: pip install deepdoc
+
+      - name: Refresh docs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: deepdoc update --strict-quality
+
+      - name: Commit updated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/ .deepdoc/
+          git diff --cached --quiet || git commit -m "chore: refresh docs [skip ci]"
+          git push
+```
+
+The `[skip ci]` tag on the commit message prevents the workflow from triggering itself again.
 
 ---
 

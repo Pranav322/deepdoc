@@ -1,0 +1,14 @@
+{
+  "compilerOptions": {
+    "lib": ["ES2022", "dom", "dom.iterable"],
+    "module": "ESNext",
+    "target": "ES2022",
+    "strict": true,
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "skipLibCheck": true
+  },
+  "include": ["src", "remotion.config.ts"]
+}

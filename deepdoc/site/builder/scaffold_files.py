@@ -1444,6 +1444,14 @@ def _docs_page_tsx() -> str:
           const meta = page.data as {
             deepdoc_generated_at?: string;
             deepdoc_generated_commit?: string;
+            deepdoc_status?: string;
+            deepdoc_evidence_records?: Array<{
+              id: string;
+              file_path: string;
+              start_line: number;
+              end_line: number;
+              source_kind?: string;
+            }>;
             deepdoc_prereqs?: string[];
           };
           const lastIndexed = meta.deepdoc_generated_at
@@ -1463,6 +1471,8 @@ def _docs_page_tsx() -> str:
                 ? `Last indexed: (${commitId})`
                 : null;
           const prereqs = meta.deepdoc_prereqs ?? [];
+          const status = meta.deepdoc_status?.trim() || null;
+          const evidenceRecords = meta.deepdoc_evidence_records ?? [];
           const { previous, next } = findNeighbour(pageTree, page.url);
 
           return (
@@ -1498,9 +1508,37 @@ def _docs_page_tsx() -> str:
                     }}
                   >
                     {lastIndexedLabel}
+                    {status ? ` · Status: ${status}` : ''}
                   </p>
                 ) : null}
                 <MDX components={getMDXComponents()} />
+                {evidenceRecords.length > 0 ? (
+                  <details
+                    style={{
+                      marginTop: '2rem',
+                      borderTop: '1px solid var(--color-fd-border)',
+                      paddingTop: '1rem',
+                      color: 'var(--color-fd-muted-foreground)',
+                      fontSize: '0.875rem',
+                    }}
+                  >
+                    <summary style={{ cursor: 'pointer', color: 'var(--color-fd-foreground)' }}>
+                      Source evidence
+                    </summary>
+                    <ul style={{ marginTop: '0.75rem', paddingLeft: '1.25rem' }}>
+                      {evidenceRecords.slice(0, 50).map((record) => (
+                        <li key={`${record.id}:${record.file_path}`}>
+                          <code>{record.id}</code>{' '}
+                          <code>{record.file_path}</code>
+                          {record.start_line && record.end_line
+                            ? `:${record.start_line}-${record.end_line}`
+                            : ''}
+                          {record.source_kind ? ` · ${record.source_kind}` : ''}
+                        </li>
+                      ))}
+                    </ul>
+                  </details>
+                ) : null}
               </DocsBody>
             </DocsPage>
           );
@@ -1703,7 +1741,7 @@ def _openapi_ts() -> str:
                 (file) =>
                   /\\.(json|ya?ml)$/i.test(file) &&
                   !/^manifest\\.json$/i.test(file) &&
-                  /^(openapi|swagger)(\\.|$)/i.test(file),
+                  (/^(openapi|swagger)(\\.|$)/i.test(file) || /^deepdoc-openapi-/i.test(file)),
               )
               .map((file) => path.join(schemaDir, file))
           : [];
@@ -1720,6 +1758,8 @@ def _openapi_ts() -> str:
           title: string;
           method: string;
           path: string;
+          source_spec?: string;
+          source_path?: string;
         };
 
         const manifestPath = path.join(schemaDir, 'manifest.json');
@@ -1739,6 +1779,9 @@ def _openapi_ts() -> str:
           const slug = slugs.join('/');
           const entry = apiManifest.find((item) => item.slug === slug);
           if (!entry) return null;
+          const document = entry.source_spec
+            ? schemaFiles.find((file) => path.basename(file) === entry.source_spec) || schemaFiles[0]
+            : schemaFiles[0];
 
           return {
             url: `/api/${entry.slug}`,
@@ -1747,7 +1790,7 @@ def _openapi_ts() -> str:
               title: entry.title,
               getAPIPageProps(): ApiPageProps {
                 return {
-                  document: schemaFiles[0],
+                  document,
                   hasHead: true,
                   operations: [
                     {

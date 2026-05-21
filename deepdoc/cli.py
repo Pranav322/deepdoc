@@ -332,6 +332,11 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     help="Run `deepdoc deploy` automatically after a successful generation.",
 )
 @click.option(
+    "--strict-quality",
+    is_flag=True,
+    help="Fail the command when generated docs contain invalid, degraded, fallback, or stub pages.",
+)
+@click.option(
     "--batch-size",
     default=10,
     show_default=True,
@@ -357,6 +362,7 @@ def generate(
     exclude,
     include_api,
     deploy,
+    strict_quality,
     batch_size,
     max_parallel_workers,
     rate_limit_pause,
@@ -414,6 +420,8 @@ def generate(
         cfg["max_parallel_workers"] = max_parallel_workers
     if rate_limit_pause is not None:
         cfg["rate_limit_pause"] = rate_limit_pause
+    if strict_quality:
+        cfg.setdefault("quality", {})["strict"] = True
 
     console.print(
         Panel.fit(
@@ -426,7 +434,15 @@ def generate(
     from .pipeline_v2 import PipelineV2
 
     pipeline = PipelineV2(repo_root, cfg)
-    pipeline.run(force=effective_force, reconcile=force and not clean)
+    stats = pipeline.run(force=effective_force, reconcile=force and not clean)
+    if cfg.get("quality", {}).get("strict"):
+        blockers = _quality_stats_blockers(stats) + _deployment_quality_blockers(
+            repo_root, output_dir
+        )
+        if blockers:
+            raise click.ClickException(
+                "Strict quality failed:\n- " + "\n- ".join(dict.fromkeys(blockers))
+            )
 
     if deploy:
         ctx = click.get_current_context()
@@ -497,7 +513,12 @@ def clean(yes):
     is_flag=True,
     help="Force a full replan even if DeepDoc thinks an incremental update would be enough.",
 )
-def update(since, deploy, replan):
+@click.option(
+    "--strict-quality",
+    is_flag=True,
+    help="Fail the command when docs contain invalid, degraded, fallback, or stub pages after update.",
+)
+def update(since, deploy, replan, strict_quality):
     """Incrementally update docs for commits newer than the last sync.
 
     Run `deepdoc generate` once before using this command.
@@ -514,6 +535,8 @@ def update(since, deploy, replan):
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
+    if strict_quality:
+        cfg.setdefault("quality", {})["strict"] = True
 
     # Resolve --since: explicit override > saved baseline
     if since is not None:
@@ -553,6 +576,16 @@ def update(since, deploy, replan):
                 "Refusing to deploy after an update with failed page work. "
                 "Run `deepdoc update` again after fixing the reported issue."
             )
+        if cfg.get("quality", {}).get("strict"):
+            output_dir = repo_root / cfg.get("output_dir", "docs")
+            blockers = _quality_stats_blockers(stats) + _deployment_quality_blockers(
+                repo_root, output_dir
+            )
+            if blockers:
+                raise click.ClickException(
+                    "Strict quality failed:\n- "
+                    + "\n- ".join(dict.fromkeys(blockers))
+                )
     else:
         console.print(
             Panel.fit(
@@ -1439,6 +1472,25 @@ def _deployment_quality_blockers(repo_root: Path, output_dir: Path) -> list[str]
         if stub_pages:
             blockers.append("stub docs present: " + ", ".join(stub_pages[:8]))
 
+    return blockers
+
+
+def _quality_stats_blockers(stats: dict[str, Any]) -> list[str]:
+    blockers: list[str] = []
+    pages_failed = int(stats.get("pages_failed", 0) or 0)
+    pages_invalid = int(stats.get("pages_invalid", 0) or 0)
+    pages_degraded = int(stats.get("pages_degraded", 0) or 0)
+    mdx_fallbacks = list(stats.get("mdx_fallback_slugs", []) or [])
+    if pages_failed:
+        blockers.append(f"{pages_failed} page(s) failed")
+    if pages_invalid:
+        blockers.append(f"{pages_invalid} page(s) invalid")
+    if pages_degraded:
+        blockers.append(f"{pages_degraded} page(s) degraded")
+    if mdx_fallbacks:
+        blockers.append("MDX fallback applied: " + ", ".join(mdx_fallbacks[:8]))
+    if stats.get("chatbot_failed") or stats.get("chatbot_error"):
+        blockers.append("chatbot index refresh failed")
     return blockers
 
 

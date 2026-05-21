@@ -7,8 +7,10 @@ import hashlib
 import json
 from pathlib import Path
 import sqlite3
+import tempfile
 from typing import Any
 
+from ..persistence_v2 import atomic_write_json, atomic_write_text
 from .types import ChunkRecord, RetrievedChunk, SourceCatalogEntry
 
 CORPUS_FILES = {
@@ -94,9 +96,7 @@ def save_corpus(
     ensure_index_dir(index_dir)
     paths = corpus_paths(index_dir, corpus)
     lines = [json.dumps(record.to_dict(), sort_keys=True) for record in records]
-    paths["chunks"].write_text(
-        "\n".join(lines) + ("\n" if lines else ""), encoding="utf-8"
-    )
+    atomic_write_text(paths["chunks"], "\n".join(lines) + ("\n" if lines else ""))
 
     try:
         import numpy as np
@@ -104,12 +104,12 @@ def save_corpus(
         arr = np.asarray(vectors, dtype="float32")
         if arr.size == 0:
             arr = np.zeros((0, 0), dtype="float32")
-        np.save(paths["vectors"], arr, allow_pickle=False)
+        _atomic_save_numpy(paths["vectors"], arr)
         write_vector_index(paths["index"], arr)
     except Exception:
-        paths["vectors"].write_text(json.dumps(vectors), encoding="utf-8")
+        atomic_write_text(paths["vectors"], json.dumps(vectors))
         write_vector_index(paths["index"], vectors)
-    paths["meta"].write_text(json.dumps(meta or {}, indent=2), encoding="utf-8")
+    atomic_write_json(paths["meta"], meta or {})
     save_lexical_corpus(index_dir, corpus, records)
 
 
@@ -230,9 +230,22 @@ def save_source_archive(index_dir: Path, archive_data: dict[str, str]) -> None:
     ensure_index_dir(index_dir)
     archive_path = index_dir / "source_archive.json.gz"
     payload = json.dumps(archive_data, sort_keys=True).encode("utf-8")
-    with archive_path.open("wb") as raw:
-        with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
-            gz.write(payload)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{archive_path.name}.", suffix=".tmp", dir=str(archive_path.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with open(fd, "wb", closefd=True) as raw:
+            with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
+                gz.write(payload)
+            raw.flush()
+        tmp_path.replace(archive_path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def load_source_archive(index_dir: Path) -> dict[str, str]:
@@ -251,9 +264,9 @@ def save_source_catalog(
     entries: list[SourceCatalogEntry],
 ) -> None:
     ensure_index_dir(index_dir)
-    (index_dir / SOURCE_CATALOG_FILE).write_text(
-        json.dumps([entry.to_dict() for entry in entries], indent=2, sort_keys=True),
-        encoding="utf-8",
+    atomic_write_json(
+        index_dir / SOURCE_CATALOG_FILE,
+        [entry.to_dict() for entry in entries],
     )
 
 
@@ -281,9 +294,9 @@ def load_source_catalog(index_dir: Path) -> list[SourceCatalogEntry]:
 def save_index_manifest(index_dir: Path) -> dict[str, Any]:
     manifest = build_index_manifest(index_dir)
     ensure_index_dir(index_dir)
-    (index_dir / INDEX_MANIFEST_FILE).write_text(
+    atomic_write_text(
+        index_dir / INDEX_MANIFEST_FILE,
         json.dumps(manifest, indent=2, sort_keys=True),
-        encoding="utf-8",
     )
     return manifest
 
@@ -392,7 +405,7 @@ def write_vector_index(path: Path, vectors: Any) -> None:
 
         arr = np.asarray(vectors, dtype="float32")
         if arr.size == 0 or arr.ndim != 2:
-            path.write_text("empty\n", encoding="utf-8")
+            atomic_write_text(path, "empty\n")
             return
         normalized = normalize_vectors(arr)
         # FAISS IndexFlatIP performs inner product search on normalized vectors
@@ -400,9 +413,32 @@ def write_vector_index(path: Path, vectors: Any) -> None:
         dim = normalized.shape[1] if normalized.ndim == 2 else 384
         index = faiss.IndexFlatIP(dim)
         index.add(normalized)
-        faiss.write_index(index, str(path))
+        tmp_path = path.with_name(f".{path.name}.tmp")
+        faiss.write_index(index, str(tmp_path))
+        tmp_path.replace(path)
     except Exception:
-        path.write_text("numpy-fallback\n", encoding="utf-8")
+        atomic_write_text(path, "numpy-fallback\n")
+
+
+def _atomic_save_numpy(path: Path, arr: Any) -> None:
+    import numpy as np
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with open(fd, "wb", closefd=True) as handle:
+            np.save(handle, arr, allow_pickle=False)
+            handle.flush()
+        tmp_path.replace(path)
+    except Exception:
+        try:
+            tmp_path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
 
 
 def normalize_vectors(vectors: Any) -> Any:

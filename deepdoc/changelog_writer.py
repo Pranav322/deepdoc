@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from pathlib import Path
 
-from .persistence_v2 import append_changelog_entry, load_changelog, load_plan, save_plan
+from .persistence_v2 import (
+    append_changelog_entry,
+    atomic_write_text,
+    load_changelog,
+    load_plan,
+    save_plan,
+)
 
 _STRATEGY_LABEL = {
     "incremental": "Incremental update",
@@ -27,6 +34,7 @@ def record_and_write(
     """Append one changelog entry and regenerate whats-changed.mdx."""
     entry = {
         "commit": commit[:8],
+        "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "date": commit_date,
         "commit_message": commit_message,
         "strategy": strategy,
@@ -43,7 +51,7 @@ def write_whats_changed_page(repo_root: Path, output_dir: Path) -> None:
     entries = load_changelog(repo_root)
     mdx = _build_mdx(entries)
     output_dir.mkdir(parents=True, exist_ok=True)
-    (output_dir / "whats-changed.mdx").write_text(mdx, encoding="utf-8")
+    atomic_write_text(output_dir / "whats-changed.mdx", mdx)
     _ensure_in_nav(repo_root)
 
 

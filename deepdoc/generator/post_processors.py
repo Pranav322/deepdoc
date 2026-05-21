@@ -650,6 +650,15 @@ def normalize_code_fence_languages(content: str) -> str:
         "dotenv": "bash",
         "shell": "bash",
         "sh": "bash",
+        "redis": "bash",
+        "curl": "bash",
+        "conf": "ini",
+        "config": "ini",
+        "text": "plaintext",
+        "txt": "plaintext",
+        "plain": "plaintext",
+        "requirements": "plaintext",
+        "output": "plaintext",
     }
 
     def replace(match: re.Match) -> str:
@@ -1023,6 +1032,8 @@ _PROVENANCE_KEYS = frozenset({
     "deepdoc_generated_version",
     "deepdoc_status",
     "deepdoc_evidence_files",
+    "deepdoc_evidence_records",
+    "deepdoc_prereqs",
     "deepdoc_generated_by",
     "stub",
 })

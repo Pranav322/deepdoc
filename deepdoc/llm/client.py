@@ -21,6 +21,11 @@ class LLMClient:
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = llm_cfg.get("base_url")
         self.api_version = llm_cfg.get("api_version")
+        self.usage: dict[str, int] = {
+            "calls": 0,
+            "prompt_chars": 0,
+            "estimated_prompt_tokens": 0,
+        }
 
         provider = (llm_cfg.get("provider") or "").strip()
         model = (self.model or "").strip()
@@ -119,6 +124,7 @@ class LLMClient:
     def complete(self, system: str, user: str) -> str:
         """Send a chat completion request and return the response text."""
         try:
+            self._record_usage(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
@@ -150,6 +156,7 @@ class LLMClient:
     def complete_stream(self, system: str, user: str):
         """Stream a completion response, yielding text chunks."""
         try:
+            self._record_usage(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
@@ -175,3 +182,9 @@ class LLMClient:
 
         except ImportError:
             raise RuntimeError("litellm not installed. Run: pip install litellm")
+
+    def _record_usage(self, system: str, user: str) -> None:
+        prompt_chars = len(system or "") + len(user or "")
+        self.usage["calls"] += 1
+        self.usage["prompt_chars"] += prompt_chars
+        self.usage["estimated_prompt_tokens"] += max(1, prompt_chars // 4)

@@ -26,6 +26,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "database_group_model_cap": 12,
     "database_group_file_cap": 8,
     "runtime_doc_mode": "dedicated_pages",
+    "quality": {
+        "strict": False,
+    },
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)
@@ -46,6 +49,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
     "include": [],  # glob patterns — empty = everything
+    "services": [],  # optional monorepo service roots, e.g. ["services/auth", "apps/api"]
+    # ── Endpoint grouping ────────────────────────────────────────────────
+    # Override or extend endpoint domain grouping used when classifying unmatched
+    # endpoints into fallback pages. Keys are bucket names, values are path-segment
+    # keywords to match. Merged on top of the built-in keyword list.
+    # Example:
+    #   tss-money: [tssmoney, wallet, cashback]
+    #   catalog: [product, item, sku, category]
+    "endpoint_groups": {},
     "exclude": [
         # ── Git / VCS ──────────────────────────────────────────────────────
         ".git",

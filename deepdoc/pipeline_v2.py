@@ -14,6 +14,7 @@ So `deepdoc update` can diff changed files → find affected pages → regenerat
 from __future__ import annotations
 
 import json
+import hashlib
 from pathlib import Path
 import shutil
 import time
@@ -53,7 +54,10 @@ from .openapi import (
 )
 from .changelog_writer import record_and_write as _record_changelog
 from .persistence_v2 import (
+    atomic_write_json,
+    atomic_write_text,
     cleanup_stale_generated_files,
+    deepdoc_state_lock,
     load_changelog,
     load_generation_ledger,
     prune_generation_ledger,
@@ -132,22 +136,20 @@ def _spec_base_path(spec: dict) -> str:
 def _write_spec(dest: Path, spec: dict) -> None:
     """Write spec dict to dest as YAML or JSON depending on suffix."""
     if dest.suffix == ".json":
-        dest.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+        atomic_write_text(dest, json.dumps(spec, indent=2) + "\n")
     else:
         try:
             import yaml
-            dest.write_text(
+            atomic_write_text(
+                dest,
                 yaml.dump(spec, allow_unicode=True, sort_keys=False, default_flow_style=False),
-                encoding="utf-8",
             )
         except ImportError:
-            dest.write_text(json.dumps(spec, indent=2) + "\n", encoding="utf-8")
+            atomic_write_text(dest, json.dumps(spec, indent=2) + "\n")
 
 
-def stage_openapi_assets(
-    repo_root: Path, openapi_paths: list[str] | None = None
-) -> bool:
-    """Stage the first detected OpenAPI spec for the generated Fumadocs app."""
+def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None) -> bool:
+    """Stage all detected OpenAPI specs for the generated Fumadocs app."""
     site_openapi_dir = repo_root / "site" / "openapi"
     site_openapi_dir.mkdir(parents=True, exist_ok=True)
 
@@ -161,12 +163,13 @@ def stage_openapi_assets(
             str(path.relative_to(repo_root)) for path in find_openapi_specs(repo_root)
         ]
 
-    for spec_rel_path in detected_paths:
+    combined_manifest: list[dict[str, str]] = []
+    for index, spec_rel_path in enumerate(detected_paths, start=1):
         spec_src = repo_root / spec_rel_path
         if not spec_src.exists():
             continue
 
-        spec_name = Path(spec_rel_path).name
+        spec_name = _staged_spec_name(spec_rel_path, index)
         staged_spec = site_openapi_dir / spec_name
 
         spec = parse_openapi_spec(spec_src)
@@ -174,7 +177,7 @@ def stage_openapi_assets(
             console.print(
                 f"[yellow]⚠[/yellow] Could not parse {spec_name} — skipping API pages"
             )
-            return False
+            continue
 
         # Bake the server base path into each path key so Fumadocs can do a
         # direct dict lookup (it does not prepend the server URL itself).
@@ -205,23 +208,42 @@ def stage_openapi_assets(
                     "title": summary,
                     "method": method,
                     "path": path,
+                    "source_spec": spec_name,
+                    "source_path": spec_rel_path,
                 }
             )
 
         if manifest:
-            (site_openapi_dir / "manifest.json").write_text(
-                json.dumps(manifest, indent=2) + "\n",
-                encoding="utf-8",
-            )
+            combined_manifest.extend(manifest)
             console.print(
-                f"[green]✓[/green] Staged {len(manifest)} Fumadocs OpenAPI pages"
+                f"[green]✓[/green] Staged {len(manifest)} Fumadocs OpenAPI pages from {spec_rel_path}"
             )
-            return True
+            continue
 
         console.print(f"[yellow]⚠[/yellow] No endpoints found in {spec_name}")
-        return False
 
+    if combined_manifest:
+        atomic_write_text(
+            site_openapi_dir / "manifest.json",
+            json.dumps(combined_manifest, indent=2) + "\n",
+        )
+        return True
+
+    manifest_path = site_openapi_dir / "manifest.json"
+    if manifest_path.exists():
+        manifest_path.unlink()
     return False
+
+
+def _staged_spec_name(spec_rel_path: str, index: int) -> str:
+    """Return a non-colliding generated OpenAPI spec filename."""
+    import re
+
+    src = Path(spec_rel_path)
+    suffix = src.suffix if src.suffix.lower() in {".json", ".yaml", ".yml"} else ".json"
+    stem = re.sub(r"[^a-zA-Z0-9_-]+", "-", src.with_suffix("").as_posix()).strip("-")
+    digest = hashlib.sha1(spec_rel_path.encode("utf-8")).hexdigest()[:8]
+    return f"deepdoc-openapi-{index}-{stem}-{digest}{suffix}"
 
 
 class PipelineV2:
@@ -234,6 +256,10 @@ class PipelineV2:
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
 
     def run(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
+        with deepdoc_state_lock(self.repo_root):
+            return self._run_locked(force=force, reconcile=True if force else reconcile)
+
+    def _run_locked(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
         stats: dict[str, Any] = {}
         phase_timings: dict[str, float] = {}
         previous_ledger = load_generation_ledger(self.repo_root) if reconcile else {}
@@ -338,6 +364,7 @@ class PipelineV2:
         # ── Persist state ──────────────────────────────────────────────
         phase_start = time.perf_counter()
         save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+        stats["llm_usage"] = dict(getattr(self.llm, "usage", {}) or {})
         self._save_quality_report(stats)
         phase_timings["persist"] = time.perf_counter() - phase_start
 
@@ -1608,8 +1635,10 @@ class PipelineV2:
             "mdx_compile_retried_slugs": stats.get("mdx_compile_retried_slugs", []),
             "mdx_fallback_slugs": stats.get("mdx_fallback_slugs", []),
             "quality_report": stats.get("quality_report", {}),
+            "llm_usage": stats.get("llm_usage", {}),
         }
-        (state_dir / "generation_quality.json").write_text(
-            json.dumps(quality_payload, indent=2) + "\n",
-            encoding="utf-8",
+        atomic_write_json(
+            state_dir / "generation_quality.json",
+            quality_payload,
+            trailing_newline=True,
         )

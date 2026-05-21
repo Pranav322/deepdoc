@@ -13,6 +13,7 @@ Phase 3 of the bucket-based doc pipeline:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
 import json
 import re
 import subprocess
@@ -1131,15 +1132,42 @@ Re-run `deepdoc generate` to retry.
             if evidence is not None and evidence.evidence_file_paths
             else tracked_bucket_files(bucket)
         )
+        evidence_records = self._build_page_evidence_records(evidence_files)
         fields: dict[str, Any] = {
             "deepdoc_generated_at": datetime.now(timezone.utc).isoformat(),
             "deepdoc_generated_commit": self._git_commit_short(),
             "deepdoc_generated_version": DEEPDOC_VERSION,
             "deepdoc_status": status_value,
             "deepdoc_evidence_files": evidence_files[:50],
+            "deepdoc_evidence_records": evidence_records,
             "deepdoc_prereqs": bucket.depends_on,
         }
         return _merge_frontmatter_fields(content, fields)
+
+    def _build_page_evidence_records(self, evidence_files: list[str]) -> list[dict[str, Any]]:
+        """Build lightweight file evidence anchors for generated-page provenance."""
+        records: list[dict[str, Any]] = []
+        for idx, rel_path in enumerate(evidence_files[:50], start=1):
+            path = self.repo_root / rel_path
+            try:
+                content = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                continue
+            lines = content.splitlines()
+            records.append(
+                {
+                    "id": f"E{idx}",
+                    "file_path": rel_path,
+                    "start_line": 1 if lines else 0,
+                    "end_line": len(lines),
+                    "snippet_hash": hashlib.sha256(
+                        content.encode("utf-8", errors="replace")
+                    ).hexdigest()[:16],
+                    "source_kind": self.scan.source_kind_by_file.get(rel_path, "unknown"),
+                    "reason": "bucket evidence",
+                }
+            )
+        return records
 
     def _git_commit_short(self) -> str:
         try:

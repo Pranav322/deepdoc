@@ -208,7 +208,7 @@ def _build_page_tree_from_plan(
     # whats-changed is a special generated page (not a DocBucket) — inject a
     # synthetic entry so it's found during the nav_structure loop below.
     if (output_dir / "whats-changed.mdx").exists() and "whats-changed" not in slug_to_page:
-        from .._legacy_types import DocPage as _DocPage
+        from ..._legacy_types import DocPage as _DocPage
         _wc = _DocPage(
             title="What's Changed",
             slug="whats-changed",

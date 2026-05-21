@@ -408,13 +408,16 @@ _GENERIC_PLACEHOLDER_SECTIONS = {
 _BACKEND_INTEGRATION_TOKENS = {
     "cdn",
     "clickpost",
+    "climes",
     "express",
     "gateway",
     "integration",
     "provider",
+    "s3",
     "third",
     "vinculum",
     "warehouse",
+    "webhook",
     "wms",
 }
 
@@ -465,6 +468,15 @@ _PATH_SECTION_PREFIXES = (
 
 
 def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
+    hints = bucket.generation_hints or {}
+    # Intro/overview pages are rendered at the root level by the site builder —
+    # they must not appear in any section or they get duplicated in the sidebar.
+    if hints.get("is_introduction_page"):
+        return "__root__"
+    # Setup buckets always belong in Start Here regardless of LLM assignment.
+    if bucket.bucket_type in {"setup", "start_here_setup"}:
+        return "Start Here"
+
     # Supporting-tier buckets always get re-sectioned (Testing, CI/CD, etc.) regardless
     # of whatever section the LLM assigned. For all other tiers, preserve the LLM's
     # domain-specific section name rather than overriding with a generic canonical one.
@@ -599,6 +611,8 @@ def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
             "is_endpoint_family"
         ) or bucket.generation_hints.get("is_endpoint_ref"):
             return "API Reference"
+        if any(token in title_tokens for token in {"api", "endpoint", "rest"}):
+            return "API Reference"
         if any(
             token in title_tokens
             for token in {
@@ -691,9 +705,15 @@ def _is_backend_placeholder_section(section: str, primary_type: str) -> bool:
         return False
     return section.strip().lower() in {
         "architecture",
+        "async tasks",
+        "background processing",
         "core",
+        "customer support",
         "features",
+        "jobs",
+        "platform utilities",
         "runtime & frameworks",
         "services",
         "subsystems",
+        "utilities",
     }

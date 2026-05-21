@@ -88,6 +88,10 @@ def _shape_plan_nav(
         hints = bucket.generation_hints or {}
         if hints.get("is_endpoint_family") or hints.get("is_endpoint_ref"):
             continue
+        # Overview/intro page is placed at the root level by the site builder —
+        # adding it to a section too creates a duplicate entry in the sidebar.
+        if hints.get("is_introduction_page"):
+            continue
         section = bucket.section or "Architecture"
         _append_nav_slug(nav, section, bucket.slug)
 
@@ -173,6 +177,11 @@ def _normalize_nav_section(section: str, primary: str) -> str:
             "API": "API Reference",
             "Getting Started": "Start Here",
             "Research Context": "Design & Notes",
+            "Background Processing": "Background Jobs",
+            "Jobs": "Background Jobs",
+            "Async Tasks": "Background Jobs",
+            "Platform Utilities": "Supporting Infrastructure",
+            "Utilities": "Supporting Infrastructure",
         }.get(top, top)
 
     if top == "Database":

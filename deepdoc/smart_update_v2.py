@@ -39,6 +39,7 @@ from .changelog_writer import record_and_write as _record_changelog
 from .persistence_v2 import (
     ENGINE_FINGERPRINT,
     cleanup_stale_generated_files,
+    deepdoc_state_lock,
     find_stale_buckets,
     ledger_summary,
     load_generation_ledger,
@@ -71,6 +72,7 @@ class ChangeSet:
     changed_artifact_files: list[str] = field(default_factory=list)
     new_artifact_files: list[str] = field(default_factory=list)
     deleted_artifact_files: list[str] = field(default_factory=list)
+    deleted_doc_paths: list[str] = field(default_factory=list)
     new_integration_signals: list[str] = field(
         default_factory=list
     )  # new integration hints
@@ -174,6 +176,12 @@ class SmartUpdater:
         self.manifest = Manifest(self.output_dir)
 
     def update(
+        self, since: str = "HEAD~1", force_replan: bool = False
+    ) -> dict[str, Any]:
+        with deepdoc_state_lock(self.repo_root):
+            return self._update_locked(since=since, force_replan=force_replan)
+
+    def _update_locked(
         self, since: str = "HEAD~1", force_replan: bool = False
     ) -> dict[str, Any]:
         """Run smart update. Returns stats dict."""
@@ -309,7 +317,7 @@ class SmartUpdater:
 
         # ── Step 4: Changelog — must run before nav rebuild so whats-changed
         #            is in plan.nav_structure when the site nav is written ────
-        if executed_strategy != "noop":
+        if executed_strategy not in {"noop", "full_replan"}:
             self._append_changelog(sync_plan, run_result)
 
         # ── Step 5: Rebuild site nav ───────────────────────────────────
@@ -425,6 +433,7 @@ class SmartUpdater:
             deleted_paths = cleanup_stale_generated_files(
                 self.repo_root, self.output_dir, keep_slugs
             )
+            change_set.deleted_doc_paths = deleted_paths
             prune_generation_ledger(self.repo_root, keep_slugs)
             if deleted_paths:
                 console.print(
@@ -491,11 +500,11 @@ class SmartUpdater:
             )
             return self._incremental_update(plan, change_set)
 
-        # Merge: add new buckets, keep existing
-        existing_slugs = {b.slug for b in plan.buckets}
-        added = [b for b in new_plan.buckets if b.slug not in existing_slugs]
+        merged_plan, added, updated_existing_slugs = self._merge_targeted_plan(
+            plan, new_plan, scan
+        )
 
-        if change_set.new_files and not added:
+        if change_set.new_files and not added and not updated_existing_slugs:
             console.print(
                 "[yellow]⚠ New files did not map to new buckets — they will be picked up on the next explicit replan[/yellow]"
             )
@@ -505,18 +514,12 @@ class SmartUpdater:
             for b in added:
                 console.print(f"    [cyan]{b.title}[/cyan] ({b.bucket_type})")
 
-        merged_buckets = plan.buckets + added
-        merged_plan = DocPlan(
-            buckets=merged_buckets,
-            nav_structure=self._merge_nav(plan.nav_structure, new_plan.nav_structure),
-            skipped_files=list(set(plan.skipped_files + new_plan.skipped_files)),
-            orphaned_files=plan.orphaned_files,
-            integration_candidates=plan.integration_candidates,
-            classification=plan.classification,
-        )
-
         # Mark all stale + new buckets for regeneration
-        stale_slugs = set(change_set.stale_bucket_slugs) | {b.slug for b in added}
+        stale_slugs = (
+            set(change_set.stale_bucket_slugs)
+            | {b.slug for b in added}
+            | set(updated_existing_slugs)
+        )
         stale_buckets = [b for b in merged_plan.buckets if b.slug in stale_slugs]
 
         mini_plan = DocPlan(
@@ -567,7 +570,8 @@ class SmartUpdater:
                         + change_set.new_artifact_files
                     ),
                     deleted_files=change_set.deleted_files
-                    + change_set.deleted_artifact_files,
+                    + change_set.deleted_artifact_files
+                    + change_set.deleted_doc_paths,
                     changed_doc_slugs=updated_slugs,
                     has_openapi=scan.has_openapi,
                 )
@@ -587,6 +591,7 @@ class SmartUpdater:
             failed_slugs=failed_slugs,
             refreshed_corpora=refreshed_corpora,
             chatbot_failed=not chatbot_ok,
+            deleted_doc_paths=list(change_set.deleted_doc_paths),
         )
 
     def _incremental_update(
@@ -665,7 +670,8 @@ class SmartUpdater:
                         + change_set.new_artifact_files
                     ),
                     deleted_files=change_set.deleted_files
-                    + change_set.deleted_artifact_files,
+                    + change_set.deleted_artifact_files
+                    + change_set.deleted_doc_paths,
                     changed_doc_slugs=updated_slugs,
                     has_openapi=scan.has_openapi,
                 )
@@ -683,6 +689,7 @@ class SmartUpdater:
             failed_slugs=failed_slugs,
             refreshed_corpora=list((chatbot_stats or {}).get("corpora_refreshed", [])),
             chatbot_failed=not chatbot_ok,
+            deleted_doc_paths=list(change_set.deleted_doc_paths),
         )
 
     # ── Change classification ────────────────────────────────────────────
@@ -797,11 +804,11 @@ class SmartUpdater:
         # ── Committed changes: since..HEAD ────────────────────────────
         try:
             diff = repo.git.diff("--name-status", since, "HEAD")
-        except Exception:
-            try:
-                diff = repo.git.diff("--name-status", "HEAD~1", "HEAD")
-            except Exception:
-                return []
+        except Exception as exc:
+            raise RuntimeError(
+                f"Could not diff DeepDoc sync baseline '{since}' against HEAD. "
+                "Pass a valid --since ref or run a full `deepdoc generate --force`."
+            ) from exc
 
         status_by_path: dict[str, str] = {}
 
@@ -1129,7 +1136,7 @@ class SmartUpdater:
             )
             return
 
-        if pages_failed == 0 and pages_updated > 0:
+        if pages_failed == 0:
             # Full success — advance baseline
             save_sync_state(
                 self.repo_root,
@@ -1221,7 +1228,12 @@ class SmartUpdater:
             strategy=run_result.strategy,
             pages_updated=list(run_result.updated_slugs),
             files_changed=list(
-                sync_plan.change_set.changed_files + sync_plan.change_set.new_files
+                sync_plan.change_set.changed_files
+                + sync_plan.change_set.new_files
+                + sync_plan.change_set.deleted_files
+                + sync_plan.change_set.changed_artifact_files
+                + sync_plan.change_set.new_artifact_files
+                + sync_plan.change_set.deleted_artifact_files
             ),
         )
 
@@ -1246,6 +1258,83 @@ class SmartUpdater:
                 if slug not in merged[section]:
                     merged[section].append(slug)
         return merged
+
+    def _merge_targeted_plan(
+        self, existing_plan: DocPlan, new_plan: DocPlan, scan: Any
+    ) -> tuple[DocPlan, list[Any], list[str]]:
+        """Merge a replanned mini-plan by stable semantic identity."""
+        from .planner.nav_shaping import _shape_plan_nav
+
+        existing_by_slug = {b.slug: b for b in existing_plan.buckets}
+        existing_by_semantic = {
+            getattr(b, "semantic_id", ""): b
+            for b in existing_plan.buckets
+            if getattr(b, "semantic_id", "")
+        }
+        added = []
+        updated_existing_slugs: list[str] = []
+
+        for candidate in new_plan.buckets:
+            target = existing_by_slug.get(candidate.slug)
+            if target is None:
+                target = existing_by_semantic.get(getattr(candidate, "semantic_id", ""))
+            if target is None:
+                added.append(candidate)
+                continue
+
+            before_files = set(target.owned_files)
+            target.title = target.title or candidate.title
+            target.description = candidate.description or target.description
+            target.section = candidate.section or target.section
+            target.bucket_type = candidate.bucket_type or target.bucket_type
+            target.owned_files = sorted(set(target.owned_files) | set(candidate.owned_files))
+            target.owned_symbols = sorted(set(target.owned_symbols) | set(candidate.owned_symbols))
+            target.artifact_refs = sorted(set(target.artifact_refs) | set(candidate.artifact_refs))
+            target.required_sections = list(
+                dict.fromkeys([*target.required_sections, *candidate.required_sections])
+            )
+            target.required_diagrams = list(
+                dict.fromkeys([*target.required_diagrams, *candidate.required_diagrams])
+            )
+            target.coverage_targets = list(
+                dict.fromkeys([*target.coverage_targets, *candidate.coverage_targets])
+            )
+            target.generation_hints = {
+                **(target.generation_hints or {}),
+                **(candidate.generation_hints or {}),
+            }
+            target.confidence = min(
+                float(getattr(target, "confidence", 1.0) or 1.0),
+                float(getattr(candidate, "confidence", 1.0) or 1.0),
+            )
+            target.evidence_anchors = list(
+                dict.fromkeys(
+                    [
+                        *getattr(target, "evidence_anchors", []),
+                        *getattr(candidate, "evidence_anchors", []),
+                    ]
+                )
+            )
+            if set(target.owned_files) != before_files:
+                updated_existing_slugs.append(target.slug)
+
+        merged_plan = DocPlan(
+            buckets=[*existing_plan.buckets, *added],
+            nav_structure=self._merge_nav(existing_plan.nav_structure, new_plan.nav_structure),
+            skipped_files=sorted(set(existing_plan.skipped_files + new_plan.skipped_files)),
+            orphaned_files=list(existing_plan.orphaned_files),
+            integration_candidates=list(existing_plan.integration_candidates),
+            classification=dict(existing_plan.classification or new_plan.classification),
+        )
+        try:
+            merged_plan = _shape_plan_nav(
+                merged_plan,
+                merged_plan.classification or {},
+                scan,
+            )
+        except Exception:
+            pass
+        return merged_plan, added, list(set(updated_existing_slugs))
 
     def _rebuild_nav(self, plan: DocPlan) -> None:
         """Rebuild the generated Fumadocs site from the current plan."""

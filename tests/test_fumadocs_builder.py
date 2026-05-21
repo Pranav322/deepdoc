@@ -458,8 +458,11 @@ def test_stage_openapi_assets_uses_endpoint_ref_slug_shape(tmp_path: Path) -> No
             "title": "Get an order",
             "method": "GET",
             "path": "/orders/{id}",
+            "source_spec": manifest[0]["source_spec"],
+            "source_path": "openapi.json",
         }
     ]
+    assert manifest[0]["source_spec"].startswith("deepdoc-openapi-")
 
 
 def test_stage_openapi_assets_strips_server_origin_from_manifest_paths(
@@ -500,8 +503,50 @@ paths:
             "title": "Health",
             "method": "GET",
             "path": "/health",
+            "source_spec": manifest[0]["source_spec"],
+            "source_path": "openapi.yaml",
         }
     ]
+
+
+def test_stage_openapi_assets_stages_multiple_specs(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "orders.openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "Orders", "version": "1.0.0"},
+                "paths": {"/orders": {"get": {"summary": "List orders", "responses": {"200": {"description": "ok"}}}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    (repo_root / "billing.openapi.json").write_text(
+        json.dumps(
+            {
+                "openapi": "3.1.0",
+                "info": {"title": "Billing", "version": "1.0.0"},
+                "paths": {"/invoices": {"post": {"summary": "Create invoice", "responses": {"200": {"description": "ok"}}}}},
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    assert stage_openapi_assets(
+        repo_root, ["orders.openapi.json", "billing.openapi.json"]
+    ) is True
+
+    manifest = json.loads(
+        (repo_root / "site" / "openapi" / "manifest.json").read_text(encoding="utf-8")
+    )
+    assert {entry["slug"] for entry in manifest} == {"get-orders", "post-invoices"}
+    assert {entry["source_path"] for entry in manifest} == {
+        "orders.openapi.json",
+        "billing.openapi.json",
+    }
+    staged_specs = sorted((repo_root / "site" / "openapi").glob("deepdoc-openapi-*"))
+    assert len(staged_specs) == 2
 
 
 def test_escape_mdx_route_params_avoids_runtime_expressions() -> None:

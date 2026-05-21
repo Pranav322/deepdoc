@@ -49,6 +49,34 @@ def test_missing_output_doc_marks_stale(tmp_repo_with_plan):
         "without output_dir, missing doc should not be checked"
 
 
+def test_invalid_generated_doc_marks_bucket_stale(tmp_repo_with_plan):
+    """Invalid DeepDoc frontmatter should force regeneration even when hashes match."""
+    root, plan = tmp_repo_with_plan
+    output_dir = root / "docs"
+    (output_dir / "auth.mdx").write_text(
+        '---\ntitle: "Auth"\ndeepdoc_status: "invalid"\n---\n# Auth\n',
+        encoding="utf-8",
+    )
+
+    stale = find_stale_buckets(plan, root, output_dir=output_dir)
+
+    assert "auth" in stale
+
+
+def test_invalid_ledger_validation_marks_bucket_stale(tmp_repo_with_plan):
+    """Failed validation in the ledger should force regeneration."""
+    root, plan = tmp_repo_with_plan
+    from deepdoc.persistence_v2 import load_generation_ledger
+
+    ledger = load_generation_ledger(root)
+    ledger["auth"]["validation"] = {"is_valid": False, "warnings": ["bad path"]}
+    write_ledger(root, ledger)
+
+    stale = find_stale_buckets(plan, root, output_dir=root / "docs")
+
+    assert "auth" in stale
+
+
 def test_new_bucket_with_no_ledger_entry(tmp_repo):
     """A bucket that exists in the plan but has no ledger entry → stale."""
     root = tmp_repo

@@ -2,15 +2,30 @@
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import git as _git
 
-from deepdoc.persistence_v2 import load_sync_state, save_sync_state
+from deepdoc.persistence_v2 import atomic_write_json, load_sync_state, save_sync_state
 from deepdoc.pipeline_v2 import PipelineV2
 
 from .conftest import FakeResult, _run_git, make_bucket, make_plan
+
+
+def test_atomic_write_json_replaces_existing_file(tmp_path: Path) -> None:
+    path = tmp_path / ".deepdoc" / "state.json"
+    atomic_write_json(path, {"status": "old"})
+
+    atomic_write_json(path, {"status": "new", "count": 2})
+
+    assert json.loads(path.read_text(encoding="utf-8")) == {
+        "status": "new",
+        "count": 2,
+    }
+    assert not list(path.parent.glob("*.tmp"))
 
 
 def test_save_and_load_sync_state_roundtrip(tmp_repo):

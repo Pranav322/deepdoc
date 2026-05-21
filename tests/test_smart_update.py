@@ -6,6 +6,7 @@ from unittest.mock import MagicMock, patch
 
 from deepdoc.persistence_v2 import (
     ENGINE_FINGERPRINT,
+    load_changelog,
     load_sync_receipt,
     load_sync_state,
     save_generation_ledger,
@@ -16,6 +17,7 @@ from deepdoc.smart_update_v2 import (
     SmartUpdater,
     UpdateRunResult,
 )
+from deepdoc.v2_models import RepoScan
 
 from .conftest import FakeBucket, FakeResult, _run_git
 
@@ -220,6 +222,68 @@ def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
     assert ENGINE_FINGERPRINT != "outdated-engine"
     assert stats["strategy"] == "full_replan"
     assert replan_mock.called
+
+
+def test_full_replan_does_not_append_second_changelog_entry(tmp_repo_with_plan):
+    """Pipeline full replan writes its own changelog; SmartUpdater should not duplicate it."""
+    root, _plan = tmp_repo_with_plan
+    state = load_sync_state(root)
+    before = len(load_changelog(root))
+    save_sync_state(
+        root,
+        commit_sha=state["last_synced_commit"],
+        status="success",
+        generator_version="v2_buckets",
+        engine_fingerprint="outdated-engine",
+        advance_baseline=True,
+    )
+
+    updater = _make_updater(root)
+    with (
+        patch.object(
+            SmartUpdater,
+            "_full_replan_and_generate",
+            return_value=UpdateRunResult(
+                strategy="full_replan",
+                pages_updated=1,
+                pages_failed=0,
+                replanned=True,
+            ),
+        ),
+        patch.object(SmartUpdater, "_rebuild_nav", return_value=None),
+    ):
+        updater.update(since=state["last_synced_commit"])
+
+    assert len(load_changelog(root)) == before
+
+
+def test_chatbot_only_recovery_advances_successful_baseline(tmp_repo_with_plan):
+    """Refreshing missing chatbot corpora without page work should be a successful sync."""
+    root, _plan = tmp_repo_with_plan
+    original_state = load_sync_state(root)
+    updater = _make_updater(root)
+
+    with (
+        patch("deepdoc.smart_update_v2.chatbot_enabled", return_value=True),
+        patch("deepdoc.smart_update_v2.chatbot_index_needs_refresh", return_value=True),
+        patch.object(
+            SmartUpdater,
+            "_incremental_update",
+            return_value=UpdateRunResult(
+                strategy="incremental",
+                pages_updated=0,
+                pages_failed=0,
+                refreshed_corpora=["code"],
+            ),
+        ),
+        patch.object(SmartUpdater, "_rebuild_nav", return_value=None),
+    ):
+        stats = updater.update(since=original_state["last_synced_commit"])
+
+    state = load_sync_state(root)
+    assert stats["status"] == "success"
+    assert state["status"] == "success"
+    assert state["last_synced_commit"] == state["last_attempted_commit"]
 
 
 def test_incremental_update_writes_sync_receipt(tmp_repo_with_plan):
@@ -433,6 +497,7 @@ def test_handle_deleted_files_removes_orphaned_bucket_and_mdx(tmp_repo_with_plan
 
     assert not any(b.slug == "payment" for b in updated_plan.buckets)
     assert not mdx_file.exists()
+    assert cs.deleted_doc_paths == ["payment.mdx"]
     assert "payment" not in updated_plan.nav_structure.get("Core", [])
 
 
@@ -451,3 +516,87 @@ def test_handle_deleted_files_noop_when_nothing_deleted(tmp_repo_with_plan):
 
     assert len(updated_plan.buckets) == 1
     assert updated_plan.buckets[0].slug == "auth"
+
+
+def test_merge_targeted_plan_mutates_existing_by_slug(tmp_repo_with_plan):
+    """Replanned bucket matching existing slug is mutated in-place, not duplicated."""
+    from deepdoc.smart_update_v2 import SmartUpdater
+    from deepdoc.v2_models import RepoScan
+    from .conftest import make_bucket, make_plan
+
+    root, _ = tmp_repo_with_plan
+    existing_bucket = make_bucket("Auth System", "auth", ["auth.py"])
+    existing_plan = make_plan([existing_bucket])
+
+    # Replanned bucket for same slug with an extra file
+    replanned_bucket = make_bucket("Auth System v2", "auth", ["auth.py", "oauth.py"])
+    new_plan = make_plan([replanned_bucket])
+
+    scan = RepoScan(
+        file_tree={}, file_summaries={}, api_endpoints=[], languages={},
+        has_openapi=False, openapi_paths=[], total_files=0,
+        frameworks_detected=[], entry_points=[], config_files=[],
+        file_line_counts={}, parsed_files={}, file_contents={},
+        giant_file_clusters={},
+    )
+    updater = _make_updater(root)
+    merged, added, updated_slugs = updater._merge_targeted_plan(existing_plan, new_plan, scan)
+
+    # No new bucket should be added — the existing one is mutated
+    assert added == []
+    # The existing bucket should now own both files
+    assert "oauth.py" in existing_bucket.owned_files
+    # The slug should appear in updated_existing_slugs since owned_files changed
+    assert "auth" in updated_slugs
+    # Plan still has exactly one bucket (no duplication)
+    assert len(merged.buckets) == 1
+
+
+def test_merge_targeted_plan_adds_genuinely_new_bucket(tmp_repo_with_plan):
+    """A replanned bucket with no matching slug or semantic_id is appended as new."""
+    from deepdoc.v2_models import RepoScan
+    from .conftest import make_bucket, make_plan
+
+    root, _ = tmp_repo_with_plan
+    existing_plan = make_plan([make_bucket("Auth System", "auth", ["auth.py"])])
+    new_plan = make_plan([make_bucket("Payment Flow", "payment", ["payment.py"])])
+
+    scan = RepoScan(
+        file_tree={}, file_summaries={}, api_endpoints=[], languages={},
+        has_openapi=False, openapi_paths=[], total_files=0,
+        frameworks_detected=[], entry_points=[], config_files=[],
+        file_line_counts={}, parsed_files={}, file_contents={},
+        giant_file_clusters={},
+    )
+    updater = _make_updater(root)
+    merged, added, updated_slugs = updater._merge_targeted_plan(existing_plan, new_plan, scan)
+
+    assert len(added) == 1
+    assert added[0].slug == "payment"
+    assert len(merged.buckets) == 2
+    assert updated_slugs == []
+
+
+def test_quality_stats_blockers_all_fields():
+    """_quality_stats_blockers returns one blocker per failing stat type."""
+    from deepdoc.cli import _quality_stats_blockers
+
+    stats = {
+        "pages_failed": 2,
+        "pages_invalid": 1,
+        "pages_degraded": 3,
+        "mdx_fallback_slugs": ["intro", "setup"],
+    }
+    blockers = _quality_stats_blockers(stats)
+    assert any("failed" in b for b in blockers)
+    assert any("invalid" in b for b in blockers)
+    assert any("degraded" in b for b in blockers)
+    assert any("MDX fallback" in b for b in blockers)
+
+
+def test_quality_stats_blockers_clean():
+    """_quality_stats_blockers returns empty list for a clean run."""
+    from deepdoc.cli import _quality_stats_blockers
+
+    assert _quality_stats_blockers({}) == []
+    assert _quality_stats_blockers({"pages_failed": 0, "pages_invalid": 0}) == []

@@ -19,12 +19,14 @@ import contextlib
 from datetime import datetime, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
+import tempfile
 from typing import Any
 
 from ._legacy_types import DocPage
 from ._legacy_types import DocPlan as LegacyDocPlan
-from .v2_models import DocBucket, DocPlan, tracked_bucket_files
+from .v2_models import DocBucket, DocPlan, build_bucket_semantic_id, tracked_bucket_files
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File locations
@@ -40,6 +42,7 @@ SYNC_RECEIPT_FILE = "sync_receipt.json"
 CHANGELOG_FILE = "changelog.json"
 CHANGELOG_MAX_ENTRIES = 50
 ENGINE_FINGERPRINT = "routes_repo_resolution_v2_trimmed_scope"
+LOCK_FILE = "run.lock"
 
 # Legacy top-level files (kept for backwards-compat)
 LEGACY_PLAN_FILE = ".deepdoc_plan.json"
@@ -51,6 +54,71 @@ def _state_dir(repo_root: Path) -> Path:
     d = repo_root / DEEPDOC_DIR
     d.mkdir(exist_ok=True)
     return d
+
+
+_LOCKED_REPOS: set[Path] = set()
+
+
+def atomic_write_text(path: Path, content: str, encoding: str = "utf-8") -> None:
+    """Write text atomically by replacing the target after fsync."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=f".{path.name}.", suffix=".tmp", dir=str(path.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding=encoding) as handle:
+            handle.write(content)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(tmp_path, path)
+    except Exception:
+        with contextlib.suppress(FileNotFoundError):
+            tmp_path.unlink()
+        raise
+
+
+def atomic_write_json(path: Path, data: Any, *, trailing_newline: bool = False) -> None:
+    """Write JSON atomically with DeepDoc's standard indentation."""
+    text = json.dumps(data, indent=2)
+    if trailing_newline:
+        text += "\n"
+    atomic_write_text(path, text)
+
+
+@contextlib.contextmanager
+def deepdoc_state_lock(repo_root: Path):
+    """Exclusive process/file lock for generate/update state mutation."""
+    state = _state_dir(repo_root)
+    lock_path = state / LOCK_FILE
+    resolved = state.resolve()
+    if resolved in _LOCKED_REPOS:
+        yield
+        return
+
+    lock_file = lock_path.open("a+")
+    try:
+        try:
+            import fcntl
+            try:
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as exc:
+                raise RuntimeError(
+                    "Another DeepDoc generate/update run is already active for this repository. "
+                    "Wait for it to finish, then retry."
+                ) from exc
+        except ImportError:
+            pass  # fcntl not available on Windows — skip file locking
+        _LOCKED_REPOS.add(resolved)
+        try:
+            yield
+        finally:
+            _LOCKED_REPOS.discard(resolved)
+            with contextlib.suppress(Exception):
+                import fcntl
+                fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+    finally:
+        lock_file.close()
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -96,7 +164,7 @@ def save_sync_state(
         data["last_synced_commit"] = commit_sha
         data["synced_at"] = _now_iso()
 
-    path.write_text(json.dumps(data, indent=2), encoding="utf-8")
+    atomic_write_json(path, data)
 
 
 def load_sync_state(repo_root: Path) -> dict[str, Any] | None:
@@ -119,9 +187,15 @@ def append_changelog_entry(repo_root: Path, entry: dict[str, Any]) -> None:
             entries = json.loads(path.read_text(encoding="utf-8"))
         except Exception:
             entries = []
+    if (
+        entries
+        and entries[0].get("commit") == entry.get("commit")
+        and entries[0].get("run_at") == entry.get("run_at")
+    ):
+        return
     entries.insert(0, entry)
     entries = entries[:CHANGELOG_MAX_ENTRIES]
-    path.write_text(json.dumps(entries, indent=2), encoding="utf-8")
+    atomic_write_json(path, entries)
 
 
 def load_changelog(repo_root: Path) -> list[dict[str, Any]]:
@@ -138,7 +212,7 @@ def load_changelog(repo_root: Path) -> list[dict[str, Any]]:
 def save_sync_receipt(repo_root: Path, receipt: dict[str, Any]) -> None:
     """Write a top-level receipt for the latest generate/update sync run."""
     path = _state_dir(repo_root) / SYNC_RECEIPT_FILE
-    path.write_text(json.dumps(receipt, indent=2), encoding="utf-8")
+    atomic_write_json(path, receipt)
 
 
 def load_sync_receipt(repo_root: Path) -> dict[str, Any] | None:
@@ -200,10 +274,10 @@ def save_plan(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
         }
 
     json_str = json.dumps(data, indent=2)
-    (state / PLAN_FILE).write_text(json_str, encoding="utf-8")
+    atomic_write_text(state / PLAN_FILE, json_str)
 
     # Also write legacy location for backwards-compat
-    (repo_root / LEGACY_PLAN_FILE).write_text(json_str, encoding="utf-8")
+    atomic_write_text(repo_root / LEGACY_PLAN_FILE, json_str)
 
 
 def load_plan(repo_root: Path) -> DocPlan | LegacyDocPlan | None:
@@ -287,6 +361,11 @@ def _bucket_to_dict(b: DocBucket) -> dict:
         "parent_slug": b.parent_slug,
         "publication_tier": b.publication_tier,
         "source_kind_summary": b.source_kind_summary,
+        "semantic_id": b.semantic_id or build_bucket_semantic_id(b),
+        "origin": b.origin,
+        "confidence": b.confidence,
+        "evidence_anchors": b.evidence_anchors,
+        "planner_schema_version": b.planner_schema_version,
     }
 
 
@@ -345,6 +424,11 @@ def _dict_to_bucket(d: dict) -> DocBucket:
         parent_slug=d.get("parent_slug"),
         publication_tier=d.get("publication_tier", "core"),
         source_kind_summary=d.get("source_kind_summary", {}),
+        semantic_id=d.get("semantic_id", ""),
+        origin=d.get("origin", "planner"),
+        confidence=float(d.get("confidence", 1.0) or 1.0),
+        evidence_anchors=d.get("evidence_anchors", []),
+        planner_schema_version=d.get("planner_schema_version", "v2"),
     )
 
 
@@ -366,8 +450,8 @@ def save_file_map(plan: DocPlan | LegacyDocPlan, repo_root: Path) -> None:
             mapping.setdefault(src_file, []).append(page.slug)
 
     json_str = json.dumps(mapping, indent=2)
-    (_state_dir(repo_root) / FILE_MAP_FILE).write_text(json_str, encoding="utf-8")
-    (repo_root / LEGACY_FILE_MAP_FILE).write_text(json_str, encoding="utf-8")
+    atomic_write_text(_state_dir(repo_root) / FILE_MAP_FILE, json_str)
+    atomic_write_text(repo_root / LEGACY_FILE_MAP_FILE, json_str)
 
 
 def load_file_map(repo_root: Path) -> dict[str, list[str]]:
@@ -432,6 +516,8 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
         "api_endpoints": scan.api_endpoints,
         "source_kind_by_file": scan.source_kind_by_file,
         "file_frameworks": scan.file_frameworks,
+        "service_boundaries": getattr(scan, "service_boundaries", []),
+        "file_services": getattr(scan, "file_services", {}),
         # Lightweight integration summary
         "integration_summary": [
             {
@@ -535,9 +621,7 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
             for k in (getattr(scan, "knex_artifacts", None) or [])[:100]
         ],
     }
-    (_state_dir(repo_root) / SCAN_CACHE_FILE).write_text(
-        json.dumps(data, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(_state_dir(repo_root) / SCAN_CACHE_FILE, data)
 
 
 def load_scan_cache(repo_root: Path) -> dict | None:
@@ -669,9 +753,7 @@ def save_generation_ledger(
 
         ledger[bucket.slug] = record
 
-    (_state_dir(repo_root) / LEDGER_FILE).write_text(
-        json.dumps(ledger, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(_state_dir(repo_root) / LEDGER_FILE, ledger)
 
 
 def load_generation_ledger(repo_root: Path) -> dict[str, Any]:
@@ -692,9 +774,7 @@ def prune_generation_ledger(repo_root: Path, keep_slugs: set[str]) -> None:
         return
 
     pruned = {slug: record for slug, record in ledger.items() if slug in keep_slugs}
-    (_state_dir(repo_root) / LEDGER_FILE).write_text(
-        json.dumps(pruned, indent=2), encoding="utf-8"
-    )
+    atomic_write_json(_state_dir(repo_root) / LEDGER_FILE, pruned)
 
 
 def cleanup_stale_generated_files(
@@ -783,6 +863,9 @@ def find_stale_buckets(
                 if not doc_path.exists():
                     stale.append(slug)
                     continue
+                if _doc_quality_requires_regeneration(doc_path, record):
+                    stale.append(slug)
+                    continue
 
         # Check file hashes (and detect deleted tracked files)
         recorded_hashes = record.get("file_hashes", {})
@@ -810,6 +893,26 @@ def find_stale_buckets(
             stale.append(slug)
 
     return stale
+
+
+def _doc_quality_requires_regeneration(doc_path: Path, record: dict[str, Any]) -> bool:
+    """Return True when an existing generated page is known low-trust."""
+    validation = record.get("validation") or {}
+    if validation and validation.get("is_valid") is False:
+        return True
+    if record.get("mdx_fallback_applied") or record.get("mdx_compile_failed"):
+        return True
+    try:
+        content = doc_path.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        return True
+    invalid_markers = (
+        'deepdoc_status: "invalid"',
+        "deepdoc_status: invalid",
+        "stub: true",
+        "deepdoc_stub: true",
+    )
+    return any(marker in content for marker in invalid_markers)
 
 
 def ledger_summary(repo_root: Path) -> dict[str, Any]:

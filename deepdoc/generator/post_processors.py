@@ -1091,3 +1091,116 @@ def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> s
         flags=re.MULTILINE,
     )
     return patched if count else content
+
+
+def extract_glossary_terms(glossary_content: str) -> list[tuple[str, str]]:
+    """Parse `### TermName` (h3) headings from glossary MDX → [(term, anchor-slug)].
+
+    Anchor slug matches GitHub auto-anchor: lowercase, non-alphanumeric → hyphen,
+    consecutive hyphens collapsed, leading/trailing hyphens trimmed.
+    """
+    terms: list[tuple[str, str]] = []
+    for line in glossary_content.splitlines():
+        m = re.match(r"^###\s+([^\n#].*?)\s*$", line)
+        if not m:
+            continue
+        term = m.group(1).strip()
+        if not term or term.startswith("#"):
+            continue
+        slug = re.sub(r"[^a-z0-9]+", "-", term.lower()).strip("-")
+        slug = re.sub(r"-+", "-", slug)
+        if slug:
+            terms.append((term, slug))
+    return terms
+
+
+def _is_term_linkable(term: str) -> bool:
+    """Filter out generic terms that would create noisy links."""
+    stripped = term.strip()
+    if len(stripped) < 4:
+        return False
+    if " " in stripped or "-" in stripped or "_" in stripped:
+        return True
+    # Single word: require PascalCase / camelCase / has digit / longer than 6 chars
+    if any(c.isupper() for c in stripped[1:]):
+        return True
+    if any(c.isdigit() for c in stripped):
+        return True
+    return len(stripped) >= 7
+
+
+def link_glossary_terms(content: str, terms: list[tuple[str, str]]) -> str:
+    """Auto-link first occurrence of each glossary term to /domain-glossary#<slug>.
+
+    Skips: fenced code blocks (``` ... ```), inline code (`...`), existing
+    markdown links ([..](..)), headings (#... lines), and frontmatter (--- ... ---).
+    First occurrence per page only.
+    """
+    if not terms or not content:
+        return content
+
+    linkable = [(t, s) for (t, s) in terms if _is_term_linkable(t)]
+    if not linkable:
+        return content
+
+    # Order longest-first so multi-word terms win over substrings.
+    linkable.sort(key=lambda ts: len(ts[0]), reverse=True)
+
+    lines = content.split("\n")
+    in_fence = False
+    in_frontmatter = lines and lines[0].strip() == "---"
+    fm_close_idx = -1
+    if in_frontmatter:
+        for i in range(1, len(lines)):
+            if lines[i].strip() == "---":
+                fm_close_idx = i
+                break
+
+    linked: set[str] = set()
+
+    def _rewrite_segment(segment: str) -> str:
+        if not segment.strip():
+            return segment
+        for term, slug in linkable:
+            if term in linked:
+                continue
+            pattern = re.compile(
+                r"(?<![\w/#-])" + re.escape(term) + r"(?![\w/-])",
+                re.IGNORECASE,
+            )
+            m = pattern.search(segment)
+            if not m:
+                continue
+            start, end = m.span()
+            replacement = f"[{m.group(0)}](/domain-glossary#{slug})"
+            segment = segment[:start] + replacement + segment[end:]
+            linked.add(term)
+        return segment
+
+    def _rewrite_line(line: str) -> str:
+        # Split out inline code spans and existing links — only rewrite the rest.
+        parts = re.split(r"(`[^`\n]*`|\[[^\]]*\]\([^)]*\))", line)
+        for i, part in enumerate(parts):
+            if not part or part.startswith("`") or part.startswith("["):
+                continue
+            parts[i] = _rewrite_segment(part)
+        return "".join(parts)
+
+    out: list[str] = []
+    for idx, line in enumerate(lines):
+        if in_frontmatter and idx <= fm_close_idx:
+            out.append(line)
+            continue
+        stripped = line.lstrip()
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            out.append(line)
+            continue
+        if in_fence:
+            out.append(line)
+            continue
+        if stripped.startswith("#"):
+            out.append(line)
+            continue
+        out.append(_rewrite_line(line))
+    return "\n".join(out)

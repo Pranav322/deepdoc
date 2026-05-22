@@ -2,6 +2,45 @@ from .common import *
 
 import shutil
 
+
+_SECTION_PRIORITY: tuple[str, ...] = (
+    "Start Here",
+    "System",
+    "Architecture",
+    "Features",
+    "Workflows",
+    "Integrations",
+    "API",
+    "API Reference",
+    "Database",
+    "Operations",
+    "Research Context",
+)
+
+_START_HERE_SLUG_ORDER: tuple[str, ...] = (
+    "start-here",
+    "local-development-setup",
+    "domain-glossary",
+    "debug-runbook",
+    "whats-changed",
+)
+
+
+def _section_rank(name: str) -> int:
+    """Stable sort key for nav sections — earlier = closer to a newcomer's first read."""
+    top = name.split(" > ", 1)[0].strip()
+    for i, known in enumerate(_SECTION_PRIORITY):
+        if top.lower() == known.lower():
+            return i
+    return len(_SECTION_PRIORITY) + abs(hash(top)) % 1000
+
+
+def _start_here_page_rank(slug: str) -> int:
+    for i, known in enumerate(_START_HERE_SLUG_ORDER):
+        if slug == known:
+            return i
+    return len(_START_HERE_SLUG_ORDER)
+
 def build_fumadocs_from_plan(
     repo_root: Path,
     output_dir: Path,
@@ -272,13 +311,21 @@ def _build_page_tree_from_plan(
 
     def _tree_to_fumadocs(
         tree: OrderedDict[str, dict[str, Any]],
+        parent_name: str = "",
     ) -> list[dict[str, Any]]:
         result = []
-        for name, data in sorted(tree.items(), key=lambda item: item[1]["_order"]):
+        sorted_items = sorted(
+            tree.items(),
+            key=lambda item: (_section_rank(item[0]), item[1]["_order"]),
+        )
+        for name, data in sorted_items:
+            pages = list(data["_pages"])
+            if name.strip().lower() == "start here":
+                pages.sort(key=lambda p: (_start_here_page_rank(p.slug), p.title.lower()))
             sub_children: list[dict[str, Any]] = []
-            for page in data["_pages"]:
+            for page in pages:
                 sub_children.append(_page_tree_node(page_url(page), page.title))
-            sub_children.extend(_tree_to_fumadocs(data["_children"]))
+            sub_children.extend(_tree_to_fumadocs(data["_children"], name))
             if sub_children:
                 result.append(
                     {
@@ -471,8 +518,34 @@ def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> 
         section = getattr(page, "section", None) or "Docs"
         sections.setdefault(section, []).append((page.title, page.slug))
 
+    ordered_section_names = sorted(sections.keys(), key=_section_rank)
+    for section_name in ordered_section_names:
+        if section_name.strip().lower() == "start here":
+            sections[section_name].sort(
+                key=lambda tp: (_start_here_page_rank(tp[1]), tp[0].lower())
+            )
+
+    reading_order_block = ""
+    if ordered_section_names:
+        items: list[str] = []
+        for section_name in ordered_section_names:
+            pages = sections[section_name]
+            if not pages:
+                continue
+            first_title, first_slug = pages[0]
+            items.append(
+                f"1. **[{section_name}](/{first_slug})** — start with *{first_title}*"
+            )
+        if items:
+            reading_order_block = (
+                "## Recommended reading order\n\n"
+                + "\n".join(items)
+                + "\n\n_New to this codebase? Read the sections above in order._\n"
+            )
+
     cards_section: list[str] = []
-    for section_name, pages in sections.items():
+    for section_name in ordered_section_names:
+        pages = sections[section_name]
         cards = []
         for title, slug in pages:
             cards.append(
@@ -484,11 +557,12 @@ def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> 
             f"## {section_name}\n\n<Cards>\n" + "\n".join(cards) + "\n</Cards>"
         )
 
-    body = (
-        "\n\n".join(cards_section)
-        if cards_section
-        else "_Documentation is being generated..._"
-    )
+    body_parts: list[str] = []
+    if reading_order_block:
+        body_parts.append(reading_order_block)
+    if cards_section:
+        body_parts.append("\n\n".join(cards_section))
+    body = "\n\n".join(body_parts) if body_parts else "_Documentation is being generated..._"
     content = f"""\
 ---
 title: {json.dumps(project_name)}

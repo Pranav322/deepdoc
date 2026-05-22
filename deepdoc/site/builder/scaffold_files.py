@@ -1570,9 +1570,27 @@ def _api_page_tsx() -> str:
           const page = getAPIPage(params.slug ?? []);
           if (!page || page.data.type !== 'openapi') notFound();
 
+          const owningSlug = page.data.owningBucketSlug;
+          const owningTitle = page.data.owningBucketTitle;
+
           return (
             <DocsPage full>
               <DocsBody>
+                {owningSlug && owningTitle ? (
+                  <p
+                    style={{
+                      marginTop: 0,
+                      marginBottom: '0.75rem',
+                      fontSize: '0.875rem',
+                      color: 'var(--color-fd-muted-foreground)',
+                    }}
+                  >
+                    {'Implemented in: '}
+                    <a href={`/${owningSlug}`} style={{ textDecoration: 'underline' }}>
+                      {owningTitle}
+                    </a>
+                  </p>
+                ) : null}
                 <APIPage {...page.data.getAPIPageProps()} />
               </DocsBody>
             </DocsPage>
@@ -1760,6 +1778,8 @@ def _openapi_ts() -> str:
           path: string;
           source_spec?: string;
           source_path?: string;
+          owning_bucket_slug?: string;
+          owning_bucket_title?: string;
         };
 
         const manifestPath = path.join(schemaDir, 'manifest.json');
@@ -1788,6 +1808,8 @@ def _openapi_ts() -> str:
             data: {
               type: 'openapi' as const,
               title: entry.title,
+              owningBucketSlug: entry.owning_bucket_slug,
+              owningBucketTitle: entry.owning_bucket_title,
               getAPIPageProps(): ApiPageProps {
                 return {
                   document,

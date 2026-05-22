@@ -148,7 +148,52 @@ def _write_spec(dest: Path, spec: dict) -> None:
             atomic_write_text(dest, json.dumps(spec, indent=2) + "\n")
 
 
-def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None) -> bool:
+def _build_endpoint_to_bucket_map(
+    plan: "DocPlan | None",
+    scanned_endpoints: list[dict] | None,
+) -> dict[tuple[str, str], tuple[str, str]]:
+    """Map (METHOD, path) → (owning_bucket_slug, owning_bucket_title).
+
+    Resolution: find the scanned endpoint whose method+path matches, then look up
+    the feature/endpoint-family bucket whose owned_files contains that handler file.
+    """
+    if not plan or not scanned_endpoints:
+        return {}
+
+    file_to_bucket: dict[str, tuple[str, str]] = {}
+    for bucket in plan.buckets:
+        hints = bucket.generation_hints or {}
+        if hints.get("is_endpoint_ref"):
+            continue
+        is_endpoint_owner = (
+            hints.get("is_endpoint_family")
+            or hints.get("include_endpoint_detail")
+            or hints.get("prompt_style") == "endpoint"
+        )
+        for f in bucket.owned_files:
+            if f in file_to_bucket and not is_endpoint_owner:
+                continue
+            file_to_bucket[f] = (bucket.slug, bucket.title)
+
+    mapping: dict[tuple[str, str], tuple[str, str]] = {}
+    for ep in scanned_endpoints:
+        method = str(ep.get("method") or "").upper()
+        path = str(ep.get("path") or "")
+        file = str(ep.get("file") or "")
+        if not (method and path and file):
+            continue
+        owner = file_to_bucket.get(file)
+        if owner:
+            mapping[(method, path)] = owner
+    return mapping
+
+
+def stage_openapi_assets(
+    repo_root: Path,
+    openapi_paths: list[str] | None = None,
+    plan: "DocPlan | None" = None,
+    scanned_endpoints: list[dict] | None = None,
+) -> bool:
     """Stage all detected OpenAPI specs for the generated Fumadocs app."""
     site_openapi_dir = repo_root / "site" / "openapi"
     site_openapi_dir.mkdir(parents=True, exist_ok=True)
@@ -162,6 +207,8 @@ def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None
         detected_paths = [
             str(path.relative_to(repo_root)) for path in find_openapi_specs(repo_root)
         ]
+
+    endpoint_owner_map = _build_endpoint_to_bucket_map(plan, scanned_endpoints)
 
     combined_manifest: list[dict[str, str]] = []
     for index, spec_rel_path in enumerate(detected_paths, start=1):
@@ -202,16 +249,21 @@ def stage_openapi_assets(repo_root: Path, openapi_paths: list[str] | None = None
             method = ep["method"].upper()
             path = ep["path"]
             summary = ep.get("summary") or f"{method} {path}"
-            manifest.append(
-                {
-                    "slug": _endpoint_ref_slug(method, path),
-                    "title": summary,
-                    "method": method,
-                    "path": path,
-                    "source_spec": spec_name,
-                    "source_path": spec_rel_path,
-                }
-            )
+            entry: dict[str, Any] = {
+                "slug": _endpoint_ref_slug(method, path),
+                "title": summary,
+                "method": method,
+                "path": path,
+                "source_spec": spec_name,
+                "source_path": spec_rel_path,
+            }
+            owner = endpoint_owner_map.get((method, path))
+            if owner is None and base_path and path.startswith(base_path):
+                owner = endpoint_owner_map.get((method, path[len(base_path):] or "/"))
+            if owner:
+                entry["owning_bucket_slug"] = owner[0]
+                entry["owning_bucket_title"] = owner[1]
+            manifest.append(entry)
 
         if manifest:
             combined_manifest.extend(manifest)
@@ -324,6 +376,12 @@ class PipelineV2:
         }
         stats["status"] = generation_summary.status
 
+        # ── Glossary auto-link pass ───────────────────────────────────
+        try:
+            self._apply_glossary_links(plan)
+        except Exception as exc:
+            console.print(f"[dim]Glossary auto-link skipped: {exc}[/dim]")
+
         # ── Phase 4: API Playground ────────────────────────────────────
         openapi_ready = False
         if scan.has_openapi:
@@ -334,7 +392,7 @@ class PipelineV2:
                 )
             )
             phase_start = time.perf_counter()
-            openapi_ready = self._setup_playground(scan)
+            openapi_ready = self._setup_playground(scan, plan)
             phase_timings["openapi"] = time.perf_counter() - phase_start
             stats["playground"] = 1 if openapi_ready else 0
         else:
@@ -1497,9 +1555,56 @@ class PipelineV2:
     # Phase 4: API Playground
     # ──────────────────────────────────────────────────────────────────────
 
-    def _setup_playground(self, scan: RepoScan) -> bool:
+    def _apply_glossary_links(self, plan: DocPlan) -> None:
+        """Auto-link domain-glossary terms across all generated pages.
+
+        Single pass: parse `### term` headings from the glossary page, then for
+        every other generated .mdx, replace the first occurrence of each term
+        with a link to /domain-glossary#<slug>. Skips code blocks, headings,
+        existing links, and the glossary page itself.
+        """
+        from .generator.post_processors import (
+            extract_glossary_terms,
+            link_glossary_terms,
+        )
+
+        glossary_path = self.output_dir / "domain-glossary.mdx"
+        if not glossary_path.exists():
+            return
+        try:
+            glossary_content = glossary_path.read_text(encoding="utf-8")
+        except OSError:
+            return
+        terms = extract_glossary_terms(glossary_content)
+        if not terms:
+            return
+
+        rewritten = 0
+        for mdx_path in self.output_dir.glob("*.mdx"):
+            if mdx_path.name == "domain-glossary.mdx":
+                continue
+            try:
+                original = mdx_path.read_text(encoding="utf-8")
+            except OSError:
+                continue
+            updated = link_glossary_terms(original, terms)
+            if updated != original:
+                mdx_path.write_text(updated, encoding="utf-8")
+                rewritten += 1
+        if rewritten:
+            console.print(
+                f"[dim]✓ Auto-linked glossary terms across {rewritten} pages "
+                f"({len(terms)} terms)[/dim]"
+            )
+
+    def _setup_playground(self, scan: RepoScan, plan: "DocPlan | None" = None) -> bool:
         """Stage OpenAPI assets for the generated Fumadocs API reference route."""
-        return stage_openapi_assets(self.repo_root, scan.openapi_paths)
+        return stage_openapi_assets(
+            self.repo_root,
+            scan.openapi_paths,
+            plan=plan,
+            scanned_endpoints=scan.api_endpoints,
+        )
 
     # ──────────────────────────────────────────────────────────────────────
     # Phase 5: Build site

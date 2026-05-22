@@ -283,7 +283,7 @@ class PipelineV2:
             )
         )
         phase_start = time.perf_counter()
-        plan = bucket_plan_docs(scan, self.cfg, self.llm)
+        plan = bucket_plan_docs(scan, self.cfg, self.llm, repo_root=self.repo_root)
         phase_timings["plan"] = time.perf_counter() - phase_start
         stats["pages_planned"] = len(plan.pages)
 
@@ -347,6 +347,34 @@ class PipelineV2:
             stats["playground"] = 0
             phase_timings["openapi"] = 0.0
 
+        # ── Persist state ──────────────────────────────────────────────
+        phase_start = time.perf_counter()
+        save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+        stats["llm_usage"] = dict(getattr(self.llm, "usage", {}) or {})
+        self._save_quality_report(stats)
+        phase_timings["persist"] = time.perf_counter() - phase_start
+
+        # ── Record changelog after save_all so entries reference persisted pages ──
+        try:
+            import git as _git
+
+            _repo_cl = _git.Repo(self.repo_root)
+            _head_cl = _repo_cl.head.commit
+            _changelog_exists = bool(load_changelog(self.repo_root))
+            _record_changelog(
+                self.repo_root,
+                self.output_dir,
+                commit=_head_cl.hexsha,
+                commit_message=_head_cl.message.strip().splitlines()[0],
+                commit_date=_head_cl.committed_datetime.strftime("%Y-%m-%d"),
+                strategy="full_generate",
+                pages_updated=[b.slug for b in plan.buckets],
+                files_changed=[],
+                is_initial=not _changelog_exists,
+            )
+        except Exception:
+            pass  # Not a git repo or detached HEAD — skip silently
+
         # ── Phase 5: Build site ────────────────────────────────────────
         console.print(
             Panel("[bold]Phase 5/5: Building site[/bold]", border_style="blue")
@@ -360,13 +388,6 @@ class PipelineV2:
         self._build_site(plan, has_openapi=openapi_ready)
         phase_timings["build_site"] = time.perf_counter() - phase_start
         stats["site"] = 1
-
-        # ── Persist state ──────────────────────────────────────────────
-        phase_start = time.perf_counter()
-        save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
-        stats["llm_usage"] = dict(getattr(self.llm, "usage", {}) or {})
-        self._save_quality_report(stats)
-        phase_timings["persist"] = time.perf_counter() - phase_start
 
         if chatbot_enabled(self.cfg):
             try:
@@ -462,19 +483,6 @@ class PipelineV2:
                     "pages_skipped": generation_summary.skipped,
                     "replanned": True,
                 },
-            )
-            changelog_exists = bool(load_changelog(self.repo_root))
-            _commit_obj = _repo.head.commit
-            _record_changelog(
-                self.repo_root,
-                self.output_dir,
-                commit=head_sha,
-                commit_message=_commit_obj.message.strip().splitlines()[0],
-                commit_date=_commit_obj.committed_datetime.strftime("%Y-%m-%d"),
-                strategy="full_generate",
-                pages_updated=[b.slug for b in plan.buckets],
-                files_changed=[],
-                is_initial=not changelog_exists,
             )
         except Exception:
             pass  # Not a git repo or detached HEAD — skip silently

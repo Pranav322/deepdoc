@@ -271,6 +271,166 @@ def test_decompose_no_candidates_returns_plan_unchanged():
     assert len(result.buckets) == 1
 
 
+def test_decompose_second_pass_fires_for_oversized_sub_buckets():
+    """Second-pass decompose should run for sub-buckets that come back oversized."""
+    # First pass creates two sub-topics; one has 27 files (above max_files_per_bucket=25)
+    oversized_files = [f"cart/file{i}.py" for i in range(27)]
+    small_files = [f"order/file{i}.py" for i in range(5)]
+    all_files = oversized_files + small_files
+
+    scan_files = {f: "summary" for f in all_files}
+    scan = _make_scan(
+        file_summaries=scan_files,
+        file_line_counts={f: 100 for f in all_files},
+        parsed_files={
+            f: ParsedFile(path=Path(f), language="python", imports=[], symbols=[])
+            for f in all_files
+        },
+    )
+    parent_bucket = _make_bucket(
+        slug="shop-core",
+        title="Shop Core",
+        owned_files=all_files,
+    )
+    plan = DocPlan(
+        buckets=[parent_bucket],
+        nav_structure={"Features": ["shop-core"]},
+        skipped_files=[],
+    )
+
+    call_count = {"n": 0}
+
+    def fake_llm_step(llm, system, prompt, step_name):
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n == 1:
+            # First pass: splits into one oversized + one normal sub-topic
+            return {
+                "sub_topics": [
+                    {
+                        "title": "Cart Ops",
+                        "slug": "cart-ops",
+                        "description": "Cart operations",
+                        "owned_files": oversized_files,
+                        "owned_symbols": [],
+                        "required_sections": ["overview"],
+                        "required_diagrams": [],
+                    },
+                    {
+                        "title": "Order Ops",
+                        "slug": "order-ops",
+                        "description": "Order operations",
+                        "owned_files": small_files,
+                        "owned_symbols": [],
+                        "required_sections": ["overview"],
+                        "required_diagrams": [],
+                    },
+                ],
+                "nav_section": "Features",
+                "keep_parent_overview": False,
+            }
+        # Second pass splits the oversized cart-ops bucket into two halves
+        half = len(oversized_files) // 2
+        return {
+            "sub_topics": [
+                {
+                    "title": "Cart Ops A",
+                    "slug": "cart-ops-a",
+                    "description": "Cart ops part A",
+                    "owned_files": oversized_files[:half],
+                    "owned_symbols": [],
+                    "required_sections": ["overview"],
+                    "required_diagrams": [],
+                },
+                {
+                    "title": "Cart Ops B",
+                    "slug": "cart-ops-b",
+                    "description": "Cart ops part B",
+                    "owned_files": oversized_files[half:],
+                    "owned_symbols": [],
+                    "required_sections": ["overview"],
+                    "required_diagrams": [],
+                },
+            ],
+            "nav_section": "Features",
+            "keep_parent_overview": False,
+        }
+
+    cfg = {"decompose_threshold": 7, "max_files_per_bucket": 25, "max_parallel_workers": 2}
+
+    with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
+        result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+
+    # LLM called twice: once for first pass, once for second pass on oversized bucket
+    assert call_count["n"] == 2
+
+    # No final bucket should have more than 25 files
+    oversized_final = [b for b in result.buckets if len(b.owned_files) > 25]
+    assert oversized_final == [], f"Still oversized: {[(b.slug, len(b.owned_files)) for b in oversized_final]}"
+
+
+def test_decompose_second_pass_accepts_oversized_if_llm_returns_none():
+    """When second-pass LLM returns None, the oversized bucket should be kept as-is."""
+    oversized_files = [f"big/file{i}.py" for i in range(30)]
+    scan = _make_scan(
+        file_summaries={f: "s" for f in oversized_files},
+        file_line_counts={f: 100 for f in oversized_files},
+        parsed_files={
+            f: ParsedFile(path=Path(f), language="python", imports=[], symbols=[])
+            for f in oversized_files
+        },
+    )
+    parent = _make_bucket(slug="big-feature", title="Big Feature", owned_files=oversized_files)
+    plan = DocPlan(
+        buckets=[parent],
+        nav_structure={"Features": ["big-feature"]},
+        skipped_files=[],
+    )
+
+    call_count = {"n": 0}
+
+    def fake_llm_step(llm, system, prompt, step_name):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            # First pass: produces one oversized sub-topic
+            return {
+                "sub_topics": [
+                    {
+                        "title": "Big A",
+                        "slug": "big-a",
+                        "description": "All the big files",
+                        "owned_files": oversized_files,
+                        "owned_symbols": [],
+                        "required_sections": ["overview"],
+                        "required_diagrams": [],
+                    },
+                    {
+                        "title": "Big B",
+                        "slug": "big-b",
+                        "description": "Placeholder",
+                        "owned_files": [],
+                        "owned_symbols": [],
+                        "required_sections": ["overview"],
+                        "required_diagrams": [],
+                    },
+                ],
+                "nav_section": "Features",
+                "keep_parent_overview": False,
+            }
+        # Second pass fails
+        return None
+
+    cfg = {"decompose_threshold": 7, "max_files_per_bucket": 25}
+
+    with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
+        result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+
+    # Should not crash; the oversized bucket is accepted with a warning
+    assert result is not None
+    oversized_slugs = [b.slug for b in result.buckets if len(b.owned_files) > 25]
+    assert "big-a" in oversized_slugs
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # Generator rate_limit_pause config
 # ═════════════════════════════════════════════════════════════════════════════

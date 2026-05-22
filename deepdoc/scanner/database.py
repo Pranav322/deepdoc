@@ -107,8 +107,15 @@ def discover_database_schema(
         path_lower = file_path.lower()
         parsed = parsed_files.get(file_path)
 
-        # Skip test/migration files for model detection
-        if any(p in path_lower for p in ("test", "spec", "fixture", "factory", "seed")):
+        # Skip test/migration files for model detection.
+        # Segment check catches files inside test/ directories; prefix check catches
+        # files named test_*.py that live outside a tests/ directory.
+        _segs = set(path_lower.replace("\\", "/").split("/"))
+        _fname = path_lower.split("/")[-1]
+        if (
+            _segs & {"test", "tests", "spec", "specs", "fixture", "fixtures", "factory", "seed"}
+            or _fname.startswith(("test_", "spec_", "fixture_", "factory_"))
+        ):
             continue
 
         # Check migrations

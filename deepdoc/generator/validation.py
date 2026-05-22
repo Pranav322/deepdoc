@@ -102,7 +102,7 @@ class PageValidator:
         self._check_sections(content, bucket, result)
 
         # 2. Check that owned files are referenced
-        self._check_file_refs(content, bucket, result)
+        self._check_file_refs(content, bucket, result, evidence)
 
         # 3. Check for hallucinated file paths
         self._check_hallucinated_paths(content, bucket, result)
@@ -114,7 +114,7 @@ class PageValidator:
         self._check_hallucinated_symbols(content, bucket, evidence, result)
 
         # 6. Check route/path claims for API and operations-heavy pages
-        self._check_route_claims(content, bucket, result)
+        self._check_route_claims(content, bucket, result, evidence)
 
         # 7. Count mermaid diagrams
         result.mermaid_block_count = len(re.findall(r"```mermaid", content))
@@ -259,21 +259,41 @@ class PageValidator:
         ]
 
     def _check_file_refs(
-        self, content: str, bucket: DocBucket, result: ValidationResult
+        self,
+        content: str,
+        bucket: DocBucket,
+        result: ValidationResult,
+        evidence: AssembledEvidence | None = None,
     ):
-        """Check that at least some of the bucket's owned files are referenced."""
+        """Check that at least some of the bucket's owned files are referenced.
+
+        Only files the LLM actually received full source for are checked — files
+        that were compressed to evidence cards are excluded from the coverage
+        threshold because the LLM cannot be expected to cite paths it never saw
+        in full.
+        """
         if not bucket.owned_files:
+            return
+
+        # Scope the check to files the LLM actually received full source for.
+        compressed_paths: set[str] = (
+            evidence.compressed_file_paths
+            if evidence is not None and evidence.compressed_file_paths
+            else set()
+        )
+        checkable_files = [f for f in bucket.owned_files if f not in compressed_paths]
+        if not checkable_files:
+            # All files were compressed — the LLM had no full source to cite from.
             return
 
         content_lower = content.lower()
         referenced = 0
-        for f in bucket.owned_files:
-            # Check if file path appears in the content (case-insensitive)
+        for f in checkable_files:
             if f.lower() in content_lower:
                 referenced += 1
 
-        coverage = referenced / len(bucket.owned_files) if bucket.owned_files else 1.0
-        unreferenced = [f for f in bucket.owned_files if f.lower() not in content_lower]
+        coverage = referenced / len(checkable_files)
+        unreferenced = [f for f in checkable_files if f.lower() not in content_lower]
 
         hints = bucket.generation_hints or {}
         is_intro = hints.get("is_introduction_page") or bucket.section == "Start Here"
@@ -289,12 +309,17 @@ class PageValidator:
 
         if coverage < threshold and len(unreferenced) > 2:
             result.missing_file_refs = unreferenced[:5]
+            compressed_note = (
+                f"; {len(compressed_paths)} compressed files excluded"
+                if compressed_paths
+                else ""
+            )
             result.warnings.append(
-                f"Low file coverage: {referenced}/{len(bucket.owned_files)} files referenced "
-                f"({coverage:.0%}; expected at least {threshold:.0%})"
+                f"Low file coverage: {referenced}/{len(checkable_files)} full-source files referenced "
+                f"({coverage:.0%}; expected at least {threshold:.0%}{compressed_note})"
             )
             if is_intro:
-                if coverage < 0.15 and len(bucket.owned_files) >= 10:
+                if coverage < 0.15 and len(checkable_files) >= 10:
                     result.is_valid = False
             else:
                 result.is_valid = False
@@ -438,6 +463,14 @@ class PageValidator:
             key = impact.get("key", "") if isinstance(impact, dict) else getattr(impact, "key", "")
             if key:
                 symbols.add(str(key))
+        # For integration pages, also treat any symbol-like token that appears in
+        # the integration context evidence as known-good. These are external SDK
+        # symbols (e.g. S3Client, GupshupMessage) that are real but not in the
+        # repo's parsed files — they should not be flagged as hallucinations.
+        if evidence is not None and evidence.integration_context:
+            for token in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]{2,})\b", evidence.integration_context):
+                if self._looks_like_symbol_reference(token):
+                    symbols.add(token)
         return symbols
 
     @staticmethod
@@ -494,7 +527,11 @@ class PageValidator:
         return lower in bucket_text
 
     def _check_route_claims(
-        self, content: str, bucket: DocBucket, result: ValidationResult
+        self,
+        content: str,
+        bucket: DocBucket,
+        result: ValidationResult,
+        evidence: "AssembledEvidence | None" = None,
     ) -> None:
         if not self.known_route_paths:
             return
@@ -511,6 +548,19 @@ class PageValidator:
             or "api" in title_lower
         ):
             return
+
+        # Build the set of valid routes for this page: internal routes + any routes
+        # that appear verbatim in the integration context evidence. The second set
+        # covers external service API paths (e.g. WhatsApp /messages, AWS /putObject)
+        # that the LLM received in evidence and is correct to reference.
+        valid_routes = set(self.known_route_paths)
+        if evidence is not None and evidence.integration_context:
+            for token in re.findall(
+                r"(\/[A-Za-z0-9{}_<>\-.:/~]+)", evidence.integration_context
+            ):
+                normalized = self._normalize_route_path(token)
+                if normalized and not self._is_markup_path_noise(normalized):
+                    valid_routes.add(normalized)
 
         candidate_tokens: list[str] = []
         for inline in re.findall(r"`([^`]+)`", content):
@@ -534,7 +584,7 @@ class PageValidator:
             candidates.add(route)
 
         unmatched = sorted(
-            route for route in candidates if route not in self.known_route_paths
+            route for route in candidates if route not in valid_routes
         )
         if unmatched:
             result.unmatched_routes = unmatched[:10]
@@ -557,9 +607,17 @@ class PageValidator:
             return
 
         content_lower = content.lower()
-        if "call flow" not in content_lower:
+        _flow_terms = (
+            "call flow", "execution flow", "request flow",
+            "flow diagram", "sequence diagram",
+        )
+        _effect_terms = (
+            "side effect", "downstream effect",
+            "triggers", "emits", "dispatches", "publishes",
+        )
+        if not any(t in content_lower for t in _flow_terms):
             result.missing_flow_edges.append("call_flow")
-        if "side effects" not in content_lower:
+        if not any(t in content_lower for t in _effect_terms):
             result.missing_flow_entrypoints.append("side_effects")
 
         if result.missing_flow_edges or result.missing_flow_entrypoints:
@@ -903,7 +961,16 @@ class PageValidator:
             return
 
         content_lower = content.lower()
-        missing = [name for name in expected if name.lower() not in content_lower]
+        # Use token-based partial matching: an integration name is "covered" if any
+        # of its meaningful tokens appear in the content. This handles paraphrasing
+        # like "Amazon Web Services" vs "AWS" or "Gupshup WhatsApp" vs "WhatsApp".
+        def _is_covered(name: str) -> bool:
+            if name.lower() in content_lower:
+                return True
+            tokens = self._integration_name_tokens(name)
+            return bool(tokens) and any(token in content_lower for token in tokens)
+
+        missing = [name for name in expected if not _is_covered(name)]
         if not missing:
             return
 
@@ -911,6 +978,8 @@ class PageValidator:
         result.warnings.append(
             f"Integration context missing named references: {', '.join(result.missing_integrations[:4])}"
         )
+        # Only mark invalid when ALL expected integrations are fully absent and we
+        # have concrete evidence the LLM had them in context.
         if bucket.bucket_type == "integration" and len(missing) == len(expected):
             result.is_valid = False
         elif (

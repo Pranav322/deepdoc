@@ -1527,6 +1527,105 @@ def test_validator_file_coverage_threshold_fails_feature_pages(tmp_path: Path) -
     ]
 
 
+def test_validator_file_coverage_excludes_compressed_files(tmp_path: Path) -> None:
+    """Coverage check should only count full-source files, not compressed ones."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    all_files = [f"src/module_{idx}.py" for idx in range(10)]
+    compressed = {f"src/module_{idx}.py" for idx in range(4, 10)}  # 6 compressed
+    full_source = [f for f in all_files if f not in compressed]    # 4 full-source
+
+    scan = RepoScan(
+        file_tree={"src": [Path(path).name for path in all_files]},
+        file_summaries={path: "summary" for path in all_files},
+        api_endpoints=[],
+        languages={"python": len(all_files)},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=len(all_files),
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        parsed_files={},
+        file_contents={},
+    )
+    bucket = make_bucket("Cart Feature", "cart-feature", all_files, bucket_type="feature")
+
+    # Cite all 4 full-source files (100% of checkable) — should be valid
+    content = (
+        "# Cart Feature\n\n"
+        + " ".join(f"`{f}`" for f in full_source)
+        + " are covered. "
+        + "Detailed grounded prose repeats enough words for validation checks to pass smoothly. " * 18
+    )
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_file_paths=set(full_source),
+        total_evidence_chars=0,
+        flow_context="",
+        compressed_file_paths=compressed,
+        files_compressed=len(compressed),
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket, evidence)
+
+    assert result.is_valid is True, f"Unexpected warnings: {result.warnings}"
+
+
+def test_validator_file_coverage_all_compressed_skips_check(tmp_path: Path) -> None:
+    """When all owned files are compressed, coverage check should be skipped."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    all_files = [f"src/heavy_{idx}.py" for idx in range(5)]
+
+    scan = RepoScan(
+        file_tree={"src": [Path(path).name for path in all_files]},
+        file_summaries={path: "summary" for path in all_files},
+        api_endpoints=[],
+        languages={"python": len(all_files)},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=len(all_files),
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        parsed_files={},
+        file_contents={},
+    )
+    bucket = make_bucket("Heavy Feature", "heavy-feature", all_files, bucket_type="feature")
+
+    # Content cites none of the owned files — normally would fail coverage check
+    content = "# Heavy Feature\n\nThis page describes the feature at a high level. " * 20
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_file_paths=set(),
+        total_evidence_chars=0,
+        flow_context="",
+        compressed_file_paths=set(all_files),
+        files_compressed=len(all_files),
+    )
+
+    result = PageValidator(repo_root, scan).validate(content, bucket, evidence)
+
+    # No coverage warning — all files were compressed so check was skipped
+    coverage_warnings = [w for w in result.warnings if "coverage" in w.lower()]
+    assert coverage_warnings == [], f"Unexpected coverage warnings: {coverage_warnings}"
+
+
 def test_generation_quality_feedback_is_actionable(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()

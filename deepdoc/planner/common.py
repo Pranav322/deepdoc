@@ -672,6 +672,9 @@ Rules:
 - Do NOT create sub-topics that substantially overlap with existing buckets listed \
   below. If a sub-topic would duplicate another bucket, omit it.
 - Slugs must be unique and URL-safe (lowercase, hyphens, no special chars).
+- No single sub-topic should own more than 20 files. If a natural grouping would \
+  exceed 20 files, split it into two sub-topics instead. Pages with >20 assigned \
+  files produce degraded output because evidence cannot fit in a single LLM context.
 """
 
 DECOMPOSE_PROMPT = """\
@@ -716,6 +719,8 @@ Return JSON:
 Important:
 - Shared files (configs, base classes) may appear in multiple sub-topics.
 - Every file from the bucket must appear in at least one sub-topic's owned_files.
+- If any sub-topic would own more than 20 files, split it further before returning.
+  Sub-topics with >20 files will be automatically re-decomposed by the system.
 - nav_section uses ">" for nested navigation. Use 2 levels by default; use 3 if
   the concept hierarchy is clearly that deep.
 - keep_parent_overview: set true if the parent topic deserves a summary/overview
@@ -900,7 +905,7 @@ def _build_repo_endpoint_keywords(
 
     # Layer 1: user config wins
     for group_name, keywords in (cfg.get("endpoint_groups") or {}).items():
-        merged[group_name] = merged.get(group_name, set()) | set(keywords)
+        merged[group_name] = merged.get(group_name, set()) | {k.lower().strip() for k in keywords}
 
     return {k: v for k, v in merged.items() if v}
 

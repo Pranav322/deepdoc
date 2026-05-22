@@ -40,7 +40,7 @@ from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
 from ..prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
-from ..scanner import _classify_file_role
+from ..scanner import _build_import_lookup, _classify_file_role, _normalize_import
 from ..openapi import parse_openapi_spec, spec_to_context_string
 
 console = Console()
@@ -354,6 +354,7 @@ class BucketGenerationEngine:
         self._repo_file_paths = set(self.scan.file_summaries.keys())
         self.coverage_report: dict[str, Any] = {}
         self.local_dev_warnings: list[str] = []
+        self._import_lookup = _build_import_lookup(set(self.scan.file_summaries.keys()))
         self._openapi_context = self._precompute_openapi_context()
         self._doc_pages = self._planned_doc_pages()
         (
@@ -363,17 +364,25 @@ class BucketGenerationEngine:
         ) = build_internal_doc_link_maps(self._doc_pages)
 
     def _precompute_openapi_context(self) -> str:
-        """Parse the first available OpenAPI spec once per run."""
+        """Parse all available OpenAPI specs, accumulating up to 6 000 chars."""
         if not self.scan.has_openapi:
             return ""
+        spec_count = len(self.scan.openapi_paths)
+        per_spec_limit = max(2000, min(4000, 6000 // max(1, spec_count)))
+        parts: list[str] = []
+        total = 0
         for spec_path in self.scan.openapi_paths:
             spec = parse_openapi_spec(self.repo_root / spec_path)
             if spec:
-                return (
+                chunk = (
                     f"\n## OpenAPI Spec ({spec_path}):\n"
-                    f"{spec_to_context_string(spec)[:4000]}"
+                    f"{spec_to_context_string(spec)[:per_spec_limit]}"
                 )
-        return ""
+                parts.append(chunk)
+                total += len(chunk)
+                if total >= 6000:
+                    break
+        return "\n".join(parts)
 
     def generate_all(self, force: bool = False) -> list[GenerationResult]:
         """Generate all pages. Returns results for each bucket.
@@ -469,6 +478,9 @@ class BucketGenerationEngine:
                                     f"~{word_count} words{diagrams} · "
                                     f"{result.elapsed_seconds:.1f}s)[/dim]{warnings}"
                                 )
+                                # Save manifest incrementally so a cancelled run
+                                # can resume from completed pages on next generate.
+                                self._checkpoint_manifest(_manifest, result)
                         except Exception as e:
                             failed_count += 1
                             results.append(
@@ -1364,24 +1376,52 @@ Re-run `deepdoc generate` to retry.
             pages.append((bucket.title, url))
         return pages
 
-    def _build_sitemap_for(self, current_slug: str) -> str:
-        """Build formatted sitemap excluding current page."""
-        by_section: dict[str, list[DocBucket]] = defaultdict(list)
-        for b in self.plan.buckets:
-            if b.slug != current_slug:
-                by_section[b.section or "Other"].append(b)
+    def _bucket_url(self, b: DocBucket) -> str:
+        """Return the site URL for a bucket, respecting endpoint_ref /api/* routing."""
+        hints = b.generation_hints or {}
+        if hints.get("is_introduction_page"):
+            return "/"
+        if self.scan.has_openapi and (
+            hints.get("is_endpoint_ref")
+            or hints.get("prompt_style") == "endpoint_ref"
+            or b.bucket_type == "endpoint_ref"
+        ):
+            return f"/api/{b.slug}"
+        return f"/{b.slug}"
 
+    def _build_sitemap_for(self, current_slug: str) -> str:
+        """Build formatted sitemap ordered by nav_structure, excluding current page."""
+        slug_to_bucket = {b.slug: b for b in self.plan.buckets if b.slug != current_slug}
         lines: list[str] = []
-        for section, buckets in by_section.items():
-            lines.append(f"**{section}**")
-            for b in buckets:
-                page_path = f"/{b.slug}"
+        seen: set[str] = set()
+
+        for section, slugs in self.plan.nav_structure.items():
+            section_lines: list[str] = []
+            for slug in slugs:
+                b = slug_to_bucket.get(slug)
+                if not b:
+                    continue
+                seen.add(slug)
+                page_path = self._bucket_url(b)
                 key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
                 if len(b.owned_files) > 4:
                     key_files += f" +{len(b.owned_files) - 4} more"
-                lines.append(f"- [{b.title}]({page_path}) — {b.description}")
+                section_lines.append(f"- [{b.title}]({page_path}) — {b.description}")
                 if key_files:
-                    lines.append(f"  *Covers: {key_files}*")
+                    section_lines.append(f"  *Covers: {key_files}*")
+            if section_lines:
+                lines.append(f"**{section}**")
+                lines.extend(section_lines)
+
+        # Buckets not referenced by nav_structure — group by section
+        orphans_by_section: dict[str, list] = defaultdict(list)
+        for slug, b in slug_to_bucket.items():
+            if slug not in seen:
+                orphans_by_section[b.section or "Other"].append(b)
+        for section, orphan_buckets in orphans_by_section.items():
+            lines.append(f"**{section}**")
+            for b in orphan_buckets:
+                lines.append(f"- [{b.title}]({self._bucket_url(b)}) — {b.description}")
 
         return "\n".join(lines) if lines else "(no other pages)"
 
@@ -1396,7 +1436,9 @@ Re-run `deepdoc generate` to retry.
             if dep_slug in slug_to_bucket and dep_slug != bucket.slug:
                 related[dep_slug] = slug_to_bucket[dep_slug]
 
-        # Import-based: find buckets whose files are imported by this bucket's files
+        # Import-based: find buckets whose files are imported by this bucket's files.
+        # Uses the pre-built import lookup (O(imports) per file) instead of scanning
+        # all repo files for each import string.
         file_to_buckets: dict[str, list[DocBucket]] = defaultdict(list)
         for b in self.plan.buckets:
             for f in b.owned_files:
@@ -1407,18 +1449,17 @@ Re-run `deepdoc generate` to retry.
             if not parsed or not parsed.imports:
                 continue
             for imp in parsed.imports:
-                # Simple suffix match against known files
-                for known_file in self.scan.file_summaries:
-                    stem = (
-                        known_file.rsplit(".", 1)[0]
-                        .replace("/", ".")
-                        .replace("\\", ".")
-                    )
-                    if stem and stem in imp.replace("/", "."):
-                        for linked_bucket in file_to_buckets.get(known_file, []):
+                for hint in _normalize_import(imp):
+                    key = hint.replace(".", "/").lower().strip("/")
+                    if not key:
+                        continue
+                    matched_files = self._import_lookup.get(key, set())
+                    if len(matched_files) > 5:
+                        continue  # ambiguous — too many matches to be useful
+                    for matched_file in matched_files:
+                        for linked_bucket in file_to_buckets.get(matched_file, []):
                             if linked_bucket.slug != bucket.slug:
                                 related[linked_bucket.slug] = linked_bucket
-                        break
 
         # Strong overlap-based links for database/runtime/interface pages
         for candidate in self.plan.buckets:
@@ -1443,7 +1484,7 @@ Re-run `deepdoc generate` to retry.
             "**Dependency Links** (pages this module imports from — MUST link to these):"
         ]
         for b in related.values():
-            lines.append(f"- [{b.title}](/{b.slug}) — {b.description}")
+            lines.append(f"- [{b.title}]({self._bucket_url(b)}) — {b.description}")
 
         return "\n".join(lines)
 
@@ -1465,6 +1506,19 @@ Re-run `deepdoc generate` to retry.
             except Exception:
                 return True
         return False
+
+    def _checkpoint_manifest(self, manifest: Any, result: "GenerationResult") -> None:
+        """Write the manifest for one completed page so a cancelled run can resume."""
+        from ..manifest import file_hash as compute_hash
+        try:
+            for src_file in tracked_bucket_files(result.bucket):
+                src_path = self.repo_root / src_file
+                if src_path.exists():
+                    content = src_path.read_text(encoding="utf-8", errors="replace")
+                    manifest.update(src_file, compute_hash(content), result.bucket.slug)
+            manifest.save()
+        except Exception:
+            pass
 
     def update_manifest(self, results: list[GenerationResult]):
         """Update the manifest with new file hashes for all successfully generated pages."""

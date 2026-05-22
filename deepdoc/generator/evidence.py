@@ -40,6 +40,11 @@ from ..openapi import parse_openapi_spec, spec_to_context_string
 
 console = Console()
 
+_EP_TITLE_RE = re.compile(
+    r"^(GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|CONNECT|TRACE)\s+(/\S*)",
+    re.IGNORECASE,
+)
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 3.1  Evidence Assembly
 # ═════════════════════════════════════════════════════════════════════════════
@@ -67,6 +72,7 @@ class AssembledEvidence:
     compressed_cards_context: str = ""
     files_included_raw: int = 0
     files_compressed: int = 0
+    compressed_file_paths: set[str] = field(default_factory=set)
     coverage_files_total: int = 0
     helper_context: str = ""  # resolved helper/utility function bodies
     flow_context: str = ""  # call graph + flow evidence (entrypoints, chains, side effects)
@@ -141,7 +147,7 @@ class EvidenceAssembler:
             source_ctx,
             compressed_cards_ctx,
             files_included_raw,
-            files_compressed,
+            compressed_file_paths,
             coverage_total,
         ) = self._build_source_context(bucket)
         endpoints_detail = self._build_endpoints_detail(bucket)
@@ -204,7 +210,8 @@ class EvidenceAssembler:
             flow_context=flow_ctx,
             total_evidence_chars=total,
             files_included_raw=files_included_raw,
-            files_compressed=files_compressed,
+            files_compressed=len(compressed_file_paths),
+            compressed_file_paths=compressed_file_paths,
             coverage_files_total=coverage_total,
             evidence_file_paths=evidence_files,
             config_env_context=config_env_ctx,
@@ -316,11 +323,12 @@ class EvidenceAssembler:
             included += 1
 
         cards_context = self._format_compressed_cards(compressed_cards)
+        compressed_paths = {card.file_path for card in compressed_cards}
         return (
             "\n".join(parts),
             cards_context,
             included,
-            len(compressed_cards),
+            compressed_paths,
             len(ranked_files),
         )
 
@@ -780,7 +788,7 @@ class EvidenceAssembler:
         """Extract actual env var names from source files for grounded config docs."""
         env_vars: dict[str, list[str]] = {}  # var_name -> [file_paths]
 
-        for src_file in bucket.owned_files:
+        for src_file in list(bucket.owned_files) + list(bucket.artifact_refs or []):
             src_path = self.repo_root / src_file
             if not src_path.exists():
                 continue
@@ -1052,10 +1060,11 @@ class EvidenceAssembler:
 
         # ── endpoint_ref: match specific endpoint, pull deep evidence ─────
         if hints.get("is_endpoint_ref"):
-            # The title is e.g. "GET /api/v1/orders" — extract method+path
-            title_parts = bucket.title.split(" ", 1)
-            ref_method = title_parts[0].upper() if len(title_parts) >= 1 else ""
-            ref_path = title_parts[1] if len(title_parts) >= 2 else ""
+            # Extract METHOD /path from title via regex — more robust than split(" ", 1)
+            # since titles may not always follow the "GET /path" convention.
+            _m = _EP_TITLE_RE.match(bucket.title)
+            ref_method = _m.group(1).upper() if _m else ""
+            ref_path = _m.group(2) if _m else ""
 
             # Find matching bundle via handler symbol or method+path
             matched_bundle = None

@@ -11,6 +11,10 @@ def _build_import_lookup(all_files: set[str]) -> dict[str, set[str]]:
             lookup["/".join(parts[i:])].add(file_path)
         if parts:
             lookup[parts[-1]].add(file_path)
+        # __init__ modules: also index by parent path so `from pkg.sub import x`
+        # resolves to pkg/sub/__init__.py in addition to pkg/sub.py.
+        if parts and parts[-1] == "__init__" and len(parts) >= 2:
+            lookup["/".join(parts[:-1])].add(file_path)
     return lookup
 
 

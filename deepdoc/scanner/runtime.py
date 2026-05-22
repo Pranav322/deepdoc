@@ -69,8 +69,16 @@ def _link_runtime_workflows(
         for scheduler in runtime.schedulers
     }
 
+    # Pre-filter: build a set of all names/targets we need to search for so files
+    # that mention none of them can be skipped before any regex is applied.
+    _all_names = {t.name for t in runtime.tasks if t.name} | {
+        tgt for s in runtime.schedulers for tgt in s.invoked_targets if tgt
+    }
+
     for file_path, content in file_contents.items():
         if not content:
+            continue
+        if _all_names and not any(n in content for n in _all_names):
             continue
         endpoint_keys = sorted(
             key for key, owned_files in endpoint_records if file_path in owned_files

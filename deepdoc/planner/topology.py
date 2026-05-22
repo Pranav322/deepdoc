@@ -171,6 +171,13 @@ def build_topology_map(scan: "RepoScan") -> TopologyMap:
         if f in foundational_set:
             continue
         cid = _path_to_cluster_id(f)
+        # Disambiguate truncation collisions: if this slug already belongs to a
+        # different entry point's cluster, append a counter suffix.
+        _base = cid
+        _counter = 1
+        while cid in proto and f not in proto[cid]:
+            cid = f"{_base[:58]}-{_counter}"
+            _counter += 1
         if cid not in proto:
             proto[cid] = set()
         file_cluster_id[f] = cid
@@ -269,8 +276,9 @@ def build_topology_map(scan: "RepoScan") -> TopologyMap:
         for f in foundational_set:
             file_cluster_id.setdefault(f, "foundational")
 
-    # Sort: shallowest entry-point clusters first; foundational always last
-    clusters.sort(key=lambda c: (c.min_depth, -len(c.all_files)))
+    # Sort: shallowest entry-point clusters first; foundational always last.
+    # is_foundational as primary key makes the intent explicit (min_depth=999 is a proxy).
+    clusters.sort(key=lambda c: (c.is_foundational, c.min_depth, -len(c.all_files)))
 
     return TopologyMap(
         clusters=clusters,

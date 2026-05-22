@@ -32,8 +32,8 @@ def build_endpoint_bundles(
     import_lookup = _build_import_lookup(all_files)
 
     for resource, eps in families.items():
-        # Collect handler files
-        handler_files = sorted(set(ep.get("file", "") for ep in eps if ep.get("file")))
+        # Collect handler files — include route_file and handler_file, not just file
+        handler_files = sorted({f for ep in eps for f in endpoint_owned_files(ep)})
         if not handler_files:
             continue
 

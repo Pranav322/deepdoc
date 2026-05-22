@@ -1,0 +1,54 @@
+# Example workflow for teams using DeepDoc as internal docs.
+# Copy this into YOUR repo (not this one) and set ANTHROPIC_API_KEY in secrets.
+#
+# What it does: on every push to main, runs `deepdoc update` and commits
+# the refreshed docs/ and .deepdoc/ state back to the branch.
+# No GitHub Pages deploy — works with any hosting setup.
+
+name: Refresh Docs
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0    # Full history needed for git diff baseline
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install deepdoc
+        run: pip install deepdoc
+        # Use pip install "deepdoc[chatbot]" if your .deepdoc.yaml has chatbot.enabled: true
+
+      - name: Refresh docs
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          # Add other keys here if your config uses a different LLM provider,
+          # e.g. OPENAI_API_KEY or AZURE_OPENAI_API_KEY
+        run: deepdoc update --strict-quality
+        # --strict-quality fails the step if any page is invalid/stub,
+        # preventing bad docs from being committed.
+        # Remove it to allow partial updates through.
+
+      - name: Commit updated docs
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add docs/ .deepdoc/
+          git diff --cached --quiet || git commit -m "chore: refresh docs [skip ci]"
+          git push
+        # [skip ci] prevents this commit from re-triggering the workflow.

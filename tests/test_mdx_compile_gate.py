@@ -89,7 +89,9 @@ def test_gate_recovers_after_one_llm_retry() -> None:
         bucket=bucket,
         validate=_make_validator(verdicts),
     )
-    assert outcome.content == fixed_content
+    # Post-processors (escape_mdx_text_hazards, escape_mdx_route_params) are
+    # applied after the fix so trailing whitespace may be normalized.
+    assert outcome.content.rstrip() == fixed_content.rstrip()
     assert outcome.retries == 1
     assert outcome.fallback_applied is False
     assert outcome.compile_failed is False

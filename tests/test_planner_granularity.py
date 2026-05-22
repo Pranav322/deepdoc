@@ -1499,3 +1499,107 @@ def test_benchmark_score_plan_flags_noise_and_orphans() -> None:
     assert score < 100
     assert details["noise_suppression"] < 1.0
     assert any("orphaned" in note or "forbidden" in note for note in notes)
+
+
+def test_decompose_respects_max_files_per_bucket_config(monkeypatch) -> None:
+    """Second-pass decompose should be triggered when a sub-bucket exceeds max_files_per_bucket."""
+    oversized_files = [f"svc/file{i}.py" for i in range(26)]
+    small_files = [f"util/file{i}.py" for i in range(3)]
+    all_files = oversized_files + small_files
+
+    bucket = DocBucket(
+        bucket_type="feature",
+        title="Service Core",
+        slug="service-core",
+        section="Features",
+        description="All service files",
+        owned_files=all_files,
+    )
+    plan = DocPlan(
+        buckets=[bucket],
+        nav_structure={"Features": ["service-core"]},
+        skipped_files=[],
+    )
+    scan = _make_scan(
+        file_summaries={f: "s" for f in all_files},
+        file_line_counts={f: 50 for f in all_files},
+        parsed_files={
+            f: ParsedFile(path=Path(f), language="python", imports=[], symbols=[])
+            for f in all_files
+        },
+    )
+
+    call_count = {"n": 0}
+
+    def _fake_llm_step(llm, system, prompt, step_name):
+        call_count["n"] += 1
+        n = call_count["n"]
+        if n == 1:
+            # First pass: one oversized sub-topic + one normal
+            return {
+                "sub_topics": [
+                    {
+                        "title": "Service Ops",
+                        "slug": "service-ops",
+                        "description": "Main ops",
+                        "owned_files": oversized_files,
+                        "owned_symbols": [],
+                        "required_sections": ["overview"],
+                        "required_diagrams": [],
+                    },
+                    {
+                        "title": "Service Utils",
+                        "slug": "service-utils",
+                        "description": "Utils",
+                        "owned_files": small_files,
+                        "owned_symbols": [],
+                        "required_sections": ["overview"],
+                        "required_diagrams": [],
+                    },
+                ],
+                "nav_section": "Features",
+                "keep_parent_overview": False,
+            }
+        # Second pass splits oversized into two halves
+        half = len(oversized_files) // 2
+        return {
+            "sub_topics": [
+                {
+                    "title": "Service Ops A",
+                    "slug": "service-ops-a",
+                    "description": "Part A",
+                    "owned_files": oversized_files[:half],
+                    "owned_symbols": [],
+                    "required_sections": ["overview"],
+                    "required_diagrams": [],
+                },
+                {
+                    "title": "Service Ops B",
+                    "slug": "service-ops-b",
+                    "description": "Part B",
+                    "owned_files": oversized_files[half:],
+                    "owned_symbols": [],
+                    "required_sections": ["overview"],
+                    "required_diagrams": [],
+                },
+            ],
+            "nav_section": "Features",
+            "keep_parent_overview": False,
+        }
+
+    monkeypatch.setattr("deepdoc.planner.heuristics._llm_step", _fake_llm_step)
+
+    result = _decompose_buckets(
+        plan,
+        scan,
+        {"decompose_threshold": 7, "max_files_per_bucket": 25},
+        llm=object(),
+        repo_profile={},
+    )
+
+    # Second pass must have fired (LLM called twice)
+    assert call_count["n"] == 2
+
+    # No bucket should exceed 25 files
+    oversized_final = [b for b in result.buckets if len(b.owned_files) > 25]
+    assert oversized_final == []

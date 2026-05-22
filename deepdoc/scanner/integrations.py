@@ -151,11 +151,13 @@ def _collect_integration_candidates(
                         )
                     )
 
-        # Check for webhook handlers
+        # Check for webhook handlers — skip pure comment lines to reduce false positives
         for pat in webhook_patterns:
             for m in pat.finditer(content):
                 line_num = _line_number_for_offset(line_starts, m.start())
                 line = lines[line_num - 1].strip() if line_num <= len(lines) else ""
+                if line.startswith(("#", "//", "*", "/*", "<!--")):
+                    continue
                 candidates.append(
                     IntegrationCandidate(
                         signal_type="webhook",

@@ -200,8 +200,10 @@ def init(name, description, provider, model, output_dir, with_chatbot):
         "openai": ("gpt-4o", "OPENAI_API_KEY"),
         "ollama": ("ollama/llama3.2", None),
         "azure": ("azure/gpt-4o", "AZURE_API_KEY"),
+        "google": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
+        "gemini": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
     }
-    default_model, default_key_env = provider_defaults.get(provider, ("", ""))
+    default_model, default_key_env = provider_defaults.get(provider, ("", "DEEPDOC_LLM_API_KEY"))
     resolved_model = model or default_model
 
     cfg = dict(DEFAULT_CONFIG)
@@ -261,14 +263,15 @@ def init(name, description, provider, model, output_dir, with_chatbot):
         )
         next_steps.append("  4. Generate docs:     [bold]deepdoc generate[/bold]")
         next_steps.append("  5. Preview locally:   [bold]deepdoc serve[/bold]")
-    elif cfg["llm"]["api_key_env"]:
-        next_steps.append(
-            f"  2. Set your API key:  [bold]export {cfg['llm']['api_key_env']}=...[/bold]"
-        )
+    elif provider == "ollama":
+        next_steps.append("  2. Make sure Ollama is running locally")
         next_steps.append("  3. Generate docs:     [bold]deepdoc generate[/bold]")
         next_steps.append("  4. Preview locally:   [bold]deepdoc serve[/bold]")
     else:
-        next_steps.append("  2. Make sure Ollama is running locally")
+        key_env = cfg["llm"].get("api_key_env") or "DEEPDOC_LLM_API_KEY"
+        next_steps.append(
+            f"  2. Set your API key:  [bold]export {key_env}=...[/bold]"
+        )
         next_steps.append("  3. Generate docs:     [bold]deepdoc generate[/bold]")
         next_steps.append("  4. Preview locally:   [bold]deepdoc serve[/bold]")
     if with_chatbot:

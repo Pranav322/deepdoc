@@ -126,8 +126,12 @@ def _build_clusters_from_llm(
     result: dict, symbols: list[Symbol]
 ) -> list[SymbolCluster]:
     """Convert LLM clustering result into SymbolCluster objects."""
-    # Index symbols by name for line range lookup
-    sym_by_name: dict[str, Symbol] = {s.name: s for s in symbols}
+    # Index symbols by name for line range lookup — keep first occurrence so
+    # duplicate names (overloads, same-name symbols across files) don't clobber each other.
+    sym_by_name: dict[str, Symbol] = {}
+    for s in symbols:
+        if s.name not in sym_by_name:
+            sym_by_name[s.name] = s
 
     clusters = []
     assigned: set[str] = set()

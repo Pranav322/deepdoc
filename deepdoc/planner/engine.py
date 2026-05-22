@@ -1,6 +1,6 @@
 from .common import *
 
-def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
+def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
 
     Phase 2 scans (giant-file clustering, endpoint bundles, integration discovery)
@@ -18,7 +18,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> DocPlan:
         Panel("[bold]Running Phase 2 scan upgrades[/bold]", border_style="green")
     )
     step_start = time.perf_counter()
-    scan = run_phase2_scans(scan, cfg, llm)
+    scan = run_phase2_scans(scan, cfg, llm, repo_root=repo_root)
     scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
 
     max_pages = cfg.get("max_pages", 0)
@@ -600,7 +600,7 @@ def _service_for_path(rel_path: str, boundaries: list[dict[str, Any]]) -> str:
     return ""
 
 
-def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> RepoScan:
+def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> RepoScan:
     """Enrich the basic scan with Phase 2 capabilities.
 
     Runs giant-file clustering, endpoint bundle building, integration discovery,
@@ -645,7 +645,12 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> Rep
                 executor.submit(_cluster_one, path): path for path in giant_files
             }
             for future in as_completed(futures):
-                path, analysis = future.result()
+                path = futures[future]
+                try:
+                    _, analysis = future.result()
+                except Exception as exc:
+                    console.print(f"    [yellow]⚠ Skipping {path}: {exc}[/yellow]")
+                    continue
                 scan.giant_file_clusters[path] = analysis
                 cluster_names = [c.cluster_name for c in analysis.clusters]
                 console.print(
@@ -661,7 +666,7 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> Rep
             published_api_endpoints,
             scan.parsed_files,
             scan.file_summaries,
-            Path("."),  # not used for resolution, just for typing
+            repo_root,
         )
         console.print(
             f"  [green]✓[/green] {len(scan.endpoint_bundles)} endpoint bundle(s)"
@@ -678,7 +683,7 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> Rep
             scan.parsed_files,
             scan.file_contents,
             scan.config_files,
-            Path("."),
+            repo_root,
             llm=llm,
         )
         if scan.integration_identities:
@@ -692,7 +697,7 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient) -> Rep
     # 2.4 Artifact discovery
     console.print("  [bold]Scanning for setup/deploy/test artifacts...[/bold]")
     scan.artifact_scan = discover_artifacts(
-        Path("."),
+        repo_root,
         scan.file_tree,
         scan.parsed_files,
         scan.file_contents,

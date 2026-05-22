@@ -493,7 +493,7 @@ class SmartUpdater:
         mini_cfg["include"] = change_set.new_files + change_set.changed_files
 
         try:
-            new_plan = bucket_plan_docs(scan, mini_cfg, self.llm)
+            new_plan = bucket_plan_docs(scan, mini_cfg, self.llm, repo_root=self.repo_root)
         except Exception as e:
             console.print(
                 f"[yellow]⚠ Targeted replan failed ({e}) — falling back to incremental[/yellow]"

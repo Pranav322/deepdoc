@@ -1,3 +1,4 @@
+.codex
 scripts/
 # CodeWiki generated state
 /.codewiki/
@@ -45,7 +46,6 @@ site/*
 !site/out/**
 !web/
 web/*
-!web/README.md
 !web/*.json
 !web/*.yaml
 !web/*.mjs

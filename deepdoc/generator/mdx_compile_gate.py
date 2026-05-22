@@ -24,6 +24,7 @@ from typing import Callable
 from ..llm import LLMClient
 from ..planner import DocBucket
 from ..prompts_v2 import SYSTEM_V2
+from .post_processors import escape_mdx_route_params, escape_mdx_text_hazards
 from .mdx_validator import (
     MdxCompileError,
     ValidationOutcome,
@@ -115,13 +116,19 @@ def apply_mdx_compile_gate(
             )
             continue
 
+        # Re-run hazard escaping so LLM fix attempts cannot reintroduce bare
+        # {expr} or route params that weren't present before the fix call.
+        fixed = escape_mdx_text_hazards(fixed)
+        fixed = escape_mdx_route_params(fixed)
         current = fixed
         next_outcome = validate(current)
         if next_outcome.ok:
             return GateOutcome(content=current, retries=retries)
         last_error = next_outcome.error
 
-    fallback = _strip_jsx_to_markdown(current)
+    # Escape hazards one more time before JSX stripping — the retry loop may
+    # have left bare {expr} in content that the strip pass won't handle.
+    fallback = _strip_jsx_to_markdown(escape_mdx_text_hazards(escape_mdx_route_params(current)))
     fallback_outcome = validate(fallback)
     return GateOutcome(
         content=fallback,

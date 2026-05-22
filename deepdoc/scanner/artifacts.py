@@ -137,29 +137,41 @@ def discover_artifacts(
     for rel in all_files:
         fname = rel.split("/")[-1]
         rel_lower = rel.lower()
+        # Pre-split path into segments for exact directory-name matching.
+        # This covers patterns like ".github", "workflows", "circleci" that identify
+        # directories and would never appear verbatim in a filename.
+        rel_parts = set(rel_lower.replace("\\", "/").split("/"))
+
+        def _pat_matches(pat: str) -> bool:
+            pat_l = pat.lower()
+            return (
+                fnmatch_simple(fname, pat)          # pattern in filename
+                or pat_l in rel_parts               # pattern is an exact path segment
+                or ("/" in pat and pat_l in rel_lower)  # path-style pattern
+            )
 
         for pat in SETUP_PATTERNS:
-            if pat.lower() in rel_lower or fnmatch_simple(fname, pat):
+            if _pat_matches(pat):
                 result.setup_artifacts.append(rel)
                 break
 
         for pat in DEPLOY_PATTERNS:
-            if pat.lower() in rel_lower or fnmatch_simple(fname, pat):
+            if _pat_matches(pat):
                 result.deploy_artifacts.append(rel)
                 break
 
         for pat in CI_PATTERNS:
-            if pat.lower() in rel_lower:
+            if _pat_matches(pat):
                 result.ci_artifacts.append(rel)
                 break
 
         for pat in TEST_PATTERNS:
-            if pat.lower() in rel_lower or fnmatch_simple(fname, pat):
+            if _pat_matches(pat):
                 result.test_artifacts.append(rel)
                 break
 
         for pat in OPS_PATTERNS:
-            if pat.lower() in rel_lower:
+            if _pat_matches(pat):
                 result.ops_artifacts.append(rel)
                 break
 

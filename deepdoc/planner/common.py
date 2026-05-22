@@ -257,6 +257,11 @@ Rules:
 - Group by BUSINESS WORKFLOW or LOGICAL CONCERN, not by file path.
 - Every bucket MUST have required_sections and required_diagrams specific to its content.
 - DEMOTION: do NOT create single-file utility buckets unless the file has a   substantial algorithm or subsystem.
+- MANDATORY BUCKETS (include when signals exist, these are required for new-joiner onboarding):
+  - INTRO: Always include exactly 1 introduction/overview bucket (is_introduction_page: true).
+  - SETUP: If setup/deploy/CI artifacts are listed, include a Getting Started or Local Setup bucket   covering prerequisites, install steps, env vars, and verification.
+  - DEBUG: If ≥2 debug signal types are listed, include a Debugging & Observability bucket covering   logging, health endpoints, error patterns, and monitoring hooks.
+  - GLOSSARY: Include a Domain Glossary bucket defining domain terms, status codes, and internal names   (omit only if the domain has fewer than 5 distinct concepts).
 """
 
 PROPOSE_PROMPT = """Based on these named topology clusters, propose documentation buckets.
@@ -279,6 +284,12 @@ PROPOSE_PROMPT = """Based on these named topology clusters, propose documentatio
 ## Database / Schema Info
 {database_info}
 
+## Debug & Observability Signals
+{debug_signals}
+
+## Repository Artifacts (setup, deploy, CI, test)
+{artifacts}
+
 ## Research / Markdown Context
 {research_context}
 
@@ -288,7 +299,9 @@ PROPOSE_PROMPT = """Based on these named topology clusters, propose documentatio
 ## Constraints
 {max_pages_instruction}
 - Must include: 1 introduction/overview bucket (is_introduction_page: true)
-- If setup artifacts exist, include a setup/getting-started bucket
+- If setup/deploy/CI artifacts listed above: include a setup/getting-started bucket
+- If debug signals listed above (≥2 types): include a Debugging & Observability bucket
+- Include a Domain Glossary bucket (omit only for trivial domains with <5 terms)
 - If database models detected: include a database bucket with   include_database_context: true, prompt_style: "database",   required_sections: ["er_diagram", "table_definitions", "relationships", "migrations"]
 - Endpoint-entry-point buckets MUST have required_diagrams: ["sequence_diagram"]   to embed the call flow inline -- no separate flow pages
 - Group by business workflow, NOT file directories
@@ -418,235 +431,6 @@ STOPWORD_TOKENS = {
     "workflows",
     "overview",
     "architecture",
-}
-
-PROFILE_TOPIC_TEMPLATES: dict[str, list[tuple[str, list[str], str]]] = {
-    "research_training": [
-        (
-            "Model Architecture",
-            [
-                "model",
-                "transformer",
-                "attention",
-                "flash",
-                "layer",
-                "embedding",
-                "kv",
-                "float8",
-                "fp8",
-                "quant",
-            ],
-            "model",
-        ),
-        (
-            "Optimization",
-            [
-                "optim",
-                "optimizer",
-                "adam",
-                "muon",
-                "schedule",
-                "scheduler",
-                "lr",
-                "weight_decay",
-            ],
-            "optimization",
-        ),
-        (
-            "Training",
-            [
-                "train",
-                "trainer",
-                "checkpoint",
-                "loss",
-                "dist",
-                "ddp",
-                "backward",
-                "gradient",
-            ],
-            "training",
-        ),
-        (
-            "Data Pipeline",
-            [
-                "data",
-                "dataset",
-                "dataloader",
-                "tokenizer",
-                "parquet",
-                "preprocess",
-                "conversation",
-                "shard",
-                "pack",
-            ],
-            "data_pipeline",
-        ),
-        (
-            "Evaluation",
-            ["eval", "metric", "benchmark", "score", "report", "validate"],
-            "evaluation",
-        ),
-        (
-            "Inference & Runtime",
-            [
-                "infer",
-                "generate",
-                "sampling",
-                "chat",
-                "serve",
-                "cache",
-                "runtime",
-                "stats",
-            ],
-            "inference",
-        ),
-        ("Interfaces", ["cli", "command", "api", "web", "ui"], "interfaces"),
-        (
-            "Research Context",
-            ["experiment", "ablation", "glossary", "history", "design", "notes"],
-            "research_context",
-        ),
-    ],
-    "backend_api": [
-        (
-            "Architecture",
-            ["middleware", "auth", "handler", "service", "route", "controller"],
-            "architecture",
-        ),
-        (
-            "Domain Flows",
-            ["order", "payment", "user", "inventory", "shipping", "checkout"],
-            "domain",
-        ),
-        ("API", ["api", "endpoint", "request", "response", "schema"], "api"),
-        (
-            "Integrations",
-            ["client", "provider", "gateway", "webhook", "sync"],
-            "integration",
-        ),
-        (
-            "Data Layer",
-            ["model", "schema", "migration", "repository", "orm"],
-            "data_layer",
-        ),
-        (
-            "Operations",
-            ["logging", "metric", "health", "deploy", "config", "queue"],
-            "operations",
-        ),
-    ],
-    "backend_service": [
-        (
-            "Architecture",
-            ["middleware", "auth", "handler", "service", "route", "controller"],
-            "architecture",
-        ),
-        (
-            "Domain Flows",
-            ["order", "payment", "user", "inventory", "shipping", "checkout"],
-            "domain",
-        ),
-        ("API", ["api", "endpoint", "request", "response", "schema"], "api"),
-        (
-            "Integrations",
-            ["client", "provider", "gateway", "webhook", "sync"],
-            "integration",
-        ),
-        (
-            "Data Layer",
-            ["model", "schema", "migration", "repository", "orm"],
-            "data_layer",
-        ),
-        (
-            "Operations",
-            ["logging", "metric", "health", "deploy", "config", "queue"],
-            "operations",
-        ),
-    ],
-    "falcon_backend": [
-        (
-            "Falcon Runtime",
-            ["falcon", "add_route", "middleware", "auth", "translator"],
-            "falcon_runtime",
-        ),
-        (
-            "Domain Flows",
-            ["order", "payment", "user", "inventory", "shipping", "checkout"],
-            "domain",
-        ),
-        ("API", ["api", "endpoint", "request", "response", "resource"], "api"),
-        ("Services", ["service", "controller", "handler", "sync", "task"], "services"),
-        (
-            "Data Layer",
-            ["model", "schema", "migration", "repository", "orm"],
-            "data_layer",
-        ),
-        (
-            "Operations",
-            ["logging", "metric", "deploy", "config", "queue", "celery"],
-            "operations",
-        ),
-    ],
-    "monorepo_product": [
-        ("Monorepo Structure", ["package", "workspace", "repo", "shared"], "structure"),
-        ("Runtime", ["runtime", "worker", "execution", "engine", "process"], "runtime"),
-        (
-            "API & Services",
-            ["api", "server", "service", "handler", "controller"],
-            "api_services",
-        ),
-        ("Frontend", ["component", "ui", "canvas", "editor", "state"], "frontend"),
-        ("Configuration", ["config", "env", "docker", "build"], "configuration"),
-        ("Release", ["release", "ci", "workflow", "version"], "release"),
-    ],
-    "platform_monorepo": [
-        ("Monorepo Structure", ["package", "workspace", "repo", "shared"], "structure"),
-        ("Runtime", ["runtime", "worker", "execution", "engine", "process"], "runtime"),
-        (
-            "API & Services",
-            ["api", "server", "service", "handler", "controller"],
-            "api_services",
-        ),
-        ("Frontend", ["component", "ui", "canvas", "editor", "state"], "frontend"),
-        ("Configuration", ["config", "env", "docker", "build"], "configuration"),
-        ("Release", ["release", "ci", "workflow", "version"], "release"),
-    ],
-    "framework_library": [
-        (
-            "Architecture",
-            ["architecture", "parser", "render", "engine", "plugin"],
-            "architecture",
-        ),
-        ("Core API", ["api", "config", "render", "layout", "detect"], "core_api"),
-        (
-            "Framework Surfaces",
-            ["diagram", "component", "syntax", "extension"],
-            "framework_surface",
-        ),
-        ("Development", ["test", "build", "ci", "quality", "bundle"], "development"),
-        ("Ecosystem", ["docs", "integration", "plugin", "community"], "ecosystem"),
-    ],
-    "frontend_admin": [
-        ("Overview", ["overview", "architecture", "app"], "overview"),
-        ("Frontend", ["component", "ui", "page", "state", "router"], "frontend"),
-        ("Data & API", ["api", "query", "mutation", "fetch", "client"], "data_api"),
-        ("Operations", ["config", "build", "deploy", "env"], "operations"),
-        ("Testing", ["test", "cypress", "playwright", "spec"], "testing"),
-    ],
-    "cli_tooling": [
-        ("Overview", ["overview", "architecture", "workflow"], "overview"),
-        ("CLI", ["cli", "command", "args", "flags", "dispatch"], "cli"),
-        ("Pipeline", ["pipeline", "generate", "update", "scan", "plan"], "pipeline"),
-        ("Integrations", ["provider", "api", "client", "llm"], "integration"),
-        ("Operations", ["config", "build", "deploy", "release"], "operations"),
-    ],
-    "hybrid": [
-        ("Architecture", ["architecture", "runtime", "workflow"], "architecture"),
-        ("Runtime & Services", ["api", "service", "handler", "controller"], "runtime"),
-        ("Frontend", ["component", "ui", "page", "state"], "frontend"),
-        ("Data Layer", ["model", "schema", "migration", "repository"], "data_layer"),
-        ("Operations", ["config", "deploy", "build", "ci", "queue"], "operations"),
-    ],
 }
 
 DECOMPOSE_SYSTEM = """\

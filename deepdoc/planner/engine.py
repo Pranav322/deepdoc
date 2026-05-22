@@ -149,6 +149,33 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             db_parts.append(f"  Schema files: {', '.join(db_scan.schema_files)}")
         database_info = "\n".join(db_parts)
 
+    # Debug signals summary for PROPOSE context
+    debug_signals_str = "(none)"
+    if scan.debug_signals:
+        counts: dict[str, int] = {}
+        for sig in scan.debug_signals:
+            counts[sig.signal_type] = counts.get(sig.signal_type, 0) + 1
+        debug_signals_str = "\n".join(
+            f"- {kind}: {n} signal(s)" for kind, n in counts.items()
+        )
+
+    # Artifact summary for PROPOSE context
+    artifacts_str = "(none)"
+    if scan.artifact_scan:
+        a = scan.artifact_scan
+        parts = []
+        if getattr(a, "setup_artifacts", []):
+            sample = ", ".join(a.setup_artifacts[:3])
+            parts.append(f"- {len(a.setup_artifacts)} setup files ({sample})")
+        if getattr(a, "deploy_artifacts", []):
+            parts.append(f"- {len(a.deploy_artifacts)} deploy files")
+        if getattr(a, "ci_artifacts", []):
+            parts.append(f"- {len(a.ci_artifacts)} CI files")
+        if getattr(a, "test_artifacts", []):
+            parts.append(f"- {len(a.test_artifacts)} test files")
+        if parts:
+            artifacts_str = "\n".join(parts)
+
     # max_pages instruction
     if max_pages and max_pages > 0:
         max_pages_instruction = f"- Maximum total buckets: {max_pages}"
@@ -170,6 +197,8 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         cross_cutting=cross_cutting,
         giant_files=giant_files_str,
         database_info=database_info,
+        debug_signals=debug_signals_str,
+        artifacts=artifacts_str,
         research_context=research_context_str,
         repo_profile=repo_profile_str,
         max_pages_instruction=max_pages_instruction,
@@ -787,6 +816,6 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return False
 
 
-from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _derive_topic_candidates, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
-from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_topic_candidates, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
+from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
+from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets

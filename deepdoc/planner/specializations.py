@@ -6,24 +6,162 @@ def _ensure_database_runtime_and_interface_buckets(
     scan: RepoScan,
     cfg: dict[str, Any],
 ) -> DocPlan:
-    """Inject deterministic database/runtime/interface bucket branches."""
-    plan.buckets = _replace_specialized_buckets(
-        plan.buckets,
-        prefixes=("database-", "background-jobs", "graphql-"),
-        prompt_styles={
-            "database",
-            "database_overview",
-            "database_group",
-            "runtime",
-            "runtime_overview",
-            "graphql",
-        },
-    )
-    plan.buckets.extend(_build_database_buckets(scan, cfg))
-    plan.buckets.extend(_build_runtime_buckets(scan, cfg))
-    plan.buckets.extend(_build_graphql_buckets(scan, cfg))
+    """Enrich LLM-proposed database/runtime/graphql buckets with correct generation hints.
+
+    Enrich-first: if the LLM already proposed a bucket covering this surface, add
+    the required generation_hints and required_sections to it without changing its
+    title, slug, section, or owned_files. Only create a new bucket if none exists.
+    """
+    plan.buckets = _enrich_or_create_database_buckets(plan, scan, cfg)
+    plan.buckets = _enrich_or_create_runtime_buckets(plan, scan, cfg)
+    plan.buckets = _enrich_or_create_graphql_buckets(plan, scan, cfg)
     plan.buckets = sorted(plan.buckets, key=lambda bucket: bucket.priority)
     return plan
+
+
+def _find_existing_database_bucket(buckets: list[DocBucket], db_files: set[str]) -> DocBucket | None:
+    """Find an LLM-proposed bucket that covers the database surface."""
+    for b in buckets:
+        hints = b.generation_hints or {}
+        if hints.get("include_database_context") or hints.get("is_database_overview"):
+            return b
+        bt = b.bucket_type.lower()
+        if any(kw in bt for kw in ("database", "schema", "data-model", "data_model", "model")):
+            return b
+        if db_files and len(db_files & set(b.owned_files)) >= min(2, len(db_files)):
+            return b
+    return None
+
+
+def _find_existing_runtime_bucket(buckets: list[DocBucket], task_files: set[str]) -> DocBucket | None:
+    """Find an LLM-proposed bucket that covers the background tasks surface."""
+    for b in buckets:
+        hints = b.generation_hints or {}
+        if hints.get("is_runtime_overview"):
+            return b
+        bt = b.bucket_type.lower()
+        if any(kw in bt for kw in ("job", "worker", "task", "queue", "celery", "scheduler", "background")):
+            return b
+        if task_files and len(task_files & set(b.owned_files)) >= min(2, len(task_files)):
+            return b
+    return None
+
+
+def _find_existing_graphql_bucket(buckets: list[DocBucket], gql_files: set[str]) -> DocBucket | None:
+    """Find an LLM-proposed bucket that covers the GraphQL surface."""
+    for b in buckets:
+        hints = b.generation_hints or {}
+        if hints.get("prompt_style") in ("graphql", "graphql_overview"):
+            return b
+        bt = b.bucket_type.lower()
+        if "graphql" in bt or "graph-ql" in bt:
+            return b
+        if gql_files and len(gql_files & set(b.owned_files)) >= min(2, len(gql_files)):
+            return b
+    return None
+
+
+def _enrich_bucket_hints(bucket: DocBucket, extra_hints: dict, extra_sections: list[str], extra_diagrams: list[str]) -> None:
+    """Merge generation_hints and required_sections into an existing bucket without overwriting structure."""
+    hints = dict(bucket.generation_hints or {})
+    hints.update(extra_hints)
+    bucket.generation_hints = hints
+    existing_sections = set(bucket.required_sections)
+    for s in extra_sections:
+        if s not in existing_sections:
+            bucket.required_sections.append(s)
+    existing_diagrams = set(bucket.required_diagrams)
+    for d in extra_diagrams:
+        if d not in existing_diagrams:
+            bucket.required_diagrams.append(d)
+
+
+def _enrich_or_create_database_buckets(plan: DocPlan, scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucket]:
+    artifact_scan = getattr(scan, "artifact_scan", None)
+    db_scan = getattr(artifact_scan, "database_scan", None) if artifact_scan else None
+    if not db_scan:
+        return plan.buckets
+
+    db_files = set(
+        [mf.file_path for mf in db_scan.model_files]
+        + list(db_scan.schema_files)
+        + [a.file_path for a in getattr(db_scan, "knex_artifacts", [])]
+    )
+    if not db_files:
+        return plan.buckets
+
+    existing = _find_existing_database_bucket(plan.buckets, db_files)
+    if existing:
+        _enrich_bucket_hints(
+            existing,
+            extra_hints={"include_database_context": True, "prompt_style": "database_overview",
+                         "icon": "database", "is_database_overview": True},
+            extra_sections=["overview", "storage_model", "high_level_er_diagram", "migrations", "query_patterns"],
+            extra_diagrams=["er_diagram"],
+        )
+        # Add any db_files not already owned
+        owned = set(existing.owned_files)
+        for f in sorted(db_files):
+            if f not in owned:
+                existing.owned_files.append(f)
+                owned.add(f)
+        return plan.buckets
+
+    # Fallback: LLM didn't propose one — create it
+    new_buckets = _build_database_buckets(scan, cfg)
+    return plan.buckets + new_buckets
+
+
+def _enrich_or_create_runtime_buckets(plan: DocPlan, scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucket]:
+    runtime_scan = getattr(scan, "runtime_scan", None)
+    if not runtime_scan:
+        return plan.buckets
+    task_files = set(
+        [t.file_path for t in getattr(runtime_scan, "tasks", []) if t.file_path]
+        + [s.file_path for s in getattr(runtime_scan, "schedulers", []) if s.file_path]
+    )
+    if not task_files:
+        return plan.buckets
+
+    existing = _find_existing_runtime_bucket(plan.buckets, task_files)
+    if existing:
+        _enrich_bucket_hints(
+            existing,
+            extra_hints={"prompt_style": "runtime_overview", "icon": "cog", "is_runtime_overview": True},
+            extra_sections=["overview", "task_inventory", "scheduling", "error_handling"],
+            extra_diagrams=[],
+        )
+        owned = set(existing.owned_files)
+        for f in sorted(task_files):
+            if f not in owned:
+                existing.owned_files.append(f)
+                owned.add(f)
+        return plan.buckets
+
+    new_buckets = _build_runtime_buckets(scan, cfg)
+    return plan.buckets + new_buckets
+
+
+def _enrich_or_create_graphql_buckets(plan: DocPlan, scan: RepoScan, cfg: dict[str, Any]) -> list[DocBucket]:
+    gql_interfaces = getattr(scan, "graphql_interfaces", [])
+    if not gql_interfaces:
+        return plan.buckets
+    gql_files = set(
+        getattr(iface, "file_path", "") for iface in gql_interfaces if getattr(iface, "file_path", "")
+    )
+
+    existing = _find_existing_graphql_bucket(plan.buckets, gql_files)
+    if existing:
+        _enrich_bucket_hints(
+            existing,
+            extra_hints={"prompt_style": "graphql", "icon": "circle-stack"},
+            extra_sections=["schema_overview", "queries", "mutations", "resolvers"],
+            extra_diagrams=[],
+        )
+        return plan.buckets
+
+    new_buckets = _build_graphql_buckets(scan, cfg)
+    return plan.buckets + new_buckets
 
 
 def _attach_flow_hints_to_cluster_buckets(

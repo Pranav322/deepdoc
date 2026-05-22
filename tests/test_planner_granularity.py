@@ -18,7 +18,6 @@ from deepdoc.planner import (
     _auto_generate_endpoint_refs,
     _build_heuristic_assignment,
     _decompose_buckets,
-    _derive_topic_candidates,
     _ensure_database_runtime_and_interface_buckets,
     _inject_research_context_buckets,
     _inject_start_here_and_debug_buckets,
@@ -679,10 +678,12 @@ def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
     assert "setup" not in slugs
 
     sections = list(shaped.nav_structure.keys())
+    # Phase 5: endpoint-family buckets are tier-1 (user-facing), so they sort before
+    # tier-2 feature sections. LLM-assigned section names are trusted as-is.
     assert sections[:3] == [
         "Start Here",
-        "Core Workflows",
         "API Reference > Orders API",
+        "Architecture",
     ]
     assert shaped.nav_structure["Start Here"] == [
         "start-here",
@@ -753,18 +754,17 @@ def test_shape_plan_nav_recategorizes_path_slug_backend_sections() -> None:
         plan, {"repo_profile": {"primary_type": "backend_service"}}
     )
 
+    # Path-slug sections are recategorized to "Architecture" (generic fallback).
+    # Phase 5: LLM section names are trusted; with no LLM-assigned meaningful sections,
+    # all buckets land in "Architecture" rather than per-type keyword-derived sections.
     assert not any(section.startswith("new-src-") for section in shaped.nav_structure)
-    assert shaped.nav_structure["Core Workflows"] == [
-        "product-sync-service",
-        "inventory-service",
-    ]
-    assert shaped.nav_structure["Integrations"] == [
-        "vinculum-warehouse-management-integration"
-    ]
-    assert shaped.nav_structure["Operations"] == ["logging-observability"]
-    assert shaped.nav_structure["Supporting Infrastructure"] == [
-        "authentication-authorization"
-    ]
+    assert "Architecture" in shaped.nav_structure
+    arch_slugs = shaped.nav_structure["Architecture"]
+    assert "product-sync-service" in arch_slugs
+    assert "inventory-service" in arch_slugs
+    assert "vinculum-warehouse-management-integration" in arch_slugs
+    assert "logging-observability" in arch_slugs
+    assert "authentication-authorization" in arch_slugs
 
 
 def test_specialized_bucket_injection_splits_large_database_docs_and_adds_runtime_pages() -> (
@@ -1177,51 +1177,6 @@ def test_scan_repo_collects_research_context(tmp_path: Path) -> None:
     assert "design_history" in kinds
     assert "experiment_log" in kinds
 
-
-def test_topic_candidates_use_code_and_doc_context() -> None:
-    scan = _make_scan(
-        file_summaries={"train.py": "train", "model.py": "model"},
-        parsed_files={
-            "train.py": _parsed_file(
-                "train.py",
-                imports=["torch.optim", "dataset"],
-                symbols=[
-                    Symbol(
-                        name="train_loop",
-                        kind="function",
-                        signature="def train_loop():",
-                    )
-                ],
-            ),
-            "model.py": _parsed_file(
-                "model.py",
-                imports=["torch.nn"],
-                symbols=[
-                    Symbol(
-                        name="Transformer", kind="class", signature="class Transformer:"
-                    )
-                ],
-            ),
-        },
-    )
-    scan.research_contexts = [
-        {
-            "kind": "glossary",
-            "title": "Glossary",
-            "file_path": "docs/glossary.md",
-            "summary": "Terms for model, optimizer, and evaluation.",
-            "headings": ["Glossary"],
-        }
-    ]
-    candidates = _derive_topic_candidates(
-        scan,
-        {"repo_profile": {"primary_type": "research_training"}},
-    )
-
-    titles = {item["title"] for item in candidates}
-    assert "Model Architecture" in titles
-    assert "Training" in titles
-    assert "Glossary" in titles
 
 
 def test_normalize_tokens_preserves_expected_token_shapes() -> None:

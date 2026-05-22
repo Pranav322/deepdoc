@@ -109,10 +109,23 @@ def _shape_plan_nav(
             continue
         _append_nav_slug(nav, "API Reference", bucket.slug)
 
+    # Build section → tier map for three-tier nav ordering
+    slug_to_bucket_map = {bucket.slug: bucket for bucket in plan.buckets}
+    section_buckets_by_top: dict[str, list[DocBucket]] = defaultdict(list)
+    for section, slugs in nav.items():
+        top_section = _section_top(section)
+        for slug in slugs:
+            if slug in slug_to_bucket_map:
+                section_buckets_by_top[top_section].append(slug_to_bucket_map[slug])
+    section_tier_map = {
+        top: _compute_section_tier(buckets_list)
+        for top, buckets_list in section_buckets_by_top.items()
+    }
+
     section_order = {section: idx for idx, section in enumerate(nav.keys())}
     ordered_sections = sorted(
         nav.keys(),
-        key=lambda section: _section_sort_key(section, primary, section_depth, section_order),
+        key=lambda section: _section_sort_key(section, primary, section_depth, section_order, section_tier_map),
     )
 
     plan.nav_structure = {
@@ -156,36 +169,17 @@ def _normalize_nav_section(section: str, primary: str) -> str:
     value = (section or "").strip() or _default_section_for_primary(primary)
     top, sep, rest = value.partition(" > ")
 
-    # Universal aliases
+    # Universal synonym aliases — collapse variant spellings, don't impose structure
     top = {
+        "Getting Started": "Start Here",
         "API Endpoints": "API Reference",
         "API": "API Reference",
         "Database": "Data Model",
         "Data Layer": "Data Model",
-        "Getting Started": "Start Here",
+        "Background Processing": "Background Jobs",
+        "Async Tasks": "Background Jobs",
+        "Jobs": "Background Jobs",
     }.get(top, top)
-
-    # Backend-specific remaps
-    backend_like = {"backend_service", "falcon_backend", "hybrid"}
-    if primary in backend_like:
-        top = {
-            "Data Layer": "Data Model",
-            "Database": "Data Model",
-            "Architecture": "Core Workflows",
-            "Subsystems": "Core Workflows",
-            "Modules": "Core Workflows",
-            "API": "API Reference",
-            "Getting Started": "Start Here",
-            "Research Context": "Design & Notes",
-            "Background Processing": "Background Jobs",
-            "Jobs": "Background Jobs",
-            "Async Tasks": "Background Jobs",
-            "Platform Utilities": "Supporting Infrastructure",
-            "Utilities": "Supporting Infrastructure",
-        }.get(top, top)
-
-    if top == "Database":
-        top = "Data Model"
 
     if sep:
         if rest.strip() == top:
@@ -313,60 +307,49 @@ def _build_section_depth_map(
     return section_depth
 
 
+def _compute_section_tier(buckets_in_section: list[DocBucket]) -> int:
+    """Return 1=user-facing, 2=domain/feature, 3=infrastructure.
+
+    Tier 1: sections containing intro, endpoint family, or endpoint-detail buckets.
+    Tier 2: sections containing feature/integration/database/endpoint bucket types.
+    Tier 3: everything else (foundational, infrastructure, utility).
+    """
+    for b in buckets_in_section:
+        hints = b.generation_hints or {}
+        if (
+            hints.get("is_introduction_page")
+            or hints.get("is_endpoint_family")
+            or hints.get("include_endpoint_detail")
+        ):
+            return 1
+    for b in buckets_in_section:
+        if b.bucket_type in ("feature", "integration", "database", "endpoint", "endpoint_ref"):
+            return 2
+    return 3
+
+
 def _section_sort_key(
     section: str,
     primary: str,
     section_depth: dict[str, int],
     section_order: dict[str, int],
+    section_tier_map: dict[str, int] | None = None,
 ) -> tuple:
     """Sort key for nav sections.
 
-    For research_training: use the established domain-specific order.
-    For all other types: pin Start Here / Overview first and tail sections
-    last; order everything in between by topology depth (entry-point
-    clusters first, foundational last), falling back to first-appearance.
+    Pins Start Here / Overview first and tail sections (Testing, CI/CD, Supporting
+    Material) last. Everything in between is ordered by three tiers that preserve
+    a newcomer reading journey (user-facing → domain/feature → infrastructure),
+    with topology depth as a tiebreaker within each tier.
     """
     top = _section_top(section)
 
-    if primary == "research_training":
-        _RT_ORDER = [
-            "Start Here", "Overview", "Model Architecture", "Training",
-            "Optimization", "Data Pipeline", "Evaluation", "Inference & Runtime",
-            "Interfaces", "Operations", "Research Context", "Design & Notes",
-            "Testing", "CI/CD and Release", "Supporting Material",
-        ]
-        rank = _RT_ORDER.index(top) if top in _RT_ORDER else 10
-        return (rank, section_order.get(section, 999), section)
-
-    if primary in {"backend_service", "backend_api", "falcon_backend"}:
-        _BACKEND_ORDER = [
-            "Start Here",
-            "Overview",
-            "Core Workflows",
-            "API Reference",
-            "Data Model",
-            "Background Jobs",
-            "Integrations",
-            "Operations",
-            "Runtime & Frameworks",
-            "Supporting Infrastructure",
-            "Design & Notes",
-            "Testing",
-            "CI/CD and Release",
-            "Supporting Material",
-        ]
-        rank = _BACKEND_ORDER.index(top) if top in _BACKEND_ORDER else 8
-        child_rank = 0 if section == top else 1
-        return (rank, child_rank, section_order.get(section, 999), section)
-
-    _FIRST = {"Start Here": 0, "Overview": 1, "Getting Started": 2}
+    _FIRST = {"Start Here": 0, "Overview": 1}
     _LAST = {
-        "Supporting Infrastructure": 55,
-        "Design & Notes": 60,
-        "Testing": 61,
-        "CI/CD and Release": 62,
-        "CI/CD & Release": 62,
-        "Supporting Material": 63,
+        "Testing": 57,
+        "CI/CD and Release": 58,
+        "CI/CD & Release": 58,
+        "Supporting Material": 59,
     }
 
     if top in _FIRST:
@@ -374,6 +357,10 @@ def _section_sort_key(
     if top in _LAST:
         return (_LAST[top], section_order.get(section, 999), section)
 
-    # Middle sections: order by topology depth (3 = entry-facing, 50 = unknown)
+    # Three-tier middle: user-facing (10+) → domain/feature (20+) → infrastructure (30+)
+    # Within each tier, topology depth orders entry-point-facing sections first.
+    tier = (section_tier_map or {}).get(top, 3)
+    tier_base = 10 * tier
     depth = section_depth.get(top, 50)
-    return (3 + depth, section_order.get(section, 999), section)
+    child_rank = 0 if section == top else 1
+    return (tier_base + depth, child_rank, section_order.get(section, 999), section)

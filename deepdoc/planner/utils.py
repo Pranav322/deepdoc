@@ -423,19 +423,6 @@ def _print_plan_summary(plan: DocPlan) -> None:
     )
 
 
-def _format_topic_candidates(candidates: list[dict[str, Any]]) -> str:
-    if not candidates:
-        return "(none)"
-    lines = []
-    for item in candidates[:20]:
-        files = ", ".join(item.get("evidence_files", [])[:4]) or "none"
-        docs = ", ".join(item.get("evidence_docs", [])[:3]) or "none"
-        signals = ", ".join(item.get("signals", [])[:6]) or "none"
-        lines.append(
-            f"- {item['title']} [{item['category']}] score={item['score']} | files: {files} | docs: {docs} | signals: {signals}"
-        )
-    return "\n".join(lines)
-
 
 def _format_research_context(scan: RepoScan) -> str:
     if not scan.research_contexts and not scan.doc_contexts:

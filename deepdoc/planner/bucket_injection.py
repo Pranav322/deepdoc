@@ -21,13 +21,40 @@ def _inject_start_here_and_debug_buckets(
 ) -> DocPlan:
     """Inject Start Here (orientation) and Debug Runbook buckets into the plan.
 
-    Start Here buckets are always generated (orientation, setup, domain glossary).
-    Debug Runbook is only generated if debug_signals were detected.
+    Acts as a safety net: each bucket is only injected if the LLM didn't already
+    propose an equivalent. The LLM is instructed to propose these when signals exist,
+    so injection here fires only on LLM omission.
     """
-    # ── Start Here section (always generated) ──────────────────────────────
-    # Generate 3 pages: index (orientation), setup (local dev), and domain glossary.
-    # These are always present regardless of codebase type — they are the entry point
-    # for every new team member.
+    # ── Detect what the LLM already proposed ──────────────────────────────
+    existing_slugs = {b.slug for b in plan.buckets}
+    existing_types = {b.bucket_type for b in plan.buckets}
+    existing_hints = {
+        k for b in plan.buckets for k, v in (b.generation_hints or {}).items() if v
+    }
+
+    has_intro = any(
+        (b.generation_hints or {}).get("is_introduction_page") for b in plan.buckets
+    )
+    has_setup = (
+        "start_here_setup" in existing_types
+        or "local-development-setup" in existing_slugs
+        or any(
+            b.bucket_type in ("setup", "getting-started", "local-development")
+            or "setup" in b.slug
+            or "getting-started" in b.slug
+            for b in plan.buckets
+        )
+    )
+    has_glossary = any(
+        "glossary" in b.slug or b.bucket_type in ("domain_glossary", "glossary")
+        for b in plan.buckets
+    )
+    has_debug = any(
+        "debug" in b.slug
+        or "observability" in b.slug
+        or b.bucket_type in ("debug_runbook", "debugging", "observability")
+        for b in plan.buckets
+    )
 
     plan.nav_structure.setdefault("Start Here", [])
 
@@ -89,39 +116,41 @@ def _inject_start_here_and_debug_buckets(
     if not start_here_files:
         start_here_files = high_trust_files[:24]
 
-    # Start Here Index (orientation)
-    plan.buckets.insert(
-        0,
-        DocBucket(
-            bucket_type="start_here_index",
-            title="Start Here",
-            slug="start-here",
-            section="Start Here",
-            description="New-joiner orientation: what this service does, who uses it, how to navigate the docs, and the 5 files every developer must know.",
-            owned_files=start_here_files,
-            artifact_refs=artifact_files[:10] if artifact_files else [],
-            required_sections=[
-                "what_this_does",
-                "who_uses_it",
-                "tech_at_a_glance",
-                "getting_running",
-                "reading_order",
-                "architecture_diagram",
-                "five_key_files",
-                "day_one_questions",
-            ],
-            required_diagrams=["architecture_overview"],
-            generation_hints={
-                "prompt_style": "start_here_index",
-                "icon": "rocket",
-                "always_generate": True,
-                "preserve_section": True,
-            },
-            priority=-20,  # highest priority — generate first
-            parent_slug=None,
-        ),
-    )
-    plan.nav_structure["Start Here"].insert(0, "start-here")
+    # Start Here Index (orientation) — inject only if LLM didn't propose one
+    if not has_intro:
+        plan.buckets.insert(
+            0,
+            DocBucket(
+                bucket_type="start_here_index",
+                title="Start Here",
+                slug="start-here",
+                section="Start Here",
+                description="New-joiner orientation: what this service does, who uses it, how to navigate the docs, and the 5 files every developer must know.",
+                owned_files=start_here_files,
+                artifact_refs=artifact_files[:10] if artifact_files else [],
+                required_sections=[
+                    "what_this_does",
+                    "who_uses_it",
+                    "tech_at_a_glance",
+                    "getting_running",
+                    "reading_order",
+                    "architecture_diagram",
+                    "five_key_files",
+                    "day_one_questions",
+                ],
+                required_diagrams=["architecture_overview"],
+                generation_hints={
+                    "prompt_style": "start_here_index",
+                    "is_introduction_page": True,
+                    "icon": "rocket",
+                    "always_generate": True,
+                    "preserve_section": True,
+                },
+                priority=-20,
+                parent_slug=None,
+            ),
+        )
+        plan.nav_structure["Start Here"].insert(0, "start-here")
 
     # Local Development Setup
     setup_files = [
@@ -146,73 +175,74 @@ def _inject_start_here_and_debug_buckets(
     ]
     setup_files = _unique_paths([*trusted_entry_points, *trusted_config_files, *setup_files])[:24]
 
-    plan.buckets.insert(
-        1,
-        DocBucket(
-            bucket_type="start_here_setup",
-            title="Local Development Setup",
-            slug="local-development-setup",
-            section="Start Here",
-            description="Complete step-by-step guide to running this service locally, including all environment variables, dependencies, and verification steps.",
-            owned_files=setup_files,
-            artifact_refs=artifact_files[:15] if artifact_files else [],
-            required_sections=[
-                "prerequisites",
-                "clone_and_install",
-                "environment_variables",
-                "database_setup",
-                "external_dependencies",
-                "starting_service",
-                "verification",
-                "troubleshooting",
-            ],
-            generation_hints={
-                "prompt_style": "start_here_setup",
-                "icon": "terminal",
-                "always_generate": True,
-                "preserve_section": True,
-            },
-            priority=-19,
-            parent_slug=None,
-        ),
-    )
-    plan.nav_structure["Start Here"].insert(1, "local-development-setup")
+    if not has_setup:
+        plan.buckets.insert(
+            1,
+            DocBucket(
+                bucket_type="start_here_setup",
+                title="Local Development Setup",
+                slug="local-development-setup",
+                section="Start Here",
+                description="Complete step-by-step guide to running this service locally, including all environment variables, dependencies, and verification steps.",
+                owned_files=setup_files,
+                artifact_refs=artifact_files[:15] if artifact_files else [],
+                required_sections=[
+                    "prerequisites",
+                    "clone_and_install",
+                    "environment_variables",
+                    "database_setup",
+                    "external_dependencies",
+                    "starting_service",
+                    "verification",
+                    "troubleshooting",
+                ],
+                generation_hints={
+                    "prompt_style": "start_here_setup",
+                    "icon": "terminal",
+                    "always_generate": True,
+                    "preserve_section": True,
+                },
+                priority=-19,
+                parent_slug=None,
+            ),
+        )
+        plan.nav_structure["Start Here"].insert(1, "local-development-setup")
 
-    # Domain Glossary
-    plan.buckets.insert(
-        2,
-        DocBucket(
-            bucket_type="domain_glossary",
-            title="Domain Glossary",
-            slug="domain-glossary",
-            section="Start Here",
-            description="Plain-English definitions of every domain-specific term, model name, status code, and internal system name used in this codebase.",
-            owned_files=db_model_files[:10] if db_model_files else all_files[:8],
-            artifact_refs=[],
-            required_sections=[
-                "how_to_use",
-                "domain_terms",
-                "status_codes_and_state_machines",
-                "integration_name_map",
-                "abbreviations",
-            ],
-            required_diagrams=["state_machine_for_primary_entity"],
-            generation_hints={
-                "prompt_style": "domain_glossary",
-                "icon": "book-open",
-                "always_generate": True,
-                "preserve_section": True,
-            },
-            priority=-18,
-            parent_slug=None,
-        ),
-    )
-    plan.nav_structure["Start Here"].insert(2, "domain-glossary")
+    if not has_glossary:
+        plan.buckets.insert(
+            2,
+            DocBucket(
+                bucket_type="domain_glossary",
+                title="Domain Glossary",
+                slug="domain-glossary",
+                section="Start Here",
+                description="Plain-English definitions of every domain-specific term, model name, status code, and internal system name used in this codebase.",
+                owned_files=db_model_files[:10] if db_model_files else all_files[:8],
+                artifact_refs=[],
+                required_sections=[
+                    "how_to_use",
+                    "domain_terms",
+                    "status_codes_and_state_machines",
+                    "integration_name_map",
+                    "abbreviations",
+                ],
+                required_diagrams=["state_machine_for_primary_entity"],
+                generation_hints={
+                    "prompt_style": "domain_glossary",
+                    "icon": "book-open",
+                    "always_generate": True,
+                    "preserve_section": True,
+                },
+                priority=-18,
+                parent_slug=None,
+            ),
+        )
+        plan.nav_structure["Start Here"].insert(2, "domain-glossary")
 
-    # ── Debug & Observability runbook (conditional) ───────────────────────
-    # Only generate if debug_signals were detected in the scan phase.
+    # ── Debug & Observability runbook (safety net) ────────────────────────
+    # Inject only if LLM didn't already propose a debug/observability bucket.
     debug_signals = getattr(scan, "debug_signals", []) if scan else []
-    if len(debug_signals) >= 2:
+    if len(debug_signals) >= 2 and not has_debug:
         debug_owned_files: list[str] = []
         for sig in debug_signals:
             if hasattr(sig, "file_path") and sig.file_path:
@@ -477,212 +507,31 @@ def _canonical_section_for_bucket(bucket: DocBucket, primary_type: str) -> str:
     if bucket.bucket_type in {"setup", "start_here_setup"}:
         return "Start Here"
 
-    # Supporting-tier buckets always get re-sectioned (Testing, CI/CD, etc.) regardless
-    # of whatever section the LLM assigned. For all other tiers, preserve the LLM's
-    # domain-specific section name rather than overriding with a generic canonical one.
-    if bucket.publication_tier != "supporting":
-        existing = (bucket.section or "").strip()
-        if (
-            existing
-            and existing.lower() not in _GENERIC_PLACEHOLDER_SECTIONS
-            and not _looks_like_path_slug_section(existing)
-            and not _is_backend_placeholder_section(existing, primary_type)
-        ):
-            return existing
-
-    title_tokens = _bucket_semantic_tokens(bucket)
+    # Route supporting-tier buckets to structural sections by source kind / title tokens
     if bucket.publication_tier == "supporting":
         supporting_section = supporting_section_for_kinds(bucket.source_kind_summary)
         if supporting_section:
             return supporting_section
+        title_tokens = _bucket_semantic_tokens(bucket)
         if bucket.bucket_type == "research-context" or any(
             token in title_tokens for token in {"history", "note", "notes", "glossary"}
         ):
             return "Design & Notes"
-        if any(
-            token in title_tokens for token in {"test", "cypress", "playwright", "spec"}
-        ):
+        if any(token in title_tokens for token in {"test", "cypress", "playwright", "spec"}):
             return "Testing"
-        if any(
-            token in title_tokens
-            for token in {"release", "deploy", "build", "workflow", "ci"}
-        ):
+        if any(token in title_tokens for token in {"release", "deploy", "build", "workflow", "ci"}):
             return "CI/CD and Release"
         return "Supporting Material"
-    if primary_type == "research_training":
-        if bucket.generation_hints.get("is_introduction_page"):
-            return "Overview"
-        if (
-            bucket.bucket_type == "research-context"
-            or "glossary" in title_tokens
-            or "experiment" in title_tokens
-            or "history" in title_tokens
-        ):
-            return "Research Context"
-        if any(
-            token in title_tokens
-            for token in {"model", "attention", "transformer", "fp8", "quant"}
-        ):
-            return "Model Architecture"
-        if any(
-            token in title_tokens
-            for token in {"optim", "optimizer", "schedule", "scheduler", "muon", "lr"}
-        ):
-            return "Optimization"
-        if any(token in title_tokens for token in {"train", "checkpoint", "loss"}):
-            return "Training"
-        if any(
-            token in title_tokens
-            for token in {"data", "dataset", "tokenizer", "parquet", "pipeline"}
-        ):
-            return "Data Pipeline"
-        if any(
-            token in title_tokens
-            for token in {"eval", "metric", "score", "benchmark", "report"}
-        ):
-            return "Evaluation"
-        if any(
-            token in title_tokens
-            for token in {"infer", "runtime", "sampling", "cache", "stats"}
-        ):
-            return "Inference & Runtime"
-        if (
-            bucket.generation_hints.get("is_endpoint_family")
-            or bucket.generation_hints.get("is_endpoint_ref")
-            or any(
-                token in title_tokens for token in {"api", "cli", "interface", "chat"}
-            )
-        ):
-            return "Interfaces"
-        return "Operations"
-    if primary_type in {"monorepo_product", "platform_monorepo"}:
-        if any(token in title_tokens for token in {"package", "workspace", "shared"}):
-            return "Monorepo Structure"
-        if any(
-            token in title_tokens for token in {"release", "ci", "workflow", "build"}
-        ):
-            return "Release"
-        if any(
-            token in title_tokens for token in {"ui", "frontend", "canvas", "component"}
-        ):
-            return "Frontend"
-        if any(token in title_tokens for token in {"runtime", "worker", "execution"}):
-            return "Runtime"
-        if any(token in title_tokens for token in {"api", "service", "server"}):
-            return "API & Services"
-        return "Configuration"
-    if primary_type == "framework_library":
-        if bucket.generation_hints.get("is_introduction_page"):
-            return "Overview"
-        if any(
-            token in title_tokens
-            for token in {"diagram", "plugin", "syntax", "render", "layout"}
-        ):
-            return "Framework Surfaces"
-        if any(
-            token in title_tokens for token in {"api", "config", "detect", "engine"}
-        ):
-            return "Core API"
-        if any(token in title_tokens for token in {"test", "build", "ci", "quality"}):
-            return "Development"
-        return "Ecosystem"
-    if primary_type == "cli_tooling":
-        if bucket.generation_hints.get("is_introduction_page"):
-            return "Overview"
-        if any(
-            token in title_tokens for token in {"cli", "command", "dispatch", "flag"}
-        ):
-            return "CLI"
-        if any(
-            token in title_tokens
-            for token in {"scan", "plan", "generate", "update", "pipeline"}
-        ):
-            return "Pipeline"
-        if any(
-            token in title_tokens
-            for token in {"provider", "client", "llm", "integration"}
-        ):
-            return "Integrations"
-        return "Operations"
-    if primary_type == "falcon_backend":
-        if bucket.generation_hints.get("is_introduction_page"):
-            return "Overview"
-        if bucket.generation_hints.get(
-            "is_endpoint_family"
-        ) or bucket.generation_hints.get("is_endpoint_ref"):
-            return "API Reference"
-        if any(token in title_tokens for token in {"api", "endpoint", "rest"}):
-            return "API Reference"
-        if any(
-            token in title_tokens
-            for token in {
-                "falcon",
-                "middleware",
-                "translator",
-                "auth",
-                "route",
-                "resource",
-            }
-        ):
-            return "Runtime & Frameworks"
-        if any(
-            token in title_tokens
-            for token in {"model", "schema", "migration", "database"}
-        ):
-            return "Data Layer"
-        if any(
-            token in title_tokens
-            for token in {"queue", "task", "sync", "worker", "celery"}
-        ):
-            return "Background Jobs"
-        if any(
-            token in title_tokens for token in {"provider", "gateway", "integration"}
-        ):
-            return "Integrations"
-        return "Subsystems"
-    if primary_type == "backend_service":
-        if bucket.generation_hints.get("is_introduction_page"):
-            return "Overview"
-        if bucket.generation_hints.get(
-            "is_endpoint_family"
-        ) or bucket.generation_hints.get("is_endpoint_ref"):
-            return "API Reference"
-        if any(
-            token in title_tokens
-            for token in {"model", "schema", "migration", "database"}
-        ):
-            return "Data Layer"
-        if bucket.bucket_type in {"runtime", "runtime-group"} or any(
-            token in title_tokens for token in _BACKEND_RUNTIME_TOKENS
-        ):
-            return "Background Jobs"
-        if any(token in title_tokens for token in _BACKEND_INTEGRATION_TOKENS):
-            return "Integrations"
-        if any(token in title_tokens for token in _BACKEND_OPERATION_TOKENS):
-            return "Operations"
-        if any(
-            token in title_tokens
-            for token in {"middleware", "auth", "route", "controller", "handler"}
-        ):
-            return "Supporting Infrastructure"
-        return "Core Workflows"
-    if bucket.generation_hints.get("is_introduction_page"):
-        return "Overview"
-    if bucket.generation_hints.get("is_endpoint_family") or bucket.generation_hints.get(
-        "is_endpoint_ref"
+
+    # For non-supporting tier: trust the LLM's section assignment if it's meaningful
+    existing = (bucket.section or "").strip()
+    if (
+        existing
+        and existing.lower() not in _GENERIC_PLACEHOLDER_SECTIONS
+        and not _looks_like_path_slug_section(existing)
     ):
-        return "API"
-    if any(token in title_tokens for token in {"integration", "provider", "gateway"}):
-        return "Integrations"
-    if any(
-        token in title_tokens for token in {"model", "schema", "migration", "database"}
-    ):
-        return "Data Layer"
-    if any(
-        token in title_tokens
-        for token in {"logging", "deploy", "metric", "health", "config"}
-    ):
-        return "Operations"
+        return existing
+
     return "Architecture"
 
 

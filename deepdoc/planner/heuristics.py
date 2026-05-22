@@ -30,129 +30,17 @@ def _normalize_tokens(*values: str) -> set[str]:
     return tokens
 
 
-def _derive_topic_candidates(
-    scan: RepoScan, classification: dict[str, Any]
-) -> list[dict[str, Any]]:
-    """Derive ranked concept candidates from code, artifacts, and markdown context."""
-    repo_profile = classification.get("repo_profile", {})
-    primary = repo_profile.get("primary_type", "other")
-    templates = PROFILE_TOPIC_TEMPLATES.get(
-        primary, PROFILE_TOPIC_TEMPLATES["backend_service"]
-    )
-
-    candidate_map: dict[str, dict[str, Any]] = {}
-    file_token_cache = scan.topic_file_token_cache
-    context_token_cache = scan.topic_context_token_cache
-
-    def _ensure_candidate(title: str, category: str) -> dict[str, Any]:
-        key = f"{category}:{title}"
-        if key not in candidate_map:
-            candidate_map[key] = {
-                "title": title,
-                "category": category,
-                "score": 0,
-                "evidence_files": set(),
-                "evidence_docs": set(),
-                "signals": set(),
-            }
-        return candidate_map[key]
-
-    if not file_token_cache:
-        for file_path, parsed in scan.parsed_files.items():
-            file_token_cache[file_path] = _normalize_tokens(
-                file_path,
-                " ".join(symbol.name for symbol in parsed.symbols[:20]),
-                " ".join(parsed.imports[:12]),
-            )
-
-    if not context_token_cache:
-        for context in scan.research_contexts:
-            context_key = (
-                context.get("file_path") or context.get("title") or str(id(context))
-            )
-            context_token_cache[context_key] = _normalize_tokens(
-                context.get("title", ""),
-                context.get("summary", ""),
-                " ".join(context.get("headings", [])),
-            )
-
-    for title, keywords, category in templates:
-        _ensure_candidate(title, category)
-        for file_path, file_tokens in file_token_cache.items():
-            matched = sorted(
-                {kw for kw in keywords if any(kw in token for token in file_tokens)}
-            )
-            if not matched:
-                continue
-            candidate = _ensure_candidate(title, category)
-            candidate["score"] += len(matched) * 3
-            candidate["evidence_files"].add(file_path)
-            candidate["signals"].update(matched)
-
-        for context in scan.research_contexts:
-            context_key = (
-                context.get("file_path") or context.get("title") or str(id(context))
-            )
-            context_tokens = context_token_cache.get(context_key, set())
-            matched = sorted(
-                {kw for kw in keywords if any(kw in token for token in context_tokens)}
-            )
-            if not matched:
-                continue
-            candidate = _ensure_candidate(title, category)
-            candidate["score"] += len(matched) * 4
-            candidate["evidence_docs"].add(context.get("file_path", ""))
-            candidate["signals"].update(matched)
-
-    # Force-add explicit research context categories when docs exist.
-    for context in scan.research_contexts:
-        kind = context.get("kind", "")
-        if kind == "experiment_log":
-            title = "Experiment Log and Findings"
-        elif kind == "design_history":
-            title = "Design History and Architecture Notes"
-        elif kind == "development_notes":
-            title = "Development Notes"
-        elif kind == "glossary":
-            title = "Glossary"
-        else:
-            continue
-        candidate = _ensure_candidate(title, "research_context")
-        candidate["score"] += 8
-        candidate["evidence_docs"].add(context.get("file_path", ""))
-        candidate["signals"].add(kind)
-
-    ranked: list[dict[str, Any]] = []
-    for candidate in candidate_map.values():
-        if candidate["score"] <= 0:
-            continue
-        ranked.append(
-            {
-                "title": candidate["title"],
-                "category": candidate["category"],
-                "score": candidate["score"],
-                "evidence_files": sorted(f for f in candidate["evidence_files"] if f)[
-                    :8
-                ],
-                "evidence_docs": sorted(f for f in candidate["evidence_docs"] if f)[:6],
-                "signals": sorted(candidate["signals"])[:10],
-            }
-        )
-    ranked.sort(key=lambda item: (-item["score"], item["title"]))
-    scan.topic_candidates = ranked
-    return ranked[:20]
-
 
 def _normalize_repo_profile(
     classification: dict[str, Any], scan: RepoScan
 ) -> dict[str, Any]:
-    """Normalize repo profile using scan-time heuristics and stack signals."""
+    """Normalize repo profile: synonym aliases + framework trait annotation only."""
     profile = dict(classification.get("repo_profile", {}) or {})
     primary = profile.get("primary_type", "other")
     frameworks = set(scan.frameworks_detected)
-    published_endpoint_count = len(scan.published_api_endpoints)
     secondary_traits = set(profile.get("secondary_traits", []))
 
+    # Annotate secondary traits from detected frameworks (informational, no classification override)
     framework_traits = {
         "falcon": "uses_falcon",
         "django": "uses_django",
@@ -160,41 +48,20 @@ def _normalize_repo_profile(
         "fastify": "uses_fastify",
         "laravel": "uses_laravel",
         "vue": "uses_vue",
+        "react": "uses_react",
+        "flask": "uses_flask",
+        "fastapi": "uses_fastapi",
     }
     for framework, trait in framework_traits.items():
         if framework in frameworks:
             secondary_traits.add(trait)
 
-    if "falcon" in frameworks:
-        normalized_primary = "falcon_backend"
-    elif primary in {"backend_api", "backend_service"}:
-        normalized_primary = "backend_service"
-    elif primary in {"monorepo_product", "platform_monorepo"}:
-        normalized_primary = "platform_monorepo"
-    elif primary == "research_training":
-        normalized_primary = "research_training"
-    elif "vue" in frameworks and published_endpoint_count == 0:
-        normalized_primary = "frontend_admin"
-    elif published_endpoint_count > 0:
-        normalized_primary = "backend_service"
-    elif any(path.endswith(("cli.py", "__main__.py")) for path in scan.file_summaries):
-        normalized_primary = "cli_tooling"
-    elif frameworks:
-        normalized_primary = "framework_library"
-    else:
-        normalized_primary = "other"
-
-    if (
-        {"vue"} & frameworks
-        and published_endpoint_count > 0
-        and normalized_primary not in {"research_training"}
-    ):
-        normalized_primary = "hybrid"
-
-    if "falcon" in frameworks:
-        profile["evidence"] = (
-            profile.get("evidence") or "Falcon routes and middleware detected"
-        )
+    # Alias normalization only — collapse synonym spellings, don't override LLM classification
+    _aliases: dict[str, str] = {
+        "backend_api": "backend_service",
+        "monorepo_product": "platform_monorepo",
+    }
+    normalized_primary = _aliases.get(primary, primary)
 
     profile["primary_type"] = normalized_primary
     profile["secondary_traits"] = sorted(secondary_traits)
@@ -1185,12 +1052,8 @@ def _clean_fallback_bucket_title(title: str, group_name: str) -> str:
 
 
 def _fallback_module_section(plan: DocPlan) -> str:
-    primary = plan.classification.get("repo_profile", {}).get("primary_type", "other")
-    if primary in {"backend_service", "falcon_backend", "hybrid"}:
-        return "Core Workflows"
-    if primary == "research_training":
-        return "Operations"
-    return "Architecture"
+    # Last-resort fallback only — use a neutral section name for any repo type
+    return "Other"
 
 
 def _fallback_plan(scan: RepoScan, cfg: dict[str, Any]) -> DocPlan:

@@ -83,7 +83,9 @@ def test_endpoint_publication_rejects_fixture_and_header_like_paths() -> None:
     assert reason in {"header_like_segment", "unexpected_uppercase_segment"}
 
 
-def test_normalize_repo_profile_promotes_falcon_backend() -> None:
+def test_normalize_repo_profile_annotates_falcon_trait() -> None:
+    # Phase 4: _normalize_repo_profile no longer overrides primary_type — it only
+    # annotates secondary traits from detected frameworks. The LLM's classification wins.
     classification = {"repo_profile": {"primary_type": "other", "secondary_traits": []}}
     scan = _scan(
         frameworks=["falcon"],
@@ -100,7 +102,8 @@ def test_normalize_repo_profile_promotes_falcon_backend() -> None:
 
     normalized = _normalize_repo_profile(classification, scan)
 
-    assert normalized["repo_profile"]["primary_type"] == "falcon_backend"
+    # primary_type stays as the LLM assigned; framework trait is annotated
+    assert normalized["repo_profile"]["primary_type"] == "other"
     assert "uses_falcon" in normalized["repo_profile"]["secondary_traits"]
 
 

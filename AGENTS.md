@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 - If you change core CLI behavior, persistence/state formats, routing semantics, or generated-site behavior, update this file in the same task. Also keep `README.md` in sync with actual codebase behavior.
 
 ## Repo Summary
-- Project name: `deepdoc` (v2.2.0)
+- Project name: `deepdoc` (v2.2.1)
 - Language/runtime: Python `>=3.10`
 - Packaging: setuptools via `pyproject.toml`
 - CLI entrypoint: `deepdoc = deepdoc.cli:main`

@@ -9,6 +9,44 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.2.1] - 2026-05-22
+
+DeepDoc 2.2.1 is a bug-fix release addressing 22 scanner, planner, and generator correctness issues identified by audit, plus adversarial-review remediations.
+
+### Bug Fixes
+
+#### Scanner
+- **Import lookup**: `__init__.py` parent-path indexing so `from pkg.sub import X` resolves to `pkg/sub/__init__.py`.
+- **Endpoint ownership**: endpoint handler now uses `endpoint_owned_files()` covering `handler_file`, `route_file`, and `file` — not just `file`.
+- **Database scanner**: hybrid segment + filename-prefix test-file skip catches `test_*.py` outside a `tests/` directory.
+- **Artifacts scanner**: path-segment membership check restores CI artifact detection for `.github/workflows/` and other directory-style patterns.
+- **Runtime scanner**: task-name pre-filter skips files that can't contain any task name before running expensive regex loops.
+- **Clustering**: duplicate symbols are deduplicated by first occurrence rather than last.
+- **Integrations**: webhook regex reverted to plain `r"webhook"` (word-boundary `\b` blocked compound identifiers like `webhook_handler`); comment-only lines are now skipped.
+
+#### Planner
+- **`repo_root` threading**: `plan_docs` and `run_phase2_scans` accept and propagate a `repo_root` parameter instead of silently defaulting to `Path(".")`.
+- **Topology sort**: cluster sort key corrected to `(is_foundational, min_depth, -len(all_files))` so foundational clusters are processed first.
+- **Topology ID collision**: duplicate cluster IDs are disambiguated with a counter suffix instead of silently overwriting.
+- **Bucket file list cap**: `_decompose_buckets` caps `owned_files` at 50 with a trailing `"... and N more"` note.
+- **`parent_slug` on split children**: decomposed child buckets now carry `parent_slug` pointing to the parent.
+- **Keyword merge**: `_build_repo_endpoint_keywords` union-merges new keywords into existing groups rather than overwriting.
+
+#### Generator
+- **Proportional OpenAPI budget**: first spec receives up to 4 000 chars; additional specs share the remaining budget down to a 2 000-char floor (single-spec repos recover the previous 4 000-char context).
+- **Ambiguous import cap**: import-based dependency links skip any hint that resolves to more than 5 files to avoid noise from generic module names.
+- **Sitemap orphans**: buckets absent from `nav_structure` are now grouped by `bucket.section` with section headers instead of being appended as a flat list.
+- **`_EP_TITLE_RE`**: endpoint-title regex promoted to a module-level constant instead of being compiled inside the per-bucket hot path.
+- **Artifact env context**: `artifact_refs` are now included when scanning env/config keys in evidence assembly.
+- **Flow validation**: bare `"sequence"` removed from `_flow_terms`; only `"sequence diagram"` is accepted to prevent false positives on unrelated uses of the word.
+
+#### Pipeline
+- **Ordering invariant restored**: `save_all` now runs before `_record_changelog`, which runs before `_build_site`. Changelog entries reference pages that are guaranteed to be persisted, and `whats-changed.mdx` exists when the site builder checks for it.
+
+### Other
+- Added `CONTRIBUTING.md` with local setup, testing, and release instructions.
+- Added `.github/workflows/deepdoc-refresh.yml` example workflow for teams running DeepDoc as an internal docs pipeline.
+
 ## [2.2.0] - 2026-05-22
 
 DeepDoc 2.2.0 is an infrastructure and planning reliability release focused on data safety, incremental update correctness, and multi-spec API support.

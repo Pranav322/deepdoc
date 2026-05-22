@@ -120,5 +120,5 @@ def build_endpoint_bundles(
     return bundles
 
 
-from .utils import _build_import_lookup, _classify_file_role, _resolve_imports_to_files
+from .utils import _build_import_lookup, _classify_file_role, _resolve_imports_to_files, endpoint_owned_files
 from .integrations import _detect_integration_edges_in_bundle

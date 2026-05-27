@@ -42,82 +42,89 @@ standard Markdown: `[Page Title](/page-slug)`. \
 Every prompt includes a sitemap of all available pages — use it. \
 If a page is listed in "Dependency Links", you MUST link to it at least once where it is \
 first mentioned. Think of each page as part of a wiki, not a standalone document.
-10. **Fumadocs UI components**: This documentation site runs on Fumadocs. Use its rich \
-JSX components to make pages beautiful and scannable. Never use `:::type` admonition syntax.
+10. **Rich components via directives**: This site uses `remark-directive`. Use the directive \
+syntax below to produce beautiful, scannable pages. NEVER write raw JSX tags like `<Callout>`, \
+`<Steps>`, `<Cards>`, `<Accordions>`, or any other JSX/HTML component tag in content files.
 
 **Callouts** — for tips, warnings, notes, gotchas:
 ```
-<Callout>This behaviour changed in v2.</Callout>
-<Callout type="warn">Running this in production will drop all existing sessions.</Callout>
-<Callout type="info">Use batch processing for large datasets — it's 10x faster.</Callout>
-<Callout>This module is auto-generated. Do not edit manually.</Callout>
-<Callout>All three environment variables must be set before starting.</Callout>
+:::note
+This behaviour changed in v2.
+:::
+
+:::warn
+Running this in production will drop all existing sessions.
+:::
+
+:::info
+Use batch processing for large datasets — it's 10x faster.
+:::
 ```
 
 **Steps** — for setup guides, workflows, any ordered procedure (use instead of a numbered list):
 ```
-<Steps>
-  <Step>
-    <h3>Install dependencies</h3>
-    Run `npm install` from the project root.
-  </Step>
-  <Step>
-    <h3>Configure environment</h3>
-    Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
-  </Step>
-  <Step>
-    <h3>Start the server</h3>
-    Run `npm run dev`. The API will be available at `http://localhost:3000`.
-  </Step>
-</Steps>
+:::steps
+::step{title="Install dependencies"}
+Run `npm install` from the project root.
+::
+
+::step{title="Configure environment"}
+Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
+::
+
+::step{title="Start the server"}
+Run `npm run dev`. The API will be available at `http://localhost:3000`.
+::
+:::
 ```
 
 **Tabs** — for showing the same concept in multiple languages or environments:
 ```
-<Tabs items={['Node.js', 'Python']}>
-  <Tab value="Node.js">
-    ```javascript
-    const client = new ApiClient({ apiKey: process.env.API_KEY });
-    ```
-  </Tab>
-  <Tab value="Python">
-    ```python
-    client = ApiClient(api_key=os.environ["API_KEY"])
-    ```
-  </Tab>
-</Tabs>
+:::tabs{items="Node.js,Python"}
+::tab{value="Node.js"}
+```javascript
+const client = new ApiClient({ apiKey: process.env.API_KEY });
+```
+::
+
+::tab{value="Python"}
+```python
+client = ApiClient(api_key=os.environ["API_KEY"])
+```
+::
+:::
 ```
 
 **Cards** — for feature overviews, linking to related pages, listing capabilities. \
 Use at the end of overview/architecture pages to create a visual navigation grid:
 ```
-<Cards>
-  <Card title="Authentication" href="/auth">
-    JWT-based auth with refresh token rotation.
-  </Card>
-  <Card title="Database Layer" href="/database">
-    PostgreSQL schema and migration strategy.
-  </Card>
-</Cards>
+:::cards
+::card{title="Authentication" href="/auth"}
+JWT-based auth with refresh token rotation.
+::
+
+::card{title="Database Layer" href="/database"}
+PostgreSQL schema and migration strategy.
+::
+:::
 ```
 
-**Accordion** — for FAQ sections, detailed option references, or collapsible details:
+**Accordions** — for FAQ sections, detailed option references, or collapsible details:
 ```
-<Accordions type="single">
-  <Accordion title="Why does the worker restart every 30 seconds?">
-    The heartbeat timeout is set in `config/worker.yaml`. Increase `heartbeat_interval`
-    to reduce restarts on slow jobs.
-  </Accordion>
-</Accordions>
+:::accordions
+::accordion{title="Why does the worker restart every 30 seconds?"}
+The heartbeat timeout is set in `config/worker.yaml`. Increase `heartbeat_interval`
+to reduce restarts on slow jobs.
+::
+:::
 ```
 
 **When to use each**:
-- Use `<Steps>` for ANY setup, installation, or ordered workflow — never a numbered list.
-- Inside `<Step>`, use HTML headings like `<h3>Install dependencies</h3>`, not markdown headings like `### Install dependencies`.
-- Use `<Cards>` at the end of overview and architecture pages to link to sub-pages.
-- Use `<Tabs>` when showing the same thing in multiple languages, environments, or configs.
-- Use `<Accordions>` and `<Accordion>` for reference material with many options or a FAQ section.
-- Use callouts (`<Callout>`, `<Callout type="warn">`, etc.) liberally — they draw the eye to important info.
+- Use `:::steps` / `::step{title="..."}` for ANY setup, installation, or ordered workflow — never a numbered list.
+- Use `:::cards` at the end of overview and architecture pages to link to sub-pages.
+- Use `:::tabs{items="..."}` when showing the same thing in multiple languages, environments, or configs.
+- Use `:::accordions` / `::accordion{title="..."}` for reference material with many options or a FAQ section.
+- Use callouts (`:::note`, `:::warn`, `:::info`) liberally — they draw the eye to important info.
 
 11. **Grounded snippets over invented examples**: When showing code in documentation, \
 prefer quoting short, targeted snippets verbatim from the provided source evidence. \

@@ -53,6 +53,12 @@ web/*
 !web/*.ts
 !web/*.tsx
 !web/content/
+!web/server/
+!web/server/**
+!web/functions/
+!web/functions/**
+!web/nginx/
+!web/nginx/**
 !web/content/**
 !web/app/
 !web/app/**

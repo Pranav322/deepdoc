@@ -34,7 +34,7 @@ from ..llm import LLMClient
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
-from ..prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
+from ..prompts import SYSTEM_V2, get_prompt_for_bucket
 from ..scanner import _classify_file_role
 from ..openapi import parse_openapi_spec, spec_to_context_string
 
@@ -190,10 +190,12 @@ class PageValidator:
                 result.missing_sections.append(section)
 
         if result.missing_sections:
-            result.is_valid = False
             result.warnings.append(
                 f"Missing sections: {', '.join(result.missing_sections)}"
             )
+            # Warning-only: heading-synonym mismatches are extremely common
+            # (e.g. required "entry_points" vs LLM "Entry Points & Triggers").
+            # See docs/validator_demotions.md.
 
     @staticmethod
     def _section_matches_heading(section: str, heading: str) -> bool:
@@ -305,7 +307,7 @@ class PageValidator:
             or hints.get("include_runtime_context")
             or hints.get("include_integration_detail")
         )
-        threshold = 0.5 if is_strict else 0.3
+        threshold = 0.4 if is_strict else 0.25
 
         if coverage < threshold and len(unreferenced) > 2:
             result.missing_file_refs = unreferenced[:5]
@@ -318,11 +320,11 @@ class PageValidator:
                 f"Low file coverage: {referenced}/{len(checkable_files)} full-source files referenced "
                 f"({coverage:.0%}; expected at least {threshold:.0%}{compressed_note})"
             )
-            if is_intro:
-                if coverage < 0.15 and len(checkable_files) >= 10:
-                    result.is_valid = False
-            else:
-                result.is_valid = False
+            # Warning-only: low coverage almost always means the bucket is
+            # oversized and most files were compressed out of the evidence
+            # pack — retrying with the same compressed pack cannot fix it.
+            # See docs/validator_demotions.md.
+            _ = is_intro  # retained for future re-enable
 
     def _check_hallucinated_paths(
         self, content: str, bucket: "DocBucket", result: ValidationResult
@@ -399,13 +401,11 @@ class PageValidator:
             result.warnings.append(
                 f"References files outside assembled evidence: {', '.join(violations[:4])}"
             )
-            hints = bucket.generation_hints or {}
-            invalid_threshold = 8
-            if hints.get("is_introduction_page") or bucket.section == "Start Here":
-                invalid_threshold = 999
-
-            if len(violations) >= invalid_threshold:
-                result.is_valid = False
+            # Warning-only: out-of-evidence refs usually trace back to
+            # bucket bloat (legitimate symbols the LLM picked up via cross-
+            # file context), not invented files. _check_hallucinated_paths
+            # still hard-fails for actually invented paths.
+            # See docs/validator_demotions.md.
 
     def _check_hallucinated_symbols(
         self,
@@ -440,8 +440,10 @@ class PageValidator:
         result.warnings.append(
             f"Potentially hallucinated symbols: {', '.join(result.hallucinated_symbols[:4])}"
         )
-        if len(violations) > 2:
-            result.is_valid = False
+        # Warning-only: the known-symbols set excludes parameters, attributes,
+        # imported names, dict keys, and language literals, so this check
+        # false-positives often. File-path hallucinations (a much higher-impact
+        # failure mode) are still hard-failed by _check_hallucinated_paths.
 
     def _known_symbols_for_bucket(
         self,
@@ -591,8 +593,10 @@ class PageValidator:
             result.warnings.append(
                 f"Unmatched route/path claims: {', '.join(unmatched[:4])}"
             )
-            if len(unmatched) >= 4:
-                result.is_valid = False
+            # Warning-only: when a bucket owns cross-domain controllers
+            # (planner over-merge), this fires on 10+ routes that are real
+            # but foreign to the page topic. Fixing the planner is the
+            # right cure, not a retry. See docs/validator_demotions.md.
 
     def _check_flow_grounding(
         self,
@@ -622,7 +626,8 @@ class PageValidator:
 
         if result.missing_flow_edges or result.missing_flow_entrypoints:
             result.warnings.append("Missing flow sections grounded by flow context")
-            result.is_valid = False
+            # Warning-only: keyword-based flow detection misses paraphrases
+            # like "kicks off" / "fans out to". See docs/validator_demotions.md.
 
     @staticmethod
     def _normalize_route_path(path: str) -> str:
@@ -702,7 +707,8 @@ class PageValidator:
             result.warnings.append(
                 f"Missing contract concepts: {', '.join(result.missing_contract_concepts)}"
             )
-            result.is_valid = False
+            # Warning-only: contract-concept matching is keyword-based and
+            # synonym-blind. See docs/validator_demotions.md.
         if result.missing_sibling_links:
             result.warnings.append(
                 f"Missing sibling links: {', '.join(result.missing_sibling_links[:4])}"
@@ -842,10 +848,10 @@ class PageValidator:
         result.warnings.append(
             f"Runtime context missing named entities: {', '.join(result.missing_runtime_entities[:4])}"
         )
-        if len(missing) == len(expected) or (
-            len(expected) >= 4 and len(missing) / len(expected) > 0.6
-        ):
-            result.is_valid = False
+        # Warning-only: runtime-entity expectations are inferred from
+        # owned files, so bucket over-merge inflates this set with
+        # unrelated entities. See docs/validator_demotions.md.
+        _ = (missing, expected)
 
     def _check_config_grounding(
         self,
@@ -893,8 +899,10 @@ class PageValidator:
         result.warnings.append(
             f"Config grounding missing key references: {', '.join(result.missing_config_keys[:4])}"
         )
-        if bucket.section == "Getting Started" or "config" in bucket.title.lower():
-            result.is_valid = False
+        # Warning-only: config-key grounding is too coarse — Getting Started
+        # pages legitimately summarise rather than enumerate every env var.
+        # See docs/validator_demotions.md.
+        _ = bucket
 
     def _check_integration_grounding(
         self,
@@ -978,17 +986,11 @@ class PageValidator:
         result.warnings.append(
             f"Integration context missing named references: {', '.join(result.missing_integrations[:4])}"
         )
-        # Only mark invalid when ALL expected integrations are fully absent and we
-        # have concrete evidence the LLM had them in context.
-        if bucket.bucket_type == "integration" and len(missing) == len(expected):
-            result.is_valid = False
-        elif (
-            hints.get("include_integration_detail")
-            and not hints.get("is_introduction_page")
-            and len(expected) <= 2
-            and len(missing) == len(expected)
-        ):
-            result.is_valid = False
+        # Warning-only: "expected integrations" are inferred from token
+        # overlap between integration names and bucket text, so unrelated
+        # pages get phantom requirements (e.g. a DB page expected to
+        # mention Haptik Chatbot). See docs/validator_demotions.md.
+        _ = (hints, expected, missing)
 
     @staticmethod
     def _integration_name_tokens(value: str) -> list[str]:

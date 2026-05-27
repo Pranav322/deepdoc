@@ -86,7 +86,15 @@ def _shape_plan_nav(
         if bucket.slug in fixed_start_here:
             continue
         hints = bucket.generation_hints or {}
-        if hints.get("is_endpoint_family") or hints.get("is_endpoint_ref"):
+        # Pure endpoint-ref pages are handled by _build_endpoint_reference_nav below.
+        if hints.get("is_endpoint_ref"):
+            continue
+        # is_endpoint_family gets stamped on any bucket that owns matched endpoints,
+        # including full domain-feature pages (e.g. "Order Lifecycle & Processing"
+        # in section "Order Management"). Those should stay in their real domain
+        # section. Only skip endpoint-family buckets that have no meaningful domain
+        # section assigned (they were created purely as API-reference families).
+        if hints.get("is_endpoint_family") and _is_api_reference_only_section(bucket.section):
             continue
         # Overview/intro page is placed at the root level by the site builder —
         # adding it to a section too creates a duplicate entry in the sidebar.
@@ -106,6 +114,10 @@ def _shape_plan_nav(
         if not (hints.get("is_endpoint_family") or hints.get("is_endpoint_ref")):
             continue
         if bucket.slug in endpoint_grouped:
+            continue
+        # Only place in API Reference if the bucket has no real domain section.
+        # Feature buckets with a proper section were already placed above.
+        if not _is_api_reference_only_section(bucket.section):
             continue
         _append_nav_slug(nav, "API Reference", bucket.slug)
 
@@ -253,6 +265,17 @@ def _build_endpoint_reference_nav(buckets: list[DocBucket]) -> dict[str, list[st
         ]
 
     return nav
+
+
+def _is_api_reference_only_section(section: str) -> bool:
+    """Return True when a bucket has no meaningful domain section and belongs in API Reference.
+
+    Buckets with a real domain section (e.g. "Order Management", "User Accounts & Identity")
+    should stay there even when is_endpoint_family is True. Only buckets with no section,
+    a generic placeholder, or an explicit API Reference section should fall into API Reference.
+    """
+    value = (section or "").strip().lower()
+    return not value or value in ("architecture", "") or value.startswith("api reference")
 
 
 def _append_nav_slug(nav: dict[str, list[str]], section: str, slug: str) -> None:

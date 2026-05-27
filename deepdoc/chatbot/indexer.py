@@ -316,14 +316,14 @@ class ChatbotIndexer:
                 changed_keys=artifact_targets,
                 deleted_keys=deleted_files,
             )
-        deleted_doc_paths = [path for path in deleted_files if path.endswith(".mdx")]
+        deleted_doc_paths = [path for path in deleted_files if path.endswith((".md", ".mdx"))]
         if rebuild_doc_summary:
             self._save_records("doc_summary", doc_summary_records)
         else:
             self._merge_records(
                 "doc_summary",
                 doc_summary_records,
-                changed_keys=[f"{slug}.mdx" for slug in changed_doc_slugs],
+                changed_keys=[f"{slug}.md" for slug in changed_doc_slugs],
                 deleted_keys=deleted_doc_paths,
             )
         if rebuild_doc_full:
@@ -332,7 +332,7 @@ class ChatbotIndexer:
             self._merge_records(
                 "doc_full",
                 doc_full_records,
-                changed_keys=[f"{slug}.mdx" for slug in changed_doc_slugs],
+                changed_keys=[f"{slug}.md" for slug in changed_doc_slugs],
                 deleted_keys=deleted_doc_paths,
             )
         if rebuild_repo_doc:

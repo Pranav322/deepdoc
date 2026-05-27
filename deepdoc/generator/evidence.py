@@ -34,7 +34,7 @@ from ..llm import LLMClient
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
-from ..prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
+from ..prompts import SYSTEM_V2, get_prompt_for_bucket
 from ..scanner import _classify_file_role
 from ..openapi import parse_openapi_spec, spec_to_context_string
 

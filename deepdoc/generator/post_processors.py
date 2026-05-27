@@ -35,7 +35,7 @@ from ..llm import LLMClient
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
-from ..prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
+from ..prompts import SYSTEM_V2, get_prompt_for_bucket
 from ..scanner import _classify_file_role
 from ..openapi import parse_openapi_spec, spec_to_context_string
 
@@ -402,246 +402,6 @@ def repair_internal_doc_links(
     )
     return content
 
-
-def escape_mdx_route_params(content: str) -> str:
-    """Escape route params like `/users/{id}` in MDX text without touching code fences.
-
-    MDX treats `{id}` as a JavaScript expression in normal text and JSX props, so
-    endpoint paths must be escaped to render as literal braces.
-    """
-
-    def escape_segment(segment: str) -> str:
-        return re.sub(
-            r"(?<=/)\{([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)\}",
-            lambda match: f"&#123;{match.group(1)}&#125;",
-            segment,
-        )
-
-    lines: list[str] = []
-    in_fence = False
-    for line in content.splitlines():
-        if line.startswith("```"):
-            in_fence = not in_fence
-            lines.append(line)
-            continue
-
-        if in_fence:
-            lines.append(line)
-            continue
-
-        parts = re.split(r"(`[^`]*`)", line)
-        escaped = "".join(
-            part
-            if part.startswith("`") and part.endswith("`")
-            else escape_segment(part)
-            for part in parts
-        )
-        if "|" in line:
-            escaped = re.sub(
-                r"`([A-Za-z_][A-Za-z0-9_]*)&lt;([^`]+)&gt;`",
-                r"`\1<\2>`",
-                escaped,
-            )
-            escaped = re.sub(
-                r"`([A-Za-z_][A-Za-z0-9_]*)<([^`\n]+)>`",
-                lambda match: f"`{match.group(1)}&lt;{match.group(2)}&gt;`",
-                escaped,
-            )
-        lines.append(escaped)
-
-    return "\n".join(lines)
-
-
-def escape_mdx_text_hazards(content: str) -> str:
-    """Escape plain-text MDX hazards like bare `<5s` outside fenced code.
-
-    A raw `<` followed by a digit, placeholder syntax like `<model>`, or generic
-    type syntax like `array<object>` is parsed as invalid JSX in MDX prose and
-    markdown tables.
-    Also repairs malformed inline HTML where the opening tag is real but the
-    closing tag was escaped by the model, e.g. `<code>path&lt;/code&gt;`.
-    """
-
-    lines: list[str] = []
-    in_fence = False
-    safe_html_tags = {
-        "a",
-        "b",
-        "body",
-        "br",
-        "code",
-        "details",
-        "div",
-        "em",
-        "h1",
-        "h2",
-        "h3",
-        "h4",
-        "h5",
-        "h6",
-        "head",
-        "header",
-        "hr",
-        "html",
-        "i",
-        "img",
-        "kbd",
-        "li",
-        "main",
-        "meta",
-        "ol",
-        "p",
-        "pre",
-        "section",
-        "small",
-        "span",
-        "strong",
-        "sub",
-        "summary",
-        "sup",
-        "table",
-        "tbody",
-        "td",
-        "th",
-        "thead",
-        "title",
-        "tr",
-        "u",
-        "ul",
-    }
-
-    for line in content.splitlines():
-        if line.startswith("```"):
-            in_fence = not in_fence
-            lines.append(line)
-            continue
-
-        if in_fence:
-            lines.append(line)
-            continue
-
-        line = re.sub(
-            r"<code>\{([^{}\n]+)\}</code>",
-            lambda match: f"<code>&#123;{match.group(1)}&#125;</code>",
-            line,
-        )
-
-        parts = re.split(r"(`[^`]*`)", line)
-
-        def normalize_code_span(part: str) -> str:
-            if "|" not in line:
-                return part
-            if not (part.startswith("`") and part.endswith("`")):
-                return part
-
-            code = part[1:-1]
-            code = re.sub(
-                r"<([^`\n<>]+)>",
-                lambda match: f"&lt;{match.group(1)}&gt;",
-                code,
-            )
-            if "{" in code or "}" in code:
-                code = code.replace("{", "&#123;").replace("}", "&#125;")
-            return f"`{code}`"
-
-        def escape_segment(part: str) -> str:
-            part = re.sub(
-                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)&gt;",
-                lambda match: (
-                    f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>"
-                ),
-                part,
-            )
-            part = re.sub(
-                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)</(?P=tag)&gt;",
-                lambda match: (
-                    f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>"
-                ),
-                part,
-            )
-            part = re.sub(
-                r"<(?P<tag>code|strong|em|b|i)>(?P<body>.*?)&lt;/(?P=tag)>",
-                lambda match: (
-                    f"<{match.group('tag')}>{match.group('body')}</{match.group('tag')}>"
-                ),
-                part,
-            )
-            part = re.sub(r"<br\s*/?>", "<br />", part, flags=re.IGNORECASE)
-            if "|" in line:
-                part = re.sub(r"<br\s*/?>", " / ", part, flags=re.IGNORECASE)
-            part = re.sub(r"<(?=[^A-Za-z/!])", "&lt;", part)
-            part = re.sub(r"<(?=\d)", "&lt;", part)
-            part = re.sub(
-                r"\b([A-Za-z_][A-Za-z0-9_]*)<([A-Za-z_][A-Za-z0-9_, .|/&;<>[\]-]*)>",
-                lambda match: f"{match.group(1)}&lt;{match.group(2)}&gt;",
-                part,
-            )
-            part = re.sub(
-                r"<([A-Za-z_][A-Za-z0-9_]*:[A-Za-z_][A-Za-z0-9_]*)>",
-                lambda match: f"&lt;{match.group(1)}&gt;",
-                part,
-            )
-            part = re.sub(
-                r"<([a-z_][a-z0-9_-]*)>",
-                lambda match: (
-                    match.group(0)
-                    if match.group(1) in safe_html_tags
-                    else f"&lt;{match.group(1)}&gt;"
-                ),
-                part,
-            )
-            part = part.replace("<=", "&lt;=")
-            if not line.lstrip().startswith("<"):
-                part = re.sub(
-                    r"\{([^`\n{}]*:[^`\n{}]*)\}",
-                    lambda match: f"&#123;{match.group(1)}&#125;",
-                    part,
-                )
-            if line.lstrip().startswith("|"):
-                part = re.sub(
-                    r"(?<!`)(\[\{[^`\n]*\}\])(?!`)",
-                    r"`\1`",
-                    part,
-                )
-                part = re.sub(
-                    r"([,(]\s*)\{([A-Za-z_][A-Za-z0-9_, ]*)\}(?=\s*[),])",
-                    lambda match: f"{match.group(1)}&#123;{match.group(2)}&#125;",
-                    part,
-                )
-            part = part.replace("{...}", "&#123;...&#125;")
-            return part
-
-        escaped = "".join(
-            normalize_code_span(part)
-            if part.startswith("`") and part.endswith("`")
-            else escape_segment(part)
-            for part in parts
-        )
-        if not line.lstrip().startswith("<"):
-            escaped = re.sub(
-                r"\{([^{}\n]*:[^{}\n]*)\}",
-                lambda match: f"&#123;{match.group(1)}&#125;",
-                escaped,
-            )
-            # Broad-escape remaining braces, but preserve ={...} JSX prop expressions.
-            # Stash each ={...} span (one level of nesting) as a NUL-keyed placeholder,
-            # escape everything else, then restore the stashed spans.
-            _jsx_slots: list[str] = []
-
-            def _stash_jsx(m: re.Match) -> str:
-                _jsx_slots.append(m.group(0))
-                return f"\x00{len(_jsx_slots) - 1}\x00"
-
-            protected = re.sub(r"=\{(?:[^{}]|\{[^{}]*\})*\}", _stash_jsx, escaped)
-            protected = protected.replace("{", "&#123;").replace("}", "&#125;")
-            for _idx, _val in enumerate(_jsx_slots):
-                protected = protected.replace(f"\x00{_idx}\x00", _val)
-            escaped = protected
-        lines.append(escaped)
-
-    return "\n".join(lines)
-
-
 def normalize_code_fence_languages(content: str) -> str:
     """Normalize unsupported or inconsistent fence labels to safe Shiki languages."""
 
@@ -894,138 +654,6 @@ def normalize_html_code_blocks(content: str) -> str:
     return content
 
 
-def normalize_mdx_steps(content: str) -> str:
-    """Rewrite heading-like content inside <Step> blocks into safe markdown text.
-
-    MDX can choke on ATX headings such as `### Title` when they appear directly
-    inside JSX flow components like <Step>. Also, raw heading tags such as
-    `<h3>Title</h3>` can end up nested inside `<p>` during hydration. Convert
-    both forms into simple bold lines while leaving headings outside steps and
-    fenced code alone.
-    """
-
-    def replace_step(match: re.Match) -> str:
-        lead = match.group("lead")
-        body = match.group("body")
-        tail = match.group("tail")
-        lines: list[str] = []
-        in_fence = False
-
-        for line in body.splitlines():
-            stripped = line.lstrip()
-            if stripped.startswith("```"):
-                in_fence = not in_fence
-                lines.append(line)
-                continue
-
-            if not in_fence:
-                heading = re.match(r"^(\s*)(#{1,6})\s+(.+?)\s*$", line)
-                if heading:
-                    indent, _hashes, title = heading.groups()
-                    lines.append(f"{indent}**{title.strip()}**")
-                    continue
-
-                html_heading = re.match(r"^(\s*)<h[1-6]>(.+?)</h[1-6]>\s*$", line)
-                if html_heading:
-                    indent, title = html_heading.groups()
-                    lines.append(f"{indent}**{title.strip()}**")
-                    continue
-
-            lines.append(line)
-
-        normalized_body = "\n".join(lines)
-        return f"{match.group('open')}{lead}{normalized_body}{tail}</Step>"
-
-    return re.sub(
-        r"(?P<open><Step(?:\s[^>]*)?>)(?P<lead>\s*)(?P<body>.*?)(?P<tail>\s*)</Step>",
-        replace_step,
-        content,
-        flags=re.DOTALL,
-    )
-
-
-def repair_mdx_component_blocks(content: str) -> str:
-    """Repair malformed block-level JSX components in generated MDX.
-
-    LLM output sometimes emits inline-started components with fenced blocks, e.g.
-    `<Callout>Text:\n```bash ...` where the closing tag appears after the fence.
-    That structure breaks MDX parsing because the opening JSX tag is treated as an
-    inline node inside a paragraph. Normalize those cases into multiline blocks.
-    """
-
-    multiline_components = (
-        "Callout",
-        "Card",
-        "Tabs",
-        "Tab",
-        "Steps",
-        "Step",
-        "Accordions",
-        "Accordion",
-        "Frame",
-    )
-
-    for component in multiline_components:
-        pattern = re.compile(
-            rf"<({component})(\s[^>]*)?>([^\n<][^\n]*?):\s*\n(```[\s\S]*?```\s*</\1>)"
-        )
-
-        def _rewrite(match: re.Match) -> str:
-            name = match.group(1)
-            attrs = match.group(2) or ""
-            lead = match.group(3).strip()
-            tail = match.group(4)
-            return f"<{name}{attrs}>\n{lead}:\n\n{tail}"
-
-        content = pattern.sub(_rewrite, content)
-
-    # Fix Accordion nesting first (inserts missing </Accordion> before </Accordions>)
-    # so the subsequent count-based repair sees balanced tags and doesn't double-add.
-    content = _repair_accordion_nesting(content)
-
-    for component in multiline_components:
-        open_count = len(re.findall(rf"<{component}(?:\s[^>]*)?>", content))
-        close_count = len(re.findall(rf"</{component}>", content))
-        if open_count <= close_count:
-            continue
-        deficit = open_count - close_count
-        content = content.rstrip() + (f"\n</{component}>" * deficit) + "\n"
-
-    return content
-
-
-def _repair_accordion_nesting(content: str) -> str:
-    """Fix Accordion nesting issues emitted by the LLM.
-
-    Two cases handled:
-    1. Missing </Accordion> before </Accordions> — inserts them in the right place.
-    2. Swapped order (</Accordions> then </Accordion>) — strips the orphaned
-       </Accordion> that appears after </Accordions> with no matching open tag.
-    """
-    import re as _re
-
-    def _fix_block(m: re.Match) -> str:
-        block = m.group(0)
-        opens = len(_re.findall(r"<Accordion(?:\s[^>]*)?>", block))
-        closes = len(_re.findall(r"</Accordion>", block))
-        deficit = opens - closes
-        if deficit <= 0:
-            return block
-        return block[:-len("</Accordions>")] + ("</Accordion>\n" * deficit) + "</Accordions>"
-
-    content = re.sub(
-        r"<Accordions(?:\s[^>]*)?>[\s\S]*?</Accordions>",
-        _fix_block,
-        content,
-    )
-
-    # Strip orphaned </Accordion> tags that appear after </Accordions>
-    # (the LLM sometimes emits </Accordions>\n</Accordion> in the wrong order)
-    content = re.sub(r"(</Accordions>)(\s*</Accordion>)+", r"\1", content)
-
-    return content
-
-
 _PROVENANCE_KEYS = frozenset({
     "deepdoc_generated_at",
     "deepdoc_generated_commit",
@@ -1070,6 +698,41 @@ def strip_leaked_provenance_fields(content: str) -> str:
         result.append(line)
         i += 1
     return "\n".join(result)
+
+
+# Patterns that break the MDX parser when .md files are processed with format:'mdx'.
+# - `<=` and bare `<` before space/digit → MDX tries to open a JSX tag
+# - `{...}` containing `:` or starting with digit/quote → MDX tries to eval as JS expression
+_MDX_ANGLE_HAZARDS = re.compile(r"<=|<(?=\s|\d)")
+_MDX_BRACE_HAZARDS = re.compile(r"\{([^}]*[:][^}]*|[0-9\"][^}]*)\}")
+
+
+def escape_mdx_angle_hazards(content: str) -> str:
+    """Escape MDX parse hazards outside code blocks and YAML frontmatter.
+
+    Handles:
+    - `<=` / bare `<` before space or digit (would be parsed as JSX tag open)
+    - `{...}` with dict-like content (would be parsed as JS expression)
+    """
+    # Split off YAML frontmatter so we never touch it — frontmatter uses raw
+    # JSON objects as field values and must not be HTML-entity escaped.
+    frontmatter = ""
+    body = content
+    fm_match = re.match(r"^(---\n[\s\S]*?\n---\n)", content)
+    if fm_match:
+        frontmatter = fm_match.group(1)
+        body = content[len(frontmatter):]
+
+    parts = re.split(r"(```[\s\S]*?```)", body)
+    result = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:
+            result.append(part)
+        else:
+            part = _MDX_ANGLE_HAZARDS.sub(lambda m: "&lt;" + m.group(0)[1:], part)
+            part = _MDX_BRACE_HAZARDS.sub(lambda m: "&#123;" + m.group(1) + "&#125;", part)
+            result.append(part)
+    return frontmatter + "".join(result)
 
 
 def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> str:

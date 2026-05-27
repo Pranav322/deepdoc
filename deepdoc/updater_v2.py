@@ -15,7 +15,7 @@ from typing import Any
 from rich.console import Console
 from rich.panel import Panel
 
-from ._legacy_types import DocPage
+from .persistence_v2 import DocPage
 from .llm import LLMClient
 from .manifest import Manifest, file_hash
 from .parser import parse_file, supported_extensions
@@ -26,7 +26,7 @@ from .persistence_v2 import (
     save_all,
 )
 from .planner import scan_repo
-from .prompts_v2 import SYSTEM_V2, UPDATE_PAGE_V2
+from .prompts import SYSTEM_V2, UPDATE_PAGE_V2
 
 console = Console()
 
@@ -34,8 +34,8 @@ console = Console()
 def _doc_filename(page: DocPage) -> str:
     """Resolve the output filename for a page."""
     if getattr(page, "page_type", None) == "overview":
-        return "index.mdx"
-    return f"{page.slug}.mdx"
+        return "index.md"
+    return f"{page.slug}.md"
 
 
 class UpdaterV2:

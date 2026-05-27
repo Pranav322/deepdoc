@@ -81,9 +81,9 @@ def _split_yaml_frontmatter_and_leaked_body(
     return yaml_lines, leaked_body_lines
 
 
-def _ensure_mdx_frontmatter(output_dir: Path) -> None:
-    """Add minimal frontmatter to generated MDX pages and repair malformed blocks."""
-    for mdx_path in output_dir.glob("*.mdx"):
+def _ensure_md_frontmatter(output_dir: Path) -> None:
+    """Add minimal frontmatter to generated MD pages and repair malformed blocks."""
+    for mdx_path in output_dir.glob("*.md"):
         text = mdx_path.read_text(encoding="utf-8", errors="replace")
         fallback_title = mdx_path.stem.replace("-", " ").replace("_", " ").title()
         frontmatter_block = _split_leading_frontmatter(text)
@@ -146,7 +146,7 @@ def _ensure_mdx_frontmatter(output_dir: Path) -> None:
             f"title: {json.dumps(title)}",
             f"description: {json.dumps('Auto-generated developer documentation')}",
         ]
-        if mdx_path.name != "index.mdx":
+        if mdx_path.name != "index.md":
             frontmatter_lines.append("_deepdoc_autogen_: true")
         frontmatter = "\n".join(frontmatter_lines) + "\n---\n\n"
         mdx_path.write_text(frontmatter + body_text.lstrip(), encoding="utf-8")

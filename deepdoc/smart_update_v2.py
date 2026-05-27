@@ -1009,9 +1009,9 @@ class SmartUpdater:
             if not doc_rel:
                 hints = record.get("generation_hints", {})
                 doc_rel = (
-                    "index.mdx"
+                    "index.md"
                     if hints.get("is_introduction_page")
-                    else f"{bucket.slug}.mdx"
+                    else f"{bucket.slug}.md"
                 )
             if doc_rel and not (self.output_dir / doc_rel).exists():
                 stale.append(bucket.slug)
@@ -1207,7 +1207,7 @@ class SmartUpdater:
         sync_plan: UpdateSyncPlan,
         run_result: UpdateRunResult,
     ) -> None:
-        """Append a changelog entry and regenerate whats-changed.mdx."""
+        """Append a changelog entry and regenerate whats-changed.md."""
         try:
             import git as _git
 

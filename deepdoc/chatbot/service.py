@@ -39,58 +39,17 @@ from .types import (
     SourceCatalogEntry,
 )
 
-from .retrieval_mixin import RetrievalMixin
 from .answer_mixin import AnswerMixin
+from .constants import (
+    CODE_WORKSPACE_CONFIG_NAMES,
+    CODE_WORKSPACE_CONFIG_SUFFIXES,
+    CODE_WORKSPACE_SUFFIXES,
+    DOC_SUFFIXES,
+    STOPWORD_TOKENS,
+)
 from .live_fallback_mixin import LiveFallbackMixin
+from .retrieval_mixin import RetrievalMixin
 from .routes import create_fastapi_app, QueryRequest, DeepResearchRequest, CodeDeepRequest
-
-STOPWORD_TOKENS = {
-    "a",
-    "an",
-    "and",
-    "any",
-    "are",
-    "can",
-    "does",
-    "first",
-    "for",
-    "from",
-    "handle",
-    "handled",
-    "how",
-    "in",
-    "is",
-    "it",
-    "its",
-    "of",
-    "or",
-    "repo",
-    "repository",
-    "show",
-    "that",
-    "the",
-    "this",
-    "to",
-    "use",
-    "what",
-    "went",
-    "where",
-    "who",
-    "which",
-    "with",
-    "work",
-}
-DOC_SUFFIXES = {".md", ".mdx", ".txt", ".rst", ".adoc", ".ipynb"}
-CODE_WORKSPACE_SUFFIXES = {
-    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".php", ".java", ".rb",
-    ".rs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass",
-}
-CODE_WORKSPACE_CONFIG_NAMES = {
-    ".env", ".env.example", "docker-compose.yml", "docker-compose.yaml",
-    "package.json", "pyproject.toml", "requirements.txt", "composer.json",
-    "go.mod", "cargo.toml", "gemfile",
-}
-CODE_WORKSPACE_CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg"}
 
 
 class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):

@@ -24,9 +24,35 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from ._legacy_types import DocPage
-from ._legacy_types import DocPlan as LegacyDocPlan
+from dataclasses import dataclass as _dataclass, field as _field
+
 from .v2_models import DocBucket, DocPlan, build_bucket_semantic_id, tracked_bucket_files
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Legacy v1 types — used only for loading old .deepdoc_plan.json files
+# ─────────────────────────────────────────────────────────────────────────────
+
+@_dataclass
+class DocPage:
+    """Single page in the planned documentation (v1 format)."""
+    title: str
+    slug: str
+    page_type: str
+    description: str
+    source_files: list[str]
+    section: str = ""
+    priority: int = 0
+    depends_on: list[str] = _field(default_factory=list)
+
+
+@_dataclass
+class LegacyDocPlan:
+    """Complete doc plan (v1 format)."""
+    pages: list[DocPage]
+    nav_structure: dict[str, list[str]]
+    skipped_files: list[str]
+    orphaned_files: list[str] = _field(default_factory=list)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # File locations
@@ -698,11 +724,11 @@ def save_generation_ledger(
             "publication_tier": getattr(bucket, "publication_tier", "core"),
             "source_kind_summary": getattr(bucket, "source_kind_summary", {}),
             "generation_hints": getattr(bucket, "generation_hints", {}),
-            "doc_path": "index.mdx"
+            "doc_path": "index.md"
             if (getattr(bucket, "generation_hints", {}) or {}).get(
                 "is_introduction_page"
             )
-            else f"{bucket.slug}.mdx",
+            else f"{bucket.slug}.md",
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),
@@ -976,8 +1002,8 @@ def _fallback_doc_path(record: dict[str, Any]) -> str | None:
         return None
     hints = record.get("generation_hints", {})
     if hints.get("is_introduction_page"):
-        return "index.mdx"
-    return f"{slug}.mdx"
+        return "index.md"
+    return f"{slug}.md"
 
 
 def _prune_empty_parents(path: Path, stop_at: Path) -> None:

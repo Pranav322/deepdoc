@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
 import os
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 import zlib
+
+from ..config import _deep_merge
 
 DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
     "enabled": False,
@@ -111,16 +112,6 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "max_doc_summary_chars": 4000,
     },
 }
-
-
-def _deep_merge(base: dict[str, Any], override: dict[str, Any]) -> dict[str, Any]:
-    merged = deepcopy(base)
-    for key, value in override.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = _deep_merge(merged[key], value)
-        else:
-            merged[key] = value
-    return merged
 
 
 def get_chatbot_cfg(cfg: dict[str, Any]) -> dict[str, Any]:

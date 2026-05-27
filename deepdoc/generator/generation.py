@@ -39,7 +39,7 @@ from ..llm import LLMClient
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
-from ..prompts_v2 import SYSTEM_V2, get_prompt_for_bucket
+from ..prompts import SYSTEM_V2, get_prompt_for_bucket
 from ..scanner import _build_import_lookup, _classify_file_role, _normalize_import
 from ..openapi import parse_openapi_spec, spec_to_context_string
 
@@ -51,9 +51,34 @@ console = Console()
 
 
 from .evidence import AssembledEvidence, EvidenceAssembler
-from .mdx_compile_gate import GateOutcome, apply_mdx_compile_gate
 from .validation import PageValidator, ValidationResult
 from .post_processors import *
+
+
+def _validation_reason(v: "ValidationResult") -> str:
+    """Return a compact one-liner explaining why validation failed."""
+    parts: list[str] = []
+    if v.missing_sections:
+        parts.append(f"missing sections: {', '.join(v.missing_sections[:3])}")
+    if v.missing_file_refs:
+        parts.append(f"uncited files: {', '.join(v.missing_file_refs[:3])}")
+    if v.hallucinated_paths:
+        parts.append(f"hallucinated paths: {', '.join(v.hallucinated_paths[:2])}")
+    if v.hallucinated_symbols:
+        parts.append(f"hallucinated symbols: {', '.join(v.hallucinated_symbols[:2])}")
+    if v.placeholder_sections:
+        parts.append(f"placeholder text in: {', '.join(v.placeholder_sections[:2])}")
+    if v.unmatched_routes:
+        parts.append(f"unmatched routes: {len(v.unmatched_routes)}")
+    if v.missing_integrations:
+        parts.append(f"missing integrations: {', '.join(v.missing_integrations[:2])}")
+    if v.word_count < 100:
+        parts.append(f"too short ({v.word_count} words)")
+    if not parts and v.warnings:
+        parts.append(v.warnings[0])
+    return "; ".join(parts) if parts else "validation failed"
+
+
 # ═════════════════════════════════════════════════════════════════════════════
 # 3.2  Single-Pass Page Generation
 # ═════════════════════════════════════════════════════════════════════════════
@@ -153,6 +178,26 @@ class PageGenerator:
             ", ".join(bucket.coverage_targets) if bucket.coverage_targets else ""
         )
 
+        # Inject a compact must-cite list for checkable files (full source included,
+        # not compressed) so the LLM cites them by path on the first pass and avoids
+        # the file-coverage validation check triggering retries.
+        compressed = evidence.compressed_file_paths or set()
+        hints = bucket.generation_hints or {}
+        is_intro = hints.get("is_introduction_page") or bucket.section == "Start Here"
+        if not is_intro and bucket.owned_files:
+            checkable = [f for f in bucket.owned_files if f not in compressed]
+            if checkable:
+                cite_lines = "\n".join(f"  - `{f}`" for f in checkable[:20])
+                if len(checkable) > 20:
+                    cite_lines += f"\n  - ... and {len(checkable) - 20} more"
+                full_source += (
+                    "\n\n## Files You Must Cite by Path\n"
+                    "Rule 2 of the system prompt requires file paths on every code mention. "
+                    "These files are in your evidence and must appear at least once with their "
+                    "exact path in backticks:\n"
+                    f"{cite_lines}"
+                )
+
         # Resource group for endpoint pages
         resource_group = bucket.slug.replace("-api", "").replace("-", " ").title()
 
@@ -214,10 +259,6 @@ class GenerationResult:
     elapsed_seconds: float = 0.0
     retries: int = 0
     degraded: bool = False
-    mdx_compile_failed: bool = False
-    mdx_compile_retries: int = 0
-    mdx_fallback_applied: bool = False
-    mdx_last_error: str | None = None
 
 
 @dataclass
@@ -233,9 +274,6 @@ class GenerationSummary:
     warnings_total: int = 0
     invalid_slugs: list[str] = field(default_factory=list)
     degraded_slugs: list[str] = field(default_factory=list)
-    mdx_compile_retries_total: int = 0
-    mdx_compile_retried_slugs: list[str] = field(default_factory=list)
-    mdx_fallback_slugs: list[str] = field(default_factory=list)
 
     @property
     def status(self) -> str:
@@ -262,12 +300,6 @@ def summarize_generation_results(results: list[GenerationResult]) -> GenerationS
             if getattr(result, "degraded", False):
                 summary.degraded += 1
                 summary.degraded_slugs.append(result.bucket.slug)
-            retries = getattr(result, "mdx_compile_retries", 0) or 0
-            if retries:
-                summary.mdx_compile_retries_total += retries
-                summary.mdx_compile_retried_slugs.append(result.bucket.slug)
-            if getattr(result, "mdx_fallback_applied", False):
-                summary.mdx_fallback_slugs.append(result.bucket.slug)
         else:
             summary.skipped += 1
     return summary
@@ -579,10 +611,7 @@ class BucketGenerationEngine:
             content = repair_unbalanced_code_fences(content)
             content = normalize_explanatory_lines_outside_fences(content)
             content = repair_dangling_plain_fences(content)
-            content = normalize_mdx_steps(content)
-            content = repair_mdx_component_blocks(content)
-            content = escape_mdx_route_params(content)
-            content = escape_mdx_text_hazards(content)
+            content = escape_mdx_angle_hazards(content)
             content = repair_internal_doc_links(
                 content,
                 self._valid_doc_urls,
@@ -596,6 +625,10 @@ class BucketGenerationEngine:
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
                 quality_feedback = self._quality_feedback_to_instructions(validation)
+                retry_reason = _validation_reason(validation)
+                console.print(
+                    f"  [dim]↺ {bucket.title}: quality retry ({retry_reason})...[/dim]"
+                )
                 try:
                     content = self._call_with_retry(
                         evidence,
@@ -617,10 +650,7 @@ class BucketGenerationEngine:
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)
-                    content = normalize_mdx_steps(content)
-                    content = repair_mdx_component_blocks(content)
-                    content = escape_mdx_route_params(content)
-                    content = escape_mdx_text_hazards(content)
+                    content = escape_mdx_angle_hazards(content)
                     content = repair_internal_doc_links(
                         content,
                         self._valid_doc_urls,
@@ -637,9 +667,10 @@ class BucketGenerationEngine:
             # context promoted to the TOP of the prompt so the LLM cannot ignore it.
             if not validation.is_valid:
                 failure_prefix = self._build_failure_prefix(validation)
+                retry_reason = _validation_reason(validation)
                 try:
                     console.print(
-                        f"  [dim]↺ {bucket.title}: full regeneration pass (failure context injected)...[/dim]"
+                        f"  [dim]↺ {bucket.title}: full rewrite ({retry_reason})...[/dim]"
                     )
                     content = self._call_with_retry(
                         evidence,
@@ -661,10 +692,7 @@ class BucketGenerationEngine:
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)
-                    content = normalize_mdx_steps(content)
-                    content = repair_mdx_component_blocks(content)
-                    content = escape_mdx_route_params(content)
-                    content = escape_mdx_text_hazards(content)
+                    content = escape_mdx_angle_hazards(content)
                     content = repair_internal_doc_links(
                         content,
                         self._valid_doc_urls,
@@ -697,36 +725,11 @@ class BucketGenerationEngine:
                 evidence,
             )
 
-            # Step 8.5: MDX compile gate — last-line guarantee that the file
-            # will parse. Reprompts the LLM on compile error, falls back to
-            # JSX-stripped Markdown if retries are exhausted.
-            gate_outcome = self._run_mdx_compile_gate(content, bucket)
-            content = gate_outcome.content
-            if gate_outcome.fallback_also_failed:
-                err = gate_outcome.last_error
-                raise RuntimeError(
-                    f"MDX compile gate: JSX-strip fallback also failed to compile for "
-                    f"{bucket.title!r}: {err.short() if err else 'unknown error'}. "
-                    "Page will be written as a stub to avoid a broken site build."
-                )
-            if gate_outcome.fallback_applied:
-                degraded = True
-                console.print(
-                    f"  [yellow]⚠ {bucket.title}: MDX did not compile after "
-                    f"{gate_outcome.retries} retry(ies); shipping JSX-stripped "
-                    f"Markdown fallback.[/yellow]"
-                )
-            elif gate_outcome.retries:
-                console.print(
-                    f"  [dim]✓ {bucket.title}: recovered MDX after "
-                    f"{gate_outcome.retries} fix retry(ies).[/dim]"
-                )
-
             bucket_hints = bucket.generation_hints or {}
             filename = (
-                "index.mdx"
+                "index.md"
                 if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.mdx"
+                else f"{bucket.slug}.md"
             )
             doc_path = self.output_dir / filename
             doc_path.parent.mkdir(parents=True, exist_ok=True)
@@ -743,14 +746,6 @@ class BucketGenerationEngine:
                 validation=validation,
                 elapsed_seconds=elapsed,
                 degraded=degraded,
-                mdx_compile_failed=gate_outcome.compile_failed,
-                mdx_compile_retries=gate_outcome.retries,
-                mdx_fallback_applied=gate_outcome.fallback_applied,
-                mdx_last_error=(
-                    gate_outcome.last_error.short()
-                    if gate_outcome.last_error is not None
-                    else None
-                ),
             )
 
         except Exception as e:
@@ -766,9 +761,9 @@ class BucketGenerationEngine:
             )
             bucket_hints = bucket.generation_hints or {}
             filename = (
-                "index.mdx"
+                "index.md"
                 if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.mdx"
+                else f"{bucket.slug}.md"
             )
             doc_path = self.output_dir / filename
             doc_path.parent.mkdir(parents=True, exist_ok=True)
@@ -845,27 +840,6 @@ class BucketGenerationEngine:
                     raise
         raise RuntimeError(f"Max retries exceeded for {evidence.bucket.title}")
 
-    # ── MDX compile gate ─────────────────────────────────────────────────
-
-    def _run_mdx_compile_gate(
-        self, content: str, bucket: DocBucket
-    ) -> GateOutcome:
-        """Run the MDX compile gate on a single page.
-
-        Wrapped in a try/except so environment failures (missing Node, npm
-        install failure) downgrade to "skip the gate, ship as-is" rather than
-        aborting the whole generation run. The downstream `pnpm build` will
-        still surface MDX problems if any slip through.
-        """
-        try:
-            return apply_mdx_compile_gate(content, self.llm, bucket)
-        except Exception as exc:
-            console.print(
-                f"  [yellow]⚠ MDX compile gate unavailable for "
-                f"{bucket.title}: {exc}. Shipping page unverified.[/yellow]"
-            )
-            return GateOutcome(content=content)
-
     # ── Graceful degradation ─────────────────────────────────────────────
 
     def _apply_degradation_fixes(
@@ -888,10 +862,10 @@ class BucketGenerationEngine:
         # Fix 2: Add a notice for very short pages
         if validation.word_count < 100:
             notice = (
-                '\n\n<Callout type="warn">\n'
+                "\n\n:::warn\n"
                 "This page was auto-generated with limited evidence. "
                 "Some sections may be incomplete.\n"
-                "</Callout>\n"
+                ":::\n"
             )
             content = notice + content
 
@@ -1111,10 +1085,10 @@ title: "{bucket.title}"
 
 # {bucket.title}
 
-<Callout type="warn">
+:::warn
 This page could not be fully generated. It contains a file listing only.
 Re-run `deepdoc generate` to retry.
-</Callout>
+:::
 
 ## Description
 

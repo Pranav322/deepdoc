@@ -1323,7 +1323,7 @@ def _detect_generated_deepdoc_version(repo_root: Path, output_dir: Path) -> str 
     for directory in candidates:
         if not directory.exists():
             continue
-        for doc_path in sorted(directory.rglob("*.mdx")):
+        for doc_path in sorted(directory.rglob("*.md")):
             try:
                 content = doc_path.read_text(encoding="utf-8", errors="replace")
             except OSError:
@@ -1459,7 +1459,7 @@ def _deployment_quality_blockers(repo_root: Path, output_dir: Path) -> list[str]
     if output_dir.exists():
         invalid_pages: list[str] = []
         stub_pages: list[str] = []
-        for doc_path in sorted(output_dir.rglob("*.mdx")):
+        for doc_path in sorted(output_dir.rglob("*.md")):
             try:
                 content = doc_path.read_text(encoding="utf-8")
             except Exception:

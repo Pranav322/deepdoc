@@ -31,7 +31,7 @@ def record_and_write(
     files_changed: list[str],
     is_initial: bool = False,
 ) -> None:
-    """Append one changelog entry and regenerate whats-changed.mdx."""
+    """Append one changelog entry and regenerate whats-changed.md."""
     entry = {
         "commit": commit[:8],
         "run_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
@@ -47,15 +47,15 @@ def record_and_write(
 
 
 def write_whats_changed_page(repo_root: Path, output_dir: Path) -> None:
-    """Write docs/whats-changed.mdx from .deepdoc/changelog.json."""
+    """Write docs/whats-changed.md from .deepdoc/changelog.json."""
     entries = load_changelog(repo_root)
-    mdx = _build_mdx(entries)
+    content = _build_md(entries)
     output_dir.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(output_dir / "whats-changed.mdx", mdx)
+    atomic_write_text(output_dir / "whats-changed.md", content)
     _ensure_in_nav(repo_root)
 
 
-def _build_mdx(entries: list[dict]) -> str:
+def _build_md(entries: list[dict]) -> str:
     lines = [
         "---",
         'title: "What\'s Changed"',
@@ -72,11 +72,11 @@ def _build_mdx(entries: list[dict]) -> str:
 
     if not entries:
         lines.append(
-            "<Callout>No changelog entries yet. Run `deepdoc generate` to create the first entry.</Callout>"
+            ":::note\nNo changelog entries yet. Run `deepdoc generate` to create the first entry.\n:::"
         )
         return "\n".join(lines)
 
-    lines.append("<Accordions>")
+    lines.append(":::accordions")
     for entry in entries:
         date = entry.get("date", "")
         msg = entry.get("commit_message", "update")
@@ -88,7 +88,7 @@ def _build_mdx(entries: list[dict]) -> str:
         strategy_label = _STRATEGY_LABEL.get(strategy, strategy)
 
         title = f"{date} — {msg[:72]} ({sha})"
-        lines.append(f'<Accordion title="{title}">')
+        lines.append(f'::accordion{{title="{title}"}}')
         lines.append("")
 
         # Commit metadata row
@@ -119,7 +119,7 @@ def _build_mdx(entries: list[dict]) -> str:
                     lines.append(f"- [{_slug_to_title(s)}](/{s})")
             else:
                 lines.append(
-                    "<Callout type='info'>No pages were regenerated — only metadata or chatbot corpora were refreshed.</Callout>"
+                    ":::info\nNo pages were regenerated — only metadata or chatbot corpora were refreshed.\n:::"
                 )
 
             # Source files that changed
@@ -148,9 +148,9 @@ def _build_mdx(entries: list[dict]) -> str:
                 )
 
         lines.append("")
-        lines.append("</Accordion>")
+        lines.append("::")
 
-    lines.append("</Accordions>")
+    lines.append(":::")
     return "\n".join(lines)
 
 

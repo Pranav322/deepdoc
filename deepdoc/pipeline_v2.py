@@ -34,13 +34,10 @@ from .chatbot.settings import chatbot_enabled
 from .generator import (
     build_internal_doc_link_maps,
     BucketGenerationEngine,
-    escape_mdx_route_params,
-    escape_mdx_text_hazards,
     normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     repair_dangling_plain_fences,
     repair_unbalanced_code_fences,
-    repair_mdx_component_blocks,
     repair_internal_doc_links,
     summarize_generation_results,
 )
@@ -60,6 +57,7 @@ from .persistence_v2 import (
     deepdoc_state_lock,
     load_changelog,
     load_generation_ledger,
+    load_plan,
     prune_generation_ledger,
     save_all,
     save_sync_receipt,
@@ -71,7 +69,7 @@ from .planner import (
 from .planner import (
     scan_repo as bucket_scan_repo,
 )
-from .prompts_v2 import SYSTEM_V2, get_prompt_for_page_type
+from .prompts import SYSTEM_V2, get_prompt_for_page_type
 
 console = Console()
 
@@ -328,15 +326,37 @@ class PipelineV2:
         stats["files_scanned"] = scan.total_files
 
         # ── Phase 2: Plan ──────────────────────────────────────────────
-        console.print(
-            Panel(
-                "[bold]Phase 2/5: Multi-step bucket planner (3 LLM calls)[/bold]",
-                border_style="blue",
+        # When force=False and a saved plan exists with the same file count,
+        # reuse it so an interrupted generate can resume without re-planning.
+        cached_plan = None if force else load_plan(self.repo_root)
+        _plan_reused = False
+        if cached_plan is not None and hasattr(cached_plan, "buckets"):
+            cached_files = {f for b in cached_plan.buckets for f in (b.owned_files or [])}
+            scan_files = set(scan.file_summaries.keys())
+            # Accept cached plan when ≥90% of its files still exist in the scan.
+            overlap = len(cached_files & scan_files)
+            if not cached_files or overlap / len(cached_files) >= 0.90:
+                plan = cached_plan
+                _plan_reused = True
+                console.print(
+                    Panel(
+                        f"[bold]Phase 2/5: Reusing saved plan[/bold] "
+                        f"[dim]({len(plan.buckets)} buckets — use --clean to re-plan)[/dim]",
+                        border_style="dim",
+                    )
+                )
+
+        if not _plan_reused:
+            console.print(
+                Panel(
+                    "[bold]Phase 2/5: Multi-step bucket planner (3 LLM calls)[/bold]",
+                    border_style="blue",
+                )
             )
-        )
-        phase_start = time.perf_counter()
-        plan = bucket_plan_docs(scan, self.cfg, self.llm, repo_root=self.repo_root)
-        phase_timings["plan"] = time.perf_counter() - phase_start
+            phase_start = time.perf_counter()
+            plan = bucket_plan_docs(scan, self.cfg, self.llm, repo_root=self.repo_root)
+            phase_timings["plan"] = time.perf_counter() - phase_start
+
         stats["pages_planned"] = len(plan.pages)
 
         # ── Phase 3: Generate ──────────────────────────────────────────
@@ -365,14 +385,9 @@ class PipelineV2:
         stats["pages_invalid"] = generation_summary.invalid
         stats["pages_degraded"] = generation_summary.degraded
         stats["page_warnings"] = generation_summary.warnings_total
-        stats["mdx_compile_retries_total"] = generation_summary.mdx_compile_retries_total
-        stats["mdx_compile_retried_slugs"] = generation_summary.mdx_compile_retried_slugs
-        stats["mdx_fallback_slugs"] = generation_summary.mdx_fallback_slugs
         stats["quality_report"] = {
             "invalid_slugs": generation_summary.invalid_slugs,
             "degraded_slugs": generation_summary.degraded_slugs,
-            "mdx_compile_retried_slugs": generation_summary.mdx_compile_retried_slugs,
-            "mdx_fallback_slugs": generation_summary.mdx_fallback_slugs,
         }
         stats["status"] = generation_summary.status
 
@@ -646,7 +661,7 @@ class PipelineV2:
 
                     # Sub-step 2: write to disk
                     filename = (
-                        "index.mdx" if _page_is_overview(page) else f"{page.slug}.mdx"
+                        "index.md" if _page_is_overview(page) else f"{page.slug}.md"
                     )
                     doc_path = self.output_dir / filename
                     doc_path.parent.mkdir(parents=True, exist_ok=True)
@@ -702,7 +717,7 @@ class PipelineV2:
 
         # Get the right prompt — prefer bucket hints, fall back to page_type
         if hasattr(page, "_b"):
-            from .prompts_v2 import get_prompt_for_bucket
+            from .prompts import get_prompt_for_bucket
 
             prompt_template = get_prompt_for_bucket(page._b)
         else:
@@ -799,9 +814,6 @@ class PipelineV2:
         raw = repair_unbalanced_code_fences(raw)
         raw = normalize_explanatory_lines_outside_fences(raw)
         raw = repair_dangling_plain_fences(raw)
-        raw = repair_mdx_component_blocks(raw)
-        raw = escape_mdx_route_params(raw)
-        raw = escape_mdx_text_hazards(raw)
         doc_pages = [
             (
                 candidate.title,
@@ -1559,7 +1571,7 @@ class PipelineV2:
         """Auto-link domain-glossary terms across all generated pages.
 
         Single pass: parse `### term` headings from the glossary page, then for
-        every other generated .mdx, replace the first occurrence of each term
+        every other generated .md, replace the first occurrence of each term
         with a link to /domain-glossary#<slug>. Skips code blocks, headings,
         existing links, and the glossary page itself.
         """
@@ -1568,7 +1580,7 @@ class PipelineV2:
             link_glossary_terms,
         )
 
-        glossary_path = self.output_dir / "domain-glossary.mdx"
+        glossary_path = self.output_dir / "domain-glossary.md"
         if not glossary_path.exists():
             return
         try:
@@ -1580,16 +1592,16 @@ class PipelineV2:
             return
 
         rewritten = 0
-        for mdx_path in self.output_dir.glob("*.mdx"):
-            if mdx_path.name == "domain-glossary.mdx":
+        for md_path in self.output_dir.glob("*.md"):
+            if md_path.name == "domain-glossary.md":
                 continue
             try:
-                original = mdx_path.read_text(encoding="utf-8")
+                original = md_path.read_text(encoding="utf-8")
             except OSError:
                 continue
             updated = link_glossary_terms(original, terms)
             if updated != original:
-                mdx_path.write_text(updated, encoding="utf-8")
+                md_path.write_text(updated, encoding="utf-8")
                 rewritten += 1
         if rewritten:
             console.print(
@@ -1699,22 +1711,11 @@ class PipelineV2:
             stats.get("pages_invalid")
             or stats.get("pages_degraded")
             or stats.get("page_warnings")
-            or stats.get("mdx_compile_retries_total")
-            or stats.get("mdx_fallback_slugs")
         ):
-            mdx_retries = int(stats.get("mdx_compile_retries_total", 0) or 0)
-            mdx_fallbacks = len(stats.get("mdx_fallback_slugs", []) or [])
-            mdx_line = ""
-            if mdx_retries or mdx_fallbacks:
-                mdx_line = (
-                    f"  MDX fix retries:  [cyan]{mdx_retries}[/cyan]\n"
-                    f"  MDX fallbacks:    [cyan]{mdx_fallbacks}[/cyan]\n"
-                )
             quality_line = (
                 f"  Invalid pages:    [cyan]{stats.get('pages_invalid', 0)}[/cyan]\n"
                 f"  Degraded pages:   [cyan]{stats.get('pages_degraded', 0)}[/cyan]\n"
                 f"  Warnings:         [cyan]{stats.get('page_warnings', 0)}[/cyan]\n"
-                f"{mdx_line}"
             )
 
         console.print()
@@ -1744,9 +1745,6 @@ class PipelineV2:
             "pages_invalid": stats.get("pages_invalid", 0),
             "pages_degraded": stats.get("pages_degraded", 0),
             "page_warnings": stats.get("page_warnings", 0),
-            "mdx_compile_retries_total": stats.get("mdx_compile_retries_total", 0),
-            "mdx_compile_retried_slugs": stats.get("mdx_compile_retried_slugs", []),
-            "mdx_fallback_slugs": stats.get("mdx_fallback_slugs", []),
             "quality_report": stats.get("quality_report", {}),
             "llm_usage": stats.get("llm_usage", {}),
         }

@@ -549,14 +549,19 @@ def _decompose_buckets(
             bucket_type=bucket.bucket_type,
             description=bucket.description,
             file_count=len(bucket.owned_files),
+            # Show every filename. File names are cheap (~50 chars) and the LLM
+            # cannot design a sensible split for files it cannot see. The old
+            # 50-file cap caused oversized buckets (e.g. 92-file Wishlist) to
+            # survive both decompose passes because the LLM was choosing splits
+            # from a sample. See docs/planner_tuning.md.
             file_list="\n".join(
                 f"  - {f} ({scan.file_line_counts.get(f, 0)} lines)"
-                for f in bucket.owned_files[:50]
-            ) + (
-                f"\n  ... and {len(bucket.owned_files) - 50} more"
-                if len(bucket.owned_files) > 50 else ""
+                for f in bucket.owned_files
             ),
-            file_summaries=file_summaries[:15000],
+            # Raised from 15_000 to 60_000 so all summaries fit for buckets up to
+            # ~200 files at ~300 chars per summary. Modern LLM context windows
+            # easily accommodate this; cost is bounded by bucket size.
+            file_summaries=file_summaries[:60000],
             existing_buckets=other_buckets_str or "(none)",
             repo_profile=repo_profile_str,
         )

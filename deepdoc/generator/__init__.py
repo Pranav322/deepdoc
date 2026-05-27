@@ -6,28 +6,16 @@ from .generation import (
     summarize_generation_results,
     BucketGenerationEngine,
 )
-from .mdx_compile_gate import GateOutcome, apply_mdx_compile_gate
-from .mdx_validator import (
-    MdxCompileError,
-    ValidationOutcome,
-    bootstrap_validator,
-    ensure_node_available,
-    validate_mdx,
-)
 from .validation import ValidationResult, PageValidator
 from .post_processors import (
     _fix_mermaid_diagram,
     build_internal_doc_link_maps,
-    escape_mdx_route_params,
-    escape_mdx_text_hazards,
     fix_file_references,
     fix_mermaid_diagrams,
     normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
-    normalize_mdx_steps,
     repair_internal_doc_links,
-    repair_mdx_component_blocks,
     repair_split_object_code_fences,
     repair_dangling_plain_fences,
     repair_unbalanced_code_fences,

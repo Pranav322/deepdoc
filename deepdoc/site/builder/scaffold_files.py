@@ -27,6 +27,7 @@ def _package_json(project_name: str) -> str:
                     "react-dom": "19.1.0",
                     "react-markdown": "^10.1.0",
                     "react-syntax-highlighter": "^15.6.1",
+                    "remark-directive": "^3.0.0",
                     "tailwindcss": "^4.1.3",
                 },
                 "devDependencies": {
@@ -159,6 +160,8 @@ def _source_config_mjs(docs_dir_relative: str) -> str:
         f"""\
         import {{ defineDocs, defineConfig }} from 'fumadocs-mdx/config';
         import {{ remarkMdxMermaid }} from 'fumadocs-core/mdx-plugins';
+        import remarkDirective from 'remark-directive';
+        import {{ remarkFumadocsDirectives }} from './lib/remark-directives.mjs';
 
         export const {{ docs, meta }} = defineDocs({{
           dir: '{docs_dir_relative}',
@@ -166,7 +169,8 @@ def _source_config_mjs(docs_dir_relative: str) -> str:
 
         export default defineConfig({{
           mdxOptions: {{
-            remarkPlugins: [remarkMdxMermaid],
+            format: 'mdx',
+            remarkPlugins: [remarkDirective, remarkFumadocsDirectives, remarkMdxMermaid],
           }},
         }});
         """
@@ -1822,6 +1826,106 @@ def _openapi_ts() -> str:
                   ],
                 };
               },
+            },
+          };
+        }
+        """
+    )
+
+
+def _remark_directives_mjs() -> str:
+    return dedent(
+        """\
+        import { visit } from 'unist-util-visit';
+
+        export function remarkFumadocsDirectives() {
+          return (tree) => {
+            visit(tree, (node, index, parent) => {
+              if (!parent || index == null) return;
+              if (node.type !== 'containerDirective') return;
+
+              const { name, attributes = {}, children } = node;
+
+              if (['note', 'warn', 'warning', 'info', 'tip', 'danger'].includes(name)) {
+                const type = name === 'note' ? null : name === 'warning' ? 'warn' : name;
+                parent.children[index] = jsx(
+                  'Callout',
+                  type ? [attr('type', type)] : [],
+                  children,
+                );
+              } else if (name === 'steps') {
+                parent.children[index] = jsx(
+                  'Steps',
+                  [],
+                  children.map((child) => {
+                    if (child.type === 'containerDirective' && child.name === 'step') {
+                      const title = child.attributes?.title ?? '';
+                      return jsx('Step', [], [
+                        { type: 'mdxJsxFlowElement', name: 'h3', attributes: [], children: [{ type: 'text', value: title }] },
+                        ...child.children,
+                      ]);
+                    }
+                    return child;
+                  }),
+                );
+              } else if (name === 'tabs') {
+                const items = (attributes.items || '').split(',').map((s) => s.trim()).filter(Boolean);
+                parent.children[index] = jsx(
+                  'Tabs',
+                  [attrExpr('items', JSON.stringify(items))],
+                  children.map((child) => {
+                    if (child.type === 'containerDirective' && child.name === 'tab') {
+                      return jsx('Tab', [attr('value', child.attributes?.value ?? '')], child.children);
+                    }
+                    return child;
+                  }),
+                );
+              } else if (name === 'cards') {
+                parent.children[index] = jsx(
+                  'Cards',
+                  [],
+                  children.map((child) => {
+                    if (child.type === 'containerDirective' && child.name === 'card') {
+                      return jsx('Card', [
+                        ...(child.attributes?.title ? [attr('title', child.attributes.title)] : []),
+                        ...(child.attributes?.href  ? [attr('href',  child.attributes.href)]  : []),
+                      ], child.children);
+                    }
+                    return child;
+                  }),
+                );
+              } else if (name === 'accordions') {
+                parent.children[index] = jsx(
+                  'Accordions',
+                  [attr('type', 'single')],
+                  children.map((child) => {
+                    if (child.type === 'containerDirective' && child.name === 'accordion') {
+                      return jsx('Accordion', [attr('title', child.attributes?.title ?? '')], child.children);
+                    }
+                    return child;
+                  }),
+                );
+              }
+            });
+          };
+        }
+
+        function jsx(name, attributes, children) {
+          return { type: 'mdxJsxFlowElement', name, attributes, children: children ?? [] };
+        }
+
+        function attr(name, value) {
+          return { type: 'mdxJsxAttribute', name, value };
+        }
+
+        function attrExpr(name, rawExpr) {
+          return {
+            type: 'mdxJsxAttribute',
+            name,
+            value: {
+              type: 'mdxJsxAttributeValueExpression',
+              value: rawExpr,
+              data: { estree: null },
             },
           };
         }

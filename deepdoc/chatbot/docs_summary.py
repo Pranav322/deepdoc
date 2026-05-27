@@ -548,8 +548,8 @@ def _looks_binary(path: Path) -> bool:
 def _doc_path_for_page(output_dir: Path, page: Any) -> Path:
     hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
     if hints.get("is_introduction_page") or page.page_type == "overview":
-        return output_dir / "index.mdx"
-    return output_dir / f"{page.slug}.mdx"
+        return output_dir / "index.md"
+    return output_dir / f"{page.slug}.md"
 
 
 def _doc_url(page: Any, has_openapi: bool) -> str:

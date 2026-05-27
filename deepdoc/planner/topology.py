@@ -23,14 +23,23 @@ from ..call_graph import CALL_KIND_CELERY, CALL_KIND_EVENT, CALL_KIND_EXTERNAL, 
 
 _SIDE_EFFECT_KINDS = {CALL_KIND_CELERY, CALL_KIND_SIGNAL, CALL_KIND_EVENT}
 
-# Files called by >= this fraction of all repo files are "foundational"
-_FOUNDATIONAL_FRACTION = 0.08
+# Files called by >= this fraction of all repo files are "foundational".
+# Lower fraction = more files treated as shared infra (excluded from cluster
+# bodies), which prevents a single BaseController / db.py from gluing every
+# cluster together. See docs/planner_tuning.md.
+_FOUNDATIONAL_FRACTION = 0.05
 
-# BFS depth cap when assigning files to clusters
-_MAX_CLUSTER_DEPTH = 10
+# BFS depth cap when assigning files to clusters. Shallower depth stops a
+# cluster from sweeping the whole call graph from an entry point — a
+# controller no longer drags in everything 9 layers deep. See
+# docs/planner_tuning.md.
+_MAX_CLUSTER_DEPTH = 4
 
-# Jaccard threshold for merging two clusters
-_MERGE_JACCARD = 0.40
+# Jaccard threshold for merging two clusters. Higher threshold = clusters
+# stay separate unless they have substantial file overlap (was 0.40, which
+# was merging weakly-related clusters via shared utility files). See
+# docs/planner_tuning.md.
+_MERGE_JACCARD = 0.60
 
 
 @dataclass

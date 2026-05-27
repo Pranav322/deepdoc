@@ -22,6 +22,7 @@ from .scaffold_files import (
     _source_ts,
     _layout_options_ts,
     _openapi_ts,
+    _remark_directives_mjs,
 )
 
 from .chatbot_components import (

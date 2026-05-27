@@ -67,8 +67,8 @@ def bucket_doc_path(bucket: DocBucket) -> str:
     hints = bucket.generation_hints or {}
     page_type = hints.get("prompt_style", bucket.bucket_type)
     if hints.get("is_introduction_page") or page_type == "overview":
-        return "index.mdx"
-    return f"{bucket.slug}.mdx"
+        return "index.md"
+    return f"{bucket.slug}.md"
 
 
 def bucket_doc_url(bucket: DocBucket, *, has_openapi: bool = False) -> str:

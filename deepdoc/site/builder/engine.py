@@ -54,9 +54,8 @@ def build_fumadocs_from_plan(
 
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    _rename_md_to_mdx(output_dir)
     _rename_legacy_intro_to_index(output_dir)
-    _ensure_mdx_frontmatter(output_dir)
+    _ensure_md_frontmatter(output_dir)
     _ensure_landing_page(output_dir, project_name, plan)
 
     docs_dir_relative = os.path.relpath(output_dir, repo_root / "site").replace(
@@ -114,6 +113,7 @@ def _ensure_app_scaffold(
         site_dir / "lib" / "layout-options.ts": _layout_options_ts(
             project_name, repo_url
         ),
+        site_dir / "lib" / "remark-directives.mjs": _remark_directives_mjs(),
         site_dir / "openapi" / ".gitkeep": "",
     }
 
@@ -193,10 +193,10 @@ def _build_page_tree_from_plan(
 
     def page_exists(page) -> bool:
         if is_overview(page):
-            return (output_dir / "index.mdx").exists()
+            return (output_dir / "index.md").exists()
         if has_openapi and is_endpoint_ref(page):
             return True
-        return (output_dir / f"{page.slug}.mdx").exists()
+        return (output_dir / f"{page.slug}.md").exists()
 
     def page_url(page) -> str:
         if is_overview(page):
@@ -246,8 +246,8 @@ def _build_page_tree_from_plan(
 
     # whats-changed is a special generated page (not a DocBucket) — inject a
     # synthetic entry so it's found during the nav_structure loop below.
-    if (output_dir / "whats-changed.mdx").exists() and "whats-changed" not in slug_to_page:
-        from ..._legacy_types import DocPage as _DocPage
+    if (output_dir / "whats-changed.md").exists() and "whats-changed" not in slug_to_page:
+        from ...persistence_v2 import DocPage as _DocPage
         _wc = _DocPage(
             title="What's Changed",
             slug="whats-changed",
@@ -263,7 +263,7 @@ def _build_page_tree_from_plan(
     overview_page = next(
         (page for page in plan.pages if is_overview(page) and page_exists(page)), None
     )
-    if overview_page or (output_dir / "index.mdx").exists():
+    if overview_page or (output_dir / "index.md").exists():
         root_children.append(
             {
                 "type": "page",
@@ -453,27 +453,16 @@ def _cleanup_legacy_artifacts(repo_root: Path) -> None:
 
 
 def _rename_legacy_intro_to_index(output_dir: Path) -> None:
-    """Migrate legacy overview filenames to Fumadocs' index.mdx."""
-    for legacy_name in ("introduction.mdx", "intro.mdx", "index.md", "intro.md"):
+    """Migrate legacy overview filenames to docs/index.md."""
+    for legacy_name in ("introduction.md", "intro.md", "introduction.mdx", "intro.mdx"):
         legacy_path = output_dir / legacy_name
-        index_mdx = output_dir / "index.mdx"
-        if legacy_path.exists() and not index_mdx.exists():
+        index_md = output_dir / "index.md"
+        if legacy_path.exists() and not index_md.exists():
             content = legacy_path.read_text(encoding="utf-8")
             content = _strip_docusaurus_frontmatter(content)
-            index_mdx.write_text(content, encoding="utf-8")
-        if legacy_path.exists() and legacy_path.name != "index.mdx":
+            index_md.write_text(content, encoding="utf-8")
+        if legacy_path.exists() and legacy_path.name != "index.md":
             legacy_path.unlink()
-
-
-def _rename_md_to_mdx(output_dir: Path) -> None:
-    """Rename generated Markdown pages to MDX."""
-    for md_file in list(output_dir.rglob("*.md")):
-        mdx_file = md_file.with_suffix(".mdx")
-        if not mdx_file.exists():
-            content = md_file.read_text(encoding="utf-8")
-            content = _strip_docusaurus_frontmatter(content)
-            mdx_file.write_text(content, encoding="utf-8")
-        md_file.unlink()
 
 
 def _strip_docusaurus_frontmatter(content: str) -> str:
@@ -501,10 +490,10 @@ def _strip_docusaurus_frontmatter(content: str) -> str:
 
 
 def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> None:
-    """Ensure the landing page exists as docs/index.mdx."""
-    index_mdx = output_dir / "index.mdx"
-    if index_mdx.exists():
-        existing = index_mdx.read_text(encoding="utf-8")
+    """Ensure the landing page exists as docs/index.md."""
+    index_md = output_dir / "index.md"
+    if index_md.exists():
+        existing = index_md.read_text(encoding="utf-8")
         if "_deepdoc_autogen_" not in existing:
             return
 
@@ -513,7 +502,7 @@ def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> 
         hints = (page._b.generation_hints or {}) if hasattr(page, "_b") else {}
         if hints.get("is_introduction_page") or page.page_type == "overview":
             continue
-        if not (output_dir / f"{page.slug}.mdx").exists():
+        if not (output_dir / f"{page.slug}.md").exists():
             continue
         section = getattr(page, "section", None) or "Docs"
         sections.setdefault(section, []).append((page.title, page.slug))
@@ -549,12 +538,12 @@ def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> 
         cards = []
         for title, slug in pages:
             cards.append(
-                f'  <Card title="{title}" href="/{slug}">\n'
-                f"    {title} documentation.\n"
-                f"  </Card>"
+                f'::card{{title="{title}" href="/{slug}"}}\n'
+                f"{title} documentation.\n"
+                f"::"
             )
         cards_section.append(
-            f"## {section_name}\n\n<Cards>\n" + "\n".join(cards) + "\n</Cards>"
+            f"## {section_name}\n\n:::cards\n" + "\n".join(cards) + "\n:::"
         )
 
     body_parts: list[str] = []
@@ -576,8 +565,8 @@ Welcome to the **{project_name}** developer documentation.
 
 {body}
 """
-    index_mdx.write_text(content, encoding="utf-8")
+    index_md.write_text(content, encoding="utf-8")
 
 
-from .templates import _api_layout_tsx, _api_page_client_tsx, _api_page_component_tsx, _api_page_tsx, _app_layout_tsx, _chatbot_ask_page_tsx, _chatbot_config_ts, _chatbot_panel_tsx, _chatbot_toggle_tsx, _docs_layout_tsx, _docs_page_tsx, _global_css, _layout_options_ts, _mdx_components_tsx, _mermaid_component_tsx, _next_config_mjs, _next_env_d_ts, _openapi_ts, _package_json, _postcss_config_mjs, _search_route_ts, _source_config_mjs, _source_ts, _tsconfig_json
-from .mdx_utils import _ensure_mdx_frontmatter
+from .templates import _api_layout_tsx, _api_page_client_tsx, _api_page_component_tsx, _api_page_tsx, _app_layout_tsx, _chatbot_ask_page_tsx, _chatbot_config_ts, _chatbot_panel_tsx, _chatbot_toggle_tsx, _docs_layout_tsx, _docs_page_tsx, _global_css, _layout_options_ts, _mdx_components_tsx, _mermaid_component_tsx, _next_config_mjs, _next_env_d_ts, _openapi_ts, _package_json, _postcss_config_mjs, _remark_directives_mjs, _search_route_ts, _source_config_mjs, _source_ts, _tsconfig_json
+from .mdx_utils import _ensure_md_frontmatter

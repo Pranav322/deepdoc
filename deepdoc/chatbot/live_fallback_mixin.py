@@ -8,12 +8,11 @@ from pathlib import Path
 from typing import Any
 
 from ..source_metadata import classify_source_kind
+from .constants import DOC_SUFFIXES
 from .types import (
     ChunkRecord,
     RetrievedChunk,
 )
-
-DOC_SUFFIXES = {".md", ".mdx", ".txt", ".rst", ".adoc", ".ipynb"}
 
 
 class LiveFallbackMixin:

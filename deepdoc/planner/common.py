@@ -242,7 +242,7 @@ Each bucket MUST include a "generation_hints" object with these flags (set true 
 - include_openapi: inject OpenAPI spec context when generating
 - include_database_context: inject DB schema, ER diagrams, model definitions
 - include_integration_detail: full external-system integration context
-- is_introduction_page: landing/overview page (becomes index.mdx)
+- is_introduction_page: landing/overview page (becomes index.md)
 - prompt_style: one of "system", "feature", "endpoint", "endpoint_ref",   "integration", "database", "training", "architecture_component",   "data_pipeline", or "general"
 - icon: Heroicon name (e.g. "server", "bolt", "globe-alt", "database",   "puzzle-piece", "book-open", "command-line", "cube", "cog")
 

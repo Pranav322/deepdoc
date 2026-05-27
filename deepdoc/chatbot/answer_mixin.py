@@ -7,23 +7,17 @@ import re
 from typing import Any, Callable
 
 from ..source_metadata import classify_source_kind
+from .constants import (
+    CODE_WORKSPACE_CONFIG_NAMES,
+    CODE_WORKSPACE_CONFIG_SUFFIXES,
+    CODE_WORKSPACE_SUFFIXES,
+)
 from .types import (
     EvidenceItem,
     ReferenceItem,
     RetrievalDiagnostics,
     RetrievedChunk,
 )
-
-CODE_WORKSPACE_SUFFIXES = {
-    ".py", ".js", ".jsx", ".ts", ".tsx", ".go", ".php", ".java", ".rb",
-    ".rs", ".vue", ".svelte", ".html", ".css", ".scss", ".sass",
-}
-CODE_WORKSPACE_CONFIG_NAMES = {
-    ".env", ".env.example", "docker-compose.yml", "docker-compose.yaml",
-    "package.json", "pyproject.toml", "requirements.txt", "composer.json",
-    "go.mod", "cargo.toml", "gemfile",
-}
-CODE_WORKSPACE_CONFIG_SUFFIXES = {".json", ".toml", ".yaml", ".yml", ".ini", ".cfg"}
 
 
 class AnswerMixin:
@@ -1039,7 +1033,7 @@ class AnswerMixin:
                         {
                             "title": page.title,
                             "url": url,
-                            "doc_path": f"{page.slug}.mdx",
+                            "doc_path": f"{page.slug}.md",
                         },
                     )
         return list(links.values())[:5]

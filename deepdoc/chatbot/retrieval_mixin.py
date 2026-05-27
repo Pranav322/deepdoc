@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from .constants import DOC_SUFFIXES, STOPWORD_TOKENS
 from .persistence import (
     query_lexical_index,
     similarity_search,
@@ -14,44 +15,6 @@ from .persistence import (
 from .types import (
     RetrievedChunk,
 )
-
-STOPWORD_TOKENS = {
-    "a",
-    "an",
-    "and",
-    "any",
-    "are",
-    "can",
-    "does",
-    "first",
-    "for",
-    "from",
-    "handle",
-    "handled",
-    "how",
-    "in",
-    "is",
-    "it",
-    "its",
-    "of",
-    "or",
-    "repo",
-    "repository",
-    "show",
-    "that",
-    "the",
-    "this",
-    "to",
-    "use",
-    "what",
-    "went",
-    "where",
-    "who",
-    "which",
-    "with",
-    "work",
-}
-DOC_SUFFIXES = {".md", ".mdx", ".txt", ".rst", ".adoc", ".ipynb"}
 
 
 class RetrievalMixin:

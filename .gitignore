@@ -64,6 +64,8 @@ web/*
 !web/artifacts/**
 !web/scripts/
 !web/scripts/**
+!web/src/
+!web/src/**
 web/node_modules/
 web/artifacts/**/node_modules/
 web/artifacts/**/dist/

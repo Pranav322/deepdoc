@@ -1,0 +1,41 @@
+---
+const year = new Date().getFullYear();
+const links = [
+  { label: "GitHub", href: "https://github.com/tss-pranavkumar/deepdoc" },
+  { label: "PyPI", href: "https://pypi.org/project/deepdoc/" },
+  { label: "Docs", href: "/docs", internal: true },
+  { label: "Changelog", href: "/changelog", internal: true },
+  { label: "License", href: "https://github.com/tss-pranavkumar/deepdoc/blob/main/LICENSE" },
+];
+---
+
+<footer style="border-top: 1px solid var(--color-line);">
+  <div
+    class="mx-auto flex max-w-6xl flex-col items-start gap-5 px-6 py-8 md:flex-row md:items-center md:justify-between"
+    style="font-family: var(--font-sans);"
+  >
+    <div class="flex items-center gap-2.5">
+      <span class="logo-word" style="font-size: 1.1rem;">
+        <span class="logo-d">D</span><span class="logo-rest" style="color: var(--color-ink-faint);">eepDoc</span>
+      </span>
+      <span style="font-size: 13px; color: var(--color-ink-faint);">&middot; MIT &middot; &copy; {year}</span>
+    </div>
+
+    <nav class="flex flex-wrap items-center gap-x-5 gap-y-2">
+      {
+        links.map((l) => (
+          <a
+            href={l.href}
+            style="font-size: 13px; color: var(--color-ink-faint); text-decoration: none; transition: color 0.15s;"
+            target={l.internal ? undefined : "_blank"}
+            rel={l.internal ? undefined : "noreferrer"}
+            onmouseover="this.style.color='var(--color-ink-muted)'"
+            onmouseout="this.style.color='var(--color-ink-faint)'"
+          >
+            {l.label}
+          </a>
+        ))
+      }
+    </nav>
+  </div>
+</footer>

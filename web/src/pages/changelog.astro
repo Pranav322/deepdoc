@@ -1,0 +1,48 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+---
+
+<Layout
+  title="Changelog — DeepDoc"
+  description="Release notes for DeepDoc."
+>
+  <Header />
+
+  <main class="mx-auto flex max-w-3xl flex-col px-6 py-24">
+    <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+      Changelog
+    </div>
+    <h1 class="text-4xl font-semibold tracking-tight text-[var(--color-ink)] md:text-5xl">
+      Release notes, soon.
+    </h1>
+    <p class="mt-5 max-w-xl text-base leading-relaxed text-[var(--color-ink-muted)]">
+      Per-release notes will land here once this page is wired up against the project's
+      <code class="rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 font-mono text-sm text-[var(--color-ink)]">CHANGELOG.md</code>.
+      Until then, the canonical history lives on GitHub.
+    </p>
+
+    <a
+      href="https://github.com/tss-pranavkumar/deepdoc/blob/main/CHANGELOG.md"
+      target="_blank"
+      rel="noreferrer"
+      class="mt-8 inline-flex w-fit items-center gap-2 rounded-lg border border-[var(--color-line-strong)] px-4 py-2.5 text-sm font-medium text-[var(--color-ink)] transition-all hover:-translate-y-px hover:border-white/25 hover:bg-[var(--color-surface-raised)]"
+    >
+      View CHANGELOG.md
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        width="14"
+        height="14"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+      ><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
+    </a>
+  </main>
+
+  <Footer />
+</Layout>

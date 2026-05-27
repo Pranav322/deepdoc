@@ -1,0 +1,104 @@
+---
+const pathname = Astro.url.pathname;
+const nav = [
+  { label: "Docs", href: "/docs" },
+  { label: "Changelog", href: "/changelog" },
+  { label: "GitHub", href: "https://github.com/tss-pranavkumar/deepdoc", external: true },
+  { label: "PyPI", href: "https://pypi.org/project/deepdoc/", external: true },
+];
+---
+
+<header
+  class="sticky top-0 z-30"
+  style="border-bottom: 1px solid var(--color-line); background: color-mix(in oklab, var(--color-surface) 86%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);"
+>
+  <div class="mx-auto flex h-[52px] max-w-6xl items-center justify-between px-6">
+
+    <!-- Cursive wordmark logo -->
+    <a href="/" class="group flex items-center gap-2.5" style="text-decoration: none;">
+      <span class="logo-word transition-opacity group-hover:opacity-80" style="font-size: 1.35rem;">
+        <span class="logo-d">D</span><span class="logo-rest">eepDoc</span>
+      </span>
+      <span
+        class="hidden sm:inline-flex items-center rounded-full px-2 py-[3px]"
+        style="border: 1px solid var(--color-line-strong); font-family: var(--font-mono); font-size: 10px; color: var(--color-ink-faint); margin-top: 2px;"
+      >
+        v2.1
+      </span>
+    </a>
+
+    <!-- Nav + theme toggle -->
+    <div class="flex items-center gap-1">
+      <nav class="flex items-center gap-0.5">
+        {
+          nav.map((item) => {
+            const isActive = !item.external && pathname === item.href;
+            return (
+              <a
+                href={item.href}
+                class="rounded-md px-3 py-1.5 text-[13px] transition-colors"
+                style={`font-family: var(--font-sans); color: ${isActive ? 'var(--color-ink)' : 'var(--color-ink-muted)'}; font-weight: 400; text-decoration: none;`}
+                target={item.external ? "_blank" : undefined}
+                rel={item.external ? "noreferrer" : undefined}
+                aria-current={isActive ? "page" : undefined}
+              >
+                {item.label}
+              </a>
+            );
+          })
+        }
+      </nav>
+
+      <!-- Theme toggle -->
+      <button
+        id="theme-toggle"
+        type="button"
+        aria-label="Toggle light/dark mode"
+        class="ml-1 flex h-8 w-8 items-center justify-center rounded-md transition-colors"
+        style="color: var(--color-ink-muted); border: 1px solid transparent;"
+      >
+        <svg id="icon-sun" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="4"></circle>
+          <line x1="12" y1="2" x2="12" y2="4"></line>
+          <line x1="12" y1="20" x2="12" y2="22"></line>
+          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
+          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
+          <line x1="2" y1="12" x2="4" y2="12"></line>
+          <line x1="20" y1="12" x2="22" y2="12"></line>
+          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
+          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+        </svg>
+        <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden">
+          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<script>
+  function applyTheme(theme: string) {
+    document.documentElement.setAttribute("data-theme", theme);
+    localStorage.setItem("theme", theme);
+    const sun = document.getElementById("icon-sun");
+    const moon = document.getElementById("icon-moon");
+    const glow = document.getElementById("accent-glow");
+    if (theme === "light") {
+      sun?.classList.add("hidden");
+      moon?.classList.remove("hidden");
+      if (glow) glow.style.opacity = "0";
+    } else {
+      sun?.classList.remove("hidden");
+      moon?.classList.add("hidden");
+      if (glow) glow.style.opacity = "1";
+    }
+  }
+
+  const current = document.documentElement.getAttribute("data-theme") ?? "dark";
+  applyTheme(current);
+
+  document.getElementById("theme-toggle")?.addEventListener("click", () => {
+    const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
+    applyTheme(next);
+  });
+</script>

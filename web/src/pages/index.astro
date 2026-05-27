@@ -1,0 +1,713 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+
+const features = [
+  {
+    num: "01",
+    title: "Bucket-based generation",
+    body: "Architecture, endpoints, integrations, and schemas planned as cohesive docs — not one noisy page per file. The planner classifies your repo, proposes buckets, assigns files and symbols to a final reader-first structure.",
+  },
+  {
+    num: "02",
+    title: "Evidence-grounded chatbot",
+    body: "Answers hydrated from indexed source with exact file paths and line ranges. Generated docs serve as references, not proof. Three modes: fast lookup, deep research, and code-first.",
+  },
+  {
+    num: "03",
+    title: "Incremental updates",
+    body: "`deepdoc update` diffs against the last synced commit and regenerates only affected buckets. Smart enough to do a targeted replan when new integrations or endpoints appear.",
+  },
+];
+
+const pipeline = [
+  { step: "Scan",     note: "Parse source. Detect endpoints, runtime surfaces, integrations, OpenAPI specs." },
+  { step: "Plan",     note: "Multi-step LLM planner. Classify repo, propose buckets, assign files." },
+  { step: "Generate", note: "Build evidence packs. LLM call per bucket. MDX compile-check before write." },
+  { step: "API Ref",  note: "Stage OpenAPI assets into Fumadocs /api/* pages when a spec exists." },
+  { step: "Build",    note: "Write site scaffold, page tree, nav, search, and optional chatbot widget." },
+];
+
+const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAPI"];
+---
+
+<Layout>
+  <Header />
+
+  <!-- ── Hero ─────────────────────────────────────────────────────── -->
+  <section
+    class="relative overflow-hidden"
+    style="border-bottom: 1px solid var(--color-line);"
+  >
+    <!-- Aurora background -->
+    <div aria-hidden="true" class="hero-aurora" style="position:absolute;inset:0;overflow:hidden;mask-image:linear-gradient(to bottom,black 0%,black 55%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,black 0%,black 55%,transparent 100%);pointer-events:none;">
+      <!-- Chartreuse — left anchor -->
+      <div style="position:absolute;top:-20%;left:-8%;width:65%;height:100%;background:radial-gradient(ellipse at 40% 40%,rgba(194,255,77,0.13) 0%,transparent 68%);filter:blur(48px);animation:blob-1 14s ease-in-out infinite;will-change:transform;"></div>
+      <!-- Electric blue — right -->
+      <div style="position:absolute;top:-10%;right:-12%;width:60%;height:90%;background:radial-gradient(ellipse at 60% 35%,rgba(55,120,255,0.10) 0%,transparent 65%);filter:blur(64px);animation:blob-2 19s ease-in-out infinite;will-change:transform;"></div>
+      <!-- Chartreuse accent — lower right -->
+      <div style="position:absolute;bottom:0%;right:15%;width:38%;height:55%;background:radial-gradient(ellipse at 50% 60%,rgba(194,255,77,0.07) 0%,transparent 65%);filter:blur(56px);animation:blob-3 23s ease-in-out infinite;will-change:transform;"></div>
+    </div>
+
+    <div class="relative mx-auto max-w-6xl px-6 pt-24 pb-20 md:pt-32 md:pb-28">
+      <div class="grid grid-cols-1 items-center gap-16 lg:grid-cols-2">
+
+        <!-- Left: copy -->
+        <div>
+          <!-- Version badge -->
+          <div
+            class="anim-fade-up mb-8 inline-flex items-center gap-2 rounded-full px-3 py-1"
+            style="border: 1px solid var(--color-line-strong); font-family: var(--font-mono); font-size: 11px; color: var(--color-ink-faint);"
+          >
+            <span
+              class="h-1.5 w-1.5 rounded-full"
+              style="background: var(--color-accent);"
+            ></span>
+            v2.1 — MDX compile gate · AI chatbot
+          </div>
+
+          <!-- Headline -->
+          <h1
+            class="anim-fade-up anim-delay-1 display"
+            style="font-size: clamp(2.6rem, 6vw, 4.25rem); color: var(--color-ink); max-width: 640px;"
+          >
+            Engineering docs<br />
+            your team will<br />
+            <span class="accent-italic">actually read.</span>
+          </h1>
+
+          <!-- Sub -->
+          <p
+            class="anim-fade-up anim-delay-2 mt-6 max-w-lg leading-relaxed"
+            style="font-size: 1rem; color: var(--color-ink-muted); font-family: var(--font-sans);"
+          >
+            DeepDoc generates internal documentation from your codebase —
+            architecture, endpoints, integrations, runtime surfaces — and ships a
+            chatbot that answers from real source with exact file paths and line ranges.
+          </p>
+
+          <!-- CTAs -->
+          <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+            <span id="copy-sr" aria-live="polite" class="sr-only"></span>
+            <button
+              id="copy-install"
+              type="button"
+              class="group flex h-10 items-center gap-2.5 rounded-lg px-4"
+              style="background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: opacity 0.15s; white-space: nowrap;"
+              aria-label="Copy install command to clipboard"
+              onmouseover="this.style.opacity='0.88'"
+              onmouseout="this.style.opacity='1'"
+            >
+              pip install deepdoc
+              <svg
+                id="copy-icon"
+                xmlns="http://www.w3.org/2000/svg"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                style="opacity: 0.6;"
+              ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+              <svg
+                id="check-icon"
+                class="hidden"
+                xmlns="http://www.w3.org/2000/svg"
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2.5"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              ><polyline points="20 6 9 17 4 12"></polyline></svg>
+            </button>
+
+            <a
+              href="https://github.com/tss-pranavkumar/deepdoc"
+              target="_blank"
+              rel="noreferrer"
+              class="flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] transition-colors"
+              style="border: 1px solid var(--color-line-strong); color: var(--color-ink-muted); font-family: var(--font-sans); font-weight: 400; text-decoration: none;"
+              onmouseover="this.style.color='var(--color-ink)'; this.style.borderColor='rgba(255,255,255,0.2)'"
+              onmouseout="this.style.color='var(--color-ink-muted)'; this.style.borderColor='var(--color-line-strong)'"
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11 11 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/>
+              </svg>
+              View on GitHub
+            </a>
+          </div>
+
+          <p
+            class="anim-fade-up anim-delay-4 mt-5"
+            style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);"
+          >
+            Python 3.10 &middot; Node 18+ &middot; MIT license &middot; Any LLM provider
+          </p>
+        </div>
+
+        <!-- Right: terminal (typewriter animated) -->
+        <div class="anim-fade-up anim-delay-3 terminal-block">
+          <div class="terminal-header">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="terminal-title">bash</span>
+          </div>
+          <div class="terminal-body" id="hero-terminal" aria-live="polite" style="min-height: 220px;"></div>
+        </div>
+
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Language strip ──────────────────────────────────────────── -->
+  <section
+    class="border-b border-[var(--color-line)]"
+    style="border-bottom: 1px solid var(--color-line);"
+  >
+    <div class="mx-auto max-w-6xl px-6 py-4 flex items-center gap-3 flex-wrap">
+      <span
+        style="font-size: 11px; font-family: var(--font-mono); color: var(--color-ink-faint); text-transform: uppercase; letter-spacing: 0.12em; white-space: nowrap;"
+      >
+        Works with
+      </span>
+      <span
+        style="width: 1px; height: 12px; background: var(--color-line-strong);"
+        aria-hidden="true"
+      ></span>
+      {
+        langs.map((l) => (
+          <span
+            style="font-size: 12px; font-family: var(--font-sans); color: var(--color-ink-muted);"
+          >
+            {l}
+          </span>
+        ))
+      }
+    </div>
+  </section>
+
+  <!-- ── Demo video ──────────────────────────────────────────────── -->
+  <section style="border-bottom: 1px solid var(--color-line);">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="mb-10 flex items-end justify-between gap-4 flex-wrap">
+        <div>
+          <div
+            style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
+          >
+            See it in action
+          </div>
+          <h2
+            class="display"
+            style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
+          >
+            Watch the pipeline run.
+          </h2>
+        </div>
+        <span style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);">
+          43 sec · all five phases
+        </span>
+      </div>
+
+      <div
+        class="overflow-hidden rounded-2xl"
+        style="border: 1px solid var(--color-line-strong); box-shadow: 0 24px 72px rgba(0,0,0,0.55); background: #0a0a0e; aspect-ratio: 16 / 9; position: relative;"
+      >
+        <video
+          src="/demo.mp4"
+          controls
+          preload="metadata"
+          playsinline
+          style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;"
+        ></video>
+        <!-- Shown only if video fails to load -->
+        <noscript>
+          <div
+            class="flex items-center justify-center"
+            style="position: absolute; inset: 0; color: var(--color-ink-faint); font-family: var(--font-sans); font-size: 13px; text-align: center; padding: 24px;"
+          >
+            Run <code style="margin: 0 6px; font-family: var(--font-mono); color: var(--color-accent);">deepdoc/video → npm run render</code> to generate the demo video.
+          </div>
+        </noscript>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Features ────────────────────────────────────────────────── -->
+  <section style="border-bottom: 1px solid var(--color-line);">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="mb-14 max-w-xl">
+        <div
+          style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
+        >
+          What it does
+        </div>
+        <h2
+          class="display"
+          style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
+        >
+          One command. A docs site<br />your team won't ignore.
+        </h2>
+      </div>
+
+      <div class="grid grid-cols-1 gap-px md:grid-cols-3" style="background: var(--color-line); border-radius: 14px; overflow: hidden;">
+        {
+          features.map((f) => (
+            <div
+              class="flex flex-col gap-0 p-8 relative overflow-hidden"
+              style="background: var(--color-surface);"
+            >
+              <!-- Large decorative number -->
+              <div
+                aria-hidden="true"
+                style={`position: absolute; top: -8px; right: 16px; font-family: var(--font-display); font-size: 5rem; line-height: 1; color: var(--color-line-strong); user-select: none; pointer-events: none; font-weight: 400;`}
+              >
+                {f.num}
+              </div>
+              <div
+                style="font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--color-accent); margin-bottom: 14px;"
+              >
+                {f.num}
+              </div>
+              <h3
+                style="font-family: var(--font-sans); font-size: 15px; font-weight: 500; color: var(--color-ink); margin-bottom: 10px; line-height: 1.3;"
+              >
+                {f.title}
+              </h3>
+              <p
+                style="font-family: var(--font-sans); font-size: 13px; line-height: 1.7; color: var(--color-ink-muted);"
+              >
+                {f.body}
+              </p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Pipeline ────────────────────────────────────────────────── -->
+  <section style="border-bottom: 1px solid var(--color-line);">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="mb-14 max-w-xl">
+        <div
+          style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
+        >
+          Pipeline
+        </div>
+        <h2
+          class="display"
+          style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
+        >
+          Five phases. No magic.
+        </h2>
+        <p
+          style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.7; color: var(--color-ink-muted); max-width: 480px;"
+        >
+          Every page is grounded in scanned evidence and MDX-compiled before it
+          hits disk. If compile fails, DeepDoc reprompts with the exact error.
+        </p>
+      </div>
+
+      <ol
+        class="grid grid-cols-1 md:grid-cols-5"
+        style="gap: 1px; background: var(--color-line); border-radius: 14px; overflow: hidden;"
+      >
+        {
+          pipeline.map((p, i) => (
+            <li
+              class="flex flex-col gap-3 p-6"
+              style="background: var(--color-surface);"
+            >
+              <div
+                style={`font-family: var(--font-mono); font-size: 11px; color: var(--color-accent);`}
+              >
+                0{i + 1}
+              </div>
+              <div
+                style="font-family: var(--font-sans); font-size: 14px; font-weight: 500; color: var(--color-ink); line-height: 1.3;"
+              >
+                {p.step}
+              </div>
+              <div
+                style="font-family: var(--font-sans); font-size: 12px; line-height: 1.65; color: var(--color-ink-muted);"
+              >
+                {p.note}
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <!-- ── Getting started ─────────────────────────────────────────── -->
+  <section style="border-bottom: 1px solid var(--color-line);">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="grid grid-cols-1 items-start gap-12 lg:grid-cols-2">
+        <!-- Left: copy -->
+        <div>
+          <div
+            style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
+          >
+            Getting started
+          </div>
+          <h2
+            class="display"
+            style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
+          >
+            Three commands.
+          </h2>
+          <p
+            style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.75; color: var(--color-ink-muted); max-width: 420px;"
+          >
+            Initialize against any Python, JavaScript/TypeScript, Go, PHP, or Vue
+            codebase. Set one API key. Generate. The chatbot inherits the same key
+            automatically and runs embeddings locally via fastembed.
+          </p>
+          <a
+            href="/docs"
+            class="inline-flex items-center gap-1.5 mt-8 transition-colors"
+            style="font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--color-accent); text-decoration: none;"
+            onmouseover="this.style.opacity='0.75'"
+            onmouseout="this.style.opacity='1'"
+          >
+            Read the full docs
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+          </a>
+        </div>
+
+        <!-- Right: terminal -->
+        <div class="terminal-block">
+          <div class="terminal-header">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="terminal-title">bash</span>
+          </div>
+          <div class="terminal-body"><span class="c"># 1 — install</span>
+$ pip install deepdoc
+
+<span class="c"># 2 — initialize against your repo</span>
+$ deepdoc init --with-chatbot --provider anthropic
+$ export ANTHROPIC_API_KEY=sk-ant-...
+
+<span class="c"># 3 — generate and preview</span>
+$ deepdoc generate
+<span class="acc">✓</span> 47 pages generated in 1m 12s
+<span class="acc">✓</span> Chatbot index built (1,247 chunks)
+
+$ deepdoc serve
+  Docs   → http://localhost:3000
+  Chat   → http://localhost:3000/ask</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── CTA strip ───────────────────────────────────────────────── -->
+  <section style="position: relative; overflow: hidden;">
+    <canvas id="cta-canvas" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: block;"></canvas>
+    <div class="mx-auto max-w-6xl px-6 py-20 flex flex-col items-center text-center gap-6" style="position: relative; z-index: 1;">
+      <h2
+        class="display"
+        style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink); max-width: 520px;"
+      >
+        Your codebase already tells a story.
+        <span class="accent-italic"> Let it.</span>
+      </h2>
+      <p
+        style="font-family: var(--font-sans); font-size: 14px; color: var(--color-ink-muted); max-width: 380px; line-height: 1.7;"
+      >
+        MIT licensed. No account. No cloud. Runs entirely in your terminal.
+      </p>
+      <button
+        id="copy-install-2"
+        type="button"
+        class="flex items-center gap-2.5 rounded-lg px-5 h-10"
+        style="background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity 0.15s;"
+        onmouseover="this.style.opacity='0.88'"
+        onmouseout="this.style.opacity='1'"
+      >
+        pip install deepdoc
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          width="13"
+          height="13"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+          style="opacity: 0.6;"
+        ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+      </button>
+    </div>
+  </section>
+
+  <Footer />
+</Layout>
+
+<script>
+  // ── Copy buttons ──────────────────────────────────────────────────
+  function attachCopy(btnId: string, srId?: string, iconId?: string, checkId?: string) {
+    const btn = document.getElementById(btnId);
+    const sr = srId ? document.getElementById(srId) : null;
+    const icon = iconId ? document.getElementById(iconId) : null;
+    const check = checkId ? document.getElementById(checkId) : null;
+    if (!btn) return;
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText("pip install deepdoc");
+        if (icon) icon.classList.add("hidden");
+        if (check) check.classList.remove("hidden");
+        if (sr) sr.textContent = "Copied to clipboard";
+        setTimeout(() => {
+          if (icon) icon.classList.remove("hidden");
+          if (check) check.classList.add("hidden");
+          if (sr) sr.textContent = "";
+        }, 1800);
+      } catch {}
+    });
+  }
+  attachCopy("copy-install", "copy-sr", "copy-icon", "check-icon");
+  attachCopy("copy-install-2");
+
+  // ── Hero terminal typewriter ──────────────────────────────────────
+  (function () {
+    const el = document.getElementById("hero-terminal");
+    if (!el) return;
+
+    type Segment = { text: string; cls?: string };
+    type Line = {
+      segments: Segment[];
+      charDelay: number;    // ms per character while typing
+      postDelay: number;    // ms pause after line finishes
+      instant?: boolean;    // appear all at once (no typing)
+    };
+
+    const lines: Line[] = [
+      { segments: [{ text: "# 1 — install", cls: "c" }],                         charDelay: 0, postDelay: 120, instant: true },
+      { segments: [{ text: "$ pip install deepdoc" }],                             charDelay: 38, postDelay: 680 },
+      { segments: [{ text: "" }],                                                   charDelay: 0, postDelay: 80,  instant: true },
+      { segments: [{ text: "# 2 — initialize against your repo", cls: "c" }],      charDelay: 0, postDelay: 80,  instant: true },
+      { segments: [{ text: "$ deepdoc init --with-chatbot --provider anthropic" }], charDelay: 28, postDelay: 220 },
+      { segments: [{ text: "$ export ANTHROPIC_API_KEY=sk-ant-..." }],              charDelay: 28, postDelay: 560 },
+      { segments: [{ text: "" }],                                                   charDelay: 0, postDelay: 80,  instant: true },
+      { segments: [{ text: "# 3 — generate and preview", cls: "c" }],              charDelay: 0, postDelay: 80,  instant: true },
+      { segments: [{ text: "$ deepdoc generate" }],                                 charDelay: 40, postDelay: 1400 },
+      { segments: [{ text: "✓", cls: "acc" }, { text: " 47 pages generated in 1m 12s" }], charDelay: 0, postDelay: 120, instant: true },
+      { segments: [{ text: "✓", cls: "acc" }, { text: " Chatbot index built (1,247 chunks)" }], charDelay: 0, postDelay: 500, instant: true },
+      { segments: [{ text: "" }],                                                   charDelay: 0, postDelay: 80,  instant: true },
+      { segments: [{ text: "$ deepdoc serve" }],                                    charDelay: 40, postDelay: 380 },
+      { segments: [{ text: "  Docs   → http://localhost:3000" }],                   charDelay: 0, postDelay: 60,  instant: true },
+      { segments: [{ text: "  Chat   → http://localhost:3000/ask" }],               charDelay: 0, postDelay: 0,   instant: true },
+    ];
+
+    // Build DOM for a completed line
+    function renderLine(line: Line): HTMLSpanElement {
+      const span = document.createElement("span");
+      for (const seg of line.segments) {
+        if (seg.cls) {
+          const s = document.createElement("span");
+          s.className = seg.cls;
+          s.textContent = seg.text;
+          span.appendChild(s);
+        } else {
+          span.appendChild(document.createTextNode(seg.text));
+        }
+      }
+      return span;
+    }
+
+    // Flatten line segments into a single string for typing
+    function lineText(line: Line): string {
+      return line.segments.map(s => s.text).join("");
+    }
+
+    let cursor: HTMLSpanElement | null = null;
+
+    function ensureCursor() {
+      if (!cursor) {
+        cursor = document.createElement("span");
+        cursor.id = "tw-cursor";
+        cursor.style.cssText =
+          "display:inline-block;width:7px;height:1em;vertical-align:text-bottom;background:var(--color-accent);animation:tw-blink 1s step-end infinite;margin-left:1px;";
+      }
+      return cursor;
+    }
+
+    // Inject blink keyframes once
+    const style = document.createElement("style");
+    style.textContent = "@keyframes tw-blink{0%,100%{opacity:1}50%{opacity:0}}";
+    document.head.appendChild(style);
+
+    async function sleep(ms: number) {
+      return new Promise<void>(r => setTimeout(r, ms));
+    }
+
+    async function run() {
+      const cur = ensureCursor();
+      el!.appendChild(cur);
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const fullText = lineText(line);
+
+        // Newline before every line except the first
+        if (i > 0) el!.insertBefore(document.createTextNode("\n"), cur);
+
+        if (line.instant || fullText === "") {
+          // Insert full rendered line instantly
+          const rendered = renderLine(line);
+          el!.insertBefore(rendered, cur);
+        } else {
+          // Type character by character
+          const node = document.createTextNode("");
+          el!.insertBefore(node, cur);
+          for (const ch of fullText) {
+            node.textContent += ch;
+            await sleep(line.charDelay);
+          }
+        }
+
+        await sleep(line.postDelay);
+      }
+
+      // Cursor stays blinking at end — done
+    }
+
+    run();
+  })();
+
+  // ── CTA canvas: upward-drifting code fragments ────────────────────
+  (function () {
+    const canvas = document.getElementById("cta-canvas") as HTMLCanvasElement | null;
+    if (!canvas) return;
+
+    const FRAGMENTS = [
+      "deepdoc generate", "deepdoc update", "deepdoc init", "deepdoc serve",
+      "pip install deepdoc", "deepdoc status", "deepdoc benchmark",
+      "bucket_type", "evidence[]", "call_graph", "owned_files", "DocBucket",
+      "topology", "scan_repo()", "--with-chatbot", "POST /query",
+      "POST /deep-research", "MDX", "faiss", "fastembed",
+      "pipeline_v2", "chatbot.enabled", "1,247 chunks", "47 pages",
+      "anthropic", "gpt-4o", "endpoint", "integration", "feature",
+      "nav_shaping", "evidence_pack", "llm_step", "slug", "schema",
+      "call_graph.py", "planner/", "generator/", "chatbot/",
+      ".deepdoc/", "deepdoc.yaml", "✓ compiled", "✓ grounded",
+      "stream=True", "chunk_size=512", "top_k=8", "rerank",
+    ];
+
+    const ctx = canvas.getContext("2d")!;
+    let w = 0, h = 0, dpr = 1;
+
+    type Particle = {
+      x: number; y: number;
+      text: string;
+      speed: number;
+      opacity: number;
+      targetOpacity: number;
+      size: number;
+    };
+
+    const particles: Particle[] = [];
+
+    function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
+
+    function spawn(startAtRandom = false): Particle {
+      return {
+        x: rand(0.02, 0.98),
+        y: startAtRandom ? rand(0, 1) : 1.05,
+        text: FRAGMENTS[Math.floor(Math.random() * FRAGMENTS.length)],
+        speed: rand(0.00025, 0.0008),
+        opacity: 0,
+        targetOpacity: rand(0.07, 0.2),
+        size: rand(10, 14),
+      };
+    }
+
+    function isLight() {
+      return document.documentElement.getAttribute("data-theme") === "light";
+    }
+
+    function resize() {
+      dpr = Math.min(devicePixelRatio, 2);
+      w = canvas!.offsetWidth;
+      h = canvas!.offsetHeight;
+      canvas!.width = w * dpr;
+      canvas!.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    }
+
+    // Pre-seed particles spread across canvas
+    for (let i = 0; i < 28; i++) particles.push(spawn(true));
+
+    let raf = 0;
+
+    function frame() {
+      ctx.clearRect(0, 0, w, h);
+
+      const light = isLight();
+      // Dark: chartreuse. Light: muted green.
+      const [r, g, b] = light ? [76, 139, 0] : [194, 255, 77];
+
+      ctx.font = `400 ${particles[0]?.size ?? 12}px 'JetBrains Mono', monospace`;
+
+      for (const p of particles) {
+        p.y -= p.speed;
+
+        // Fade in from bottom, fade out near top
+        const fadeZone = 0.15;
+        if (p.y > 1 - fadeZone) {
+          p.opacity = Math.max(0, (1 - p.y) / fadeZone) * p.targetOpacity;
+        } else if (p.y < fadeZone) {
+          p.opacity = Math.max(0, p.y / fadeZone) * p.targetOpacity;
+        } else {
+          p.opacity = Math.min(p.opacity + 0.003, p.targetOpacity);
+        }
+
+        if (p.y < -0.05) {
+          // Reset
+          Object.assign(p, spawn(false));
+        }
+
+        ctx.font = `400 ${p.size}px 'JetBrains Mono', monospace`;
+        ctx.fillStyle = `rgba(${r},${g},${b},${p.opacity})`;
+        ctx.fillText(p.text, p.x * w, p.y * h);
+      }
+
+      raf = requestAnimationFrame(frame);
+    }
+
+    const ro = new ResizeObserver(resize);
+    ro.observe(canvas);
+    resize();
+
+    const io = new IntersectionObserver(entries => {
+      if (entries[0].isIntersecting) { if (!raf) frame(); }
+      else { cancelAnimationFrame(raf); raf = 0; }
+    });
+    io.observe(canvas);
+
+    frame();
+  })();
+</script>

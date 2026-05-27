@@ -1,0 +1,1158 @@
+---
+import Layout from "../layouts/Layout.astro";
+import Header from "../components/Header.astro";
+import Footer from "../components/Footer.astro";
+
+const nav = [
+  { id: "quick-start",    label: "Quick Start" },
+  { id: "architecture",   label: "Architecture" },
+  { id: "pipeline",       label: "Five-Phase Pipeline" },
+  { id: "data-models",    label: "Data Models" },
+  { id: "configuration",  label: "Configuration" },
+  { id: "cli",            label: "CLI Reference" },
+  { id: "bucket-types",   label: "Bucket Types" },
+  { id: "languages",      label: "Supported Languages" },
+  { id: "chatbot",        label: "Chatbot" },
+  { id: "updates",        label: "Incremental Updates" },
+  { id: "deployment",     label: "Deployment" },
+  { id: "modules",        label: "Module Reference" },
+];
+
+const pipeline = [
+  {
+    step: "Scan",
+    num: "01",
+    color: "var(--color-accent)",
+    desc: "Traverse the repo without any LLM calls. Detects HTTP endpoints (Django, FastAPI, Express, NestJS, Laravel, Go, Falcon), runtime surfaces (async workers, schedulers, Celery), third-party integrations, database schemas (SQL, Knex, GraphQL), OpenAPI specs, and config artifacts.",
+    output: "RepoScan — endpoints, symbols, routes, integrations, artifacts",
+  },
+  {
+    step: "Plan",
+    num: "02",
+    color: "#67E8F9",
+    desc: "Multi-step LLM bucket planner (3 sequential LLM calls). Step 1: classify the repo type. Step 2: propose documentation buckets. Step 3: inject specialised buckets (database groups, runtime pages, integration pages). Then heuristics refine ownership: assign files/symbols, decompose oversized buckets, consolidate singletons.",
+    output: "DocPlan — ordered bucket list, nav structure, orphaned files",
+  },
+  {
+    step: "Generate",
+    num: "03",
+    color: "#A5B4FC",
+    desc: "For each bucket: assemble an evidence pack (source snippets, artifact extracts, scan hits), call the LLM, receive MDX. Then run the MDX compile gate — Node.js validates the output. On failure: reprompt with the exact error. If still broken: strip JSX and fall back to safe Markdown. Nothing broken ever hits disk.",
+    output: "MDX pages on disk, per-page quality status, compile-gate log",
+  },
+  {
+    step: "API Ref",
+    num: "04",
+    color: "#C4B5FD",
+    desc: "When an OpenAPI spec is found during scan, stage the raw JSON/YAML alongside a Fumadocs-compatible manifest.json so the /api/* page tree renders interactive endpoint reference pages automatically.",
+    output: "openapi.json + manifest.json in site/app/api/",
+  },
+  {
+    step: "Build",
+    num: "05",
+    color: "#86EFAC",
+    desc: "Write the complete Fumadocs Next.js scaffold: fumadocs.config.ts, root layout.tsx, global.css, the page tree JSON, search route, and one page.tsx per MDX file. When chatbot is enabled, also emit the React chatbot widget, sidebar toggle, and inline chat components.",
+    output: "site/ — a production-ready Next.js Fumadocs project",
+  },
+];
+
+const bucketTypes = [
+  { type: "system",        color: "var(--color-accent)", desc: "Top-level architecture, setup guides, auth flows, observability, and ops runbooks. Every repo gets at least one." },
+  { type: "feature",       color: "#A5B4FC", desc: "Business-logic workflows: checkout, refunds, onboarding, notifications. Scoped to how engineers think about the domain, not how files are laid out." },
+  { type: "endpoint",      color: "#67E8F9", desc: "Endpoint-family API docs. One bucket per logical resource (e.g. all /orders/* routes). Enriched with scanned route metadata." },
+  { type: "endpoint_ref",  color: "#8B5CF6", desc: "Single-endpoint page backed by an OpenAPI spec. Rendered as an interactive Fumadocs API reference page at /api/{slug}." },
+  { type: "integration",   color: "#86EFAC", desc: "Third-party system docs: payment gateways, delivery providers, webhook consumers, external APIs. Auto-detected from import patterns." },
+  { type: "database",      color: "#FDE68A", desc: "Schema and data-layer docs. Grouped by model family when a repo has many models; a single overview page for smaller schemas." },
+];
+
+const cliCommands = [
+  {
+    cmd: "deepdoc init",
+    flags: [
+      { flag: "--provider", val: "anthropic | openai | gemini | …", desc: "LLM provider (required). Sets llm.provider in .deepdoc.yaml." },
+      { flag: "--model", val: "string", desc: "Override the default model for the chosen provider." },
+      { flag: "--with-chatbot", val: "flag", desc: "Enable the chatbot module. Adds chatbot config block with sensible defaults." },
+      { flag: "--output-dir", val: "path", desc: "Where generated MDX pages land. Default: docs/" },
+      { flag: "--site-dir", val: "path", desc: "Where the Fumadocs scaffold is written. Default: site/" },
+    ],
+    desc: "Scaffold a .deepdoc.yaml config file in the current directory. Safe to re-run — only missing keys are added.",
+  },
+  {
+    cmd: "deepdoc generate",
+    flags: [
+      { flag: "--force", val: "flag", desc: "Ignore existing state and regenerate everything from scratch." },
+      { flag: "--reconcile", val: "flag", desc: "Re-run planning then regenerate pages whose bucket assignment changed." },
+      { flag: "--dry-run", val: "flag", desc: "Run scan + plan only, print the proposed bucket list, exit without generating." },
+      { flag: "--workers", val: "int", desc: "Override max_parallel_workers for this run." },
+    ],
+    desc: "Run the full five-phase pipeline. Reads .deepdoc.yaml. On success prints per-phase timings and a page-quality summary.",
+  },
+  {
+    cmd: "deepdoc update",
+    flags: [
+      { flag: "--since", val: "git-ref", desc: "Compare against this ref instead of the stored sync baseline." },
+      { flag: "--replan", val: "flag", desc: "Force a full replan even if the changed file set is small." },
+    ],
+    desc: "Incremental update. Diffs the repo against the last synced commit. Regenerates only affected buckets; triggers a targeted replan when new routes or integrations appear.",
+  },
+  {
+    cmd: "deepdoc serve",
+    flags: [
+      { flag: "--port", val: "int", desc: "HTTP port for the Next.js dev server. Default: 3000." },
+      { flag: "--open", val: "flag", desc: "Open the browser automatically after starting." },
+    ],
+    desc: "cd into site/ and run next dev. Requires Node 18+ and an initial npm install (done automatically on first run).",
+  },
+  {
+    cmd: "deepdoc deploy",
+    flags: [
+      { flag: "--branch", val: "string", desc: "Target GitHub Pages branch. Default: gh-pages." },
+      { flag: "--force", val: "flag", desc: "Force-push to the deploy branch." },
+    ],
+    desc: "Build the Fumadocs site (next build) and push the output to GitHub Pages. Requires git remote origin to be set.",
+  },
+];
+
+const configKeys = [
+  { key: "project_name",         dflt: "(repo dir name)",   desc: "Human-readable project name used in site title and nav header." },
+  { key: "description",          dflt: '""',                desc: "One-line summary shown in hero and meta description." },
+  { key: "output_dir",           dflt: '"docs"',            desc: "Where generated MDX pages are written." },
+  { key: "site_dir",             dflt: '"site"',            desc: "Where the Fumadocs Next.js scaffold is written." },
+  { key: "generation_mode",      dflt: '"feature_buckets"', desc: 'v2 bucket-based pipeline. Set "file_centric" for legacy v1 mode.' },
+  { key: "max_pages",            dflt: "0",                 desc: "Cap on total pages generated. 0 = unlimited." },
+  { key: "max_parallel_workers", dflt: "6",                 desc: "Concurrent LLM calls during generate phase." },
+  { key: "llm.provider",         dflt: "(required)",        desc: "LLM provider: anthropic, openai, gemini, azure, ollama, …" },
+  { key: "llm.model",            dflt: "(provider default)",desc: "Model name. Passed directly to LiteLLM." },
+  { key: "llm.api_key_env",      dflt: "auto-detected",     desc: "Env var name holding the API key. Inferred from provider if omitted." },
+  { key: "llm.temperature",      dflt: "0.2",               desc: "Generation temperature. Lower = more deterministic output." },
+  { key: "chatbot.enabled",      dflt: "false",             desc: "Enable chatbot indexing and the /ask route in the built site." },
+  { key: "chatbot.answer.provider", dflt: "(inherits llm)", desc: "Separate provider for chatbot answer calls." },
+  { key: "chatbot.embeddings.provider", dflt: '"fastembed"',desc: "Embedding provider. fastembed runs 100% locally — no API key." },
+  { key: "chatbot.embeddings.model", dflt: "nomic-embed-text-v1.5", desc: "Local embedding model for fastembed. Downloaded once on first run." },
+  { key: "large_file_lines",     dflt: "500",               desc: "Files above this threshold get chunked before evidence assembly." },
+  { key: "giant_file_lines",     dflt: "2000",              desc: "Files above this threshold are split into symbol clusters." },
+  { key: "source_context_budget", dflt: "200000",           desc: "Max chars of source included in a single evidence pack." },
+];
+
+const modules = [
+  {
+    path: "deepdoc/scanner/",
+    role: "Phase 1 — static analysis",
+    exports: ["discover_integrations()", "discover_database_schema()", "discover_runtime_surfaces()", "discover_artifacts()", "cluster_giant_file()"],
+    note: "Zero LLM calls. Extracts every signal that the planner and generator consume as evidence.",
+  },
+  {
+    path: "deepdoc/planner/",
+    role: "Phase 2 — bucket planning",
+    exports: ["plan_docs(repo_root, cfg) → DocPlan", "scan_repo(repo_root, cfg) → RepoScan", "build_flow_candidates()", "_merge_plan()", "_build_heuristic_assignment()", "_llm_step()"],
+    note: "heuristics.py is the public planning API. Tests mock at this path. engine.py orchestrates the multi-step planner.",
+  },
+  {
+    path: "deepdoc/generator/",
+    role: "Phase 3 — MDX generation",
+    exports: ["PageGenerator", "BucketGenerationEngine", "AssembledEvidence", "apply_mdx_compile_gate()"],
+    note: "post_processors.py handles MDX escaping, fence repair, and Mermaid diagram fixups after generation.",
+  },
+  {
+    path: "deepdoc/parser/",
+    role: "Symbol & route extraction",
+    exports: ["parse_file(path, language) → ParsedFile", "ParsedFile", "Symbol", "supported_extensions()"],
+    note: "routes/ sub-package has per-framework detectors: Django, FastAPI, Express, NestJS, Laravel, Falcon, Go. repo_resolver.py auto-detects the framework.",
+  },
+  {
+    path: "deepdoc/chatbot/",
+    role: "RAG indexing + query service",
+    exports: ["ChatbotIndexer", "ChatbotQueryService", "create_fastapi_app()"],
+    note: "retrieval_mixin.py owns all search logic. answer_mixin.py owns LLM prompting. service.py wires query(), deep_research(), code_deep().",
+  },
+  {
+    path: "deepdoc/site/builder/",
+    role: "Phase 5 — scaffold generation",
+    exports: ["SiteBuilderEngine"],
+    note: "scaffold_files.py emits the Fumadocs project. chatbot_components.py emits React chatbot widget when chatbot.enabled = true.",
+  },
+  {
+    path: "deepdoc/llm/",
+    role: "LLM provider abstraction",
+    exports: ["LLMClient(cfg)"],
+    note: "Thin wrapper around LiteLLM. Supports every provider LiteLLM supports: OpenAI, Anthropic, Gemini, Azure, Mistral, Ollama, …",
+  },
+  {
+    path: "deepdoc/persistence_v2.py",
+    role: "State persistence",
+    exports: ["load_ledger()", "save_ledger()", "load_sync_state()", "save_sync_state()"],
+    note: "All state lives under .deepdoc/. Ledger tracks per-page quality. Sync state stores the last-generated git commit hash.",
+  },
+  {
+    path: "deepdoc/smart_update_v2.py",
+    role: "Incremental update strategy",
+    exports: ["compute_update_plan()", "run_smart_update()"],
+    note: "Diffs changed files against the sync baseline, classifies impact (new route? new integration?), decides which buckets to regenerate.",
+  },
+];
+---
+
+<Layout
+  title="Docs — DeepDoc"
+  description="Full engineering reference for DeepDoc — architecture, setup, CLI, chatbot, and deployment."
+>
+  <Header />
+
+  <!-- ── Page hero ───────────────────────────────────────────────── -->
+  <div style="border-bottom: 1px solid var(--color-line);">
+    <div class="mx-auto max-w-6xl px-6 py-16 md:py-20">
+      <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
+        Documentation
+      </div>
+      <h1 class="display" style="font-size: clamp(2rem, 5vw, 3.25rem); color: var(--color-ink);">
+        Engineering <span class="accent-italic">Reference.</span>
+      </h1>
+      <p style="margin-top: 14px; max-width: 560px; font-family: var(--font-sans); font-size: 15px; line-height: 1.75; color: var(--color-ink-muted);">
+        Everything you need to install, configure, run, and extend DeepDoc — from the five-phase
+        pipeline internals to chatbot retrieval and GitHub Pages deployment.
+      </p>
+      <div
+        class="mt-6 inline-flex items-center gap-2 rounded-full px-3 py-1"
+        style="border: 1px solid var(--color-line-strong); font-family: var(--font-mono); font-size: 11px; color: var(--color-ink-faint);"
+      >
+        <span class="h-1.5 w-1.5 rounded-full" style="background: var(--color-accent);"></span>
+        v2.1.0 · Python 3.10+ · Node 18+ · MIT
+      </div>
+    </div>
+  </div>
+
+  <!-- ── Two-column layout ───────────────────────────────────────── -->
+  <div class="mx-auto max-w-7xl px-6 py-12">
+    <div class="flex gap-12 lg:gap-16">
+
+      <!-- Sidebar -->
+      <aside class="hidden w-52 shrink-0 lg:block">
+        <nav class="sticky top-20 flex flex-col gap-0.5" id="docs-nav" aria-label="Page sections">
+          {nav.map((item) => (
+            <a
+              href={`#${item.id}`}
+              class="docs-nav-link rounded-md px-2.5 py-1.5 text-sm text-[var(--color-ink-faint)] transition-colors hover:text-[var(--color-ink)]"
+              data-section={item.id}
+            >
+              {item.label}
+            </a>
+          ))}
+        </nav>
+      </aside>
+
+      <!-- Main content -->
+      <main class="min-w-0 flex-1">
+        <div class="flex flex-col gap-20">
+
+          <!-- ── QUICK START ───────────────────────────────────────── -->
+          <section id="quick-start">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              01
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Quick Start
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              Three commands to go from repo to a live docs site with an optional AI chatbot.
+            </p>
+
+            <!-- Step cards -->
+            <div class="flex flex-col gap-6">
+
+              <!-- Step 1 -->
+              <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/50 p-6">
+                <div class="mb-4 flex items-center gap-3">
+                  <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-dim)] font-mono text-xs font-semibold text-[var(--color-accent)]">1</span>
+                  <h3 class="text-base font-semibold text-[var(--color-ink)]">Install the package</h3>
+                </div>
+                <div class="terminal-block">
+                  <div class="terminal-header">
+                    <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                    <span class="terminal-title">bash</span>
+                  </div>
+                  <pre class="terminal-body"><span class="c"># Python 3.10+ required</span>
+pip install deepdoc
+
+<span class="c"># With chatbot dependencies (FAISS, FastAPI, fastembed)</span>
+pip install "deepdoc[chatbot]"</pre>
+                </div>
+                <p class="mt-4 text-sm leading-relaxed text-[var(--color-ink-muted)]">
+                  The base install pulls in LiteLLM, GitPython, Click, Rich, PyYAML, and Jinja2.
+                  The <code class="inline-code">[chatbot]</code> extra adds faiss-cpu, fastapi, uvicorn, httpx, and fastembed for local embeddings.
+                </p>
+              </div>
+
+              <!-- Step 2 -->
+              <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/50 p-6">
+                <div class="mb-4 flex items-center gap-3">
+                  <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-dim)] font-mono text-xs font-semibold text-[var(--color-accent)]">2</span>
+                  <h3 class="text-base font-semibold text-[var(--color-ink)]">Initialise against your repo</h3>
+                </div>
+                <div class="terminal-block">
+                  <div class="terminal-header">
+                    <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                    <span class="terminal-title">bash</span>
+                  </div>
+                  <pre class="terminal-body"><span class="c"># cd into your target codebase first</span>
+cd /path/to/your-repo
+
+<span class="c"># Initialize — writes .deepdoc.yaml with sensible defaults</span>
+deepdoc init --provider anthropic
+
+<span class="c"># Add --with-chatbot to enable the /ask Q&amp;A interface</span>
+deepdoc init --provider openai --with-chatbot
+
+<span class="c"># Set your API key (matches llm.api_key_env in .deepdoc.yaml)</span>
+export ANTHROPIC_API_KEY=sk-ant-...</pre>
+                </div>
+                <p class="mt-4 text-sm leading-relaxed text-[var(--color-ink-muted)]">
+                  <code class="inline-code">init</code> is safe to re-run — it only adds keys that are missing. The generated
+                  <code class="inline-code">.deepdoc.yaml</code> lives in your repo root and should be committed.
+                </p>
+              </div>
+
+              <!-- Step 3 -->
+              <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/50 p-6">
+                <div class="mb-4 flex items-center gap-3">
+                  <span class="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--color-accent-dim)] font-mono text-xs font-semibold text-[var(--color-accent)]">3</span>
+                  <h3 class="text-base font-semibold text-[var(--color-ink)]">Generate and preview</h3>
+                </div>
+                <div class="terminal-block">
+                  <div class="terminal-header">
+                    <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                    <span class="terminal-title">bash</span>
+                  </div>
+                  <pre class="terminal-body"><span class="c"># Full pipeline — scan, plan, generate, build</span>
+deepdoc generate
+
+<span class="acc">✓</span> Scan complete        — 312 files · 47 endpoints · 8 integrations
+<span class="acc">✓</span> Plan complete        — 34 buckets across 6 sections
+<span class="acc">✓</span> Generate complete    — 34 pages · 2 MDX fixes applied
+<span class="acc">✓</span> Chatbot index built  — 1,247 chunks · 4.2 MB FAISS index
+<span class="acc">✓</span> Site scaffold written → site/
+
+  Phase timings:  scan 4s · plan 18s · generate 72s · build 3s
+
+<span class="c"># Preview locally (Node 18+ required, deps auto-installed)</span>
+deepdoc serve
+
+  Docs   → http://localhost:3000
+  Chat   → http://localhost:3000/ask</pre>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          <!-- ── ARCHITECTURE ──────────────────────────────────────── -->
+          <section id="architecture">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              02
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Architecture
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              DeepDoc is a stateful, five-phase pipeline. Each phase has a single responsibility and
+              a well-defined output contract. Nothing is hand-edited inside <code class="inline-code">docs/</code>,
+              <code class="inline-code">site/</code>, or <code class="inline-code">.deepdoc/</code> — all
+              fixes go into generators, builders, or prompts.
+            </p>
+
+            <!-- Architecture diagram — clean SVG -->
+            <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/50">
+              <div class="border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">System overview</span>
+              </div>
+              <div class="overflow-x-auto p-4 md:p-6">
+                <svg viewBox="0 0 740 480" xmlns="http://www.w3.org/2000/svg" class="w-full max-w-2xl mx-auto" style="font-family:ui-monospace,SFMono-Regular,Menlo,monospace">
+                  <defs>
+                    <marker id="arr" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                      <path d="M0,0 L6,3 L0,6 Z" fill="#C2FF4D" opacity="0.7"/>
+                    </marker>
+                    <marker id="arr-faint" markerWidth="6" markerHeight="6" refX="5" refY="3" orient="auto">
+                      <path d="M0,0 L6,3 L0,6 Z" fill="#525252"/>
+                    </marker>
+                  </defs>
+
+                  <!-- ── Your repo ── -->
+                  <rect x="295" y="14" width="150" height="36" rx="8" fill="#111" stroke="rgba(255,255,255,0.12)" stroke-width="1"/>
+                  <text x="370" y="37" text-anchor="middle" fill="#ededed" font-size="12" font-weight="600">Your repo</text>
+
+                  <!-- arrow down to pipeline -->
+                  <line x1="370" y1="50" x2="370" y2="74" stroke="#C2FF4D" stroke-width="1" opacity="0.5" marker-end="url(#arr)"/>
+
+                  <!-- ── Pipeline container ── -->
+                  <rect x="20" y="78" width="700" height="192" rx="12" fill="rgba(194,255,77,0.03)" stroke="rgba(194,255,77,0.18)" stroke-width="1"/>
+                  <text x="370" y="98" text-anchor="middle" fill="rgba(194,255,77,0.5)" font-size="10" letter-spacing="3">DEEPDOC GENERATE</text>
+
+                  <!-- Phase boxes -->
+                  <!-- Scan -->
+                  <rect x="38" y="110" width="120" height="68" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="98" y="132" text-anchor="middle" fill="#525252" font-size="9">01</text>
+                  <text x="98" y="150" text-anchor="middle" fill="#ededed" font-size="13" font-weight="600">Scan</text>
+                  <text x="98" y="168" text-anchor="middle" fill="#525252" font-size="10">no LLM</text>
+
+                  <!-- Plan -->
+                  <rect x="198" y="110" width="120" height="68" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="258" y="132" text-anchor="middle" fill="#525252" font-size="9">02</text>
+                  <text x="258" y="150" text-anchor="middle" fill="#ededed" font-size="13" font-weight="600">Plan</text>
+                  <text x="258" y="168" text-anchor="middle" fill="#525252" font-size="10">3×LLM</text>
+
+                  <!-- Generate -->
+                  <rect x="358" y="110" width="120" height="68" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="418" y="132" text-anchor="middle" fill="#525252" font-size="9">03</text>
+                  <text x="418" y="150" text-anchor="middle" fill="#ededed" font-size="13" font-weight="600">Generate</text>
+                  <text x="418" y="168" text-anchor="middle" fill="#525252" font-size="10">N×LLM</text>
+
+                  <!-- API Ref -->
+                  <rect x="518" y="110" width="120" height="68" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="578" y="132" text-anchor="middle" fill="#525252" font-size="9">04</text>
+                  <text x="578" y="150" text-anchor="middle" fill="#ededed" font-size="13" font-weight="600">API Ref</text>
+                  <text x="578" y="168" text-anchor="middle" fill="#525252" font-size="10">OpenAPI</text>
+
+                  <!-- Build -->
+                  <rect x="298" y="210" width="144" height="48" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="370" y="228" text-anchor="middle" fill="#525252" font-size="9">05</text>
+                  <text x="370" y="247" text-anchor="middle" fill="#ededed" font-size="13" font-weight="600">Build</text>
+
+                  <!-- Arrows between phases -->
+                  <line x1="158" y1="144" x2="192" y2="144" stroke="#C2FF4D" stroke-width="1" opacity="0.5" marker-end="url(#arr)"/>
+                  <line x1="318" y1="144" x2="352" y2="144" stroke="#C2FF4D" stroke-width="1" opacity="0.5" marker-end="url(#arr)"/>
+                  <line x1="478" y1="144" x2="512" y2="144" stroke="#C2FF4D" stroke-width="1" opacity="0.5" marker-end="url(#arr)"/>
+
+                  <!-- Arrow from Generate down to Build -->
+                  <line x1="418" y1="178" x2="418" y2="206" stroke="#C2FF4D" stroke-width="1" opacity="0.4"/>
+                  <line x1="370" y1="206" x2="418" y2="206" stroke="#C2FF4D" stroke-width="1" opacity="0.4" marker-end="url(#arr)"/>
+
+                  <!-- Output labels inside pipeline -->
+                  <text x="98" y="200" text-anchor="middle" fill="#525252" font-size="9">→ RepoScan</text>
+                  <text x="258" y="200" text-anchor="middle" fill="#525252" font-size="9">→ DocPlan</text>
+                  <text x="418" y="200" text-anchor="middle" fill="#525252" font-size="9">→ MDX pages</text>
+                  <text x="578" y="200" text-anchor="middle" fill="#525252" font-size="9">→ manifest.json</text>
+
+                  <!-- Arrow from Build down -->
+                  <line x1="370" y1="258" x2="370" y2="290" stroke="#C2FF4D" stroke-width="1" opacity="0.5" marker-end="url(#arr)"/>
+
+                  <!-- Fan out lines to 3 outputs -->
+                  <line x1="150" y1="302" x2="590" y2="302" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+                  <line x1="150" y1="302" x2="150" y2="318" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+                  <line x1="370" y1="290" x2="370" y2="318" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+                  <line x1="590" y1="302" x2="590" y2="318" stroke="rgba(255,255,255,0.08)" stroke-width="1"/>
+
+                  <!-- Output boxes -->
+                  <rect x="60" y="318" width="180" height="52" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="150" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">site/app/</text>
+                  <text x="150" y="358" text-anchor="middle" fill="#525252" font-size="10">Fumadocs scaffold</text>
+
+                  <rect x="280" y="318" width="180" height="52" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="370" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">.deepdoc/</text>
+                  <text x="370" y="358" text-anchor="middle" fill="#525252" font-size="10">state ledger</text>
+
+                  <rect x="500" y="318" width="180" height="52" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
+                  <text x="590" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">docs/*.mdx</text>
+                  <text x="590" y="358" text-anchor="middle" fill="#525252" font-size="10">MDX pages</text>
+
+                  <!-- Chatbot divider -->
+                  <line x1="20" y1="396" x2="720" y2="396" stroke="rgba(255,255,255,0.06)" stroke-width="1" stroke-dasharray="4 4"/>
+                  <text x="30" y="413" fill="#525252" font-size="10">chatbot.enabled: true</text>
+
+                  <!-- Chatbot boxes -->
+                  <rect x="60" y="424" width="170" height="44" rx="8" fill="#0a0a0a" stroke="rgba(99,102,241,0.3)" stroke-width="1"/>
+                  <text x="145" y="442" text-anchor="middle" fill="#a5b4fc" font-size="11">ChatbotIndexer</text>
+                  <text x="145" y="458" text-anchor="middle" fill="#525252" font-size="10">chunk + embed</text>
+
+                  <rect x="285" y="424" width="170" height="44" rx="8" fill="#0a0a0a" stroke="rgba(99,102,241,0.3)" stroke-width="1"/>
+                  <text x="370" y="442" text-anchor="middle" fill="#a5b4fc" font-size="11">FAISS + SQLite</text>
+                  <text x="370" y="458" text-anchor="middle" fill="#525252" font-size="10">vector + FTS index</text>
+
+                  <rect x="510" y="424" width="170" height="44" rx="8" fill="#0a0a0a" stroke="rgba(99,102,241,0.3)" stroke-width="1"/>
+                  <text x="595" y="442" text-anchor="middle" fill="#a5b4fc" font-size="11">/ask  (SSE)</text>
+                  <text x="595" y="458" text-anchor="middle" fill="#525252" font-size="10">FastAPI streaming</text>
+
+                  <!-- Chatbot arrows -->
+                  <line x1="230" y1="446" x2="279" y2="446" stroke="rgba(99,102,241,0.5)" stroke-width="1" marker-end="url(#arr-faint)"/>
+                  <line x1="455" y1="446" x2="504" y2="446" stroke="rgba(99,102,241,0.5)" stroke-width="1" marker-end="url(#arr-faint)"/>
+                </svg>
+              </div>
+            </div>
+
+            <!-- Component table -->
+            <div class="mt-8 overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">Key components</span>
+              </div>
+              <div class="divide-y divide-[var(--color-line)]">
+                {[
+                  { path: "deepdoc/cli.py", role: "Click entry-point. init, generate, update, serve, deploy commands." },
+                  { path: "deepdoc/pipeline_v2.py", role: "PipelineV2 orchestrator. Drives all five phases end-to-end." },
+                  { path: "deepdoc/v2_models.py", role: "DocBucket + DocPlan dataclasses — the central data contract." },
+                  { path: "deepdoc/config.py", role: ".deepdoc.yaml schema, DEFAULT_CONFIG dict, load/save helpers." },
+                  { path: "deepdoc/scanner/", role: "Static repo analysis — endpoints, runtime, integrations, DB, artifacts." },
+                  { path: "deepdoc/planner/engine.py", role: "Multi-step LLM planner orchestration and bucket-scan entrypoint." },
+                  { path: "deepdoc/planner/heuristics.py", role: "Public planning API: _merge_plan, _build_heuristic_assignment, _llm_step." },
+                  { path: "deepdoc/generator/generation.py", role: "PageGenerator + BucketGenerationEngine. Batched parallel generation." },
+                  { path: "deepdoc/generator/mdx_compile_gate.py", role: "Node.js MDX validator + LLM-reprompt + JSX-strip fallback." },
+                  { path: "deepdoc/chatbot/service.py", role: "ChatbotQueryService. query / deep_research / code_deep modes." },
+                  { path: "deepdoc/chatbot/retrieval_mixin.py", role: "All retrieval: FAISS + FTS, rerank, expansion, hit-selection." },
+                  { path: "deepdoc/site/builder/engine.py", role: "SiteBuilderEngine — writes the full Fumadocs scaffold." },
+                  { path: "deepdoc/persistence_v2.py", role: "Ledger, sync state, manifest, plan storage under .deepdoc/." },
+                  { path: "deepdoc/smart_update_v2.py", role: "Incremental update logic — diff-based replan and regen." },
+                ].map(({ path, role }) => (
+                  <div class="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-start sm:gap-6">
+                    <code class="w-full shrink-0 font-mono text-xs text-[var(--color-accent)] sm:w-72">{path}</code>
+                    <span class="text-sm text-[var(--color-ink-muted)]">{role}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <!-- ── FIVE-PHASE PIPELINE ───────────────────────────────── -->
+          <section id="pipeline">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              03
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Five-Phase Pipeline
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              Each phase runs sequentially. The output of one is the sole input to the next —
+              there are no cross-phase side effects.
+            </p>
+
+            <div class="flex flex-col gap-4">
+              {pipeline.map((p) => (
+                <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 transition-colors hover:border-[var(--color-line-strong)]">
+                  <div class="flex items-center gap-4 border-b border-[var(--color-line)] px-6 py-4">
+                    <span class="font-mono text-xs" style={`color:${p.color}`}>{p.num}</span>
+                    <span class="h-px flex-1 bg-[var(--color-line)]"></span>
+                    <h3 class="text-base font-semibold tracking-tight text-[var(--color-ink)]">{p.step}</h3>
+                  </div>
+                  <div class="px-6 py-5">
+                    <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">{p.desc}</p>
+                    <div class="mt-4 flex items-start gap-2 rounded-lg bg-[var(--color-surface)] px-4 py-3">
+                      <span class="mt-0.5 shrink-0 font-mono text-[10px] uppercase tracking-wider" style={`color:${p.color}`}>output</span>
+                      <span class="font-mono text-xs text-[var(--color-ink-faint)]">{p.output}</span>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <!-- MDX Compile Gate callout -->
+            <div class="mt-8 rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-accent-dim)]/30 p-6">
+              <div class="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-accent)]">MDX Compile Gate</div>
+              <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">
+                After each LLM generation call, DeepDoc spawns a lightweight Node.js validator that compiles
+                the MDX in isolation. If it throws, the exact compile error is injected back into a
+                reprompt call. If the reprompt still fails, JSX is stripped and a safe Markdown fallback
+                is written instead. <strong class="text-[var(--color-ink)]">Nothing broken ever reaches disk.</strong>
+              </p>
+            </div>
+          </section>
+
+          <!-- ── DATA MODELS ───────────────────────────────────────── -->
+          <section id="data-models">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              04
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Core Data Models
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              The entire pipeline communicates through two dataclasses defined in
+              <code class="inline-code">deepdoc/v2_models.py</code>.
+            </p>
+
+            <!-- DocBucket -->
+            <div class="mb-6 overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="flex items-center justify-between border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-sm font-semibold text-[var(--color-ink)]">DocBucket</span>
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">deepdoc/v2_models.py</span>
+              </div>
+              <p class="px-5 pt-4 text-sm leading-relaxed text-[var(--color-ink-muted)]">
+                The atomic planning unit. One bucket = one documentation page. The planner creates, assigns, and
+                refines buckets; the generator consumes them.
+              </p>
+              <div class="terminal-block m-5 mt-4">
+                <div class="terminal-header">
+                  <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                  <span class="terminal-title">python</span>
+                </div>
+                <pre class="terminal-body">@dataclass
+class DocBucket:
+    <span class="c"># Identity</span>
+    bucket_type: str          <span class="c"># system | feature | endpoint | integration | database</span>
+    title: str                <span class="c"># page title shown in nav</span>
+    slug: str                 <span class="c"># URL slug, e.g. "checkout-flow"</span>
+    section: str              <span class="c"># nav section grouping</span>
+    description: str          <span class="c"># one-line description for planning context</span>
+
+    <span class="c"># Ownership — what evidence goes into this page</span>
+    owned_files: list[str]    <span class="c"># file paths relative to repo root</span>
+    owned_symbols: list[str]  <span class="c"># "module.Class.method" qualified names</span>
+    artifact_refs: list[str]  <span class="c"># config keys, env vars, OpenAPI ops</span>
+
+    <span class="c"># Generation instructions</span>
+    generation_hints: dict    <span class="c"># prompt_style, is_introduction_page, is_endpoint_ref</span>
+    required_sections: list[str]
+    required_diagrams: list[str]
+
+    <span class="c"># Topology</span>
+    depends_on: list[str]     <span class="c"># slugs this bucket depends on</span>
+    parent_slug: str | None
+
+    <span class="c"># Metadata</span>
+    priority: int             <span class="c"># generation order within section</span>
+    publication_tier: str     <span class="c"># core | advanced | deprecated</span>
+    source_kind_summary: str  <span class="c"># summary of what kind of code is in owned_files</span></pre>
+              </div>
+            </div>
+
+            <!-- DocPlan -->
+            <div class="overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="flex items-center justify-between border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-sm font-semibold text-[var(--color-ink)]">DocPlan</span>
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">deepdoc/v2_models.py</span>
+              </div>
+              <p class="px-5 pt-4 text-sm leading-relaxed text-[var(--color-ink-muted)]">
+                The complete output of the planner. Consumed by the generator and site builder.
+              </p>
+              <div class="terminal-block m-5 mt-4">
+                <div class="terminal-header">
+                  <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                  <span class="terminal-title">python</span>
+                </div>
+                <pre class="terminal-body">@dataclass
+class DocPlan:
+    buckets: list[DocBucket]         <span class="c"># ordered list — generation order</span>
+    nav_structure: dict[str, list]   <span class="c"># section → [slug, ...] for sidebar nav</span>
+    skipped_files: list[str]         <span class="c"># intentionally excluded (tests, fixtures…)</span>
+    orphaned_files: list[str]        <span class="c"># files not assigned to any bucket</span>
+    classification: str              <span class="c"># repo type: "api_service" | "monolith" | …</span>
+    integration_candidates: list[str]
+
+    <span class="c"># Shim — adapts DocBucket to legacy DocPage interface</span>
+    @property
+    def pages(self) -> list[_BucketAsPage]: ...</pre>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── CONFIGURATION ─────────────────────────────────────── -->
+          <section id="configuration">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              05
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Configuration
+            </h2>
+            <p class="mb-6 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              <code class="inline-code">.deepdoc.yaml</code> lives in your repo root.
+              <code class="inline-code">deepdoc init</code> writes sensible defaults; you only need to set
+              <code class="inline-code">llm.provider</code> and your API key env var.
+            </p>
+
+            <!-- minimal example -->
+            <div class="mb-8 terminal-block">
+              <div class="terminal-header">
+                <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                <span class="terminal-title">.deepdoc.yaml</span>
+              </div>
+              <pre class="terminal-body">project_name: My API
+description: "Internal API service for orders and fulfilment"
+
+llm:
+  provider: anthropic           <span class="c"># required</span>
+  model: claude-opus-4-7        <span class="c"># optional — uses provider default if omitted</span>
+  api_key_env: ANTHROPIC_API_KEY
+
+generation_mode: feature_buckets  <span class="c"># v2 pipeline (default)</span>
+max_parallel_workers: 6
+output_dir: docs
+site_dir: site
+
+<span class="c"># Optional chatbot</span>
+chatbot:
+  enabled: true
+  embeddings:
+    provider: fastembed           <span class="c"># 100% local — no API key needed</span>
+    model: nomic-ai/nomic-embed-text-v1.5</pre>
+            </div>
+
+            <!-- config table -->
+            <div class="overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">All configuration keys</span>
+              </div>
+              <div class="divide-y divide-[var(--color-line)]">
+                <div class="grid grid-cols-[1fr_auto_2fr] gap-4 px-5 py-2.5 font-mono text-[10px] uppercase tracking-wider text-[var(--color-ink-faint)]">
+                  <span>Key</span><span>Default</span><span>Description</span>
+                </div>
+                {configKeys.map(({ key, dflt, desc }) => (
+                  <div class="grid grid-cols-1 gap-y-1 gap-x-4 px-5 py-3 sm:grid-cols-[1fr_auto_2fr] sm:items-start">
+                    <code class="font-mono text-xs text-[var(--color-accent)]">{key}</code>
+                    <code class="font-mono text-xs text-[var(--color-ink-faint)]">{dflt}</code>
+                    <span class="text-sm text-[var(--color-ink-muted)]">{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <!-- ── CLI REFERENCE ─────────────────────────────────────── -->
+          <section id="cli">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              06
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              CLI Reference
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              All commands accept <code class="inline-code">--help</code> for the full flag list.
+              Run <code class="inline-code">python -m deepdoc.cli --help</code> to verify installation.
+            </p>
+
+            <div class="flex flex-col gap-6">
+              {cliCommands.map((cmd) => (
+                <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40">
+                  <div class="flex items-center gap-3 border-b border-[var(--color-line)] px-5 py-4">
+                    <code class="font-mono text-sm font-semibold text-[var(--color-ink)]">{cmd.cmd}</code>
+                  </div>
+                  <div class="px-5 py-4">
+                    <p class="mb-4 text-sm leading-relaxed text-[var(--color-ink-muted)]">{cmd.desc}</p>
+                    <div class="overflow-x-auto rounded-xl border border-[var(--color-line)] bg-[var(--color-surface)]">
+                      <table class="w-full text-sm">
+                        <thead>
+                          <tr class="border-b border-[var(--color-line)]">
+                            <th class="px-4 py-2.5 text-left font-mono text-xs text-[var(--color-ink-faint)]">Flag</th>
+                            <th class="px-4 py-2.5 text-left font-mono text-xs text-[var(--color-ink-faint)]">Value</th>
+                            <th class="px-4 py-2.5 text-left font-mono text-xs text-[var(--color-ink-faint)]">Description</th>
+                          </tr>
+                        </thead>
+                        <tbody class="divide-y divide-[var(--color-line)]">
+                          {cmd.flags.map((f) => (
+                            <tr>
+                              <td class="px-4 py-2.5"><code class="font-mono text-xs text-[var(--color-accent)]">{f.flag}</code></td>
+                              <td class="px-4 py-2.5"><code class="font-mono text-xs text-[var(--color-ink-faint)]">{f.val}</code></td>
+                              <td class="px-4 py-2.5 text-xs text-[var(--color-ink-muted)]">{f.desc}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <!-- ── BUCKET TYPES ──────────────────────────────────────── -->
+          <section id="bucket-types">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              07
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Bucket Types
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              Every documentation page belongs to a bucket. The planner picks the right type based on
+              the repo classification and scanned signals. Each type maps to a different generation
+              prompt and page template.
+            </p>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              {bucketTypes.map((b) => (
+                <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5 transition-colors hover:border-[var(--color-line-strong)]">
+                  <div class="mb-3 flex items-center gap-2.5">
+                    <span class="h-2 w-2 rounded-full" style={`background:${b.color}`}></span>
+                    <code class="font-mono text-sm font-semibold text-[var(--color-ink)]">{b.type}</code>
+                  </div>
+                  <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">{b.desc}</p>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          <!-- ── SUPPORTED LANGUAGES ──────────────────────────────── -->
+          <section id="languages">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              08
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Supported Languages
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              DeepDoc parses source files natively (no subprocess or tree-sitter compilation required
+              for most languages). Route detection is framework-aware.
+            </p>
+
+            <div class="overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="divide-y divide-[var(--color-line)]">
+                {[
+                  { lang: "Python", exts: ".py", frameworks: "Django · FastAPI · Falcon · Flask (generic)", parser: "deepdoc/parser/python_parser.py" },
+                  { lang: "JavaScript", exts: ".js, .mjs", frameworks: "Express · Fastify · NestJS (JS mode)", parser: "deepdoc/parser/js_ts_parser.py" },
+                  { lang: "TypeScript", exts: ".ts, .tsx", frameworks: "Express · Fastify · NestJS · Next.js API routes", parser: "deepdoc/parser/js_ts_parser.py" },
+                  { lang: "Go", exts: ".go", frameworks: "net/http · Gin · Echo (heuristic)", parser: "deepdoc/parser/go_parser.py" },
+                  { lang: "PHP", exts: ".php", frameworks: "Laravel (routes/web.php + routes/api.php)", parser: "deepdoc/parser/php_parser.py" },
+                  { lang: "Vue", exts: ".vue", frameworks: "Vue Router (composition API)", parser: "deepdoc/parser/vue_parser.py" },
+                ].map(({ lang, exts, frameworks, parser }) => (
+                  <div class="grid grid-cols-1 gap-y-1 gap-x-6 px-5 py-4 sm:grid-cols-[90px_140px_1fr_220px] sm:items-center">
+                    <span class="font-semibold text-sm text-[var(--color-ink)]">{lang}</span>
+                    <code class="font-mono text-xs text-[var(--color-ink-faint)]">{exts}</code>
+                    <span class="text-xs text-[var(--color-ink-muted)]">{frameworks}</span>
+                    <code class="font-mono text-[10px] text-[var(--color-ink-faint)]">{parser}</code>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <!-- ── CHATBOT ───────────────────────────────────────────── -->
+          <section id="chatbot">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              09
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Chatbot
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              An opt-in RAG chatbot that answers questions about your codebase. Embeddings run
+              <strong class="text-[var(--color-ink)]">100% locally</strong> via fastembed — no extra API
+              key or paid embedding service required.
+            </p>
+
+            <!-- Enable -->
+            <div class="mb-8 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-6">
+              <h3 class="mb-4 text-base font-semibold text-[var(--color-ink)]">Enable the chatbot</h3>
+              <div class="terminal-block">
+                <div class="terminal-header">
+                  <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                  <span class="terminal-title">bash</span>
+                </div>
+                <pre class="terminal-body"><span class="c"># Enable during init</span>
+deepdoc init --provider anthropic --with-chatbot
+
+<span class="c"># Or add to .deepdoc.yaml manually</span>
+chatbot:
+  enabled: true
+
+<span class="c"># The chatbot model can differ from the doc generation model</span>
+chatbot:
+  enabled: true
+  answer:
+    provider: openai
+    model: gpt-4o
+  embeddings:
+    provider: fastembed
+    model: nomic-ai/nomic-embed-text-v1.5  <span class="c"># downloaded once, ~270 MB</span></pre>
+              </div>
+            </div>
+
+            <!-- Three modes -->
+            <h3 class="mb-4 text-base font-semibold text-[var(--color-ink)]">Query modes</h3>
+            <div class="mb-8 grid grid-cols-1 gap-4 sm:grid-cols-3">
+              {[
+                { mode: "/query", label: "Fast", color: "var(--color-accent)", desc: "Single-pass BM25 + semantic retrieval. Best for quick look-ups. Returns in ~1s." },
+                { mode: "/deep-research", label: "Deep", color: "#A5B4FC", desc: "Multi-hop synthesis. Bounded live-file fallback when the index lacks coverage. Streams via SSE." },
+                { mode: "/code-deep", label: "Code-first", color: "#86EFAC", desc: "Strict source-first mode. Reads exact file ranges. Includes call trace and full file inventory in response." },
+              ].map(({ mode, label, color, desc }) => (
+                <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
+                  <div class="mb-1 flex items-center gap-2">
+                    <span class="h-1.5 w-1.5 rounded-full" style={`background:${color}`}></span>
+                    <span class="font-mono text-xs font-semibold" style={`color:${color}`}>{label}</span>
+                  </div>
+                  <code class="mb-3 block font-mono text-sm text-[var(--color-ink)]">{mode}</code>
+                  <p class="text-xs leading-relaxed text-[var(--color-ink-muted)]">{desc}</p>
+                </div>
+              ))}
+            </div>
+
+            <!-- Retrieval architecture -->
+            <h3 class="mb-4 text-base font-semibold text-[var(--color-ink)]">Retrieval architecture</h3>
+            <div class="overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">retrieval pipeline</span>
+              </div>
+              <pre class="overflow-x-auto p-5 font-mono text-xs leading-6 text-[var(--color-ink-muted)]">Query
+  │
+  ├─ <span class="text-[var(--color-accent)]">FAISS vector search</span>    (nomic-embed-text-v1.5, 768-dim)
+  │    └─ top-K semantic candidates
+  │
+  ├─ <span style="color:#A5B4FC">SQLite FTS5 search</span>     (BM25 lexical)
+  │    └─ top-K keyword candidates
+  │
+  ├─ <span style="color:#86EFAC">Graph neighbour expansion</span>
+  │    └─ chunks adjacent to strong hits
+  │
+  ├─ Optional: <span style="color:#FDE68A">LLM rerank</span>    (cross-encoder scoring)
+  │
+  └─ <span class="text-[var(--color-ink)]">Hit selection</span>          → evidence[] + references[]
+       │
+       └─ Answer generation (answer_mixin.py)
+            ├─ evidence-first prompt
+            ├─ exact file:line citations
+            └─ SSE streaming response</pre>
+            </div>
+
+            <!-- Index storage -->
+            <div class="mt-6 overflow-hidden rounded-2xl border border-[var(--color-line)]">
+              <div class="border-b border-[var(--color-line)] px-5 py-3">
+                <span class="font-mono text-xs text-[var(--color-ink-faint)]">index storage (under .deepdoc/)</span>
+              </div>
+              <div class="divide-y divide-[var(--color-line)]">
+                {[
+                  { path: ".deepdoc/chatbot/faiss.index", desc: "FAISS flat L2 index. Rebuilt on each generate run." },
+                  { path: ".deepdoc/chatbot/fts.db", desc: "SQLite FTS5 database for BM25 lexical search." },
+                  { path: ".deepdoc/chatbot/chunks.json", desc: "Chunk metadata: text, file, line range, type." },
+                  { path: ".deepdoc/chatbot/source_archive/", desc: "Compressed source files for exact line-range citation in code-deep mode." },
+                  { path: ".deepdoc/chatbot/symbol_index.json", desc: "Symbol name → file:line map for fast symbol look-up." },
+                ].map(({ path, desc }) => (
+                  <div class="flex flex-col gap-1 px-5 py-3 sm:flex-row sm:items-start sm:gap-6">
+                    <code class="w-full shrink-0 font-mono text-xs text-[var(--color-accent)] sm:w-64">{path}</code>
+                    <span class="text-sm text-[var(--color-ink-muted)]">{desc}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </section>
+
+          <!-- ── INCREMENTAL UPDATES ───────────────────────────────── -->
+          <section id="updates">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              10
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Incremental Updates
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              After the first full generate, use <code class="inline-code">deepdoc update</code> instead of
+              regenerating everything. It only spends LLM tokens on buckets affected by your changes.
+            </p>
+
+            <div class="terminal-block mb-8">
+              <div class="terminal-header">
+                <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                <span class="terminal-title">bash</span>
+              </div>
+              <pre class="terminal-body"><span class="c"># Diff against last sync, regenerate affected buckets only</span>
+deepdoc update
+
+<span class="acc">✓</span> Diff: 8 files changed since 3f2a91b
+<span class="acc">✓</span> Affected buckets: checkout-flow, order-api, payment-integration
+<span class="acc">✓</span> Replan triggered: new route detected in orders/views.py
+<span class="acc">✓</span> Regenerated 4 pages in 18s (saved ~54s vs full run)
+
+<span class="c"># Force a full replan even on small changes</span>
+deepdoc update --replan
+
+<span class="c"># Compare against a specific git ref</span>
+deepdoc update --since main</pre>
+            </div>
+
+            <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+              <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
+                <h4 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">When a targeted replan triggers</h4>
+                <ul class="flex flex-col gap-1.5 text-xs leading-relaxed text-[var(--color-ink-muted)]">
+                  {["New HTTP endpoint detected", "New third-party integration import", "New database model found", "A bucket's owned files are deleted", "Bucket count changes significantly"].map((item) => (
+                    <li class="flex items-start gap-2">
+                      <span class="mt-1 h-1 w-1 shrink-0 rounded-full bg-[var(--color-accent)]"></span>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+              <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
+                <h4 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">State files that power updates</h4>
+                <ul class="flex flex-col gap-2 text-xs leading-relaxed">
+                  {[
+                    { f: ".deepdoc/sync_state.json", d: "Last-generated commit hash" },
+                    { f: ".deepdoc/ledger.json", d: "Per-page quality + timestamp" },
+                    { f: ".deepdoc/plan.json", d: "Serialised DocPlan from last run" },
+                    { f: ".deepdoc/manifest.json", d: "File → hash → page mapping" },
+                  ].map(({ f, d }) => (
+                    <li class="flex flex-col gap-0.5">
+                      <code class="font-mono text-[10px] text-[var(--color-accent)]">{f}</code>
+                      <span class="text-[var(--color-ink-muted)]">{d}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <!-- ── DEPLOYMENT ────────────────────────────────────────── -->
+          <section id="deployment">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              11
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Deployment
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              The generated <code class="inline-code">site/</code> directory is a standard Next.js project.
+              Deploy it anywhere that runs Next.js, or use <code class="inline-code">deepdoc deploy</code>
+              for one-command GitHub Pages deployment.
+            </p>
+
+            <div class="flex flex-col gap-6">
+
+              <!-- GitHub Pages -->
+              <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40">
+                <div class="border-b border-[var(--color-line)] px-5 py-3">
+                  <span class="font-mono text-sm font-semibold text-[var(--color-ink)]">GitHub Pages (built-in)</span>
+                </div>
+                <div class="px-5 py-5">
+                  <div class="terminal-block">
+                    <div class="terminal-header">
+                      <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                      <span class="terminal-title">bash</span>
+                    </div>
+                    <pre class="terminal-body"><span class="c"># Builds Next.js static export and pushes to gh-pages branch</span>
+deepdoc deploy
+
+<span class="c"># .deepdoc.yaml — GitHub Pages config block</span>
+github_pages:
+  base_path: /your-repo-name   <span class="c"># required if repo is not at root</span>
+  branch: gh-pages</pre>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Vercel / Netlify -->
+              <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40">
+                <div class="border-b border-[var(--color-line)] px-5 py-3">
+                  <span class="font-mono text-sm font-semibold text-[var(--color-ink)]">Vercel / Netlify / any Next.js host</span>
+                </div>
+                <div class="px-5 py-5">
+                  <div class="terminal-block">
+                    <div class="terminal-header">
+                      <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                      <span class="terminal-title">bash</span>
+                    </div>
+                    <pre class="terminal-body"><span class="c"># The site/ directory is a standard Next.js app</span>
+cd site
+npm install
+npm run build          <span class="c"># or: next build</span>
+npm run start          <span class="c"># production server</span>
+
+<span class="c"># Or point Vercel/Netlify at the site/ subdirectory</span>
+<span class="c"># Build command: next build</span>
+<span class="c"># Output directory: site/.next</span>
+<span class="c"># Root directory: site</span></pre>
+                  </div>
+                </div>
+              </div>
+
+              <!-- CI/CD -->
+              <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40">
+                <div class="border-b border-[var(--color-line)] px-5 py-3">
+                  <span class="font-mono text-sm font-semibold text-[var(--color-ink)]">CI/CD — auto-regenerate on push</span>
+                </div>
+                <div class="px-5 py-5">
+                  <div class="terminal-block">
+                    <div class="terminal-header">
+                      <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>
+                      <span class="terminal-title">.github/workflows/docs.yml</span>
+                    </div>
+                    <pre class="terminal-body">name: Regenerate docs
+on:
+  push:
+    branches: [main]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: &#123;fetch-depth: 0&#125;
+
+      - uses: actions/setup-python@v5
+        with: &#123;python-version: "3.11"&#125;
+
+      - uses: actions/setup-node@v4
+        with: &#123;node-version: "20"&#125;
+
+      - run: pip install deepdoc
+
+      - run: deepdoc update         <span class="c"># incremental — only changed buckets</span>
+        env:
+          ANTHROPIC_API_KEY: $&#123;&#123; secrets.ANTHROPIC_API_KEY &#125;&#125;
+
+      - run: deepdoc deploy
+        env:
+          GITHUB_TOKEN: $&#123;&#123; secrets.GITHUB_TOKEN &#125;&#125;</pre>
+                  </div>
+                </div>
+              </div>
+
+            </div>
+          </section>
+
+          <!-- ── MODULE REFERENCE ──────────────────────────────────── -->
+          <section id="modules">
+            <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
+              12
+            </div>
+            <h2 class="mb-2 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl">
+              Module Reference
+            </h2>
+            <p class="mb-8 text-base leading-relaxed text-[var(--color-ink-muted)]">
+              All modules follow the rule: extend <code class="inline-code">_v2</code> variants, never
+              hand-edit generated output, route fixes go in <code class="inline-code">repo_resolver.py</code>.
+            </p>
+
+            <div class="flex flex-col gap-4">
+              {modules.map((m) => (
+                <div class="overflow-hidden rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40">
+                  <div class="flex flex-wrap items-center gap-3 border-b border-[var(--color-line)] px-5 py-3">
+                    <code class="font-mono text-sm font-semibold text-[var(--color-accent)]">{m.path}</code>
+                    <span class="ml-auto rounded-full border border-[var(--color-line-strong)] px-2.5 py-0.5 font-mono text-[10px] text-[var(--color-ink-faint)]">{m.role}</span>
+                  </div>
+                  <div class="px-5 py-4">
+                    <p class="mb-3 text-xs leading-relaxed text-[var(--color-ink-muted)]">{m.note}</p>
+                    <div class="flex flex-wrap gap-2">
+                      {m.exports.map((exp) => (
+                        <code class="rounded-md bg-[var(--color-surface)] px-2.5 py-1 font-mono text-xs text-[var(--color-ink-faint)]">{exp}</code>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+        </div>
+      </main>
+    </div>
+  </div>
+
+  <Footer />
+</Layout>
+
+
+<script>
+  // Highlight active sidebar section on scroll
+  const links = document.querySelectorAll<HTMLAnchorElement>(".docs-nav-link");
+  const sections = Array.from(links)
+    .map((l) => document.getElementById(l.dataset.section!))
+    .filter(Boolean) as HTMLElement[];
+
+  const obs = new IntersectionObserver(
+    (entries) => {
+      for (const entry of entries) {
+        if (entry.isIntersecting) {
+          links.forEach((l) => l.classList.remove("active"));
+          const active = document.querySelector<HTMLAnchorElement>(
+            `.docs-nav-link[data-section="${entry.target.id}"]`
+          );
+          active?.classList.add("active");
+        }
+      }
+    },
+    { rootMargin: "-20% 0px -70% 0px" }
+  );
+
+  sections.forEach((s) => obs.observe(s));
+</script>

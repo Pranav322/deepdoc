@@ -1,0 +1,219 @@
+@import "tailwindcss";
+
+@source "../**/*.{astro,html,js,jsx,ts,tsx,md,mdx}";
+
+@theme static {
+  --color-ink: #F0EFEA;
+  --color-ink-muted: #7E7D76;
+  --color-ink-faint: #44433C;
+  --color-surface: #09090D;
+  --color-surface-raised: #10101A;
+  --color-surface-high: #181820;
+  --color-line: rgba(255, 255, 255, 0.06);
+  --color-line-strong: rgba(255, 255, 255, 0.11);
+  --color-accent: #C2FF4D;
+  --color-accent-dim: rgba(194, 255, 77, 0.09);
+  --color-accent-glow: rgba(194, 255, 77, 0.18);
+
+  --font-script: 'Dancing Script', 'Brush Script MT', cursive;
+  --font-display: 'DM Serif Display', Georgia, 'Times New Roman', serif;
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+html {
+  background: var(--color-surface);
+  color: var(--color-ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  scrollbar-gutter: stable;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--color-surface);
+  color: var(--color-ink);
+}
+
+::selection {
+  background: var(--color-accent-dim);
+  color: var(--color-ink);
+}
+
+/* Dot grid for hero sections — opt-in via .with-dots */
+.with-dots {
+  background-image: radial-gradient(circle, rgba(255,255,255,0.14) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse 90% 75% at 50% 0%, black 20%, transparent 100%);
+}
+
+/* Subtle line grid — kept for .with-grid compat */
+.with-grid {
+  background-image:
+    linear-gradient(var(--color-line) 1px, transparent 1px),
+    linear-gradient(90deg, var(--color-line) 1px, transparent 1px);
+  background-size: 56px 56px;
+  background-position: -1px -1px;
+  mask-image: radial-gradient(ellipse 70% 60% at 50% 30%, black 40%, transparent 100%);
+}
+
+/* Cursive logo wordmark */
+.logo-word {
+  font-family: var(--font-script);
+  font-weight: 600;
+  letter-spacing: 0.01em;
+  line-height: 1;
+}
+.logo-word .logo-d {
+  color: var(--color-accent);
+}
+.logo-word .logo-rest {
+  color: var(--color-ink);
+}
+
+/* Display heading — DM Serif Display */
+.display {
+  font-family: var(--font-display);
+  font-weight: 400;
+  letter-spacing: -0.01em;
+  line-height: 1.0;
+}
+
+/* Accent text treatment */
+.accent-italic {
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--color-accent);
+}
+
+/* Updated to chartreuse — replaces old cyan gradient */
+.accent-gradient {
+  background: linear-gradient(135deg, #C2FF4D 0%, #7EE000 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+/* ── Aurora blob keyframes ───────────────────────────────────────── */
+@keyframes blob-1 {
+  0%,100% { transform: translate(0px,   0px)  scale(1);    }
+  38%     { transform: translate(48px, -36px) scale(1.07); }
+  72%     { transform: translate(-22px, 18px) scale(0.95); }
+}
+@keyframes blob-2 {
+  0%,100% { transform: translate(0px,   0px)  scale(1);    }
+  30%     { transform: translate(-52px, 22px) scale(1.05); }
+  65%     { transform: translate(32px, -28px) scale(1.10); }
+}
+@keyframes blob-3 {
+  0%,100% { transform: translate(0px,   0px)  scale(1);    }
+  42%     { transform: translate(24px,  38px) scale(0.93); }
+  75%     { transform: translate(-18px,-22px) scale(1.06); }
+}
+
+/* Entrance animations */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(20px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.anim-fade-up {
+  animation: fade-up 0.65s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+.anim-delay-1 { animation-delay: 0.08s; }
+.anim-delay-2 { animation-delay: 0.16s; }
+.anim-delay-3 { animation-delay: 0.24s; }
+.anim-delay-4 { animation-delay: 0.32s; }
+
+/* Terminal block */
+.terminal-block {
+  overflow: hidden;
+  border-radius: 0.875rem;
+  border: 1px solid var(--color-line-strong);
+  background: var(--color-surface-raised);
+  box-shadow:
+    0 0 0 1px rgba(194, 255, 77, 0.04),
+    0 24px 64px rgba(0, 0, 0, 0.55);
+}
+.terminal-header {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--color-line);
+  padding: 0.625rem 1rem;
+}
+.terminal-title {
+  margin: 0 auto;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  color: var(--color-ink-faint);
+}
+.dot { display: inline-block; height: 0.625rem; width: 0.625rem; border-radius: 9999px; }
+.dot.red    { background: rgba(255, 95, 86, 0.6); }
+.dot.yellow { background: rgba(255, 189, 46, 0.6); }
+.dot.green  { background: rgba(39, 201, 63, 0.6); }
+.terminal-body {
+  overflow-x: auto;
+  background: transparent;
+  padding: 1.25rem 1.5rem;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.75;
+  color: var(--color-ink);
+  white-space: pre;
+}
+.terminal-body .c   { color: var(--color-ink-faint); }
+.terminal-body .acc { color: var(--color-accent); }
+
+/* Inline code pill */
+.inline-code {
+  border-radius: 0.3rem;
+  background: var(--color-surface-raised);
+  border: 1px solid var(--color-line-strong);
+  padding: 0.1em 0.4em;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  color: var(--color-ink);
+}
+
+/* ── Light theme ─────────────────────────────────────────────────── */
+html[data-theme="light"] {
+  --color-ink: #111110;
+  --color-ink-muted: #6B6B63;
+  --color-ink-faint: #A8A89E;
+  --color-surface: #F5F4F0;
+  --color-surface-raised: #ECEAE4;
+  --color-surface-high: #E2E0DA;
+  --color-line: rgba(0, 0, 0, 0.07);
+  --color-line-strong: rgba(0, 0, 0, 0.13);
+  --color-accent: #4C8B00;
+  --color-accent-dim: rgba(76, 139, 0, 0.09);
+  --color-accent-glow: rgba(76, 139, 0, 0.15);
+}
+
+html[data-theme="light"] body {
+  background: var(--color-surface);
+}
+
+html[data-theme="light"] .with-dots {
+  background-image: radial-gradient(circle, rgba(0,0,0,0.12) 1px, transparent 1px);
+}
+
+html[data-theme="light"] .terminal-block {
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.05), 0 16px 48px rgba(0,0,0,0.12);
+}
+
+html[data-theme="light"] .hero-aurora div {
+  opacity: 0.35;
+}
+
+html[data-theme="light"] .terminal-body {
+  color: var(--color-ink);
+}
+
+/* Docs page active sidebar link */
+.docs-nav-link.active {
+  color: var(--color-ink);
+  background: var(--color-surface-raised);
+}

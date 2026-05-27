@@ -1,0 +1,65 @@
+---
+import "../styles/global.css";
+
+export interface Props {
+  title?: string;
+  description?: string;
+}
+
+const {
+  title = "DeepDoc — Engineering docs your team will actually read",
+  description = "DeepDoc generates evidence-grounded internal documentation from your codebase — architecture, endpoints, integrations, runtime surfaces — with a chatbot that answers from real source.",
+} = Astro.props;
+
+const canonical = new URL(Astro.url.pathname, Astro.site).toString();
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <link rel="canonical" href={canonical} />
+
+    <title>{title}</title>
+    <meta name="description" content={description} />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content={title} />
+    <meta property="og:description" content={description} />
+    <meta property="og:url" content={canonical} />
+
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content={title} />
+    <meta name="twitter:description" content={description} />
+
+    <!-- Fonts: DM Serif Display + DM Sans + JetBrains Mono -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,300;9..40,400;9..40,500;9..40,600&family=JetBrains+Mono:wght@400;500&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- No-flash theme init: runs before first paint -->
+    <script is:inline>
+      (function () {
+        var stored = localStorage.getItem("theme");
+        var prefer = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        var theme = stored || prefer;
+        document.documentElement.setAttribute("data-theme", theme);
+      })();
+    </script>
+  </head>
+  <body>
+    <!-- Top accent glow (hidden in light mode via opacity) -->
+    <div
+      id="accent-glow"
+      aria-hidden="true"
+      style="position:fixed;top:-120px;left:50%;transform:translateX(-50%);width:600px;height:320px;background:radial-gradient(ellipse at 50% 0%, rgba(194,255,77,0.07) 0%, transparent 70%);pointer-events:none;z-index:0;transition:opacity 0.3s;"
+    ></div>
+    <slot />
+  </body>
+</html>

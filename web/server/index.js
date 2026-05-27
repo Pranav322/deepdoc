@@ -62,15 +62,11 @@ app.get('/:owner/:repo', (req, res) => {
   const indexFile = path.join(outDir, 'index.html');
   const force = 'force' in req.query;
 
-  // ── ?force — wipe everything and restart ────────────────────────────────
+  // ── ?force — wipe everything and restart regardless of current state ───
   if (force) {
-    const job = getJob(owner, repo);
-    if (job && job.status === 'running') {
-      // Don't interrupt a running job — just redirect to progress
-      return res.redirect(`/${owner}/${repo}`);
-    }
     clearJob(owner, repo);
     fs.rmSync(outDir, { recursive: true, force: true });
+    // Old worker detects generation mismatch and self-aborts
   }
 
   // ── Already built → serve docs ──────────────────────────────────────────
@@ -91,9 +87,9 @@ app.get('/:owner/:repo', (req, res) => {
   }
 
   // ── Start new job ────────────────────────────────────────────────────────
-  createJob(owner, repo);
+  const generation = createJob(owner, repo);
   const { pending } = queueDepth();
-  enqueue(() => runJob(owner, repo));
+  enqueue(() => runJob(owner, repo, generation));
 
   res.send(progressPage(owner, repo, pending));
 });

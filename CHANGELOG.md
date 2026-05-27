@@ -9,6 +9,41 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.3.0] - 2026-05-27
+
+DeepDoc 2.3.0 is an internal quality and architecture release: the Node.js MDX compile gate subprocess is replaced by inline Python validation, validator checks are demoted to warnings so generation never stalls on stylistic issues, and the marketing site ships a full design-system refresh.
+
+### Changed
+
+#### Generator
+- **MDX compile gate removed** — the external Node.js subprocess (`mdx_validator/validate.mjs`) that validated generated MDX is replaced by inline Python-side validation. Generation no longer requires a Node.js process at validation time, eliminating subprocess startup overhead and environment-dependency issues on Node-less machines.
+- **Validator check demotions** — most validation checks are now **warning-only** and no longer trigger Step 6 / Step 6.5 retries. Hard-fails remain only for: truncated output (`word_count < 100`), leaked placeholders (`placeholder_sections`), and hallucinated file paths (`_check_hallucinated_paths`). All other checks — missing sections, low file coverage, out-of-evidence refs, hallucinated symbols, unmatched routes, flow grounding, contract concepts, runtime entities, config keys, integration grounding — log warnings and are recorded in `generation_quality.json` but do not block the page. See `docs/validator_demotions.md` for per-check rationale.
+
+#### Chatbot
+- **Shared constants centralised** — `chatbot/constants.py` introduced as the single source of truth for shared string literals (chunk types, corpus names, field keys) used across `indexer.py`, `retrieval_mixin.py`, `answer_mixin.py`, and `service.py`.
+- **Retrieval and answer cleanup** — `retrieval_mixin.py` and `answer_mixin.py` updated for the new constants module; dead code and redundant type checks removed across `linking.py`, `live_fallback_mixin.py`, `docs_summary.py`, and `settings.py`.
+
+#### Planner
+- **Topology and refinement updates** — `topology.py` cluster-merging and `bucket_refinement.py` decomposition logic updated for consistency with the new validator contract; `nav_shaping.py` and `common.py` minor cleanups.
+- **Public API tightened** — `planner/__init__.py` exports trimmed to the canonical public surface; internal helpers no longer exported.
+
+#### Legacy module removal
+- `deepdoc/_legacy_types.py` deleted — all callers use `v2_models.py` directly.
+- `deepdoc/prompts_v2.py` re-export facade deleted — callers import from `deepdoc/prompts/` directly.
+- `deepdoc/generator/mdx_validator/` Node.js shim deleted.
+
+#### Site builder
+- `scaffold_files.py`, `mdx_utils.py`, `engine.py`, and `templates.py` updated for the removed compile-gate and new generator API surface.
+
+### Web
+
+- **Complete marketing site redesign** — new design system: DM Serif Display + DM Sans + JetBrains Mono + Dancing Script cursive wordmark. Chartreuse `#C2FF4D` accent replacing old cyan. Aurora gradient hero background. Typewriter terminal animation. Upward-drifting code-fragment canvas on the CTA. Light/dark mode toggle with no-flash init. Video container fixed to 16:9. `web/src/` added to git tracking.
+- **Docs page** — updated to new design system; all hardcoded old-cyan color references replaced with the new cohesive palette; SVG architecture diagram updated; `DM Serif Display` headings throughout.
+
+### Tests
+- `test_mdx_compile_gate.py` removed (module deleted).
+- All other affected test files updated for the new generator, chatbot, and planner APIs.
+
 ## [2.2.1] - 2026-05-22
 
 DeepDoc 2.2.1 is a bug-fix release addressing 22 scanner, planner, and generator correctness issues identified by audit, plus adversarial-review remediations.

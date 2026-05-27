@@ -37,7 +37,7 @@ const pipeline = [
     step: "Generate",
     num: "03",
     color: "#A5B4FC",
-    desc: "For each bucket: assemble an evidence pack (source snippets, artifact extracts, scan hits), call the LLM, receive MDX. Then run the MDX compile gate — Node.js validates the output. On failure: reprompt with the exact error. If still broken: strip JSX and fall back to safe Markdown. Nothing broken ever hits disk.",
+    desc: "For each bucket: assemble an evidence pack (source snippets, artifact extracts, scan hits), call the LLM, receive MDX. Inline validation runs immediately — on failure the LLM is reprompted with the exact error. If still broken, JSX is stripped and a safe Markdown fallback is written. Nothing broken ever hits disk.",
     output: "MDX pages on disk, per-page quality status, compile-gate log",
   },
   {
@@ -216,7 +216,7 @@ const modules = [
         style="border: 1px solid var(--color-line-strong); font-family: var(--font-mono); font-size: 11px; color: var(--color-ink-faint);"
       >
         <span class="h-1.5 w-1.5 rounded-full" style="background: var(--color-accent);"></span>
-        v2.1.0 · Python 3.10+ · Node 18+ · MIT
+        v2.3.0 · Python 3.10+ · Node 18+ · MIT
       </div>
     </div>
   </div>

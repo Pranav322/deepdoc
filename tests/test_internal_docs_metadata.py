@@ -10,15 +10,11 @@ from deepdoc.persistence_v2 import (
     save_plan,
     save_scan_cache,
 )
-from deepdoc.planner import (
-    DocBucket,
-    DocPlan,
-    RepoScan,
-    _assign_publication_tiers,
-    _auto_generate_endpoint_refs,
-    _normalize_repo_profile,
-    _shape_plan_nav,
-)
+from deepdoc.planner import DocBucket, DocPlan, RepoScan
+from deepdoc.planner.bucket_injection import _assign_publication_tiers
+from deepdoc.planner.endpoint_refs import _auto_generate_endpoint_refs
+from deepdoc.planner.heuristics import _normalize_repo_profile
+from deepdoc.planner.nav_shaping import _shape_plan_nav
 from deepdoc.source_metadata import (
     classify_integration_party,
     classify_source_kind,

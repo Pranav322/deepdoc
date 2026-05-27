@@ -5,13 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.parser.base import ParsedFile, Symbol
-from deepdoc.planner import (
-    DocBucket,
-    DocPlan,
-    RepoScan,
-    _consolidate_similar_buckets,
-    _should_decompose,
-)
+from deepdoc.planner import DocBucket, DocPlan, RepoScan
+from deepdoc.planner.bucket_refinement import _consolidate_similar_buckets, _should_decompose
 
 
 def _make_scan(

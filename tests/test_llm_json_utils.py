@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 
 from deepdoc.llm.json_utils import _repair_json_candidate, parse_llm_json
-from deepdoc.planner import _llm_step
+from deepdoc.planner.heuristics import _llm_step
 from deepdoc.scanner import _parse_json
 
 

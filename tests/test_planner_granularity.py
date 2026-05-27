@@ -7,28 +7,24 @@ from deepdoc.benchmark_v2 import score_plan
 from deepdoc.generator import PageValidator
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.persistence_v2 import load_plan, save_plan
-from deepdoc.planner import (
-    CLASSIFY_PROMPT,
-    PROPOSE_PROMPT,
-    DocBucket,
-    DocPlan,
-    RepoScan,
-    _apply_page_contracts,
-    _attach_orphans_semantically,
-    _auto_generate_endpoint_refs,
-    _build_heuristic_assignment,
-    _decompose_buckets,
-    _ensure_database_runtime_and_interface_buckets,
+from deepdoc.planner import DocBucket, DocPlan, RepoScan, scan_repo
+from deepdoc.planner.bucket_injection import (
     _inject_research_context_buckets,
     _inject_start_here_and_debug_buckets,
-    _normalize_tokens,
+)
+from deepdoc.planner.bucket_refinement import (
+    _apply_page_contracts,
+    _attach_orphans_semantically,
+    _decompose_buckets,
     _refine_bucket_ownership,
     _refine_proposal,
-    _shape_plan_nav,
-    _validate_coverage,
-    scan_repo,
 )
-from deepdoc.prompts_v2 import PROMPT_STYLE_TEMPLATES
+from deepdoc.planner.common import CLASSIFY_PROMPT, PROPOSE_PROMPT, _normalize_tokens
+from deepdoc.planner.endpoint_refs import _auto_generate_endpoint_refs
+from deepdoc.planner.heuristics import _build_heuristic_assignment, _validate_coverage
+from deepdoc.planner.nav_shaping import _shape_plan_nav
+from deepdoc.planner.specializations import _ensure_database_runtime_and_interface_buckets
+from deepdoc.prompts import PROMPT_STYLE_TEMPLATES
 from deepdoc.site.builder import build_fumadocs_from_plan
 
 
@@ -1127,7 +1123,7 @@ def test_recursive_nav_builder_supports_three_levels(tmp_path: Path) -> None:
         skipped_files=[],
     )
 
-    (output_dir / "flash-attention.mdx").write_text(
+    (output_dir / "flash-attention.md").write_text(
         "# Flash Attention\n", encoding="utf-8"
     )
 

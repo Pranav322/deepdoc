@@ -6,20 +6,16 @@ from pathlib import Path
 from deepdoc.generator import (
     _fix_mermaid_diagram,
     build_internal_doc_link_maps,
-    escape_mdx_route_params,
-    escape_mdx_text_hazards,
     normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
-    normalize_mdx_steps,
-    repair_mdx_component_blocks,
     repair_split_object_code_fences,
     repair_dangling_plain_fences,
     repair_internal_doc_links,
     repair_unbalanced_code_fences,
 )
 from deepdoc.pipeline_v2 import _endpoint_ref_slug, stage_openapi_assets
-from deepdoc.prompts_v2 import (
+from deepdoc.prompts import (
     DEBUG_RUNBOOK_V2,
     DOMAIN_GLOSSARY_V2,
     ENDPOINT_BUCKET_V2,
@@ -28,7 +24,7 @@ from deepdoc.prompts_v2 import (
     START_HERE_SETUP_V2,
     SYSTEM_V2,
 )
-from deepdoc.site.builder import _ensure_mdx_frontmatter, build_fumadocs_from_plan
+from deepdoc.site.builder import _ensure_md_frontmatter, build_fumadocs_from_plan
 from tests.conftest import make_bucket, make_plan
 
 
@@ -60,7 +56,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
         "API Endpoints > Orders": ["get-order"],
     }
 
-    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+    (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
     build_fumadocs_from_plan(
         repo_root,
@@ -80,7 +76,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
         has_openapi=True,
     )
 
-    assert (output_dir / "index.mdx").exists()
+    assert (output_dir / "index.md").exists()
     assert (repo_root / "site" / "package.json").exists()
     assert (repo_root / "site" / "postcss.config.mjs").exists()
     assert (repo_root / "site" / "source.config.mjs").exists()
@@ -110,7 +106,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(
         encoding="utf-8"
     )
-    auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
+    auth_doc = (output_dir / "auth.md").read_text(encoding="utf-8")
     assert '"url": "/"' in page_tree
     assert '"name": "Core"' in page_tree
     assert '"url": "/auth"' in page_tree
@@ -144,7 +140,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
         in app_layout
     )
     assert "api: searchApiPath" in app_layout
-    assert 'title: "Demo"' in (output_dir / "index.mdx").read_text(encoding="utf-8")
+    assert 'title: "Demo"' in (output_dir / "index.md").read_text(encoding="utf-8")
     assert "icon: 'favicon.svg'" in app_layout
     assert "ChatbotToggle" not in app_layout
     assert "provider/next" not in app_layout
@@ -239,8 +235,8 @@ def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(
     plan.nav_structure = {"Core": ["auth"]}
 
     custom_index = "# Custom landing\n\nThis page is handwritten.\n"
-    (output_dir / "index.mdx").write_text(custom_index, encoding="utf-8")
-    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+    (output_dir / "index.md").write_text(custom_index, encoding="utf-8")
+    (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
     build_fumadocs_from_plan(
         repo_root,
@@ -250,8 +246,8 @@ def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(
         has_openapi=False,
     )
 
-    index_text = (output_dir / "index.mdx").read_text(encoding="utf-8")
-    auth_doc = (output_dir / "auth.mdx").read_text(encoding="utf-8")
+    index_text = (output_dir / "index.md").read_text(encoding="utf-8")
+    auth_doc = (output_dir / "auth.md").read_text(encoding="utf-8")
 
     assert index_text.startswith("---\n")
     assert 'title: "Custom landing"' in index_text
@@ -286,8 +282,8 @@ A real-time POS backend.
 
 It runs the admin platform.
 """
-    (output_dir / "index.mdx").write_text(malformed_index, encoding="utf-8")
-    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+    (output_dir / "index.md").write_text(malformed_index, encoding="utf-8")
+    (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
     build_fumadocs_from_plan(
         repo_root,
@@ -297,7 +293,7 @@ It runs the admin platform.
         has_openapi=False,
     )
 
-    index_text = (output_dir / "index.mdx").read_text(encoding="utf-8")
+    index_text = (output_dir / "index.md").read_text(encoding="utf-8")
 
     assert index_text.startswith("---\n")
     assert 'title: "System Architecture & Overview"' in index_text
@@ -325,7 +321,7 @@ def test_build_fumadocs_without_openapi_omits_api_route_scaffold(
     plan = make_plan([overview, auth])
     plan.nav_structure = {"Core": ["auth"]}
 
-    (output_dir / "auth.mdx").write_text("# Auth\n", encoding="utf-8")
+    (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
     build_fumadocs_from_plan(
         repo_root,
@@ -387,8 +383,8 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
     plan = make_plan([overview, health])
     plan.nav_structure = {"API Reference": ["operations-health"]}
 
-    (output_dir / "index.mdx").write_text("# Overview\n", encoding="utf-8")
-    (output_dir / "operations-health.mdx").write_text("# Health\n", encoding="utf-8")
+    (output_dir / "index.md").write_text("# Overview\n", encoding="utf-8")
+    (output_dir / "operations-health.md").write_text("# Health\n", encoding="utf-8")
 
     build_fumadocs_from_plan(
         repo_root,
@@ -408,10 +404,10 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
 
 def test_fumadocs_prompts_drop_mintlify_only_components() -> None:
     assert "Mintlify" not in SYSTEM_V2
-    assert "<Callout" in SYSTEM_V2
-    assert "<Cards>" in SYSTEM_V2
-    assert "<Tabs items={" in SYSTEM_V2
-    assert '<Accordions type="single">' in SYSTEM_V2
+    assert ":::note" in SYSTEM_V2
+    assert ":::cards" in SYSTEM_V2
+    assert ":::tabs{items=" in SYSTEM_V2
+    assert ":::accordions" in SYSTEM_V2
     assert "<CardGroup" not in SYSTEM_V2
     assert "<AccordionGroup" not in SYSTEM_V2
 
@@ -549,256 +545,6 @@ def test_stage_openapi_assets_stages_multiple_specs(tmp_path: Path) -> None:
     assert len(staged_specs) == 2
 
 
-def test_escape_mdx_route_params_avoids_runtime_expressions() -> None:
-    content = """# GET /reports/{slug}
-
-<Card title="GET /api/users/{id}" href="/get-api-users-id">
-  Open the user endpoint.
-</Card>
-
-Inline code: `GET /reports/{slug}`
-
-```mermaid
-flowchart TD
-    A["GET /reports/{slug}"]
-```
-"""
-
-    escaped = escape_mdx_route_params(content)
-
-    assert "/reports/&#123;slug&#125;" in escaped
-    assert 'title="GET /api/users/&#123;id&#125;"' in escaped
-    assert "`GET /reports/{slug}`" in escaped
-    assert 'A["GET /reports/{slug}"]' in escaped
-
-
-def test_escape_mdx_route_params_escapes_typed_route_params() -> None:
-    content = (
-        "See [GET /artists/{slug:int}/{page:int}](/get-artists-slug-int-page-int)."
-    )
-
-    escaped = escape_mdx_route_params(content)
-
-    assert "&#123;slug:int&#125;" in escaped
-    assert "&#123;page:int&#125;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_bare_lt_in_prose_only() -> None:
-    content = """- **Timeouts**: Webhook handlers must respond quickly (<5s typical).
-
-Inline code: `<5s`
-
-```md
-<5s
-```
-"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "(&lt;5s typical)." in escaped
-    assert "Inline code: `<5s`" in escaped
-    assert "```md\n<5s\n```" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_lte_operator_in_jsx_text() -> None:
-    content = '<Callout type="warn">If `final_points` is missing or <=0, return 400.</Callout>'
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "&lt;=0" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_django_route_converters() -> None:
-    content = """# ANY /get-prod-variants/<str:prod_slug>
-
-Description: API reference for ANY /get-prod-variants/<str:prod_slug>
-
-Inline code: `ANY /get-prod-variants/<str:prod_slug>`
-"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "/get-prod-variants/&lt;str:prod_slug&gt;" in escaped
-    assert "`ANY /get-prod-variants/<str:prod_slug>`" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_plain_placeholder_tags() -> None:
-    content = """| Location | Name |
-|----------|------|
-| path     | <model>/ |
-
-Inline code: `<model>/`
-"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "| path     | &lt;model&gt;/ |" in escaped
-    assert "Inline code: `<model>/`" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_hyphenated_placeholder_tags() -> None:
-    content = "[ANY /get-prod-variants-<str-prod_slug>](/any-get-prod-variants-<str-prod_slug>)"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "&lt;str-prod_slug&gt;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_non_tag_less_than_sequences() -> None:
-    content = '- **detailed**: \' .\\\'\\`^",:;Il!i><~+_-?][}{1)(|/tfjrxn\''
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert ">&lt;~" in escaped
-    assert "][&#125;&#123;1)" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_generic_types_in_tables_only() -> None:
-    content = """| Field | Type | Description |
-|-------|------|-------------|
-| products | array<object> | Product list |
-
-Inline code: `array<object>`
-
-```md
-| products | array<object> | Product list |
-```
-"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "| products | array&lt;object&gt; | Product list |" in escaped
-    assert "Inline code: `array<object>`" in escaped
-    assert "```md\n| products | array<object> | Product list |\n```" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_union_generic_types() -> None:
-    content = "- `productIds` (Array<string|number>): List of product IDs to sync."
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "Array&lt;string|number&gt;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_generic_types_with_array_members() -> None:
-    content = (
-        "| `fetchIncompleteOrders` | `report/index.ts` | "
-        "() => Promise<OrderData[]> | Fetches incomplete orders |"
-    )
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "() => Promise&lt;OrderData[]&gt;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_nested_generic_types() -> None:
-    content = "- **writerQuery(sql, params):** Promise<Array&lt;Row&gt;>"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "Promise&lt;Array&lt;Row&gt;&gt;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_literal_brace_ellipsis() -> None:
-    content = "| responseData | Error | {...} |"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "&#123;...&#125;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_destructured_args_in_table_cells() -> None:
-    content = """| Symbol | Signature |
-|---|---|
-| updateHasProductReturnDetails | (details, {connection}) |
-
-Inline code: `(details, {connection})`
-"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "(details, &#123;connection&#125;)" in escaped
-    assert "Inline code: `(details, &#123;connection&#125;)`" in escaped
-
-
-def test_escape_mdx_text_hazards_wraps_json_like_table_cells() -> None:
-    content = '| product_details | has_products | [{"prod_id":101}] |'
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert '[&#123;"prod_id":101&#125;]' in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_generic_code_spans_in_tables() -> None:
-    content = (
-        "| `getKey` | `redisUtils.ts` | `<T>(key): Promise<T | null>` | "
-        "Get and deserialize key |"
-    )
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "`&lt;T&gt;(key): Promise&lt;T | null&gt;`" in escaped
-
-
-def test_escape_mdx_text_hazards_rewrites_br_tags_inside_table_cells() -> None:
-    content = "| logger | methods | .error(),<br>.warn(),<br />.info() |"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "<br" not in escaped.lower()
-    assert ".error(), / .warn(), / .info()" in escaped
-
-
-def test_escape_mdx_text_hazards_normalizes_br_tags_to_self_closing() -> None:
-    content = """<Accordion title=\"Health Endpoint Failure\">
-**Symptom**: `/health` returns non-200.<br>
-**Root Cause**: Application misconfiguration.<br/>
-**Fix**: Check logs.
-</Accordion>"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "**Symptom**: `/health` returns non-200.<br />" in escaped
-    assert "**Root Cause**: Application misconfiguration.<br />" in escaped
-    assert "<br>" not in escaped
-    assert "<br/>" not in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_generic_types_inside_inline_code_table_cells() -> (
-    None
-):
-    content = "| fn | returns |\n|---|---|\n| `save()` | `Promise<object|boolean>` |"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "`Promise&lt;object|boolean&gt;`" in escaped
-
-
-def test_escape_mdx_text_hazards_repairs_escaped_inline_html_closers() -> None:
-    content = """<Callout>Handler: <strong>statsHandler&lt;/strong&gt; in <code>server.js&lt;/code&gt;</Callout>
-
-Inline code: `<code>server.js&lt;/code&gt;`
-"""
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert (
-        "<Callout>Handler: <strong>statsHandler</strong> in <code>server.js</code></Callout>"
-        in escaped
-    )
-    assert "Inline code: `<code>server.js&lt;/code&gt;`" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_json_literals_inside_inline_code_tags() -> (
-    None
-):
-    content = '<Callout type="info">You should see <code>{"status": "ok"}</code> or similar.</Callout>'
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert '<code>&#123;"status": "ok"&#125;</code>' in escaped
-
-
 def test_normalize_code_fence_languages_rewrites_env_aliases() -> None:
     content = """```env
 SECRET_KEY=test
@@ -869,76 +615,6 @@ def test_normalize_html_code_blocks_does_not_escape_br_outside_code_tags() -> No
     normalized = normalize_html_code_blocks(content)
 
     assert normalized == content
-
-
-def test_normalize_mdx_steps_converts_markdown_headings_inside_step_blocks() -> None:
-    content = """<Steps>
-  <Step>
-    ### 1. Clone the repository
-
-    ```bash
-    git clone https://example.com/repo.git
-    ```
-  </Step>
-</Steps>
-"""
-
-    normalized = normalize_mdx_steps(content)
-
-    assert "**1. Clone the repository**" in normalized
-    assert "### 1. Clone the repository" not in normalized
-    assert "```bash" in normalized
-
-
-def test_normalize_mdx_steps_leaves_code_fence_contents_and_external_headings_unchanged() -> (
-    None
-):
-    content = """## Setup
-
-<Steps>
-  <Step>
-    ```md
-    ### not-a-real-heading
-    ```
-  </Step>
-</Steps>
-"""
-
-    normalized = normalize_mdx_steps(content)
-
-    assert normalized.startswith("## Setup")
-    assert "### not-a-real-heading" in normalized
-    assert "**not-a-real-heading**" not in normalized
-
-
-def test_normalize_mdx_steps_converts_html_headings_inside_step_blocks() -> None:
-    content = """<Steps>
-  <Step>
-    <h3>Install dependencies</h3>
-    Run `npm install`.
-  </Step>
-</Steps>
-"""
-
-    normalized = normalize_mdx_steps(content)
-
-    assert "<h3>Install dependencies</h3>" not in normalized
-    assert "**Install dependencies**" in normalized
-
-
-def test_repair_mdx_component_blocks_converts_inline_callout_before_fence() -> None:
-    content = """<Callout type=\"info\">If using ASGI, start Daphne with:
-```bash
-daphne <django_project>.asgi:application
-```
-</Callout>
-"""
-
-    repaired = repair_mdx_component_blocks(content)
-
-    assert repaired.startswith('<Callout type="info">\n')
-    assert "If using ASGI, start Daphne with:\n\n```bash" in repaired
-    assert repaired.rstrip().endswith("</Callout>")
 
 
 def test_repair_unbalanced_code_fences_drops_last_unmatched_fence() -> None:
@@ -1025,61 +701,6 @@ def test_repair_split_object_code_fences_stitches_body_back_into_fence() -> None
     assert "```typescript\n// ReturnDetailsPayload\n{\n  response: {\n    order: []\n  }\n}\n```" in repaired
 
 
-def test_escape_mdx_text_hazards_repairs_mis_escaped_inline_closing_tags() -> None:
-    content = "<code>python -m venv venv&lt;br>source venv/bin/activate</code&gt;"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert escaped == "<code>python -m venv venv&lt;br>source venv/bin/activate</code>"
-
-
-def test_escape_mdx_text_hazards_escapes_json_like_table_cells() -> None:
-    content = (
-        '| `WishlistFactory.instantiate` | `middleware/WishlistMiddleware.py` | '
-        '(None, {"user_id": ...}, context, sync=True) | Instantiates wishlist object. |'
-    )
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert '&#123;"user_id": ...&#125;' in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_raw_object_literals_in_prose() -> None:
-    content = "- **Returns:** { status: 'healthy' | 'degraded' | 'unhealthy', details: object }"
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "&#123; status: 'healthy' | 'degraded' | 'unhealthy', details: object &#125;" in escaped
-
-
-def test_escape_mdx_text_hazards_escapes_object_literals_split_by_inline_code() -> None:
-    table_row = (
-        '| `ValidationError` | Global handler | 400 | '
-        '{ status: "error", `statusCode`: 400, message: ... } |'
-    )
-    prose_line = "- **Returns:** { status: `healthy`, details: object }"
-
-    escaped_table = escape_mdx_text_hazards(table_row)
-    escaped_prose = escape_mdx_text_hazards(prose_line)
-
-    assert (
-        "&#123; status: \"error\", `statusCode`: 400, message: ... &#125;"
-        in escaped_table
-    )
-    assert "&#123; status: `healthy`, details: object &#125;" in escaped_prose
-
-
-def test_escape_mdx_text_hazards_escapes_braces_inside_table_code_spans() -> None:
-    content = (
-        '| `/health` | Example | '
-        '`{ status: "healthy", checks: { ... } }` |'
-    )
-
-    escaped = escape_mdx_text_hazards(content)
-
-    assert "`&#123; status: \"healthy\", checks: &#123; ... &#125; &#125;`" in escaped
-
-
 def test_repair_internal_doc_links_rewrites_aliases_using_page_titles() -> None:
     valid_urls, title_to_url, alias_map = build_internal_doc_link_maps(
         [
@@ -1130,7 +751,7 @@ def test_ensure_mdx_frontmatter_normalizes_existing_yaml_scalars(
 ) -> None:
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    mdx_path = docs_dir / "start-here.mdx"
+    mdx_path = docs_dir / "start-here.md"
     mdx_path.write_text(
         """---
 title: Start Here
@@ -1142,7 +763,7 @@ description: Orientation for new developers: what this service does, who uses it
         encoding="utf-8",
     )
 
-    _ensure_mdx_frontmatter(docs_dir)
+    _ensure_md_frontmatter(docs_dir)
 
     updated = mdx_path.read_text(encoding="utf-8")
     assert 'title: "Start Here"' in updated
@@ -1157,7 +778,7 @@ def test_ensure_mdx_frontmatter_preserves_deepdoc_provenance_fields(
 ) -> None:
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    mdx_path = docs_dir / "auth.mdx"
+    mdx_path = docs_dir / "auth.md"
     mdx_path.write_text(
         """---
 title: Auth
@@ -1172,7 +793,7 @@ deepdoc_evidence_files:
         encoding="utf-8",
     )
 
-    _ensure_mdx_frontmatter(docs_dir)
+    _ensure_md_frontmatter(docs_dir)
 
     updated = mdx_path.read_text(encoding="utf-8")
     assert 'deepdoc_generated_commit: "abc1234"' in updated
@@ -1185,7 +806,7 @@ def test_ensure_mdx_frontmatter_moves_leaked_body_out_of_yaml_frontmatter(
 ) -> None:
     docs_dir = tmp_path / "docs"
     docs_dir.mkdir(parents=True, exist_ok=True)
-    mdx_path = docs_dir / "background-jobs.mdx"
+    mdx_path = docs_dir / "background-jobs.md"
     mdx_path.write_text(
         """---
 title: "Background Jobs"
@@ -1204,7 +825,7 @@ If you are looking for Django management commands, see [Django Commands & Signal
         encoding="utf-8",
     )
 
-    _ensure_mdx_frontmatter(docs_dir)
+    _ensure_md_frontmatter(docs_dir)
 
     updated = mdx_path.read_text(encoding="utf-8")
     frontmatter, body = updated.split("\n---\n\n", 1)

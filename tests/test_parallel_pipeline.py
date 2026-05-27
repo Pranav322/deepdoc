@@ -8,13 +8,8 @@ from unittest.mock import MagicMock, patch
 
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.parser.base import ParsedFile, Symbol
-from deepdoc.planner import (
-    DocBucket,
-    DocPlan,
-    RepoScan,
-    _decompose_buckets,
-    run_phase2_scans,
-)
+from deepdoc.planner import DocBucket, DocPlan, RepoScan, run_phase2_scans
+from deepdoc.planner.bucket_refinement import _decompose_buckets
 
 
 def _make_scan(

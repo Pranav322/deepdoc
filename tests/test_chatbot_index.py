@@ -78,7 +78,7 @@ def test_code_chunks_use_symbol_line_ranges(tmp_path: Path) -> None:
     assert chunk.end_line == 4
     assert chunk.symbol_names == ["login"]
     assert chunk.related_doc_urls == ["/auth"]
-    assert chunk.related_doc_paths == ["auth.mdx"]
+    assert chunk.related_doc_paths == ["auth.md"]
     assert "def login(user):" in chunk.text
 
 
@@ -239,7 +239,7 @@ def test_artifact_chunks_cover_config_files(tmp_path: Path) -> None:
 def test_doc_summary_chunks_are_deterministic(tmp_path: Path) -> None:
     output_dir = tmp_path / "docs"
     output_dir.mkdir()
-    (output_dir / "index.mdx").write_text(
+    (output_dir / "index.md").write_text(
         "---\ntitle: Demo\n---\n\n# Demo\n\nWelcome aboard.\n\n## Architecture\n\nAuth flows through middleware.\n",
         encoding="utf-8",
     )
@@ -264,7 +264,7 @@ def test_doc_summary_chunks_are_deterministic(tmp_path: Path) -> None:
 def test_doc_full_chunks_preserve_section_content(tmp_path: Path) -> None:
     output_dir = tmp_path / "docs"
     output_dir.mkdir()
-    (output_dir / "auth.mdx").write_text(
+    (output_dir / "auth.md").write_text(
         (
             "---\ntitle: Auth\n---\n\n# Auth\n\nIntro.\n\n"
             "## Login Flow\n\nThe login flow validates credentials.\n\n"
@@ -300,7 +300,7 @@ def test_repo_doc_chunks_index_repo_authored_docs_without_generated_output(
         "# Demo\n\n## Architecture\n\nAuth flows through middleware.\n",
         encoding="utf-8",
     )
-    (output_dir / "index.mdx").write_text(
+    (output_dir / "index.md").write_text(
         "# Generated Docs\n\nThis should stay in the generated-doc corpus only.\n",
         encoding="utf-8",
     )
@@ -314,7 +314,7 @@ def test_repo_doc_chunks_index_repo_authored_docs_without_generated_output(
     scan = _scan_for(tmp_path)
     scan.doc_contexts = {
         "README.md": "Headings: Demo, Architecture | Summary: Auth flows through middleware.",
-        "docs/index.mdx": "Generated docs summary",
+        "docs/index.md": "Generated docs summary",
     }
 
     chunks = build_repo_doc_chunks(
@@ -345,7 +345,7 @@ def test_incremental_sync_recovers_missing_doc_corpus(
         "# Demo\n\n## Architecture\n\nAuth flows through middleware.\n",
         encoding="utf-8",
     )
-    (output_dir / "index.mdx").write_text(
+    (output_dir / "index.md").write_text(
         "# Demo\n\nWelcome aboard.\n\n## Architecture\n\nAuth flows through middleware.\n",
         encoding="utf-8",
     )
@@ -534,19 +534,19 @@ def test_incremental_sync_removes_deleted_generated_doc_chunks(
     doc_record = ChunkRecord(
         chunk_id="doc-old",
         kind="doc_summary",
-        source_key="old-page.mdx",
+        source_key="old-page.md",
         text="# Old Page",
         chunk_hash="oldhash",
-        doc_path="old-page.mdx",
+        doc_path="old-page.md",
         doc_url="/old-page",
     )
     doc_full_record = ChunkRecord(
         chunk_id="doc-full-old",
         kind="doc_full",
-        source_key="old-page.mdx",
+        source_key="old-page.md",
         text="# Old Page\n\nMore details",
         chunk_hash="oldfullhash",
-        doc_path="old-page.mdx",
+        doc_path="old-page.md",
         doc_url="/old-page",
     )
     save_corpus(index_dir, "doc_summary", [doc_record], [[1.0]])
@@ -569,7 +569,7 @@ def test_incremental_sync_removes_deleted_generated_doc_chunks(
         plan=plan,
         scan=scan,
         output_dir=output_dir,
-        deleted_files=["old-page.mdx"],
+        deleted_files=["old-page.md"],
     )
 
     doc_records, _ = load_corpus(index_dir, "doc_summary")

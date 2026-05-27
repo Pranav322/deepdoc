@@ -134,6 +134,9 @@ Chatbot is opt-in. When `chatbot.enabled` is false, no `/ask` route, chatbot com
 ### Generated-page quality
 - Generation retry has up to Step 6.5: Step 6 patches with quality feedback; Step 6.5 does a full clean regeneration with a structured failure report (`_build_failure_prefix`) prepended to the prompt.
 - Validation checks: sections, files, routes, runtime/config/integration grounding, hallucinated paths/symbols, flow grounding, low file coverage.
+- See `docs/known_issues.md` for a working list of bugs found but not fixed, each with verified cause and concrete next step.
+- Bucket size is primarily controlled by three knobs in `planner/topology.py`: `_MAX_CLUSTER_DEPTH`, `_MERGE_JACCARD`, `_FOUNDATIONAL_FRACTION`. Loosening these creates mega-clusters (90+ owned files, heavy evidence compression, cascading validator warnings). See `docs/planner_tuning.md` for current values, rationale, and the verification checklist before changing them.
+- Most validator checks are **warning-only**. Hard-fails remain only for: truncated output (`word_count < 100`), leaked placeholders (`placeholder_sections`), and hallucinated file paths (`_check_hallucinated_paths`). All other checks — missing sections, low file coverage, out-of-evidence refs, hallucinated symbols, unmatched routes, flow grounding, contract concepts, runtime entities, config keys, integration grounding — log warnings only and do not trigger Step 6 / Step 6.5 retries. See `docs/validator_demotions.md` for the per-check rationale and the future fix that would let each one return to hard-fail.
 - Provenance frontmatter (`deepdoc_generated_*`, `deepdoc_status`, `deepdoc_evidence_files`) on all generated pages; commit badge in the scaffold.
 - `deepdoc deploy` quality gate refuses to export when failed/invalid/stub pages exist.
 

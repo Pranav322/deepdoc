@@ -12,7 +12,7 @@ from deepdoc.persistence_v2 import (
     append_changelog_entry,
     load_changelog,
 )
-from deepdoc.changelog_writer import _build_mdx, write_whats_changed_page
+from deepdoc.changelog_writer import _build_md, write_whats_changed_page
 
 
 def _make_entry(n: int, is_initial: bool = False) -> dict:
@@ -53,7 +53,7 @@ def test_load_changelog_returns_empty_list_if_missing(tmp_path):
     assert load_changelog(tmp_path) == []
 
 
-def test_write_whats_changed_page_generates_mdx(tmp_path):
+def test_write_whats_changed_page_generates_md(tmp_path):
     output_dir = tmp_path / "docs"
     output_dir.mkdir()
 
@@ -62,12 +62,12 @@ def test_write_whats_changed_page_generates_mdx(tmp_path):
 
     write_whats_changed_page(tmp_path, output_dir)
 
-    mdx_path = output_dir / "whats-changed.mdx"
-    assert mdx_path.exists()
-    content = mdx_path.read_text(encoding="utf-8")
+    md_path = output_dir / "whats-changed.md"
+    assert md_path.exists()
+    content = md_path.read_text(encoding="utf-8")
 
     assert "What's Changed" in content
-    assert "<Accordions>" in content
+    assert ":::accordions" in content
     assert "feat: change 2" in content
     assert "feat: change 1" in content
     assert "created from scratch" in content

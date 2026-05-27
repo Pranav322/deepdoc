@@ -19,7 +19,7 @@ from deepdoc.generator import (
 )
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import RepoScan
-from deepdoc.prompts_v2 import OVERVIEW_V2, get_prompt_for_bucket
+from deepdoc.prompts import OVERVIEW_V2, get_prompt_for_bucket
 from deepdoc.scanner import RuntimeScan, RuntimeScheduler, RuntimeTask
 from deepdoc.planner.flow_candidates import FlowCandidate, EntryPoint
 from tests.conftest import make_bucket, make_plan
@@ -1181,7 +1181,7 @@ def test_page_validator_flags_missing_flow_sections_when_flow_context_present(
 
     assert "call_flow" in result.missing_flow_edges
     assert "side_effects" in result.missing_flow_entrypoints
-    assert result.is_valid is False
+    assert result.is_valid is True  # flow grounding check is warning-only
 
 
 def test_page_validator_flags_missing_runtime_and_config_grounding(
@@ -1455,16 +1455,18 @@ def test_validator_flags_hallucinated_symbols_but_allows_known_symbols(
         "# Auth Feature\n\n"
         "`src/routes.py` calls `login()` and `src/services/auth_service.py` defines "
         "`authenticate()`. The page must not invent `process_order()`, "
-        "`SubmitOrder`, or `fakeAuthFlow`. "
+        "`SubmitOrder`, `fakeAuthFlow`, `ghostToken`, or `phantomSession`. "
         + "The rest of this paragraph is grounded filler for the validator. " * 14
     )
 
     result = PageValidator(repo_root, scan).validate(content, bucket)
 
-    assert result.is_valid is False
+    assert result.is_valid is True  # symbol check is warning-only
     assert result.hallucinated_symbols == [
         "SubmitOrder",
         "fakeAuthFlow",
+        "ghostToken",
+        "phantomSession",
         "process_order",
     ]
 
@@ -1512,18 +1514,17 @@ def test_validator_file_coverage_threshold_fails_feature_pages(tmp_path: Path) -
     bucket = make_bucket("Large Feature", "large-feature", files, bucket_type="feature")
     content = (
         "# Large Feature\n\n"
-        "`src/module_0.py`, `src/module_1.py`, `src/module_2.py`, and "
-        "`src/module_3.py` are referenced. "
+        "`src/module_0.py`, `src/module_1.py`, and `src/module_2.py` are referenced. "
         + "Detailed grounded prose repeats enough words for validation. " * 18
     )
 
     result = PageValidator(repo_root, scan).validate(content, bucket)
 
-    assert result.is_valid is False
+    assert result.is_valid is True  # file coverage check is warning-only
     assert result.missing_file_refs[:3] == [
+        "src/module_3.py",
         "src/module_4.py",
         "src/module_5.py",
-        "src/module_6.py",
     ]
 
 

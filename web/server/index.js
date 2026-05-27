@@ -60,9 +60,21 @@ app.get('/:owner/:repo', (req, res) => {
 
   const outDir = path.join(DATA_DIR, owner, repo, 'site', 'out');
   const indexFile = path.join(outDir, 'index.html');
+  const force = 'force' in req.query;
+
+  // ── ?force — wipe everything and restart ────────────────────────────────
+  if (force) {
+    const job = getJob(owner, repo);
+    if (job && job.status === 'running') {
+      // Don't interrupt a running job — just redirect to progress
+      return res.redirect(`/${owner}/${repo}`);
+    }
+    clearJob(owner, repo);
+    fs.rmSync(outDir, { recursive: true, force: true });
+  }
 
   // ── Already built → serve docs ──────────────────────────────────────────
-  if (fs.existsSync(indexFile)) {
+  if (!force && fs.existsSync(indexFile)) {
     return res.sendFile(indexFile);
   }
 

@@ -61,6 +61,10 @@ async function runJob(owner, repo) {
     });
     log('[build] Done.');
 
+    // Clean up node_modules — only needed during build, saves ~150MB per repo
+    log('[build] Cleaning up node_modules...');
+    fs.rmSync(path.join(siteDir, 'node_modules'), { recursive: true, force: true });
+
     setStatus(owner, repo, 'done');
     log(`[done] Docs ready at /${owner}/${repo}`);
   } catch (err) {

@@ -7,19 +7,19 @@ const { addLog, setStatus } = require('./jobs');
 
 const DATA_DIR = process.env.DATA_DIR || '/data';
 
-async function runJob(jobId, owner, repo) {
+async function runJob(owner, repo) {
   const repoDir = path.join(DATA_DIR, owner, repo);
   const siteDir = path.join(repoDir, 'site');
 
-  setStatus(jobId, 'running');
+  const log = (msg) => addLog(owner, repo, msg);
 
   try {
     // ── 1. Clone or pull ─────────────────────────────────────────────
-    addLog(jobId, `[clone] Fetching github.com/${owner}/${repo}...`);
+    log(`[clone] Fetching github.com/${owner}/${repo}...`);
     fs.mkdirSync(path.join(DATA_DIR, owner), { recursive: true });
 
     if (fs.existsSync(path.join(repoDir, '.git'))) {
-      addLog(jobId, '[clone] Repo exists — pulling latest...');
+      log('[clone] Repo exists — pulling latest...');
       execSync(`git -C ${repoDir} pull --ff-only`, { stdio: 'pipe' });
     } else {
       execSync(
@@ -27,10 +27,10 @@ async function runJob(jobId, owner, repo) {
         { stdio: 'pipe', timeout: 120_000 }
       );
     }
-    addLog(jobId, '[clone] Done.');
+    log('[clone] Done.');
 
     // ── 2. Write .deepdoc.yaml ────────────────────────────────────────
-    addLog(jobId, '[config] Writing .deepdoc.yaml...');
+    log('[config] Writing .deepdoc.yaml...');
     const yaml = [
       `project:`,
       `  name: ${repo}`,
@@ -45,31 +45,31 @@ async function runJob(jobId, owner, repo) {
     fs.writeFileSync(path.join(repoDir, '.deepdoc.yaml'), yaml + '\n');
 
     // ── 3. deepdoc generate ───────────────────────────────────────────
-    addLog(jobId, '[generate] Scanning codebase and generating docs...');
-    addLog(jobId, '[generate] This takes 3-8 minutes depending on repo size.');
-    await run('deepdoc', ['generate', '--clean', '--yes'], repoDir, jobId);
-    addLog(jobId, '[generate] Done.');
+    log('[generate] Scanning codebase and generating docs...');
+    log('[generate] This takes 3-8 minutes depending on repo size.');
+    await run('deepdoc', ['generate', '--clean', '--yes'], repoDir, owner, repo);
+    log('[generate] Done.');
 
     // ── 4. npm install ────────────────────────────────────────────────
-    addLog(jobId, '[build] Installing Next.js dependencies...');
-    await run('npm', ['install', '--prefer-offline', '--no-audit', '--no-fund'], siteDir, jobId);
+    log('[build] Installing Next.js dependencies...');
+    await run('npm', ['install', '--no-audit', '--no-fund'], siteDir, owner, repo);
 
     // ── 5. next build (static export) ────────────────────────────────
-    addLog(jobId, '[build] Building static site...');
-    await run('npm', ['run', 'build'], siteDir, jobId, {
+    log('[build] Building static site...');
+    await run('npm', ['run', 'build'], siteDir, owner, repo, {
       DEEPDOC_SITE_BASE_PATH: `${owner}/${repo}`,
     });
-    addLog(jobId, '[build] Done.');
+    log('[build] Done.');
 
-    setStatus(jobId, 'done');
-    addLog(jobId, `[done] Docs ready at /${owner}/${repo}`);
+    setStatus(owner, repo, 'done');
+    log(`[done] Docs ready at /${owner}/${repo}`);
   } catch (err) {
-    addLog(jobId, `[error] ${err.message}`);
-    setStatus(jobId, 'error');
+    log(`[error] ${err.message}`);
+    setStatus(owner, repo, 'error');
   }
 }
 
-function run(cmd, args, cwd, jobId, extraEnv = {}) {
+function run(cmd, args, cwd, owner, repo, extraEnv = {}) {
   return new Promise((resolve, reject) => {
     const proc = spawn(cmd, args, {
       cwd,
@@ -78,10 +78,10 @@ function run(cmd, args, cwd, jobId, extraEnv = {}) {
     });
 
     proc.stdout.on('data', (d) => {
-      d.toString().split('\n').forEach((line) => addLog(jobId, line));
+      d.toString().split('\n').forEach((l) => addLog(owner, repo, l));
     });
     proc.stderr.on('data', (d) => {
-      d.toString().split('\n').forEach((line) => addLog(jobId, line));
+      d.toString().split('\n').forEach((l) => addLog(owner, repo, l));
     });
     proc.on('close', (code) => {
       if (code === 0) resolve();

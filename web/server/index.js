@@ -5,7 +5,7 @@ require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const fs = require('fs');
-const { createJob, getJob, getJobForRepo } = require('./jobs');
+const { createJob, getJob, setStatus, readLogs, clearJob } = require('./jobs');
 const { enqueue, queueDepth } = require('./queue');
 const { runJob } = require('./worker');
 
@@ -13,29 +13,32 @@ const app = express();
 const DATA_DIR = process.env.DATA_DIR || '/data';
 const PORT = process.env.PORT || 3001;
 
-// ── SSE: /:owner/:repo/_status/:jobId ──────────────────────────────────────
-app.get('/:owner/:repo/_status/:jobId', (req, res) => {
-  const job = getJob(req.params.jobId);
-  if (!job) return res.status(404).json({ error: 'Job not found' });
+// ── SSE: /:owner/:repo/_status ─────────────────────────────────────────────
+// No jobId needed — one job per repo, state is on disk.
+app.get('/:owner/:repo/_status', (req, res) => {
+  const { owner, repo } = req.params;
+  const job = getJob(owner, repo);
+  if (!job) return res.status(404).json({ error: 'No job found for this repo.' });
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
-  res.setHeader('X-Accel-Buffering', 'no'); // disable nginx buffering
+  res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
   let sent = 0;
 
   const flush = () => {
-    while (sent < job.logs.length) {
-      const line = job.logs[sent++];
-      res.write(`data: ${JSON.stringify({ log: line })}\n\n`);
+    const logs = readLogs(owner, repo);
+    while (sent < logs.length) {
+      res.write(`data: ${JSON.stringify({ log: logs[sent++] })}\n\n`);
     }
-    if (job.status === 'done') {
+    const current = getJob(owner, repo);
+    if (current?.status === 'done') {
       res.write(`data: ${JSON.stringify({ status: 'done' })}\n\n`);
       clearInterval(timer);
       res.end();
-    } else if (job.status === 'error') {
+    } else if (current?.status === 'error') {
       res.write(`data: ${JSON.stringify({ status: 'error' })}\n\n`);
       clearInterval(timer);
       res.end();
@@ -43,7 +46,7 @@ app.get('/:owner/:repo/_status/:jobId', (req, res) => {
   };
 
   const timer = setInterval(flush, 400);
-  flush(); // send buffered logs immediately on connect
+  flush();
   req.on('close', () => clearInterval(timer));
 });
 
@@ -51,7 +54,6 @@ app.get('/:owner/:repo/_status/:jobId', (req, res) => {
 app.get('/:owner/:repo', (req, res) => {
   const { owner, repo } = req.params;
 
-  // Validate — basic github username/repo name chars only
   if (!/^[a-zA-Z0-9_.-]+$/.test(owner) || !/^[a-zA-Z0-9_.-]+$/.test(repo)) {
     return res.status(400).send('Invalid owner or repo name.');
   }
@@ -59,24 +61,29 @@ app.get('/:owner/:repo', (req, res) => {
   const outDir = path.join(DATA_DIR, owner, repo, 'site', 'out');
   const indexFile = path.join(outDir, 'index.html');
 
-  // ── Already built → serve ──
+  // ── Already built → serve docs ──────────────────────────────────────────
   if (fs.existsSync(indexFile)) {
     return res.sendFile(indexFile);
   }
 
-  // ── Job already running → show progress ──
-  const existing = getJobForRepo(owner, repo);
-  if (existing && (existing.status === 'pending' || existing.status === 'running')) {
-    return res.send(progressPage(owner, repo, existing.id));
+  const job = getJob(owner, repo);
+
+  // ── Locked: job is running → show same progress page (any tab, any reload) ──
+  if (job && job.status === 'running') {
+    return res.send(progressPage(owner, repo));
   }
 
-  // ── Start new job ──
-  const jobId = createJob(owner, repo);
-  const { pending } = queueDepth();
-  enqueue(() => runJob(jobId, owner, repo));
+  // ── Previous attempt errored → allow retry (clear old state) ────────────
+  if (job && job.status === 'error') {
+    clearJob(owner, repo);
+  }
 
-  const html = progressPage(owner, repo, jobId, pending);
-  res.send(html);
+  // ── Start new job ────────────────────────────────────────────────────────
+  createJob(owner, repo);
+  const { pending } = queueDepth();
+  enqueue(() => runJob(owner, repo));
+
+  res.send(progressPage(owner, repo, pending));
 });
 
 // ── Static files: /:owner/:repo/* ─────────────────────────────────────────
@@ -95,10 +102,11 @@ app.listen(PORT, () => {
   console.log(`DATA_DIR=${DATA_DIR}`);
 });
 
-// ── Progress page HTML ─────────────────────────────────────────────────────
-function progressPage(owner, repo, jobId, queuePos = 0) {
+// ── Progress page ──────────────────────────────────────────────────────────
+function progressPage(owner, repo, queuePos = 0) {
   const repoLabel = `${owner}/${repo}`;
-  const statusUrl = `/${owner}/${repo}/_status/${jobId}`;
+  // SSE URL has no jobId — just owner/repo, reads from disk
+  const statusUrl = `/${owner}/${repo}/_status`;
   const queueNote = queuePos > 0
     ? `<p class="queue">⏳ ${queuePos} job${queuePos > 1 ? 's' : ''} ahead of you in queue</p>`
     : '';
@@ -111,121 +119,58 @@ function progressPage(owner, repo, jobId, queuePos = 0) {
   <title>Indexing ${repoLabel} — DeepDoc</title>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     body {
-      background: #0d1117;
-      color: #e6edf3;
+      background: #0d1117; color: #e6edf3;
       font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      justify-content: center;
-      padding: 2rem;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 2rem;
     }
-
     .card {
-      width: 100%;
-      max-width: 720px;
-      background: #161b22;
-      border: 1px solid #30363d;
-      border-radius: 12px;
-      padding: 2rem;
+      width: 100%; max-width: 720px; background: #161b22;
+      border: 1px solid #30363d; border-radius: 12px; padding: 2rem;
     }
-
-    .header {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.5rem;
-    }
-
+    .header { display: flex; align-items: center; gap: 1rem; margin-bottom: 1.5rem; }
     .spinner {
-      width: 28px;
-      height: 28px;
-      border: 3px solid #30363d;
-      border-top-color: #58a6ff;
-      border-radius: 50%;
-      animation: spin 0.8s linear infinite;
-      flex-shrink: 0;
+      width: 28px; height: 28px; border: 3px solid #30363d;
+      border-top-color: #58a6ff; border-radius: 50%;
+      animation: spin 0.8s linear infinite; flex-shrink: 0;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
-
-    .header h1 { font-size: 1.1rem; font-weight: 600; color: #e6edf3; }
+    .header h1 { font-size: 1.1rem; font-weight: 600; }
     .header p  { font-size: 0.8rem; color: #8b949e; margin-top: 2px; }
-
     .repo-badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      background: #21262d;
-      border: 1px solid #30363d;
-      border-radius: 6px;
-      padding: 4px 10px;
-      font-size: 0.875rem;
-      color: #58a6ff;
-      font-family: 'SF Mono', 'Fira Mono', monospace;
-      margin-bottom: 1.25rem;
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+      padding: 4px 10px; font-size: 0.875rem; color: #58a6ff;
+      font-family: 'SF Mono', monospace; margin-bottom: 1.25rem;
     }
-
-    .queue {
-      font-size: 0.8rem;
-      color: #d29922;
-      margin-bottom: 1rem;
-    }
-
-    .stage-list {
-      display: flex;
-      flex-direction: column;
-      gap: 6px;
-      margin-bottom: 1.5rem;
-    }
-
-    .stage {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      font-size: 0.85rem;
-      color: #8b949e;
-    }
+    .queue { font-size: 0.8rem; color: #d29922; margin-bottom: 1rem; }
+    .stage-list { display: flex; flex-direction: column; gap: 6px; margin-bottom: 1.5rem; }
+    .stage { display: flex; align-items: center; gap: 10px; font-size: 0.85rem; color: #8b949e; }
     .stage.active { color: #e6edf3; }
     .stage.done   { color: #3fb950; }
-
-    .stage-icon { width: 18px; text-align: center; font-size: 0.9rem; }
-
+    .stage-icon   { width: 18px; text-align: center; }
     .log-box {
-      background: #010409;
-      border: 1px solid #21262d;
-      border-radius: 8px;
-      padding: 1rem;
-      height: 220px;
-      overflow-y: auto;
-      font-family: 'SF Mono', 'Fira Mono', 'Consolas', monospace;
-      font-size: 0.75rem;
-      line-height: 1.6;
-      scroll-behavior: smooth;
+      background: #010409; border: 1px solid #21262d; border-radius: 8px;
+      padding: 1rem; height: 220px; overflow-y: auto;
+      font-family: 'SF Mono', 'Fira Mono', monospace;
+      font-size: 0.75rem; line-height: 1.6;
     }
-
     .log-line { color: #8b949e; white-space: pre-wrap; word-break: break-all; }
     .log-line.error { color: #f85149; }
     .log-line.done  { color: #3fb950; }
-
-    .eta {
-      font-size: 0.75rem;
-      color: #8b949e;
-      margin-top: 0.75rem;
-      text-align: right;
-    }
-
+    .eta { font-size: 0.75rem; color: #8b949e; margin-top: 0.75rem; text-align: right; }
     .error-msg {
-      margin-top: 1rem;
-      padding: 0.75rem 1rem;
-      background: #1c1212;
-      border: 1px solid #6e2020;
-      border-radius: 6px;
-      font-size: 0.85rem;
-      color: #f85149;
+      margin-top: 1rem; padding: 0.75rem 1rem; background: #1c1212;
+      border: 1px solid #6e2020; border-radius: 6px;
+      font-size: 0.85rem; color: #f85149;
     }
+    .retry-btn {
+      margin-top: 1rem; padding: 0.5rem 1.25rem; background: #21262d;
+      border: 1px solid #30363d; border-radius: 6px; color: #e6edf3;
+      font-size: 0.85rem; cursor: pointer;
+    }
+    .retry-btn:hover { background: #30363d; }
   </style>
 </head>
 <body>
@@ -247,16 +192,10 @@ function progressPage(owner, repo, jobId, queuePos = 0) {
 
     ${queueNote}
 
-    <div class="stage-list" id="stages">
-      <div class="stage" id="stage-clone">
-        <span class="stage-icon">○</span> Cloning repository
-      </div>
-      <div class="stage" id="stage-generate">
-        <span class="stage-icon">○</span> Scanning code &amp; generating docs with AI
-      </div>
-      <div class="stage" id="stage-build">
-        <span class="stage-icon">○</span> Building static site
-      </div>
+    <div class="stage-list">
+      <div class="stage" id="stage-clone"><span class="stage-icon">○</span> Cloning repository</div>
+      <div class="stage" id="stage-generate"><span class="stage-icon">○</span> Scanning code &amp; generating docs with AI</div>
+      <div class="stage" id="stage-build"><span class="stage-icon">○</span> Building static site</div>
     </div>
 
     <div class="log-box" id="log"></div>
@@ -270,9 +209,9 @@ function progressPage(owner, repo, jobId, queuePos = 0) {
     const spinner = document.getElementById('spinner');
     const startTime = Date.now();
 
-    function setStage(prefix, state) {
+    function setStage(key, state) {
       const map = { clone: 'stage-clone', generate: 'stage-generate', build: 'stage-build' };
-      const el = document.getElementById(map[prefix]);
+      const el = document.getElementById(map[key]);
       if (!el) return;
       el.className = 'stage ' + state;
       el.querySelector('.stage-icon').textContent =
@@ -287,19 +226,16 @@ function progressPage(owner, repo, jobId, queuePos = 0) {
       logBox.appendChild(div);
       logBox.scrollTop = logBox.scrollHeight;
 
-      // Update stage indicators from log prefixes
-      if (line.includes('[clone]'))    setStage('clone', line.includes('Done') ? 'done' : 'active');
+      if (line.includes('[clone]'))    setStage('clone',    line.includes('Done') ? 'done' : 'active');
       if (line.includes('[generate]')) setStage('generate', line.includes('Done') ? 'done' : 'active');
-      if (line.includes('[build]'))    setStage('build', line.includes('Done') ? 'done' : 'active');
-      if (line.includes('[done]'))     { setStage('build', 'done'); }
+      if (line.includes('[build]'))    setStage('build',    line.includes('Done') ? 'done' : 'active');
+      if (line.includes('[done]'))     setStage('build', 'done');
     }
 
-    function tick() {
+    const clock = setInterval(() => {
       const s = Math.floor((Date.now() - startTime) / 1000);
-      const m = Math.floor(s / 60), sec = s % 60;
-      eta.textContent = \`Elapsed: \${m}m \${sec}s\`;
-    }
-    const clock = setInterval(tick, 1000);
+      eta.textContent = \`Elapsed: \${Math.floor(s/60)}m \${s%60}s\`;
+    }, 1000);
 
     const es = new EventSource(statusUrl);
 
@@ -307,28 +243,28 @@ function progressPage(owner, repo, jobId, queuePos = 0) {
       const data = JSON.parse(e.data);
       if (data.log) appendLog(data.log);
       if (data.status === 'done') {
-        es.close();
-        clearInterval(clock);
+        es.close(); clearInterval(clock);
         spinner.style.borderTopColor = '#3fb950';
         spinner.style.animation = 'none';
         eta.textContent = 'Done! Redirecting...';
         setTimeout(() => { window.location.reload(); }, 1200);
       }
       if (data.status === 'error') {
-        es.close();
-        clearInterval(clock);
+        es.close(); clearInterval(clock);
         spinner.style.borderTopColor = '#f85149';
         spinner.style.animation = 'none';
-        eta.textContent = 'Generation failed. Check logs above.';
+        eta.textContent = 'Generation failed.';
         const errEl = document.createElement('div');
         errEl.className = 'error-msg';
-        errEl.textContent = 'Something went wrong. You can try reloading the page to retry.';
+        errEl.textContent = 'Generation failed. Reload the page to retry.';
+        const btn = document.createElement('button');
+        btn.className = 'retry-btn';
+        btn.textContent = 'Retry';
+        btn.onclick = () => window.location.reload();
+        errEl.appendChild(document.createElement('br'));
+        errEl.appendChild(btn);
         document.querySelector('.card').appendChild(errEl);
       }
-    };
-
-    es.onerror = () => {
-      // SSE reconnects automatically — don't show error unless persistent
     };
   </script>
 </body>

@@ -875,32 +875,42 @@ def fix_bare_mermaid_fences(content: str) -> str:
 
 
 def fix_bare_language_markers(content: str) -> str:
-    """Repair lines where the LLM appended ':language' instead of opening a fence.
+    """Repair lines where the LLM wrote a bare language name instead of opening a fence.
 
-    The LLM sometimes writes:
-        Some description text:typescript
-        interface Foo { ... }
-        ```
+    Two variants the LLM produces:
 
-    instead of:
-        Some description text
-        ```typescript
-        interface Foo { ... }
-        ```
+    1. Suffix variant — language appended after a colon:
+           Some description text:typescript
+           interface Foo { ... }
+           ```
 
-    The bare ':language' suffix leaves the code content in free MDX body,
-    causing acorn parse errors on any {expression} inside.
+    2. Standalone variant — language on its own line:
+           #### Example Usage
+           typescript
+           <Component ... />
+           ```
+
+    Both leave the code content in free MDX body causing acorn parse errors.
     """
     _LANGS = (
         r"typescript|javascript|python|bash|json|yaml|tsx|jsx"
         r"|go|rust|java|css|html|sql|sh|text|plaintext|ruby|php|c|cpp|swift"
     )
-    return re.sub(
+    # Variant 1: text ending in :language
+    content = re.sub(
         rf"^(.*\S):({_LANGS})\s*$",
         lambda m: f"{m.group(1)}\n```{m.group(2)}",
         content,
         flags=re.MULTILINE,
     )
+    # Variant 2: language word alone on its own line (must be preceded by non-code line)
+    content = re.sub(
+        rf"^({_LANGS})\n",
+        lambda m: f"```{m.group(1)}\n",
+        content,
+        flags=re.MULTILINE,
+    )
+    return content
 
 
 def fix_leaf_card_directives(content: str) -> str:

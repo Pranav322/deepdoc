@@ -1652,8 +1652,43 @@ def _mermaid_component_tsx() -> str:
         """\
         'use client';
 
-        import { use, useEffect, useId, useState } from 'react';
+        import { Component, use, useEffect, useId, useState } from 'react';
+        import type { ReactNode } from 'react';
         import { useTheme } from 'next-themes';
+
+        // Error boundary so a bad diagram never crashes the whole page
+        class MermaidErrorBoundary extends Component<
+          { children: ReactNode },
+          { error: string | null }
+        > {
+          constructor(props: { children: ReactNode }) {
+            super(props);
+            this.state = { error: null };
+          }
+          static getDerivedStateFromError(err: unknown) {
+            return { error: err instanceof Error ? err.message : String(err) };
+          }
+          render() {
+            if (this.state.error) {
+              return (
+                <pre
+                  style={{
+                    padding: '0.75rem 1rem',
+                    background: 'var(--color-fd-muted)',
+                    borderRadius: '6px',
+                    fontSize: '0.75rem',
+                    color: 'var(--color-fd-muted-foreground)',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-word',
+                  }}
+                >
+                  {'[diagram parse error] ' + this.state.error}
+                </pre>
+              );
+            }
+            return this.props.children;
+          }
+        }
 
         export function Mermaid({ chart }: { chart: string }) {
           const [mounted, setMounted] = useState(false);
@@ -1663,7 +1698,11 @@ def _mermaid_component_tsx() -> str:
           }, []);
 
           if (!mounted) return null;
-          return <MermaidContent chart={chart} />;
+          return (
+            <MermaidErrorBoundary>
+              <MermaidContent chart={chart} />
+            </MermaidErrorBoundary>
+          );
         }
 
         const cache = new Map<string, Promise<unknown>>();
@@ -1672,7 +1711,11 @@ def _mermaid_component_tsx() -> str:
           const cached = cache.get(key);
           if (cached) return cached as Promise<T>;
 
-          const promise = setPromise();
+          const promise = setPromise().catch((err) => {
+            // Remove from cache so a retry is possible, then re-throw for boundary
+            cache.delete(key);
+            throw err;
+          }) as Promise<T>;
           cache.set(key, promise);
           return promise;
         }

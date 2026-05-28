@@ -9,6 +9,14 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.3.3] - 2026-05-29
+
+### Bug Fixes
+
+- **Fumadocs directive normalization** — `normalize_fumadocs_directives` in `post_processors.py` maps LLM shorthand callout names (`:::warn`, `:::error`, `:::success`, etc.) to the valid fumadocs set (`:::warning`, `:::danger`, `:::tip`). Previously these rendered as raw text instead of styled callout boxes.
+- **Frontmatter description cleanup** — `fix_frontmatter_description` strips trailing `::` / `:::` artefacts from the YAML `description:` field that the remark-directive plugin partially parses, corrupting the nav sidebar descriptions.
+- **Mermaid error boundary silent fallback** — `MermaidErrorBoundary` in scaffold now returns `null` for broken diagrams instead of a visible error `<pre>` block, keeping pages noise-free. Source-level mermaid fixes (`_fix_mermaid_diagram`) remain in place as the primary guard.
+
 ## [2.3.2] - 2026-05-28
 
 ### Bug Fixes

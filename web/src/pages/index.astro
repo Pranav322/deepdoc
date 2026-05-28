@@ -2,6 +2,7 @@
 import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import BackgroundRippleEffect from "../components/BackgroundRippleEffect.astro";
 
 const features = [
   {
@@ -12,7 +13,7 @@ const features = [
   {
     num: "02",
     title: "Evidence-grounded chatbot",
-    body: "Answers hydrated from indexed source with exact file paths and line ranges. Generated docs serve as references, not proof. Three modes: fast lookup, deep research, and code-first.",
+    body: "An embedded assistant ships with the docs site. Answers are hydrated from indexed source with exact file paths and line ranges, with fast lookup, deep research, and code-first modes.",
   },
   {
     num: "03",
@@ -24,12 +25,31 @@ const features = [
 const pipeline = [
   { step: "Scan",     note: "Parse source. Detect endpoints, runtime surfaces, integrations, OpenAPI specs." },
   { step: "Plan",     note: "Multi-step LLM planner. Classify repo, propose buckets, assign files." },
-  { step: "Generate", note: "Build evidence packs. LLM call per bucket. MDX compile-check before write." },
+  { step: "Generate", note: "Build evidence packs. LLM call per bucket. Python-side repair and grounding checks." },
   { step: "API Ref",  note: "Stage OpenAPI assets into Fumadocs /api/* pages when a spec exists." },
   { step: "Build",    note: "Write site scaffold, page tree, nav, search, and optional chatbot widget." },
 ];
 
 const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAPI"];
+
+const proofStats = [
+  { value: "47", label: "docs pages planned from source" },
+  { value: "1,247", label: "chatbot chunks indexed locally" },
+  { value: "3", label: "query modes for answers" },
+];
+
+const chatMessages = [
+  {
+    role: "You",
+    text: "Where does billing verification happen?",
+    refs: [],
+  },
+  {
+    role: "DeepDoc",
+    text: "Payment verification is handled in the Razorpay billing flow, then persisted through the usage and project records.",
+    refs: ["billing/routes.py:41-88", "services/usage.py:12-57"],
+  },
+];
 ---
 
 <Layout>
@@ -50,8 +70,10 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
       <div style="position:absolute;bottom:0%;right:15%;width:38%;height:55%;background:radial-gradient(ellipse at 50% 60%,rgba(194,255,77,0.07) 0%,transparent 65%);filter:blur(56px);animation:blob-3 23s ease-in-out infinite;will-change:transform;"></div>
     </div>
 
-    <div class="relative mx-auto max-w-6xl px-6 pt-24 pb-20 md:pt-32 md:pb-28">
-      <div class="grid grid-cols-1 items-center gap-16 lg:grid-cols-2">
+    <BackgroundRippleEffect />
+
+    <div class="relative z-10 mx-auto max-w-6xl px-6 pt-24 pb-20 md:pt-32 md:pb-28">
+      <div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-[0.94fr_1.06fr]">
 
         <!-- Left: copy -->
         <div>
@@ -64,7 +86,7 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
               class="h-1.5 w-1.5 rounded-full"
               style="background: var(--color-accent);"
             ></span>
-            v2.3 — inline validation · AI chatbot
+            v2.3 — source-cited docs · AI chatbot
           </div>
 
           <!-- Headline -->
@@ -83,8 +105,8 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
             style="font-size: 1rem; color: var(--color-ink-muted); font-family: var(--font-sans);"
           >
             DeepDoc generates internal documentation from your codebase —
-            architecture, endpoints, integrations, runtime surfaces — and ships a
-            chatbot that answers from real source with exact file paths and line ranges.
+            architecture, endpoints, integrations, runtime surfaces — and ships an
+            embedded chatbot that answers from real source with exact file paths.
           </p>
 
           <!-- CTAs -->
@@ -142,6 +164,43 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
               </svg>
               View on GitHub
             </a>
+
+          </div>
+
+          <a
+            href="#product-proof"
+            class="anim-fade-up anim-delay-4 mt-5 inline-flex items-center gap-2 text-[13px] transition-opacity"
+            style="font-family: var(--font-sans); color: var(--color-accent); text-decoration: none;"
+            onmouseover="this.style.opacity='0.72'"
+            onmouseout="this.style.opacity='1'"
+          >
+            See the generated site and chatbot
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              width="13"
+              height="13"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            ><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+          </a>
+
+          <div class="anim-fade-up anim-delay-4 mt-8 grid max-w-xl grid-cols-3 gap-px overflow-hidden rounded-xl" style="background: var(--color-line); border: 1px solid var(--color-line);">
+            {
+              proofStats.map((stat) => (
+                <div style="background: color-mix(in oklab, var(--color-surface-raised) 64%, transparent); padding: 16px 14px;">
+                  <div class="display" style="font-size: clamp(1.35rem, 3vw, 2rem); color: var(--color-ink); line-height: 1;">
+                    {stat.value}
+                  </div>
+                  <div style="margin-top: 7px; font-family: var(--font-sans); font-size: 11px; line-height: 1.35; color: var(--color-ink-faint);">
+                    {stat.label}
+                  </div>
+                </div>
+              ))
+            }
           </div>
 
           <p
@@ -152,15 +211,60 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
           </p>
         </div>
 
-        <!-- Right: terminal (typewriter animated) -->
-        <div class="anim-fade-up anim-delay-3 terminal-block">
-          <div class="terminal-header">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
-            <span class="terminal-title">bash</span>
+        <!-- Right: product proof -->
+        <div class="anim-fade-up anim-delay-3 proof-stage">
+          <div class="proof-glow" aria-hidden="true"></div>
+          <div class="proof-window">
+            <div class="proof-bar">
+              <span class="dot red"></span>
+              <span class="dot yellow"></span>
+              <span class="dot green"></span>
+              <span class="proof-url">deepdoc.local/docs/contextly-platform-overview</span>
+            </div>
+            <div class="proof-image-wrap">
+              <img
+                src="/proof-docs-dark.png"
+                alt="Generated DeepDoc documentation site for the Contextly platform, showing structured navigation and source-grounded content"
+                class="proof-image proof-image-dark"
+                loading="eager"
+                decoding="async"
+              />
+              <img
+                src="/proof-docs.png"
+                alt="Generated DeepDoc documentation site for the Contextly platform, showing structured navigation and source-grounded content"
+                class="proof-image proof-image-light"
+                loading="eager"
+                decoding="async"
+              />
+            </div>
           </div>
-          <div class="terminal-body" id="hero-terminal" aria-live="polite" style="min-height: 220px;"></div>
+
+          <div class="proof-chip chip-left">
+            <span class="chip-kicker">Generated nav</span>
+            <span>14 repo-aware sections</span>
+          </div>
+
+          <div class="chat-proof-card">
+            <div class="chat-proof-header">
+              <span class="chat-pulse"></span>
+              DeepDoc Chatbot
+            </div>
+            {
+              chatMessages.map((message) => (
+                <div class={`chat-bubble ${message.role === "You" ? "user" : "assistant"}`}>
+                  <div class="chat-role">{message.role}</div>
+                  <div>{message.text}</div>
+                  {message.refs ? (
+                    <div class="chat-refs">
+                      {message.refs.map((ref) => (
+                        <span>{ref}</span>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              ))
+            }
+          </div>
         </div>
 
       </div>
@@ -191,6 +295,89 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
           </span>
         ))
       }
+    </div>
+  </section>
+
+  <!-- ── Product proof ───────────────────────────────────────────── -->
+  <section id="product-proof" style="border-bottom: 1px solid var(--color-line); position: relative; overflow: hidden;">
+    <div class="mx-auto max-w-6xl px-6 py-20">
+      <div class="mb-12 grid grid-cols-1 items-end gap-8 lg:grid-cols-[0.9fr_1.1fr]">
+        <div>
+          <div
+            style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
+          >
+            Product proof
+          </div>
+          <h2
+            class="display"
+            style="font-size: clamp(1.9rem, 4vw, 3rem); color: var(--color-ink);"
+          >
+            A complete docs site,
+            <span class="accent-italic"> not a markdown dump.</span>
+          </h2>
+        </div>
+        <p
+          style="font-family: var(--font-sans); font-size: 14px; line-height: 1.75; color: var(--color-ink-muted); max-width: 540px;"
+        >
+          DeepDoc plans the sidebar, writes grounded pages, adds source-file disclosures,
+          stages API reference pages, and embeds a chatbot that can answer across the
+          same indexed codebase.
+        </p>
+      </div>
+
+      <div class="proof-grid">
+        <div class="proof-large-window">
+          <div class="proof-bar">
+            <span class="dot red"></span>
+            <span class="dot yellow"></span>
+            <span class="dot green"></span>
+            <span class="proof-url">generated Fumadocs site</span>
+          </div>
+          <img
+            src="/proof-docs-dark.png"
+            alt="Generated documentation page with sidebar navigation, table of contents, and source-grounded overview content"
+            class="proof-image-dark"
+            loading="lazy"
+            decoding="async"
+          />
+          <img
+            src="/proof-docs.png"
+            alt="Generated documentation page with sidebar navigation, table of contents, and source-grounded overview content"
+            class="proof-image-light"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
+
+        <div class="proof-side-stack">
+          <div class="proof-panel">
+            <div class="panel-kicker">Chatbot included</div>
+            <h3>Ask the docs like a teammate.</h3>
+            <p>
+              The assistant uses generated docs for orientation and source archives for proof,
+              so answers come back with real paths and line ranges.
+            </p>
+            <div class="mini-chat">
+              <div class="mini-question">How does the embedded widget reach the backend?</div>
+              <div class="mini-answer">
+                It uses the widget token flow, then sends chat requests through the API client.
+                <span>widget/client.ts:18-64</span>
+                <span>api/chat.py:33-91</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="proof-panel compact">
+            <div class="panel-kicker">What ships</div>
+            <ul>
+              <li>Structured docs nav from the planner</li>
+              <li>Mermaid diagrams and API reference pages</li>
+              <li>Incremental updates from git diffs</li>
+              <li>Local chatbot index and source archive</li>
+            </ul>
+          </div>
+        </div>
+      </div>
     </div>
   </section>
 
@@ -311,8 +498,8 @@ const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAP
         <p
           style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.7; color: var(--color-ink-muted); max-width: 480px;"
         >
-          Every page is grounded in scanned evidence and MDX-compiled before it
-          hits disk. If compile fails, DeepDoc reprompts with the exact error.
+          Every page is grounded in scanned evidence, repaired into safe Markdown,
+          and checked for source coverage before the site is built.
         </p>
       </div>
 

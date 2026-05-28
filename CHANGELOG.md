@@ -9,6 +9,13 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.3.4] - 2026-05-29
+
+### Bug Fixes
+
+- **Bare mermaid fence repair** — `fix_bare_mermaid_fences` in `post_processors.py` detects when the LLM writes `mermaid` as a bare paragraph instead of opening a ` ```mermaid ` fence, and inserts the correct fence. Without this, `{node}` labels inside diagrams leak into free MDX body and cause acorn parse errors.
+- **Leaf card directive fix** — `fix_leaf_card_directives` converts LLM-generated `::card{...}\nCONTENT\n::` blocks to `:::card{...}\nCONTENT\n:::` container directives that the fumadocs remark plugin actually understands. Previously the standalone `::` close markers rendered as visible text on the page.
+
 ## [2.3.3] - 2026-05-29
 
 ### Bug Fixes

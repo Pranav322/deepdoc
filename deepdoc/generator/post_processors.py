@@ -851,6 +851,57 @@ def fix_frontmatter_description(content: str) -> str:
     )
 
 
+def fix_bare_mermaid_fences(content: str) -> str:
+    """Repair mermaid diagrams where the LLM omitted the opening code fence.
+
+    The LLM sometimes writes just the word 'mermaid' on its own line followed
+    by diagram content and a closing ``` — instead of the correct ```mermaid
+    opening fence.  This produces a bare 'mermaid' paragraph in MDX and leaves
+    the diagram body (including {node} labels) unescaped, causing acorn parse
+    errors.
+
+    Pattern matched:
+        <text ending in : or .\n>
+        mermaid\n
+        <diagram type line, e.g. sequenceDiagram>\n
+        ...diagram body...
+        ```
+    """
+    return re.sub(
+        r'(?m)^mermaid\n(?=(sequenceDiagram|flowchart|graph|classDiagram|stateDiagram|erDiagram|gantt|pie|gitGraph|mindmap|timeline|journey|quadrantChart|xychart|block|packet|kanban|architecture))',
+        '```mermaid\n',
+        content,
+    )
+
+
+def fix_leaf_card_directives(content: str) -> str:
+    """Convert LLM-invented ::card{...}\\nCONTENT\\n:: to :::card{...}\\nCONTENT\\n:::.
+
+    The fumadocs remark-directive plugin expects 'card' to be a *container*
+    directive (:::card ... :::) so it can carry child content.  The LLM
+    frequently uses the *leaf* directive form (::card) with a standalone ::
+    close marker — which remark-directive does not recognise, rendering both
+    the content and the :: as raw text.
+    """
+    def fix_cards_block(m: re.Match) -> str:
+        inner = m.group(1)
+        # ::card{...}\nCONTENT\n::  →  :::card{...}\nCONTENT\n:::
+        inner = re.sub(
+            r'^::card(\{[^}]*\})\n(.*?)\n^::$',
+            r':::card\1\n\2\n:::',
+            inner,
+            flags=re.MULTILINE | re.DOTALL,
+        )
+        return f':::cards\n{inner}\n:::'
+
+    return re.sub(
+        r':::cards\n(.*?)\n:::',
+        fix_cards_block,
+        content,
+        flags=re.DOTALL,
+    )
+
+
 def unwrap_markdown_trapped_in_code_fences(content: str) -> str:
     """Detect code fences that contain markdown content and unwrap them.
 

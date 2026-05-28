@@ -207,9 +207,13 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 dupes.append(nid)
             seen.add(nid)
         if dupes:
+            # Insert comment AFTER the diagram type declaration line, not before it
+            # (Mermaid requires diagram type as the very first line)
+            first_nl = result.index("\n") if "\n" in result else len(result)
             result = (
-                f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n"
-                + result
+                result[: first_nl + 1]
+                + f"%% Note: possible duplicate node IDs: {', '.join(set(dupes))}\n"
+                + result[first_nl + 1 :]
             )
 
     return result

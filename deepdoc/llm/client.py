@@ -19,8 +19,10 @@ class LLMClient:
         # max_tokens=None means don't cap — let the model use its full output capacity
         self.max_tokens = llm_cfg.get("max_tokens", None)
         self.temperature = llm_cfg.get("temperature", 0.2)
-        self.base_url = llm_cfg.get("base_url")
-        self.api_version = llm_cfg.get("api_version")
+        self.base_url = str(llm_cfg.get("base_url") or "") or None
+        # YAML parses bare dates like 2024-12-01 as datetime.date — coerce to str
+        _api_version = llm_cfg.get("api_version")
+        self.api_version = str(_api_version).strip() if _api_version is not None else None
         self.usage: dict[str, int] = {
             "calls": 0,
             "prompt_chars": 0,

@@ -155,7 +155,7 @@ function pausedPage(owner, repo) {
     </p>
     <div class="note">
       Want early access when it reopens?
-      Reach out at <a href="mailto:hi@deepdoc.tech">hi@deepdoc.tech</a>
+      Reach out at <a href="mailto:pranavdotdev@gmail.com">pranavdotdev@gmail.com</a>
       or <a href="https://github.com/tss-pranavkumar/deepdoc" target="_blank">star the repo</a> to follow along.
     </div>
   </div>

@@ -68,15 +68,36 @@ app.get('/:owner/:repo', (req, res) => {
   const indexFile = path.join(outDir, 'index.html');
   const force = 'force' in req.query;
 
-  // ── Already built → serve docs (always, even when paused) ──────────────
+  // ── ?force — wipe everything and restart regardless of current state ───
+  if (force) {
+    clearJob(owner, repo);
+    fs.rmSync(outDir, { recursive: true, force: true });
+    // Old worker detects generation mismatch and self-aborts
+  }
+
+  // ── Already built → serve docs ──────────────────────────────────────────
   if (!force && fs.existsSync(indexFile)) {
     return res.sendFile(indexFile);
   }
 
-  // ── Generation paused ────────────────────────────────────────────────────
-  // New indexing is disabled while we figure out cost controls.
-  // Already-generated repos above are still served normally.
-  return res.status(503).send(pausedPage(owner, repo));
+  const job = getJob(owner, repo);
+
+  // ── Locked: job is running → show same progress page (any tab, any reload) ──
+  if (job && job.status === 'running') {
+    return res.send(progressPage(owner, repo));
+  }
+
+  // ── Previous attempt errored → allow retry (clear old state) ────────────
+  if (job && job.status === 'error') {
+    clearJob(owner, repo);
+  }
+
+  // ── Start new job ────────────────────────────────────────────────────────
+  const generation = createJob(owner, repo);
+  const { pending } = queueDepth();
+  enqueue(() => runJob(owner, repo, generation));
+
+  res.send(progressPage(owner, repo, pending));
 });
 
 // ── Static files: /:owner/:repo/* ─────────────────────────────────────────

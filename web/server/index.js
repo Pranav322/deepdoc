@@ -68,36 +68,15 @@ app.get('/:owner/:repo', (req, res) => {
   const indexFile = path.join(outDir, 'index.html');
   const force = 'force' in req.query;
 
-  // ── ?force — wipe everything and restart regardless of current state ───
-  if (force) {
-    clearJob(owner, repo);
-    fs.rmSync(outDir, { recursive: true, force: true });
-    // Old worker detects generation mismatch and self-aborts
-  }
-
-  // ── Already built → serve docs ──────────────────────────────────────────
+  // ── Already built → serve docs (always, even when paused) ──────────────
   if (!force && fs.existsSync(indexFile)) {
     return res.sendFile(indexFile);
   }
 
-  const job = getJob(owner, repo);
-
-  // ── Locked: job is running → show same progress page (any tab, any reload) ──
-  if (job && job.status === 'running') {
-    return res.send(progressPage(owner, repo));
-  }
-
-  // ── Previous attempt errored → allow retry (clear old state) ────────────
-  if (job && job.status === 'error') {
-    clearJob(owner, repo);
-  }
-
-  // ── Start new job ────────────────────────────────────────────────────────
-  const generation = createJob(owner, repo);
-  const { pending } = queueDepth();
-  enqueue(() => runJob(owner, repo, generation));
-
-  res.send(progressPage(owner, repo, pending));
+  // ── Generation paused ────────────────────────────────────────────────────
+  // New indexing is disabled while we figure out cost controls.
+  // Already-generated repos above are still served normally.
+  return res.status(503).send(pausedPage(owner, repo));
 });
 
 // ── Static files: /:owner/:repo/* ─────────────────────────────────────────
@@ -115,6 +94,74 @@ app.listen(PORT, () => {
   console.log(`deepdoc-server listening on :${PORT}`);
   console.log(`DATA_DIR=${DATA_DIR}`);
 });
+
+// ── Paused page ────────────────────────────────────────────────────────────
+function pausedPage(owner, repo) {
+  const repoLabel = `${owner}/${repo}`;
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${repoLabel} — DeepDoc</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #0d1117; color: #e6edf3;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      min-height: 100vh; display: flex; flex-direction: column;
+      align-items: center; justify-content: center; padding: 2rem;
+    }
+    .card {
+      width: 100%; max-width: 560px; background: #161b22;
+      border: 1px solid #30363d; border-radius: 12px; padding: 2.5rem 2rem;
+      text-align: center;
+    }
+    .icon { font-size: 2.5rem; margin-bottom: 1.25rem; }
+    h1 { font-size: 1.25rem; font-weight: 600; margin-bottom: 0.75rem; }
+    p { font-size: 0.9rem; color: #8b949e; line-height: 1.6; margin-bottom: 0.75rem; }
+    .repo-badge {
+      display: inline-flex; align-items: center; gap: 6px;
+      background: #21262d; border: 1px solid #30363d; border-radius: 6px;
+      padding: 4px 10px; font-size: 0.875rem; color: #58a6ff;
+      font-family: 'SF Mono', monospace; margin-bottom: 1.5rem;
+    }
+    .note {
+      margin-top: 1.5rem; padding: 0.75rem 1rem;
+      background: #1c1a10; border: 1px solid #3d3010; border-radius: 6px;
+      font-size: 0.8rem; color: #d29922; line-height: 1.5;
+    }
+    a { color: #58a6ff; text-decoration: none; }
+    a:hover { text-decoration: underline; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <div class="icon">⏸️</div>
+    <h1>Generation temporarily paused</h1>
+    <div class="repo-badge">
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor">
+        <path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8Z"/>
+      </svg>
+      ${repoLabel}
+    </div>
+    <p>
+      We're a solo-built project and AI generation costs add up fast.
+      New indexing is paused while we work on sustainable cost controls.
+    </p>
+    <p>
+      Already-generated repos are still fully accessible —
+      if yours was indexed before, just visit the URL directly.
+    </p>
+    <div class="note">
+      Want early access when it reopens?
+      Reach out at <a href="mailto:hi@deepdoc.tech">hi@deepdoc.tech</a>
+      or <a href="https://github.com/tss-pranavkumar/deepdoc" target="_blank">star the repo</a> to follow along.
+    </div>
+  </div>
+</body>
+</html>`;
+}
 
 // ── Progress page ──────────────────────────────────────────────────────────
 function progressPage(owner, repo, queuePos = 0) {

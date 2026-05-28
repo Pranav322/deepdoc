@@ -43,7 +43,7 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **Bucket-based documentation architecture** — system, feature, endpoint, integration, and database buckets instead of one-file-per-page noise.
 - **Multi-step AI planner** — classifies the repo, proposes buckets, then assigns files, symbols, artifacts, and dependencies into a final reader-first plan.
 - **Giant-file handling** — large files are decomposed into feature-aligned clusters so a single controller can feed multiple doc pages.
-- **MDX compile gate** — every page is compile-checked before being written; broken MDX is auto-fixed via LLM retry or degraded to safe Markdown rather than shipped.
+- **MDX-safe generation** — generated pages are repaired and validated in Python before being written; deploy-time quality gates block failed, invalid, or stub pages before the Fumadocs build.
 - **Evidence-first chatbot answers** — final code proof is hydrated from archived source snippets with exact file paths and line ranges, not just retrieval guesses.
 - **Incremental updates** — `deepdoc update` regenerates only stale or structurally affected docs against the last synced commit.
 - **OpenAPI-aware API docs** — auto-detects OpenAPI/Swagger specs and stages interactive `/api/*` pages in the generated site.
@@ -90,7 +90,7 @@ pip install click litellm gitpython rich pyyaml jinja2
 pip install -e . --no-deps
 ```
 
-You will also need **Node 18+** on `PATH`. DeepDoc uses Node at generate time to compile-check each MDX page before writing it, and at `serve`/`deploy` time for the Fumadocs site. The small set of MDX validation dependencies installs into `deepdoc/generator/mdx_validator/node_modules/` automatically on first `deepdoc generate`.
+You will also need **Node 18+** on `PATH` when you run `deepdoc serve` or `deepdoc deploy`. DeepDoc generation itself uses Python-side repair and validation; Node is only needed for the generated Fumadocs site.
 
 ### Verify installation
 
@@ -307,7 +307,7 @@ deepdoc generate --exclude "tests/**"
 
 1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
-3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through an MDX compile-check (with bounded LLM-driven retry on failure) before being written to disk.
+3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through Python-side MDX repair, grounding validation, and bounded quality retries before being written to disk.
 4. **Phase 4: API Ref** — Stage OpenAPI assets for the generated Fumadocs `/api/*` pages when a spec exists.
 5. **Phase 5: Build** — Write the generated `site/` Fumadocs scaffold, page tree, search route, and static assets from the generated plan.
 
@@ -1523,7 +1523,7 @@ deepdoc generate --force           # Full regen with new model
 ## Requirements
 
 - Python 3.10+
-- **Node 18+** on `PATH` — used at generate time for MDX compile validation, and at `serve`/`deploy` time for the Fumadocs site
+- **Node 18+** on `PATH` — used by `deepdoc serve` and `deepdoc deploy` for the generated Fumadocs site
 - Git (for `deepdoc update` and `deepdoc deploy`)
 - An LLM API key (or Ollama running locally)
 

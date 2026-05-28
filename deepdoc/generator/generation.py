@@ -611,6 +611,8 @@ class BucketGenerationEngine:
             content = repair_unbalanced_code_fences(content)
             content = normalize_explanatory_lines_outside_fences(content)
             content = repair_dangling_plain_fences(content)
+            content = normalize_fumadocs_directives(content)
+            content = fix_frontmatter_description(content)
             content = escape_mdx_angle_hazards(content)
             content = repair_internal_doc_links(
                 content,

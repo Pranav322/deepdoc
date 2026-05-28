@@ -1670,21 +1670,8 @@ def _mermaid_component_tsx() -> str:
           }
           render() {
             if (this.state.error) {
-              return (
-                <pre
-                  style={{
-                    padding: '0.75rem 1rem',
-                    background: 'var(--color-fd-muted)',
-                    borderRadius: '6px',
-                    fontSize: '0.75rem',
-                    color: 'var(--color-fd-muted-foreground)',
-                    whiteSpace: 'pre-wrap',
-                    wordBreak: 'break-word',
-                  }}
-                >
-                  {'[diagram parse error] ' + this.state.error}
-                </pre>
-              );
+              // Silently hide diagrams that fail to parse — noise-free fallback
+              return null;
             }
             return this.props.children;
           }

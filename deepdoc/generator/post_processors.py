@@ -804,6 +804,81 @@ def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> s
     return patched if count else content
 
 
+def normalize_fumadocs_directives(content: str) -> str:
+    """Normalize fumadocs callout directive names to the supported set.
+
+    Valid fumadocs directive types: note, tip, info, warning, danger, caution.
+    The LLM frequently uses shorthands like :::warn, :::error, :::success.
+    """
+    _alias: dict[str, str] = {
+        "warn": "warning",
+        "caution": "warning",
+        "alert": "warning",
+        "error": "danger",
+        "success": "tip",
+        "check": "tip",
+        "hint": "tip",
+        "important": "note",
+        "notice": "note",
+    }
+
+    def replace_directive(m: re.Match) -> str:
+        name = m.group(1).strip().lower()
+        canonical = _alias.get(name, name)
+        return f":::{canonical}"
+
+    # Only replace opening directives (:::name), not closing :::
+    return re.sub(r":::([a-z]+)", replace_directive, content)
+
+
+def fix_frontmatter_description(content: str) -> str:
+    """Strip directive artefacts (trailing ::, :::) from frontmatter description field.
+
+    The LLM sometimes writes description values that end with :: or ::: which
+    the remark-directive plugin then partially parses, corrupting the nav sidebar.
+    """
+    def clean_description(m: re.Match) -> str:
+        prefix = m.group(1)   # "description: "
+        value = m.group(2)    # the value only
+        value = re.sub(r'\s*:{2,3}\s*$', '', value.rstrip())
+        return f'{prefix}{value}'
+
+    return re.sub(
+        r'^(description:\s*)(["\']?.*?["\']?)\s*$',
+        clean_description,
+        content,
+        flags=re.MULTILINE,
+    )
+
+
+def unwrap_markdown_trapped_in_code_fences(content: str) -> str:
+    """Detect code fences that contain markdown content and unwrap them.
+
+    The LLM sometimes forgets to close a code fence, leaving section headers
+    (## ...), callout directives (:::), and horizontal rules (---) trapped
+    inside a code block. These render as literal text instead of MDX.
+    """
+    # Pattern: a fenced block that contains markdown indicators
+    MD_INDICATORS = re.compile(
+        r"^(?:#{1,6}\s|:::|\-\-\-\s*$|^\*\*\*\s*$)",
+        re.MULTILINE,
+    )
+
+    def maybe_unwrap(m: re.Match) -> str:
+        lang = m.group(1)  # may be empty for plain ```
+        body = m.group(2)
+        # If body contains markdown indicators, unwrap it
+        if MD_INDICATORS.search(body):
+            return body
+        return m.group(0)  # leave intact
+
+    return re.sub(
+        r"```([A-Za-z0-9_+-]*)\n([\s\S]*?)\n```",
+        maybe_unwrap,
+        content,
+    )
+
+
 def extract_glossary_terms(glossary_content: str) -> list[tuple[str, str]]:
     """Parse `### TermName` (h3) headings from glossary MDX → [(term, anchor-slug)].
 

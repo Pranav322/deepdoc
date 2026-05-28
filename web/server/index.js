@@ -50,6 +50,14 @@ app.get('/:owner/:repo/_status', (req, res) => {
   req.on('close', () => clearInterval(timer));
 });
 
+// ── Cancel: POST /:owner/:repo/_cancel ────────────────────────────────────
+app.post('/:owner/:repo/_cancel', (req, res) => {
+  const { owner, repo } = req.params;
+  clearJob(owner, repo);
+  // Worker detects missing job file via alive() and self-aborts
+  res.json({ ok: true });
+});
+
 // ── Main: /:owner/:repo ────────────────────────────────────────────────────
 app.get('/:owner/:repo', (req, res) => {
   const { owner, repo } = req.params;
@@ -253,6 +261,12 @@ function progressPage(owner, repo, queuePos = 0) {
       font-size: 0.85rem; cursor: pointer;
     }
     .retry-btn:hover { background: #30363d; }
+    .stop-btn {
+      padding: 0.35rem 0.9rem; background: transparent;
+      border: 1px solid #6e2020; border-radius: 6px; color: #f85149;
+      font-size: 0.8rem; cursor: pointer; margin-left: auto;
+    }
+    .stop-btn:hover { background: #1c1212; }
   </style>
 </head>
 <body>
@@ -263,6 +277,7 @@ function progressPage(owner, repo, queuePos = 0) {
         <h1>Generating documentation</h1>
         <p>Sit tight — this usually takes 3–8 minutes</p>
       </div>
+      <button class="stop-btn" id="stopBtn" onclick="stopGeneration()">✕ Stop</button>
     </div>
 
     <div class="repo-badge">
@@ -290,6 +305,16 @@ function progressPage(owner, repo, queuePos = 0) {
     const eta = document.getElementById('eta');
     const spinner = document.getElementById('spinner');
     const startTime = Date.now();
+
+    async function stopGeneration() {
+      const btn = document.getElementById('stopBtn');
+      if (btn) { btn.disabled = true; btn.textContent = 'Stopping...'; }
+      es.close(); clearInterval(clock);
+      await fetch(${JSON.stringify(`/${owner}/${repo}/_cancel`)}, { method: 'POST' });
+      spinner.style.borderTopColor = '#8b949e';
+      spinner.style.animation = 'none';
+      eta.textContent = 'Stopped. Reload to start again.';
+    }
 
     function setStage(key, state) {
       const map = { clone: 'stage-clone', generate: 'stage-generate', build: 'stage-build' };

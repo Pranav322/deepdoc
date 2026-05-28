@@ -9,6 +9,12 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.3.5] - 2026-05-29
+
+### Bug Fixes
+
+- **Bare language marker repair** — `fix_bare_language_markers` in `post_processors.py` detects when the LLM appends `:typescript` / `:json` / etc. directly to a sentence instead of opening a proper ` ```typescript ` fence, and inserts the correct fence. Without this, code content following the marker sits in free MDX body and causes acorn parse errors.
+
 ## [2.3.4] - 2026-05-29
 
 ### Bug Fixes

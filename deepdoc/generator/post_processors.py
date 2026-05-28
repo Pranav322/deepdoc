@@ -874,6 +874,35 @@ def fix_bare_mermaid_fences(content: str) -> str:
     )
 
 
+def fix_bare_language_markers(content: str) -> str:
+    """Repair lines where the LLM appended ':language' instead of opening a fence.
+
+    The LLM sometimes writes:
+        Some description text:typescript
+        interface Foo { ... }
+        ```
+
+    instead of:
+        Some description text
+        ```typescript
+        interface Foo { ... }
+        ```
+
+    The bare ':language' suffix leaves the code content in free MDX body,
+    causing acorn parse errors on any {expression} inside.
+    """
+    _LANGS = (
+        r"typescript|javascript|python|bash|json|yaml|tsx|jsx"
+        r"|go|rust|java|css|html|sql|sh|text|plaintext|ruby|php|c|cpp|swift"
+    )
+    return re.sub(
+        rf"^(.*\S):({_LANGS})\s*$",
+        lambda m: f"{m.group(1)}\n```{m.group(2)}",
+        content,
+        flags=re.MULTILINE,
+    )
+
+
 def fix_leaf_card_directives(content: str) -> str:
     """Convert LLM-invented ::card{...}\\nCONTENT\\n:: to :::card{...}\\nCONTENT\\n:::.
 

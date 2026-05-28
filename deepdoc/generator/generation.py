@@ -613,6 +613,7 @@ class BucketGenerationEngine:
             content = repair_dangling_plain_fences(content)
             content = normalize_fumadocs_directives(content)
             content = fix_frontmatter_description(content)
+            content = fix_bare_language_markers(content)
             content = fix_bare_mermaid_fences(content)
             content = fix_leaf_card_directives(content)
             content = escape_mdx_angle_hazards(content)

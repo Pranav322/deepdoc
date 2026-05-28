@@ -58,6 +58,12 @@ app.get('/:owner/:repo', (req, res) => {
     return res.status(400).send('Invalid owner or repo name.');
   }
 
+  // Block common bot probes (WordPress, PHP, env scanners, etc.)
+  const BLOCKED = ['wp-admin', 'wp-login.php', 'phpMyAdmin', '.env', 'admin', 'shell'];
+  if (BLOCKED.includes(owner) || BLOCKED.includes(repo) || repo.endsWith('.php')) {
+    return res.status(404).send('Not found.');
+  }
+
   const outDir = path.join(DATA_DIR, owner, repo, 'site', 'out');
   const indexFile = path.join(outDir, 'index.html');
   const force = 'force' in req.query;

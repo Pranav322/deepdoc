@@ -1425,9 +1425,7 @@ def _docs_page_tsx() -> str:
         """\
         import { notFound } from 'next/navigation';
         import { DocsBody, DocsPage } from 'fumadocs-ui/page';
-        import { findNeighbour } from 'fumadocs-core/server';
         import { docsSource } from '@/lib/source';
-        import { pageTree } from '@/lib/page-tree.generated';
         import { getMDXComponents } from '@/mdx-components';
         import type { ComponentType } from 'react';
         import type { TOCItemType } from 'fumadocs-core/server';
@@ -1477,10 +1475,9 @@ def _docs_page_tsx() -> str:
           const prereqs = meta.deepdoc_prereqs ?? [];
           const status = meta.deepdoc_status?.trim() || null;
           const evidenceRecords = meta.deepdoc_evidence_records ?? [];
-          const { previous, next } = findNeighbour(pageTree, page.url);
 
           return (
-            <DocsPage toc={toc} prev={previous ?? false} next={next ?? false}>
+            <DocsPage toc={toc}>
               <DocsBody>
                 {prereqs.length > 0 ? (
                   <p

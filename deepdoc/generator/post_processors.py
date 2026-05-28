@@ -421,11 +421,55 @@ def normalize_code_fence_languages(content: str) -> str:
         "output": "plaintext",
     }
 
+    # Languages included in Shiki's default bundle (fumadocs uses bundled-all).
+    # Anything outside this set falls back to plaintext to avoid build failures.
+    _SHIKI_BUNDLED = {
+        "abap", "actionscript-3", "ada", "angular-html", "angular-ts",
+        "apache", "apex", "apl", "applescript", "ara", "asciidoc", "asm",
+        "astro", "awk", "ballerina", "bat", "batch", "beancount", "berry",
+        "be", "bibtex", "bicep", "blade", "c", "cadence", "cdc", "clarity",
+        "clojure", "clj", "cmake", "cobol", "codeowners", "coffescript",
+        "common-lisp", "lisp", "coq", "cpp", "crystal", "csharp", "cs",
+        "css", "csv", "cue", "cypher", "d", "dart", "dax", "desktop",
+        "diff", "docker", "dockerfile", "dotenv", "dream-maker", "edge",
+        "elixir", "elm", "emacs-lisp", "erb", "erlang", "fennel", "fish",
+        "fluent", "fortran-fixed-form", "fortran-free-form", "fsharp",
+        "gdresource", "gdscript", "gdshader", "genie", "gherkin", "git-commit",
+        "git-rebase", "gleam", "glimmer-js", "glimmer-ts", "glsl", "gnuplot",
+        "go", "graphql", "gql", "groovy", "hack", "haml", "handlebars", "hbs",
+        "haskell", "hcl", "hjson", "hlsl", "html", "html-derivative", "http",
+        "hxml", "hy", "imba", "ini", "toml", "java", "javascript", "js",
+        "jinja", "jinja-html", "jison", "json", "json5", "jsonc", "jsonl",
+        "jsonnet", "jssm", "jsx", "julia", "kotlin", "kusto", "kql", "latex",
+        "lean", "less", "liquid", "log", "logo", "lua", "luau", "make",
+        "makefile", "markdown", "md", "marko", "matlab", "mdc", "mdx",
+        "mermaid", "mipsasm", "mojo", "move", "narrat", "nextflow", "nf",
+        "nginx", "nim", "nix", "nushell", "nu", "objective-c", "objc",
+        "objective-cpp", "ocaml", "pascal", "perl", "php", "plsql",
+        "postcss", "powerquery", "powershell", "ps", "ps1", "prisma",
+        "prolog", "proto", "protobuf", "puppet", "purescript", "python",
+        "py", "r", "raku", "perl6", "razor", "reg", "regexp", "regex",
+        "rel", "riscv", "rst", "ruby", "rb", "rust", "rs", "sas", "sass",
+        "scala", "scheme", "scss", "shaderlab", "shader", "shellscript",
+        "bash", "sh", "shell", "zsh", "smalltalk", "solidity", "soy",
+        "sparql", "splunk", "spl", "sql", "ssh-config", "stata", "stylus",
+        "styl", "svelte", "swift", "system-verilog", "systemd", "tasl",
+        "tcl", "templ", "terraform", "tex", "toml", "ts", "tsv", "tsx",
+        "turtle", "twig", "typescript", "typespec", "typst", "v", "vb",
+        "cmd", "verilog", "vhdl", "viml", "vim", "vimscript", "vue",
+        "vue-html", "vyper", "wasm", "wenyan", "wgsl", "wikitext",
+        "mediawiki", "wolfram", "xml", "xsl", "yaml", "yml", "zenscript",
+        "zig", "plaintext",
+    }
+
     def replace(match: re.Match) -> str:
         indent = match.group(1) or ""
         lang = match.group(2)
         rest = match.group(3) or ""
         normalized = alias_map.get(lang.lower(), lang)
+        # Fall back to plaintext for langs not in Shiki's bundle to prevent build failures
+        if normalized.lower() not in _SHIKI_BUNDLED:
+            normalized = "plaintext"
         return f"{indent}```{normalized}{rest}"
 
     return re.sub(

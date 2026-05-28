@@ -9,6 +9,13 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.3.1] - 2026-05-28
+
+### Bug Fixes
+
+- **Shiki language whitelist** — `normalize_code_fence_languages` in `post_processors.py` now falls back to `plaintext` for any code fence language not included in Shiki's default bundle (e.g. `promql`, `hql`, `cel`). Previously these caused `ShikiError` build failures during `next build`.
+- **`DocsPage` prev/next props removed** — scaffold template no longer passes `prev`/`next` props that were removed in recent fumadocs releases, fixing TypeScript compile errors on fresh site builds.
+
 ## [2.3.0] - 2026-05-27
 
 DeepDoc 2.3.0 is an internal quality and architecture release: the Node.js MDX compile gate subprocess is replaced by inline Python validation, validator checks are demoted to warnings so generation never stalls on stylistic issues, and the marketing site ships a full design-system refresh.

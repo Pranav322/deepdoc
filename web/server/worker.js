@@ -34,6 +34,8 @@ async function runJob(owner, repo, generation) {
       log('[clone] Repo exists — pulling latest...');
       execSync(`git -C ${repoDir} pull --ff-only`, { stdio: 'pipe' });
     } else {
+      // Directory may exist in a partial/broken state — wipe it before cloning
+      fs.rmSync(repoDir, { recursive: true, force: true });
       execSync(
         `git clone --depth 1 https://github.com/${owner}/${repo} ${repoDir}`,
         { stdio: 'pipe', timeout: 120_000 }

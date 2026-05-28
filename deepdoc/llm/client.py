@@ -65,8 +65,9 @@ class LLMClient:
 
         is_azure = provider.lower() == "azure" or model.lower().startswith("azure/")
         if is_azure:
-            base_url = (llm_cfg.get("base_url") or "").strip()
-            api_version = (llm_cfg.get("api_version") or "").strip()
+            base_url = str(llm_cfg.get("base_url") or "").strip()
+            # YAML parses bare dates like 2025-07-01 as datetime.date — coerce to str
+            api_version = str(llm_cfg.get("api_version") or "").strip()
             missing = []
             if not base_url:
                 missing.append("llm.base_url  (your Azure OpenAI endpoint URL)")

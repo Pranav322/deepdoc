@@ -97,6 +97,13 @@ class FileEvidenceCard:
     targeted_snippet: str = ""
 
 
+def _unowned_ratio(symbols: list[Symbol], owned: set[str]) -> float:
+    """Fraction of file symbols not owned by the current bucket."""
+    if not symbols:
+        return 0.0
+    return sum(1 for s in symbols if s.name not in owned) / len(symbols)
+
+
 class EvidenceAssembler:
     """Gathers and formats evidence for a single bucket from the full scan output.
 
@@ -291,7 +298,17 @@ class EvidenceAssembler:
 
             # Choose tier
             if line_count <= self.large_file_lines:
-                code = content
+                if (
+                    owned_symbols_set
+                    and parsed
+                    and parsed.symbols
+                    and _unowned_ratio(parsed.symbols, owned_symbols_set) > 0.5
+                ):
+                    code = self._extract_owned_symbol_bodies(
+                        parsed, content, owned_symbols_set
+                    )
+                else:
+                    code = content
             elif line_count <= self.giant_file_lines:
                 code = self._extract_signatures(parsed, content)
             else:
@@ -1038,6 +1055,60 @@ class EvidenceAssembler:
                 sig_lines.append(f"    ... [{sym_end - end} more lines]")
 
         return header + "\n".join(sig_lines)
+
+    def _extract_owned_symbol_bodies(
+        self,
+        parsed: ParsedFile,
+        content: str,
+        owned_symbols: set[str],
+    ) -> str:
+        """Tier 0.5: file header + full bodies of owned symbols only.
+
+        Activated for Tier 1 files when owned_symbols is set and more than half
+        the file's symbols are unowned — avoids sending irrelevant functions to
+        the LLM.
+        """
+        lines = content.splitlines()
+
+        # File header: everything up to the first def/class/async def (≤60 lines)
+        header_end = 0
+        for i, line in enumerate(lines[:60]):
+            stripped = line.strip()
+            if stripped.startswith(("def ", "class ", "async def ")):
+                header_end = i
+                break
+        header = "\n".join(lines[:header_end]) if header_end else ""
+
+        # Precompute symbol end lines — prefer Symbol.end_line, fall back to
+        # next symbol's start minus 1 (same pattern as _extract_key_sections).
+        def _sym_end(idx: int) -> int:
+            sym = parsed.symbols[idx]
+            if sym.has_known_range():
+                return sym.end_line
+            if idx + 1 < len(parsed.symbols):
+                return parsed.symbols[idx + 1].start_line - 1
+            return len(lines)
+
+        body_parts: list[str] = []
+        for idx, sym in enumerate(parsed.symbols):
+            if sym.name not in owned_symbols:
+                continue
+            start = max(0, sym.start_line - 1)
+            end = _sym_end(idx)
+            body_parts.append("\n".join(lines[start:end]))
+
+        if not body_parts:
+            # owned_symbols listed names that don't match any parsed symbol in
+            # this file — include header + a safe leading chunk so the page
+            # still has some source context.
+            fallback = "\n".join(lines[:min(60, len(lines))])
+            return f"{header}\n\n{fallback}" if header else fallback
+
+        total = len(parsed.symbols)
+        owned_count = len(body_parts)
+        marker = f"# [Owned symbols only — {owned_count} of {total} in file]"
+        joined = "\n\n".join(body_parts)
+        return f"{header}\n\n{marker}\n\n{joined}" if header else f"{marker}\n\n{joined}"
 
     # ── Endpoint detail ──────────────────────────────────────────────────
 

@@ -2256,3 +2256,175 @@ def test_call_graph_context_prefers_exact_method_symbol_and_counts_extra_context
     assert evidence.total_evidence_chars >= (
         len(evidence.call_graph_context) + len(evidence.config_env_context)
     )
+
+
+# ── Tier 0.5: symbol-level evidence pack tests ───────────────────────────────
+
+
+def test_tier1_owned_symbol_bodies_extracts_only_owned(tmp_path):
+    """Tier 1 file with 5 fns, bucket owns 2 → only owned bodies in source_context."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    src = "\n".join([
+        "import os",
+        "",
+        "def alpha():",
+        "    return 'alpha'",
+        "",
+        "def beta():",
+        "    return 'beta'",
+        "",
+        "def gamma():",
+        "    return 'gamma'",
+        "",
+        "def delta():",
+        "    return 'delta'",
+        "",
+        "def epsilon():",
+        "    return 'epsilon'",
+    ])
+    (repo_root / "mod.py").write_text(src)
+
+    symbols = [
+        Symbol(name="alpha",   kind="function", signature="def alpha():",   start_line=3,  end_line=4),
+        Symbol(name="beta",    kind="function", signature="def beta():",    start_line=6,  end_line=7),
+        Symbol(name="gamma",   kind="function", signature="def gamma():",   start_line=9,  end_line=10),
+        Symbol(name="delta",   kind="function", signature="def delta():",   start_line=12, end_line=13),
+        Symbol(name="epsilon", kind="function", signature="def epsilon():", start_line=15, end_line=16),
+    ]
+    parsed = ParsedFile(path=Path("mod.py"), language="python", symbols=symbols, imports=["os"])
+
+    scan = RepoScan(
+        file_tree={"": ["mod.py"]},
+        file_summaries={"mod.py": "utility module"},
+        file_contents={"mod.py": src},
+        parsed_files={"mod.py": parsed},
+        file_line_counts={"mod.py": len(src.splitlines())},
+        api_endpoints=[],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+    )
+
+    bucket = make_bucket("Mod", "mod", ["mod.py"])
+    bucket.owned_symbols = ["beta", "delta"]
+    plan = make_plan([bucket])
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(bucket)
+
+    # Owned function bodies present
+    assert "return 'beta'" in evidence.source_context
+    assert "return 'delta'" in evidence.source_context
+    # Unowned function bodies absent
+    assert "return 'alpha'" not in evidence.source_context
+    assert "return 'gamma'" not in evidence.source_context
+    assert "return 'epsilon'" not in evidence.source_context
+    assert "Owned symbols only" in evidence.source_context
+
+
+def test_tier1_owned_symbol_bodies_falls_through_for_low_unowned_ratio(tmp_path):
+    """Tier 1 file with 4 fns, bucket owns 3 (ratio=0.25) → full source included."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    src = "\n".join([
+        "def alpha():",
+        "    return 'alpha'",
+        "",
+        "def beta():",
+        "    return 'beta'",
+        "",
+        "def gamma():",
+        "    return 'gamma'",
+        "",
+        "def delta():",
+        "    return 'delta'",
+    ])
+    (repo_root / "mod.py").write_text(src)
+
+    symbols = [
+        Symbol(name="alpha", kind="function", signature="def alpha():", start_line=1, end_line=2),
+        Symbol(name="beta",  kind="function", signature="def beta():",  start_line=4, end_line=5),
+        Symbol(name="gamma", kind="function", signature="def gamma():", start_line=7, end_line=8),
+        Symbol(name="delta", kind="function", signature="def delta():", start_line=10, end_line=11),
+    ]
+    parsed = ParsedFile(path=Path("mod.py"), language="python", symbols=symbols, imports=[])
+
+    scan = RepoScan(
+        file_tree={"": ["mod.py"]},
+        file_summaries={"mod.py": ""},
+        file_contents={"mod.py": src},
+        parsed_files={"mod.py": parsed},
+        file_line_counts={"mod.py": len(src.splitlines())},
+        api_endpoints=[],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+    )
+
+    bucket = make_bucket("Mod", "mod", ["mod.py"])
+    bucket.owned_symbols = ["alpha", "beta", "gamma"]  # 3 of 4 owned → ratio=0.25
+    plan = make_plan([bucket])
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(bucket)
+
+    # All four function names should appear — full source was included
+    for name in ("alpha", "beta", "gamma", "delta"):
+        assert name in evidence.source_context
+    assert "Owned symbols only" not in evidence.source_context
+
+
+def test_tier1_owned_symbol_bodies_falls_through_when_owned_symbols_empty(tmp_path):
+    """Tier 1 file with owned_symbols=[] → full source included unchanged."""
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    src = "\n".join([
+        "def alpha():",
+        "    return 1",
+        "",
+        "def beta():",
+        "    return 2",
+    ])
+    (repo_root / "mod.py").write_text(src)
+
+    symbols = [
+        Symbol(name="alpha", kind="function", signature="def alpha():", start_line=1, end_line=2),
+        Symbol(name="beta",  kind="function", signature="def beta():",  start_line=4, end_line=5),
+    ]
+    parsed = ParsedFile(path=Path("mod.py"), language="python", symbols=symbols, imports=[])
+
+    scan = RepoScan(
+        file_tree={"": ["mod.py"]},
+        file_summaries={"mod.py": ""},
+        file_contents={"mod.py": src},
+        parsed_files={"mod.py": parsed},
+        file_line_counts={"mod.py": len(src.splitlines())},
+        api_endpoints=[],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=1,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+    )
+
+    bucket = make_bucket("Mod", "mod", ["mod.py"])
+    # owned_symbols defaults to [] — no narrowing should happen
+    plan = make_plan([bucket])
+
+    evidence = EvidenceAssembler(repo_root, scan, plan, dict(DEFAULT_CONFIG)).assemble(bucket)
+
+    assert "alpha" in evidence.source_context
+    assert "beta" in evidence.source_context
+    assert "Owned symbols only" not in evidence.source_context

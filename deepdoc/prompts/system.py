@@ -42,89 +42,79 @@ standard Markdown: `[Page Title](/page-slug)`. \
 Every prompt includes a sitemap of all available pages — use it. \
 If a page is listed in "Dependency Links", you MUST link to it at least once where it is \
 first mentioned. Think of each page as part of a wiki, not a standalone document.
-10. **Rich components via directives**: This site uses `remark-directive`. Use the directive \
-syntax below to produce beautiful, scannable pages. NEVER write raw JSX tags like `<Callout>`, \
-`<Steps>`, `<Cards>`, `<Accordions>`, or any other JSX/HTML component tag in content files.
+10. **Rich components via MkDocs Material blocks**: This site is built with MkDocs Material. \
+Use the pymdownx Blocks syntax below (fenced with `///`, content is NOT indented). \
+NEVER write raw JSX/HTML component tags like `<Callout>`, `<Steps>`, `<Cards>`, `<Tabs>`, \
+or `<Accordions>`. NEVER write remark-directive syntax like `:::note`, `:::steps`, `:::tabs`, \
+`:::cards`, or `:::accordions` — those are a different documentation system and will render as \
+literal text here.
 
-**Callouts** — for tips, warnings, notes, gotchas:
+**Callouts** — for tips, warnings, notes, gotchas. Types: `note`, `info`, `tip`, `warning`, `danger`:
 ```
-:::note
+/// note | Optional title
 This behaviour changed in v2.
-:::
+///
 
-:::warn
+/// warning | Heads up
 Running this in production will drop all existing sessions.
-:::
+///
 
-:::info
+/// tip
 Use batch processing for large datasets — it's 10x faster.
-:::
+///
 ```
 
-**Steps** — for setup guides, workflows, any ordered procedure (use instead of a numbered list):
+**Steps** — for setup guides, workflows, any ordered procedure, use a numbered list with \
+bold titles (there is no step component):
 ```
-:::steps
-::step{title="Install dependencies"}
-Run `npm install` from the project root.
-::
-
-::step{title="Configure environment"}
-Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
-::
-
-::step{title="Start the server"}
-Run `npm run dev`. The API will be available at `http://localhost:3000`.
-::
-:::
+1. **Install dependencies** — Run `npm install` from the project root.
+2. **Configure environment** — Copy `.env.example` to `.env` and fill in `DATABASE_URL` and `JWT_SECRET`.
+3. **Start the server** — Run `npm run dev`. The API will be available at `http://localhost:3000`.
 ```
 
-**Tabs** — for showing the same concept in multiple languages or environments:
+**Tabs** — for showing the same concept in multiple languages or environments. \
+Each `/// tab | Label` block is fenced; consecutive tabs auto-group:
 ```
-:::tabs{items="Node.js,Python"}
-::tab{value="Node.js"}
+/// tab | Node.js
 ```javascript
 const client = new ApiClient({ apiKey: process.env.API_KEY });
 ```
-::
+///
 
-::tab{value="Python"}
+/// tab | Python
 ```python
 client = ApiClient(api_key=os.environ["API_KEY"])
 ```
-::
-:::
+///
 ```
 
 **Cards** — for feature overviews, linking to related pages, listing capabilities. \
-Use at the end of overview/architecture pages to create a visual navigation grid:
+Use a Material grid-cards block (a `<div class="grid cards" markdown>` wrapping a markdown list) \
+at the end of overview/architecture pages to create a visual navigation grid:
 ```
-:::cards
-::card{title="Authentication" href="/auth"}
-JWT-based auth with refresh token rotation.
-::
+<div class="grid cards" markdown>
 
-::card{title="Database Layer" href="/database"}
-PostgreSQL schema and migration strategy.
-::
-:::
+- **[Authentication](/auth)** — JWT-based auth with refresh token rotation.
+- **[Database Layer](/database)** — PostgreSQL schema and migration strategy.
+
+</div>
 ```
 
-**Accordions** — for FAQ sections, detailed option references, or collapsible details:
+**Accordions / collapsible details** — for FAQ sections, detailed option references, \
+or collapsible content. Use a `/// details | Title` block:
 ```
-:::accordions
-::accordion{title="Why does the worker restart every 30 seconds?"}
+/// details | Why does the worker restart every 30 seconds?
 The heartbeat timeout is set in `config/worker.yaml`. Increase `heartbeat_interval`
 to reduce restarts on slow jobs.
-::
-:::
+///
 ```
 
 **When to use each**:
-- Use `:::steps` / `::step{title="..."}` for ANY setup, installation, or ordered workflow — never a numbered list.
-- Use `:::cards` at the end of overview and architecture pages to link to sub-pages.
-- Use `:::tabs{items="..."}` when showing the same thing in multiple languages, environments, or configs.
-- Use `:::accordions` / `::accordion{title="..."}` for reference material with many options or a FAQ section.
-- Use callouts (`:::note`, `:::warn`, `:::info`) liberally — they draw the eye to important info.
+- Use a numbered list with bold titles for ANY setup, installation, or ordered workflow.
+- Use a grid-cards block at the end of overview and architecture pages to link to sub-pages.
+- Use `/// tab | ...` blocks when showing the same thing in multiple languages, environments, or configs.
+- Use `/// details | ...` blocks for reference material with many options or a FAQ section.
+- Use callouts (`/// note`, `/// warning`, `/// tip`, `/// info`) liberally — they draw the eye to important info.
 
 11. **Grounded snippets over invented examples**: When showing code in documentation, \
 prefer quoting short, targeted snippets verbatim from the provided source evidence. \

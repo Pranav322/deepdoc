@@ -67,10 +67,10 @@ def test_write_whats_changed_page_generates_md(tmp_path):
     content = md_path.read_text(encoding="utf-8")
 
     assert "What's Changed" in content
-    assert ":::accordions" in content
+    assert "/// details |" in content
     assert "feat: change 2" in content
     assert "feat: change 1" in content
     assert "created from scratch" in content
-    assert "[Page 2](/page-2)" in content
-    assert "[Page 1](/page-1)" in content
+    assert "[Page 2](page-2.md)" in content
+    assert "[Page 1](page-1.md)" in content
     assert "Incremental update" in content

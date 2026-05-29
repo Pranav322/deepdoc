@@ -7,49 +7,30 @@ from click.testing import CliRunner
 from deepdoc import cli
 
 
-def test_site_dependencies_need_install_when_lockfile_missing(tmp_path: Path) -> None:
-    site_dir = tmp_path / "site"
-    site_dir.mkdir()
-    (site_dir / "package.json").write_text("{}", encoding="utf-8")
-    (site_dir / "node_modules").mkdir()
+def test_ensure_mkdocs_installed_raises_when_missing(monkeypatch) -> None:
+    import importlib
 
-    assert cli._site_dependencies_need_install(site_dir) is True
+    # mkdocs absent → clear ClickException with a pip command.
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: Path("/nonexistent"))
 
+    import pytest
 
-def test_site_dependencies_need_install_when_stamp_missing(tmp_path: Path) -> None:
-    site_dir = tmp_path / "site"
-    site_dir.mkdir()
-    (site_dir / "package.json").write_text("{}", encoding="utf-8")
-    (site_dir / "package-lock.json").write_text("{}", encoding="utf-8")
-    (site_dir / "node_modules").mkdir()
+    with pytest.raises(cli.click.ClickException) as exc:
+        cli._ensure_mkdocs_installed({})
 
-    assert cli._site_dependencies_need_install(site_dir) is True
+    assert "pip install" in str(exc.value)
+    assert "mkdocs-material" in str(exc.value)
 
 
-def test_site_dependencies_need_install_when_stamp_mismatches(tmp_path: Path) -> None:
-    site_dir = tmp_path / "site"
-    site_dir.mkdir()
-    package_json = site_dir / "package.json"
-    package_json.write_text('{"name":"demo"}', encoding="utf-8")
-    (site_dir / "package-lock.json").write_text("{}", encoding="utf-8")
-    (site_dir / "node_modules").mkdir()
-    cli._site_dependency_stamp_path(site_dir).write_text(
-        '{"package_json_hash":"stale"}\n',
-        encoding="utf-8",
-    )
+def test_ensure_mkdocs_installed_passes_when_present(monkeypatch) -> None:
+    import importlib
 
-    assert cli._site_dependencies_need_install(site_dir) is True
+    # All specs resolve → no exception. No OpenAPI dir, so swagger plugin not required.
+    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: Path("/nonexistent"))
 
-
-def test_site_dependencies_need_install_false_when_stamp_matches(tmp_path: Path) -> None:
-    site_dir = tmp_path / "site"
-    site_dir.mkdir()
-    (site_dir / "package.json").write_text('{"name":"demo"}', encoding="utf-8")
-    (site_dir / "package-lock.json").write_text("{}", encoding="utf-8")
-    (site_dir / "node_modules").mkdir()
-    cli._record_site_dependencies_synced(site_dir)
-
-    assert cli._site_dependencies_need_install(site_dir) is False
+    cli._ensure_mkdocs_installed({})  # should not raise
 
 
 def test_find_available_loopback_port_skips_busy_port(monkeypatch) -> None:
@@ -100,7 +81,7 @@ def test_deploy_refuses_invalid_generated_docs(monkeypatch, tmp_path: Path) -> N
     docs_dir.mkdir()
     quality_dir.mkdir()
 
-    (site_dir / "package.json").write_text("{}", encoding="utf-8")
+    (site_dir / "mkdocs.yml").write_text("site_name: Demo\n", encoding="utf-8")
     (docs_dir / "start-here.md").write_text(
         '---\ndeepdoc_status: "invalid"\n---\n', encoding="utf-8"
     )

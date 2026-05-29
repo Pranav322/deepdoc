@@ -78,10 +78,12 @@ class CrossBucketConsistencyPass:
             if not page_path.exists():
                 continue
             content = page_path.read_text(encoding="utf-8")
-            if f"/{to_slug}" in content:
+            if f"]({to_slug}.md" in content:
                 continue
             to_title = slug_to_title[to_slug]
-            callout = f"\n:::note[See also]\n- [{to_title}](/{to_slug}) — {reason}\n:::\n"
+            callout = (
+                f"\n/// note | See also\n- [{to_title}]({to_slug}.md) — {reason}\n///\n"
+            )
             page_path.write_text(content.rstrip() + callout, encoding="utf-8")
             patched += 1
 

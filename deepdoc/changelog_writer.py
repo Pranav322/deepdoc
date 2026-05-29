@@ -72,11 +72,10 @@ def _build_md(entries: list[dict]) -> str:
 
     if not entries:
         lines.append(
-            ":::note\nNo changelog entries yet. Run `deepdoc generate` to create the first entry.\n:::"
+            "/// note\nNo changelog entries yet. Run `deepdoc generate` to create the first entry.\n///"
         )
         return "\n".join(lines)
 
-    lines.append(":::accordions")
     for entry in entries:
         date = entry.get("date", "")
         msg = entry.get("commit_message", "update")
@@ -88,7 +87,7 @@ def _build_md(entries: list[dict]) -> str:
         strategy_label = _STRATEGY_LABEL.get(strategy, strategy)
 
         title = f"{date} — {msg[:72]} ({sha})"
-        lines.append(f'::accordion{{title="{title}"}}')
+        lines.append(f"/// details | {title}")
         lines.append("")
 
         # Commit metadata row
@@ -109,17 +108,17 @@ def _build_md(entries: list[dict]) -> str:
                 lines.append("**Pages generated:**")
                 lines.append("")
                 for s in pages:
-                    lines.append(f"- [{_slug_to_title(s)}](/{s})")
+                    lines.append(f"- [{_slug_to_title(s)}]({s}.md)")
         else:
             # Pages updated
             if pages:
                 lines.append(f"**{len(pages)} page(s) updated:**")
                 lines.append("")
                 for s in pages:
-                    lines.append(f"- [{_slug_to_title(s)}](/{s})")
+                    lines.append(f"- [{_slug_to_title(s)}]({s}.md)")
             else:
                 lines.append(
-                    ":::info\nNo pages were regenerated — only metadata or chatbot corpora were refreshed.\n:::"
+                    "/// info\nNo pages were regenerated — only metadata or chatbot corpora were refreshed.\n///"
                 )
 
             # Source files that changed
@@ -148,9 +147,8 @@ def _build_md(entries: list[dict]) -> str:
                 )
 
         lines.append("")
-        lines.append("::")
+        lines.append("///")
 
-    lines.append(":::")
     return "\n".join(lines)
 
 

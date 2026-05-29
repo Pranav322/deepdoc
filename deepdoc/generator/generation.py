@@ -52,7 +52,23 @@ console = Console()
 
 from .evidence import AssembledEvidence, EvidenceAssembler
 from .validation import PageValidator, ValidationResult
-from .post_processors import *
+from .post_processors import (
+    build_internal_doc_link_maps,
+    fix_bare_language_markers,
+    fix_bare_mermaid_fences,
+    fix_file_references,
+    fix_frontmatter_description,
+    fix_mermaid_diagrams,
+    inject_source_files_disclosure,
+    normalize_code_fence_languages,
+    normalize_explanatory_lines_outside_fences,
+    normalize_html_code_blocks,
+    repair_dangling_plain_fences,
+    repair_internal_doc_links,
+    repair_split_object_code_fences,
+    repair_unbalanced_code_fences,
+    strip_leaked_provenance_fields,
+)
 
 
 def _validation_reason(v: "ValidationResult") -> str:
@@ -611,12 +627,9 @@ class BucketGenerationEngine:
             content = repair_unbalanced_code_fences(content)
             content = normalize_explanatory_lines_outside_fences(content)
             content = repair_dangling_plain_fences(content)
-            content = normalize_fumadocs_directives(content)
             content = fix_frontmatter_description(content)
             content = fix_bare_language_markers(content)
             content = fix_bare_mermaid_fences(content)
-            content = fix_leaf_card_directives(content)
-            content = escape_mdx_angle_hazards(content)
             content = repair_internal_doc_links(
                 content,
                 self._valid_doc_urls,
@@ -655,11 +668,8 @@ class BucketGenerationEngine:
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)
-                    content = normalize_fumadocs_directives(content)
                     content = fix_frontmatter_description(content)
                     content = fix_bare_mermaid_fences(content)
-                    content = fix_leaf_card_directives(content)
-                    content = escape_mdx_angle_hazards(content)
                     content = repair_internal_doc_links(
                         content,
                         self._valid_doc_urls,
@@ -701,11 +711,8 @@ class BucketGenerationEngine:
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)
-                    content = normalize_fumadocs_directives(content)
                     content = fix_frontmatter_description(content)
                     content = fix_bare_mermaid_fences(content)
-                    content = fix_leaf_card_directives(content)
-                    content = escape_mdx_angle_hazards(content)
                     content = repair_internal_doc_links(
                         content,
                         self._valid_doc_urls,
@@ -850,10 +857,10 @@ class BucketGenerationEngine:
         # Fix 2: Add a notice for very short pages
         if validation.word_count < 100:
             notice = (
-                "\n\n:::warn\n"
+                "\n\n/// warning\n"
                 "This page was auto-generated with limited evidence. "
                 "Some sections may be incomplete.\n"
-                ":::\n"
+                "///\n"
             )
             content = notice + content
 
@@ -1073,10 +1080,10 @@ title: "{bucket.title}"
 
 # {bucket.title}
 
-:::warn
+/// warning
 This page could not be fully generated. It contains a file listing only.
 Re-run `deepdoc generate` to retry.
-:::
+///
 
 ## Description
 

@@ -585,13 +585,11 @@ def test_quality_stats_blockers_all_fields():
         "pages_failed": 2,
         "pages_invalid": 1,
         "pages_degraded": 3,
-        "mdx_fallback_slugs": ["intro", "setup"],
     }
     blockers = _quality_stats_blockers(stats)
     assert any("failed" in b for b in blockers)
     assert any("invalid" in b for b in blockers)
     assert any("degraded" in b for b in blockers)
-    assert any("MDX fallback" in b for b in blockers)
 
 
 def test_quality_stats_blockers_clean():

@@ -130,10 +130,10 @@ class UpdaterV2:
 
         # Step 6: Rebuild nav
         from .pipeline_v2 import stage_openapi_assets
-        from .site.builder import build_fumadocs_from_plan
+        from .site.builder import build_mkdocs_from_plan
         if plan:
             has_openapi = stage_openapi_assets(self.repo_root)
-            build_fumadocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
+            build_mkdocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} page(s)[/bold green]")
         return updated
@@ -316,9 +316,9 @@ class UpdaterV2:
 
         # Step 5: Rebuild nav
         from .pipeline_v2 import stage_openapi_assets
-        from .site.builder import build_fumadocs_from_plan
+        from .site.builder import build_mkdocs_from_plan
         has_openapi = stage_openapi_assets(self.repo_root)
-        build_fumadocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
+        build_mkdocs_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} bucket page(s)[/bold green]")
         return updated

@@ -25,7 +25,7 @@ from deepdoc.planner.heuristics import _build_heuristic_assignment, _validate_co
 from deepdoc.planner.nav_shaping import _shape_plan_nav
 from deepdoc.planner.specializations import _ensure_database_runtime_and_interface_buckets
 from deepdoc.prompts import PROMPT_STYLE_TEMPLATES
-from deepdoc.site.builder import build_fumadocs_from_plan
+from deepdoc.site.builder import build_mkdocs_from_plan
 
 
 def _make_scan(
@@ -1127,7 +1127,7 @@ def test_recursive_nav_builder_supports_three_levels(tmp_path: Path) -> None:
         "# Flash Attention\n", encoding="utf-8"
     )
 
-    build_fumadocs_from_plan(
+    build_mkdocs_from_plan(
         repo_root,
         output_dir,
         {"project_name": "Demo", "site": {"repo_url": ""}},
@@ -1135,13 +1135,11 @@ def test_recursive_nav_builder_supports_three_levels(tmp_path: Path) -> None:
         has_openapi=False,
     )
 
-    page_tree = (repo_root / "site" / "lib" / "page-tree.generated.ts").read_text(
-        encoding="utf-8"
-    )
-    assert '"name": "Model Architecture"' in page_tree
-    assert '"name": "Attention"' in page_tree
-    assert '"name": "Flash Attention"' in page_tree
-    assert '"url": "/flash-attention"' in page_tree
+    mkdocs_yml = (repo_root / "site" / "mkdocs.yml").read_text(encoding="utf-8")
+    # Nested " > " sections become nested nav groups in mkdocs.yml.
+    assert "Model Architecture:" in mkdocs_yml
+    assert "Attention:" in mkdocs_yml
+    assert "Flash Attention: flash-attention.md" in mkdocs_yml
 
 
 def test_prompt_templates_and_prompts_include_new_granularity_support() -> None:

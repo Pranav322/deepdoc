@@ -6,13 +6,13 @@ Guidance for coding agents working in this repository.
 - If you change core CLI behavior, persistence/state formats, routing semantics, or generated-site behavior, update this file in the same task. Also keep `README.md` in sync with actual codebase behavior.
 
 ## Repo Summary
-- Project name: `deepdoc` (v2.3.6)
+- Project name: `deepdoc` (v2.4.0)
 - Language/runtime: Python `>=3.10`
 - Packaging: setuptools via `pyproject.toml`
 - CLI entrypoint: `deepdoc = deepdoc.cli:main`
 - Test runner: `pytest`
 - Main implementation path is the v2 bucket-based pipeline.
-- Generated docs live in `docs/` (configurable); the generated Fumadocs site lives in `site/`.
+- Generated docs live in `docs/` (configurable); the generated MkDocs Material site config lives in `site/` (`site/mkdocs.yml`), and `mkdocs build` outputs static HTML to `site/out/`.
 - Repo also contains a VS Code extension at `vscode-extension/` (Node/TypeScript, independent release track) and a Remotion marketing video project at `deepdoc/video/` (not part of the Python pipeline).
 
 ## Important Paths
@@ -42,7 +42,7 @@ Guidance for coding agents working in this repository.
 - `deepdoc/generator/evidence.py` — evidence pack assembly; `flow_context` included for buckets with `flow_id` generation hint; `generation_hints` null-guarded; Tier 0.5 (`_extract_owned_symbol_bodies`): when `owned_symbols` is set and >50% of a Tier 1 file's symbols are unowned, sends only owned symbol bodies + file header instead of full source; uses `Symbol.end_line` when `has_known_range()`, falls back to next-symbol boundary
 - `deepdoc/generator/consistency.py` — `CrossBucketConsistencyPass`; single post-generation LLM call that detects cross-link gaps between independently generated pages and appends `:::note[See also]` callouts; runs after `engine.generate_all()` in `pipeline_v2.py`; controlled by `consistency_pass` config key (default `true`); skips gracefully on LLM failure or already-linked pages
 - `deepdoc/generator/validation.py` — `PageValidator`; checks sections, files, routes, runtime/config/integration grounding, hallucinated paths/symbols, flow grounding, file coverage
-- `deepdoc/generator/post_processors.py` — MDX repair pipeline; `repair_mdx_component_blocks` calls `_repair_accordion_nesting` first; brace escaping skips lines containing `={`; `normalize_mdx_steps`, `escape_mdx_text_hazards`, `inject_source_files_disclosure`; **MDX hazard fixers** (all run in `generation.py` at all three post-processing call sites): `normalize_fumadocs_directives` (maps `:::warn`/`:::error`/`:::success` → valid fumadocs callout names), `fix_frontmatter_description` (strips trailing `::` artefacts from YAML `description:` field), `fix_bare_mermaid_fences` (inserts missing ` ```mermaid ` opening fence when LLM writes bare `mermaid` text), `fix_bare_language_markers` (fixes both `:typescript` suffix and standalone `typescript`-on-its-own-line patterns), `fix_leaf_card_directives` (converts `::card{...}\nCONTENT\n::` to `:::card{...}\nCONTENT\n:::` container directives)
+- `deepdoc/generator/post_processors.py` — framework-neutral Markdown repair pipeline (all run in `generation.py` at all three post-processing call sites): `fix_mermaid_diagrams`, fence repair (`repair_split_object_code_fences`, `repair_unbalanced_code_fences`, `repair_dangling_plain_fences`), `normalize_html_code_blocks`, `normalize_code_fence_languages`, `normalize_explanatory_lines_outside_fences`, `fix_frontmatter_description` (strips trailing `::` artefacts from YAML `description:`), `fix_bare_mermaid_fences`, `fix_bare_language_markers`, and `repair_internal_doc_links`. **Link rewriting:** `repair_internal_doc_links` is the single owner that validates `/slug` links against the page tree and rewrites them to MkDocs-relative form via `_to_mkdocs_relative` (`/` → `index.md`, `/auth` → `auth.md`, `/api` → `api.md`, `/api/*` left as-is); the glossary linker emits `domain-glossary.md#slug` directly. No MDX/JSX escaping exists — MkDocs renders plain CommonMark, so `escape_mdx_*`, `normalize_fumadocs_directives`, and `fix_leaf_card_directives` were removed.
 
 ### Chatbot
 - `deepdoc/chatbot/service.py` — `ChatbotQueryService`; `query`, `deep_research`, `code_deep`; re-exports `create_fastapi_app`; tests mock here
@@ -58,10 +58,11 @@ Guidance for coding agents working in this repository.
 - `deepdoc/chatbot/settings.py` — chatbot config schema
 - `deepdoc/chatbot/scaffold.py` — chatbot `chatbot_backend/` scaffolding generator
 
-### Site builder
-- `deepdoc/site/builder/scaffold_files.py` — non-chatbot scaffold generators; `_docs_page_tsx` wires `findNeighbour` (prev/next arrows) and "Read first:" callout from `deepdoc_prereqs` frontmatter; provenance badge renders `deepdoc_generated_at` + `deepdoc_generated_commit`
-- `deepdoc/site/builder/chatbot_components.py` — chatbot TSX/TS generators (`_chatbot_panel_tsx`, `_chatbot_config_ts`, `_chatbot_toggle_tsx`)
-- `deepdoc/site/builder/templates.py` — re-export facade; import scaffold functions from here
+### Site builder (MkDocs Material)
+- `deepdoc/site/builder/mkdocs_builder.py` — **canonical site builder**: `build_mkdocs_from_plan()` writes `site/mkdocs.yml` (Material theme, pymdownx Blocks + Mermaid superfence), `site/docs/stylesheets/extra.css` (brand colors), the landing page (grid cards), and consolidates OpenAPI into a single `docs/api.md` Swagger UI page via the `mkdocs-swagger-ui-tag` plugin (staged `.json`/`.yaml`/`.yml` specs). Nav ordering reuses `_section_rank` / `_start_here_page_rank`; `_cleanup_fumadocs_artifacts` removes any leftover Next.js scaffold. `site_dir: out` avoids colliding with deepdoc's `site/` directory.
+- `deepdoc/site/builder/mdx_utils.py` — `_ensure_md_frontmatter` and frontmatter helpers (operate on generated `*.md`)
+- Generated pages are plain CommonMark `.md`. There is **no JSX/MDX compile step**, so a page can never fail to build. The LLM emits pymdownx Blocks (`/// note`, `/// tab |`, `/// details |`) and grid-cards HTML — never `:::` remark-directives or JSX.
+- Chatbot UI is **not** part of the MkDocs scaffold (separate follow-up sub-project); the chatbot backend still runs via `deepdoc serve`.
 
 ### Other modules
 - `deepdoc/llm/retry.py` — `is_retryable_llm_error()`; single source of truth for transient-vs-fatal LLM error classification (used by both retry loops)
@@ -70,10 +71,10 @@ Guidance for coding agents working in this repository.
 - `deepdoc/openapi.py` — `find_openapi_specs()`, OpenAPI/Swagger spec parser and importer
 - `deepdoc/source_metadata.py` — `SOURCE_KIND_CORE`, `SOURCE_KIND_SUPPORTING`, `LOW_TRUST_SOURCE_KINDS`, `FRAMEWORK_PRIORITIES`
 - `deepdoc/benchmark_v2.py` — `BenchmarkResult`; planner quality scorecard harness
-- `deepdoc/changelog_writer.py` — `record_and_write` appends to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.mdx`; generates commit metadata tables, bulleted page lists, and strategy explanation blocks; `_ensure_in_nav` injects `whats-changed` into `Start Here`
+- `deepdoc/changelog_writer.py` — `record_and_write` appends to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.md`; generates commit metadata tables, bulleted page lists, and strategy explanation blocks; `_ensure_in_nav` injects `whats-changed` into `Start Here`
 - `deepdoc/updater_v2.py` — `UpdaterV2`; legacy V1-era file-map updater (kept for compatibility)
 - `deepdoc/_legacy_types.py` — compatibility type shims
-- `deepdoc/prompts_v2.py` — re-export facade; import all prompt constants from here
+- `deepdoc/prompts/__init__.py` — re-export facade; import all prompt constants from here (there is no `prompts_v2.py`)
 - `deepdoc/prompts/system.py` — `SYSTEM_V2`, `CROSS_LINK_SECTION`
 - `deepdoc/prompts/page_types.py` — page-type prompts; all templates include `{flow_context}` placeholder
 - `deepdoc/prompts/bucket_types.py` — bucket-type prompts; all templates include `{flow_context}` placeholder
@@ -109,7 +110,7 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 - `_append_changelog()` must be called before `_rebuild_nav()` in `smart_update_v2.py` so the `whats-changed` page appears in nav on first run.
 - `pipeline_v2._build_site()` must be called after `_record_changelog()` for the same reason.
 - `CrossBucketConsistencyPass.run()` must be called after `engine.update_manifest(gen_results)` and before `summarize_generation_results()` in `pipeline_v2.py` so injected callouts are counted in the final summary and written to disk before any downstream site build step.
-- After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `docs/whats-changed.mdx` is regenerated. Do not skip these calls when adding new execution paths.
+- After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `docs/whats-changed.md` is regenerated. Do not skip these calls when adding new execution paths.
 - Targeted replans merge by stable bucket identity (`semantic_id`) and preserve existing slugs when the same concept is rediscovered.
 - Bucket slug collision guard: fallback slug generation appends `-2`, `-3`, … suffixes; a bucket that has already absorbed another cannot be absorbed again in the same consolidation pass (`merge_target_slugs` set).
 - `_decompose_buckets` is canonical in `bucket_refinement.py` only — the duplicate was removed from `heuristics.py`.
@@ -146,10 +147,10 @@ Chatbot is opt-in. When `chatbot.enabled` is false, no `/ask` route, chatbot com
 - `deepdoc deploy` quality gate refuses to export when failed/invalid/stub pages exist.
 
 ### Glossary limits
-`bucket_injection.py` caps glossary evidence at 10 model files. The domain-glossary prompt enforces a 40-term hard cap, skips generic fields (`id`, `created_at`, `email`, etc.), uses `<Accordions>` grouped output, one Mermaid diagram max, and 300-line page length limit.
+`bucket_injection.py` caps glossary evidence at 10 model files. The domain-glossary prompt enforces a 40-term hard cap, skips generic fields (`id`, `created_at`, `email`, etc.), uses `/// details | Domain` grouped output, one Mermaid diagram max, and 300-line page length limit.
 
 ### Framework targets
-Supported scan targets: Python (Django, Falcon, DRF), Go, PHP (Laravel), JS/TS (Express, Fastify, NestJS). Next.js, Nuxt, FastAPI, and Flask are **not** supported scan targets; they are used internally by the generated site and chatbot stacks. Extend scanner coverage in `deepdoc/scanner/` before adding generator-only heuristics.
+Supported scan targets: Python (Django, Falcon, DRF), Go, PHP (Laravel), JS/TS (Express, Fastify, NestJS). Nuxt, FastAPI, and Flask are **not** supported scan targets. The generated site is now MkDocs Material (pure Python; no Node/Next.js); the chatbot backend remains a FastAPI stack. Extend scanner coverage in `deepdoc/scanner/` before adding generator-only heuristics.
 
 ### Other rules
 - Prefer extending `_v2` modules over creating new parallel flows.
@@ -218,7 +219,7 @@ Notes:
 - `deepdoc clean` — removes `.deepdoc.yaml`, generated docs, and saved state; prompts for confirmation unless `--yes`.
 - `deepdoc status` — shows all generated pages, staleness, and quality status.
 - `deepdoc benchmark` — runs the planner quality scorecard against a gold manifest catalog.
-- `deepdoc deploy` — runs the Next.js/Fumadocs build and exports `site/out/`; blocked by the quality gate if failed/invalid/stub pages exist.
+- `deepdoc deploy` — runs `mkdocs build` and exports static HTML to `site/out/`; blocked by the quality gate if failed/invalid/stub pages exist. Requires `pip install mkdocs-material` (and `mkdocs-swagger-ui-tag` when an OpenAPI spec is present).
 - `deepdoc serve` and `deepdoc deploy` assume generated site files already exist under `site/`.
 - `deepdoc update` is commit-based: diffs `.deepdoc/state.json`'s last synced commit against `HEAD`, compares saved scan cache for semantic endpoint changes, then refreshes docs and chatbot state.
 - Avoid `deepdoc generate --clean --yes` unless a clean rebuild is explicitly required.
@@ -241,7 +242,7 @@ python3 -m pytest -k "route or stale or chatbot" -q
 - Topology/planner work: cover topology clustering output and the downstream bucket/evidence/nav behavior together; do not just test `build_topology_map()` in isolation.
 - Runtime/database/interface extraction: fixture-backed scan coverage + planner/generator regressions (new metadata must change page planning and evidence, not just raw scan output).
 - Freshness/update work: run stale and smart-update tests.
-- Chatbot/site work: run chatbot config/scaffold/relationship tests and `tests/test_fumadocs_builder.py` if scaffold output changed.
+- Chatbot/site work: run chatbot config/scaffold/relationship tests and `tests/test_mkdocs_builder.py` if scaffold output changed. When scaffold output changes, also run a real `mkdocs build --strict` against a generated `site/` to confirm the static site builds.
 - For non-trivial changes, prefer a focused test first, then `python3 -m pytest -q` if feasible.
 - If you could not run verification, say so clearly and name the next command to run.
 
@@ -274,7 +275,7 @@ python3 -m pytest -k "route or stale or chatbot" -q
 - If a change touches persisted data or freshness semantics, audit: plan save/load, ledger save/load, sync state save/load, manifest, stale detection, and `_append_changelog` call sites.
 - If a change touches routing, audit: per-framework detector, route registry, repo resolver, `scan_repo(...)`, endpoint bucket ownership.
 - If a change touches planning, audit: `topology.py`, `flow_candidates.py`, `specializations.py`, `heuristics.py`, `nav_shaping.py`, and `bucket_refinement.py` together.
-- If a change touches chatbot behavior, audit: `deepdoc/chatbot/settings.py`, `deepdoc/chatbot/indexer.py`, `deepdoc/chatbot/service.py`, `deepdoc/chatbot/scaffold.py`, and `deepdoc/site/builder/chatbot_components.py`.
+- If a change touches chatbot behavior, audit: `deepdoc/chatbot/settings.py`, `deepdoc/chatbot/indexer.py`, `deepdoc/chatbot/service.py`, and `deepdoc/chatbot/scaffold.py` (the chatbot backend). The chatbot UI is not part of the MkDocs site scaffold.
 - The Start Here onboarding setup page uses the slug `local-development-setup`; the generic configuration page stays at `setup`.
 - This repo may be in a dirty worktree; inspect carefully and never revert unrelated user changes.
 

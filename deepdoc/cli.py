@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -231,9 +230,6 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     _add_gitignore_entries(
         cwd,
         [
-            "site/node_modules/",
-            "site/.next/",
-            "site/.source/",
             "site/out/",
             ".deepdoc/chatbot/",
             "chatbot_backend/.venv/",
@@ -383,8 +379,8 @@ def generate(
       1. Scan       Collect files, symbols, endpoints, and OpenAPI specs
       2. Plan       Build a bucket-based docs plan with the LLM
       3. Generate   Write pages batch-by-batch
-      4. API Ref     Stage OpenAPI assets for Fumadocs API pages
-      5. Build      Write the generated Fumadocs site scaffold
+      4. API Ref     Stage OpenAPI assets for the MkDocs API reference page
+      5. Build      Write the generated MkDocs Material site scaffold
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
@@ -971,26 +967,27 @@ def benchmark(
     "--port",
     default=3000,
     show_default=True,
-    help="Port to bind the local Fumadocs development server to.",
+    help="Port to bind the local MkDocs development server to.",
 )
 def serve(port):
     """Preview the generated docs locally with live reload.
 
     \b
-    Run `deepdoc generate` first so the generated Fumadocs app and docs exist.
-    Requires Node.js >= 18 to be installed.
+    Run `deepdoc generate` first so the generated MkDocs site and docs exist.
+    Requires MkDocs Material: pip install mkdocs-material
     """
     _load_or_exit()
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
     site_dir = repo_root / "site"
 
-    package_json = site_dir / "package.json"
-    if not package_json.exists():
+    mkdocs_yml = site_dir / "mkdocs.yml"
+    if not mkdocs_yml.exists():
         console.print(
-            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            "[red]site/mkdocs.yml not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
+    _ensure_mkdocs_installed(cfg)
 
     preview_url = f"http://localhost:{port}"
     console.print(
@@ -1000,43 +997,36 @@ def serve(port):
 
     try:
         backend_proc = None
-        next_env = os.environ.copy()
         if cfg.get("chatbot", {}).get("enabled"):
-            backend_proc, backend_url = _start_chatbot_backend(repo_root, cfg, port)
-            if backend_url:
-                next_env["NEXT_PUBLIC_DEEPDOC_CHATBOT_BASE_URL"] = backend_url
-        if _site_dependencies_need_install(site_dir):
-            console.print("[dim]Installing site dependencies...[/dim]")
-            install = subprocess.run(
-                ["npm", "install"], cwd=str(site_dir), capture_output=False
-            )
-            if install.returncode != 0:
-                console.print("[red]npm install failed.[/red]")
-                sys.exit(1)
-            _record_site_dependencies_synced(site_dir)
+            backend_proc, _ = _start_chatbot_backend(repo_root, cfg, port)
 
-        # Auto-open browser after a short delay to let Next.js start
+        # Auto-open browser after a short delay to let MkDocs start
         import threading
         import webbrowser
 
         def _open_browser():
             import time
 
-            time.sleep(3)
+            time.sleep(2)
             webbrowser.open(preview_url)
 
         threading.Thread(target=_open_browser, daemon=True).start()
 
         subprocess.run(
-            ["npx", "next", "dev", "--port", str(port)],
-            cwd=str(site_dir),
-            env=next_env,
+            [
+                "mkdocs",
+                "serve",
+                "--config-file",
+                str(mkdocs_yml),
+                "--dev-addr",
+                f"127.0.0.1:{port}",
+            ],
         )
     except KeyboardInterrupt:
         pass
     except FileNotFoundError:
         console.print(
-            "[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]"
+            "[red]mkdocs not found. Install it: [bold]pip install mkdocs-material[/bold][/red]"
         )
         sys.exit(1)
     finally:
@@ -1058,7 +1048,7 @@ def _deploy():
     """Deploy the generated documentation.
 
     \b
-    Fumadocs builds a static Next.js export:
+    MkDocs builds a static HTML site:
       1. Run `deepdoc deploy`
       2. Publish `site/out/` to any static host
     """
@@ -1067,10 +1057,10 @@ def _deploy():
     site_dir = repo_root / "site"
     output_dir = repo_root / str(cfg.get("output_dir", "docs") or "docs")
 
-    package_json = site_dir / "package.json"
-    if not package_json.exists():
+    mkdocs_yml = site_dir / "mkdocs.yml"
+    if not mkdocs_yml.exists():
         console.print(
-            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            "[red]site/mkdocs.yml not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
 
@@ -1082,10 +1072,12 @@ def _deploy():
             + "\nRun `deepdoc generate` again after fixing the generation issues."
         )
 
+    _ensure_mkdocs_installed(cfg)
+
     console.print(
         Panel.fit(
-            "[bold]Fumadocs Deployment:[/bold]\n\n"
-            "1. [bold cyan]Static export:[/bold cyan]\n"
+            "[bold]MkDocs Deployment:[/bold]\n\n"
+            "1. [bold cyan]Static build:[/bold cyan]\n"
             "   Run: [bold]deepdoc deploy[/bold]\n"
             "   Publish [bold]site/out/[/bold] to any static host\n\n"
             "2. [bold cyan]Suggested hosts:[/bold cyan]\n"
@@ -1100,22 +1092,11 @@ def _deploy():
             "separately on an internal Python host and point [bold]chatbot.backend.base_url[/bold] at it."
         )
 
-    # Offer to run a static build
+    # Run the static build
     console.print("\n[dim]Running static build...[/dim]")
     try:
-        if _site_dependencies_need_install(site_dir):
-            console.print("[dim]Installing site dependencies...[/dim]")
-            install = subprocess.run(
-                ["npm", "install"], cwd=str(site_dir), capture_output=False
-            )
-            if install.returncode != 0:
-                console.print("[red]npm install failed.[/red]")
-                sys.exit(1)
-            _record_site_dependencies_synced(site_dir)
-
         build_result = subprocess.run(
-            ["npx", "next", "build"],
-            cwd=str(site_dir),
+            ["mkdocs", "build", "--config-file", str(mkdocs_yml)],
             capture_output=False,
         )
         if build_result.returncode == 0:
@@ -1126,58 +1107,35 @@ def _deploy():
             console.print("[red]Build failed.[/red]")
     except FileNotFoundError:
         console.print(
-            "[red]npm/npx not found. Install Node.js >= 18: https://nodejs.org[/red]"
+            "[red]mkdocs not found. Install it: [bold]pip install mkdocs-material[/bold][/red]"
         )
         sys.exit(1)
 
 
-def _site_dependencies_need_install(site_dir: Path) -> bool:
-    """Return True when site dependencies are missing or stale."""
-    node_modules = site_dir / "node_modules"
-    package_lock = site_dir / "package-lock.json"
+def _ensure_mkdocs_installed(cfg: dict) -> None:
+    """Verify MkDocs Material (and the Swagger plugin when needed) is importable.
 
-    if not node_modules.exists():
-        return True
-    if not package_lock.exists():
-        return True
+    MkDocs is a user-installed Python dependency, not bundled with deepdoc. If it
+    is missing we fail fast with a clear pip command rather than a cryptic
+    FileNotFoundError when the subprocess tries to run.
+    """
+    import importlib.util
 
-    try:
-        stamp_path = _site_dependency_stamp_path(site_dir)
-        if not stamp_path.exists():
-            return True
+    missing: list[str] = []
+    if importlib.util.find_spec("mkdocs") is None:
+        missing.append("mkdocs-material")
+    elif importlib.util.find_spec("material") is None:
+        missing.append("mkdocs-material")
+    if importlib.util.find_spec("mkdocs_swagger_ui_tag") is None:
+        # Only required when an OpenAPI spec was staged.
+        if (_find_repo_root() / "site" / "openapi").exists():
+            missing.append("mkdocs-swagger-ui-tag")
 
-        expected_hash = _site_package_manifest_hash(site_dir)
-        stamp_data = json.loads(stamp_path.read_text(encoding="utf-8"))
-        return stamp_data.get("package_json_hash") != expected_hash
-    except FileNotFoundError:
-        return True
-    except json.JSONDecodeError:
-        return True
-
-
-def _site_dependency_stamp_path(site_dir: Path) -> Path:
-    return site_dir / "node_modules" / ".deepdoc-package-sync.json"
-
-
-def _site_package_manifest_hash(site_dir: Path) -> str:
-    package_json = site_dir / "package.json"
-    content = package_json.read_bytes()
-    return hashlib.sha256(content).hexdigest()
-
-
-def _record_site_dependencies_synced(site_dir: Path) -> None:
-    stamp_path = _site_dependency_stamp_path(site_dir)
-    stamp_path.parent.mkdir(parents=True, exist_ok=True)
-    stamp_path.write_text(
-        json.dumps(
-            {
-                "package_json_hash": _site_package_manifest_hash(site_dir),
-            },
-            indent=2,
+    if missing:
+        pkgs = " ".join(dict.fromkeys(missing))
+        raise click.ClickException(
+            f"MkDocs is not installed. Install it with:\n    pip install {pkgs}"
         )
-        + "\n",
-        encoding="utf-8",
-    )
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1483,15 +1441,12 @@ def _quality_stats_blockers(stats: dict[str, Any]) -> list[str]:
     pages_failed = int(stats.get("pages_failed", 0) or 0)
     pages_invalid = int(stats.get("pages_invalid", 0) or 0)
     pages_degraded = int(stats.get("pages_degraded", 0) or 0)
-    mdx_fallbacks = list(stats.get("mdx_fallback_slugs", []) or [])
     if pages_failed:
         blockers.append(f"{pages_failed} page(s) failed")
     if pages_invalid:
         blockers.append(f"{pages_invalid} page(s) invalid")
     if pages_degraded:
         blockers.append(f"{pages_degraded} page(s) degraded")
-    if mdx_fallbacks:
-        blockers.append("MDX fallback applied: " + ", ".join(mdx_fallbacks[:8]))
     if stats.get("chatbot_failed") or stats.get("chatbot_error"):
         blockers.append("chatbot index refresh failed")
     return blockers

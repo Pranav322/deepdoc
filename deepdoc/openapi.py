@@ -125,28 +125,6 @@ def spec_to_context_string(spec: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def generate_swagger_ui_html(spec_path_relative: str) -> str:
-    """Generate HTML snippet to embed Swagger UI for API playground."""
-    return f"""\
-<div id="swagger-ui-container"></div>
-<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui.min.css">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-bundle.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/swagger-ui/5.11.0/swagger-ui-standalone-preset.min.js"></script>
-<script>
-window.onload = function() {{
-  SwaggerUIBundle({{
-    url: "{spec_path_relative}",
-    dom_id: '#swagger-ui-container',
-    presets: [SwaggerUIBundle.presets.apis, SwaggerUIStandalonePreset],
-    layout: "StandaloneLayout",
-    deepLinking: true,
-    tryItOutEnabled: true,
-  }});
-}};
-</script>
-"""
-
-
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────

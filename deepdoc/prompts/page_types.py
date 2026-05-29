@@ -92,8 +92,8 @@ The 3-7 most important things a new dev must understand. For each:
 - Mention non-obvious behavior or operational gotchas where relevant
 
 ## Getting Started
-Use a `<Steps>` component (not a numbered list) for the installation and run steps. \
-Infer from config files. Link to the Setup page from the sitemap if it exists.
+Use a numbered list with bold step titles (e.g. `1. **Install dependencies** — ...`) for the \
+installation and run steps. Infer from config files. Link to the Setup page from the sitemap if it exists.
 
 ## How To Read This Docs Set
 Tell a new joiner which pages to read next, in order, depending on their goal:
@@ -104,9 +104,10 @@ Tell a new joiner which pages to read next, in order, depending on their goal:
 - local setup and debugging
 
 ## Explore the Docs
-End the page with a `<Cards>` block that links to the most important pages \
-from the sitemap. Each `<Card>` must have a `title`, an `href` (the `/slug`), \
-and a 1-sentence description.
+End the page with a Material grid-cards block (a `<div class="grid cards" markdown>` wrapping a \
+markdown list) that links to the most important pages from the sitemap. Each list item must be a \
+bold markdown link to the page `/slug` followed by a 1-sentence description, e.g. \
+`- **[Authentication](/auth)** — JWT-based auth with refresh token rotation.`
 
 Be detailed and specific. Reference actual file paths everywhere. \
 This overview is the entry point and must feel substantial, architectural, and actionable.

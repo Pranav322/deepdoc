@@ -734,10 +734,6 @@ def save_generation_ledger(
             "generated_at": _now_iso(),
             "elapsed_seconds": round(result.elapsed_seconds, 2),
             "retries": getattr(result, "retries", 0),
-            "mdx_compile_failed": bool(getattr(result, "mdx_compile_failed", False)),
-            "mdx_compile_retries": int(getattr(result, "mdx_compile_retries", 0) or 0),
-            "mdx_fallback_applied": bool(getattr(result, "mdx_fallback_applied", False)),
-            "mdx_last_error": getattr(result, "mdx_last_error", None),
         }
 
         # Word + diagram counts
@@ -925,8 +921,6 @@ def _doc_quality_requires_regeneration(doc_path: Path, record: dict[str, Any]) -
     """Return True when an existing generated page is known low-trust."""
     validation = record.get("validation") or {}
     if validation and validation.get("is_valid") is False:
-        return True
-    if record.get("mdx_fallback_applied") or record.get("mdx_compile_failed"):
         return True
     try:
         content = doc_path.read_text(encoding="utf-8", errors="replace")

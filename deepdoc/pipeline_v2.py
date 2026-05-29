@@ -104,7 +104,7 @@ def _page_url(page: Any, has_openapi: bool) -> str:
     if _page_is_overview(page):
         return "/"
     if _page_uses_openapi_route(page, has_openapi):
-        return f"/api/{page.slug}"
+        return "/api"
     return f"/{page.slug}"
 
 
@@ -1604,13 +1604,13 @@ class PipelineV2:
     # ──────────────────────────────────────────────────────────────────────
 
     def _build_site(self, plan: DocPlan, has_openapi: bool) -> None:
-        """Build the generated Fumadocs site from the AI's nav plan."""
-        from .site.builder import build_fumadocs_from_plan
+        """Build the generated MkDocs Material site from the AI's nav plan."""
+        from .site.builder import build_mkdocs_from_plan
 
-        build_fumadocs_from_plan(
+        build_mkdocs_from_plan(
             self.repo_root, self.output_dir, self.cfg, plan, has_openapi
         )
-        console.print("[green]✓[/green] Fumadocs site built")
+        console.print("[green]✓[/green] MkDocs site built")
 
     # ──────────────────────────────────────────────────────────────────────
     # Persistence helpers

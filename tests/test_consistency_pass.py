@@ -52,8 +52,8 @@ def test_consistency_pass_injects_missing_link(tmp_path):
 
     assert injected == 1
     patched = (output_dir / "order-fulfillment.md").read_text()
-    assert ":::note[See also]" in patched
-    assert "/payments-billing" in patched
+    assert "/// note | See also" in patched
+    assert "(payments-billing.md)" in patched
     assert "charge_card" in patched
     # Payments page untouched
     assert (output_dir / "payments-billing.md").read_text() == payments_content
@@ -66,7 +66,7 @@ def test_consistency_pass_skips_existing_link(tmp_path):
 
     orders_content = (
         "# Order Fulfillment\n\n"
-        "See [Payments & Billing](/payments-billing) for charge details.\n"
+        "See [Payments & Billing](payments-billing.md) for charge details.\n"
     )
     (output_dir / "order-fulfillment.md").write_text(orders_content)
     (output_dir / "payments-billing.md").write_text("# Payments\n")

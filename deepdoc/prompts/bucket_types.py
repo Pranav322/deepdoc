@@ -915,16 +915,16 @@ A brief table: Language, Framework, Primary DB, Cache/Queue, Key integrations.
 Derive only from evidence — no invented entries.
 
 ### How to Get Running Locally
-Reference the Setup page with a `<Callout>`:
-```mdx
-<Callout type="info">
-  See [Local Setup](/local-development-setup) for the complete step-by-step guide, including all required
-  environment variables and service dependencies.
-</Callout>
+Reference the Setup page with a callout:
+```
+/// info
+See [Local Setup](/local-development-setup) for the complete step-by-step guide, including all required
+environment variables and service dependencies.
+///
 ```
 
 ### Reading Order for Different Roles
-A `<Tabs>` block with tabs for at least: Backend Developer, DevOps/Infra, and New Tech Lead.
+A set of `/// tab | Role` blocks with tabs for at least: Backend Developer, DevOps/Infra, and New Tech Lead.
 Each tab lists 4–6 documentation pages in the order they should be read, with brief (one-line)
 explanations of why each page matters for that role.
 
@@ -1001,8 +1001,8 @@ without codebase context. Skip obvious generic names.
 - Internal system names, feature flags, integration codenames
 - Fields whose meaning is only clear from business context (e.g. `exclusive_user`, `cashback_amt`)
 
-Use `<Accordions>` to group terms by domain (Orders, Users, Payments, etc.).
-Each group is one `<Accordion>`. Inside each accordion write terms as:
+Use `/// details | Domain` blocks to group terms by domain (Orders, Users, Payments, etc.).
+Each group is one `/// details | ...` block. Inside each block write terms as:
 
 **`TermName`** — Plain-English definition in one sentence. Link to the most relevant page.
 
@@ -1099,7 +1099,7 @@ For each major feature area documented in evidence, describe:
 - The root cause pattern.
 - The fix.
 
-Format as a `<Accordions>` component, one accordion per failure mode.
+Format as a set of `/// details | Failure mode` blocks, one block per failure mode.
 
 ### Exception Handling Map
 For each distinct exception type handled in the codebase (from evidence):
@@ -1117,7 +1117,7 @@ If monitoring hooks (Prometheus, NewRelic, Sentry, etc.) are found in evidence:
 - Every command, path, key, and endpoint must come from evidence. Never invent.
 - If something cannot be determined from static analysis (e.g., dashboard URLs),
   say: *"Check with the team — not determinable from source."*
-- Use `<Callout type="warn">` for anything that could cause data loss if done wrong.
+- Use a `/// warning` callout for anything that could cause data loss if done wrong.
 - Write in imperative second person ("Run this", "Check this key", "If you see X, do Y").
 - Include at least one Mermaid sequence or flowchart diagram showing the debug flow for
   the most common production issue.
@@ -1160,7 +1160,7 @@ Table: Tool | Required Version | Install Command. Include only tools evidenced i
 
 ### Clone and Install
 Exact commands for cloning, installing dependencies, and setting up the virtual environment
-or node_modules. Use `<Steps>` component.
+or node_modules. Use a numbered list with bold step titles.
 
 ### Environment Variables
 For EVERY environment variable referenced in the codebase (from .env.example, os.environ,
@@ -1180,14 +1180,14 @@ credentials), and how to set it up. Be honest if something requires real credent
 
 ### Starting the Service
 Exact command(s) to start the server, background workers, and any required sidecars.
-Use `<Steps>` and note expected output so the developer knows it worked.
+Use a numbered list with bold step titles and note expected output so the developer knows it worked.
 
 ### Verifying It Works
 2–3 test requests or health checks to confirm the service is running correctly.
 Include exact curl or browser instructions.
 
 ### Troubleshooting Common Setup Issues
-`<Accordions>` with the top 5 setup failure modes and their fixes.
+A set of `/// details | Issue` blocks with the top 5 setup failure modes and their fixes.
 Derive from evidence: missing env vars, migration failures, dependency conflicts, port conflicts.
 
 ## Hard rules

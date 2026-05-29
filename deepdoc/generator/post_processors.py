@@ -268,6 +268,26 @@ def _normalize_internal_doc_url(target: str) -> str:
     return normalized or "/"
 
 
+def _to_mkdocs_relative(url: str) -> str:
+    """Convert a validated root-absolute doc URL (``/slug``) into a MkDocs-relative
+    ``.md`` path so links resolve in the statically built site.
+
+    ``/`` → ``index.md``; ``/auth`` → ``auth.md``; ``/glossary#term`` → ``glossary.md#term``.
+    External links, protocol-relative links, ``/api/`` pages, and targets that already
+    point at a file are returned unchanged.
+    """
+    if not url.startswith("/") or url.startswith("//") or url.startswith("/api/"):
+        return url
+    path, sep, frag = url.partition("#")
+    if path in ("", "/"):
+        return "index.md" + (sep + frag if sep else "")
+    slug = path[1:]
+    last_segment = slug.rsplit("/", 1)[-1]
+    if "." in last_segment:  # already a file reference
+        return url
+    return f"{slug}.md" + (sep + frag if sep else "")
+
+
 def _normalize_doc_title_key(value: str) -> str:
     cleaned = html.unescape(value or "")
     cleaned = re.sub(r"<[^>]+>", " ", cleaned)
@@ -366,9 +386,10 @@ def repair_internal_doc_links(
         resolved = resolve_target(target, label=label)
         if resolved is None:
             return label
-        if resolved == target:
+        relative = _to_mkdocs_relative(resolved)
+        if relative == target:
             return match.group(0)
-        return f"[{label}]({resolved})"
+        return f"[{label}]({relative})"
 
     def replace_tag(match: re.Match[str]) -> str:
         tag = match.group("tag")
@@ -384,12 +405,13 @@ def repair_internal_doc_links(
         )
         if resolved is None:
             resolved = "/" if "/" in valid_urls else target
-        if resolved == target:
+        relative = _to_mkdocs_relative(resolved)
+        if relative == target:
             return match.group(0)
 
         replaced_attrs = (
             attrs[: href_match.start("target")]
-            + resolved
+            + relative
             + attrs[href_match.end("target") :]
         )
         return f"<{tag}{replaced_attrs}>"
@@ -748,41 +770,6 @@ def strip_leaked_provenance_fields(content: str) -> str:
     return "\n".join(result)
 
 
-# Patterns that break the MDX parser when .md files are processed with format:'mdx'.
-# - `<=` and bare `<` before space/digit → MDX tries to open a JSX tag
-# - `{...}` containing `:` or starting with digit/quote → MDX tries to eval as JS expression
-_MDX_ANGLE_HAZARDS = re.compile(r"<=|<(?=\s|\d)")
-_MDX_BRACE_HAZARDS = re.compile(r"\{([^}]*[:][^}]*|[0-9\"][^}]*)\}")
-
-
-def escape_mdx_angle_hazards(content: str) -> str:
-    """Escape MDX parse hazards outside code blocks and YAML frontmatter.
-
-    Handles:
-    - `<=` / bare `<` before space or digit (would be parsed as JSX tag open)
-    - `{...}` with dict-like content (would be parsed as JS expression)
-    """
-    # Split off YAML frontmatter so we never touch it — frontmatter uses raw
-    # JSON objects as field values and must not be HTML-entity escaped.
-    frontmatter = ""
-    body = content
-    fm_match = re.match(r"^(---\n[\s\S]*?\n---\n)", content)
-    if fm_match:
-        frontmatter = fm_match.group(1)
-        body = content[len(frontmatter):]
-
-    parts = re.split(r"(```[\s\S]*?```)", body)
-    result = []
-    for i, part in enumerate(parts):
-        if i % 2 == 1:
-            result.append(part)
-        else:
-            part = _MDX_ANGLE_HAZARDS.sub(lambda m: "&lt;" + m.group(0)[1:], part)
-            part = _MDX_BRACE_HAZARDS.sub(lambda m: "&#123;" + m.group(1) + "&#125;", part)
-            result.append(part)
-    return frontmatter + "".join(result)
-
-
 def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> str:
     """Inject a collapsible source-file list after the first H1 heading."""
     if not content or not evidence_files:
@@ -802,33 +789,6 @@ def inject_source_files_disclosure(content: str, evidence_files: list[str]) -> s
         flags=re.MULTILINE,
     )
     return patched if count else content
-
-
-def normalize_fumadocs_directives(content: str) -> str:
-    """Normalize fumadocs callout directive names to the supported set.
-
-    Valid fumadocs directive types: note, tip, info, warning, danger, caution.
-    The LLM frequently uses shorthands like :::warn, :::error, :::success.
-    """
-    _alias: dict[str, str] = {
-        "warn": "warning",
-        "caution": "warning",
-        "alert": "warning",
-        "error": "danger",
-        "success": "tip",
-        "check": "tip",
-        "hint": "tip",
-        "important": "note",
-        "notice": "note",
-    }
-
-    def replace_directive(m: re.Match) -> str:
-        name = m.group(1).strip().lower()
-        canonical = _alias.get(name, name)
-        return f":::{canonical}"
-
-    # Only replace opening directives (:::name), not closing :::
-    return re.sub(r":::([a-z]+)", replace_directive, content)
 
 
 def fix_frontmatter_description(content: str) -> str:
@@ -913,44 +873,16 @@ def fix_bare_language_markers(content: str) -> str:
     return content
 
 
-def fix_leaf_card_directives(content: str) -> str:
-    """Convert LLM-invented ::card{...}\\nCONTENT\\n:: to :::card{...}\\nCONTENT\\n:::.
-
-    The fumadocs remark-directive plugin expects 'card' to be a *container*
-    directive (:::card ... :::) so it can carry child content.  The LLM
-    frequently uses the *leaf* directive form (::card) with a standalone ::
-    close marker — which remark-directive does not recognise, rendering both
-    the content and the :: as raw text.
-    """
-    def fix_cards_block(m: re.Match) -> str:
-        inner = m.group(1)
-        # ::card{...}\nCONTENT\n::  →  :::card{...}\nCONTENT\n:::
-        inner = re.sub(
-            r'^::card(\{[^}]*\})\n(.*?)\n^::$',
-            r':::card\1\n\2\n:::',
-            inner,
-            flags=re.MULTILINE | re.DOTALL,
-        )
-        return f':::cards\n{inner}\n:::'
-
-    return re.sub(
-        r':::cards\n(.*?)\n:::',
-        fix_cards_block,
-        content,
-        flags=re.DOTALL,
-    )
-
-
 def unwrap_markdown_trapped_in_code_fences(content: str) -> str:
     """Detect code fences that contain markdown content and unwrap them.
 
     The LLM sometimes forgets to close a code fence, leaving section headers
-    (## ...), callout directives (:::), and horizontal rules (---) trapped
-    inside a code block. These render as literal text instead of MDX.
+    (## ...), callout blocks (/// ...), and horizontal rules (---) trapped
+    inside a code block. These render as literal text instead of rich content.
     """
     # Pattern: a fenced block that contains markdown indicators
     MD_INDICATORS = re.compile(
-        r"^(?:#{1,6}\s|:::|\-\-\-\s*$|^\*\*\*\s*$)",
+        r"^(?:#{1,6}\s|///\s|\-\-\-\s*$|^\*\*\*\s*$)",
         re.MULTILINE,
     )
 
@@ -1048,7 +980,7 @@ def link_glossary_terms(content: str, terms: list[tuple[str, str]]) -> str:
             if not m:
                 continue
             start, end = m.span()
-            replacement = f"[{m.group(0)}](/domain-glossary#{slug})"
+            replacement = f"[{m.group(0)}](domain-glossary.md#{slug})"
             segment = segment[:start] + replacement + segment[end:]
             linked.add(term)
         return segment

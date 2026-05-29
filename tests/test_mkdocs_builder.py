@@ -24,15 +24,28 @@ from deepdoc.prompts import (
     START_HERE_SETUP_V2,
     SYSTEM_V2,
 )
-from deepdoc.site.builder import _ensure_md_frontmatter, build_fumadocs_from_plan
+from deepdoc.site.builder import _ensure_md_frontmatter, build_mkdocs_from_plan
 from tests.conftest import make_bucket, make_plan
 
 
-def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
+def test_build_mkdocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     output_dir = repo_root / "docs"
     output_dir.mkdir()
+
+    # Stage an OpenAPI spec so the Swagger UI page is generated.
+    (repo_root / "site" / "openapi").mkdir(parents=True)
+    (repo_root / "site" / "openapi" / "spec.json").write_text(
+        json.dumps(
+            {"openapi": "3.0.0", "info": {"title": "T", "version": "1"}, "paths": {}}
+        ),
+        encoding="utf-8",
+    )
+    # Leftover Fumadocs artifacts that the builder must clean up.
+    (repo_root / "site" / "next.config.mjs").write_text("// old", encoding="utf-8")
+    (repo_root / "site" / "app").mkdir()
+    (repo_root / "site" / "app" / "layout.tsx").write_text("x", encoding="utf-8")
 
     overview = make_bucket(
         "Overview",
@@ -58,7 +71,7 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
 
     (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
-    build_fumadocs_from_plan(
+    build_mkdocs_from_plan(
         repo_root,
         output_dir,
         {
@@ -76,128 +89,52 @@ def test_build_fumadocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
         has_openapi=True,
     )
 
+    mkdocs_yml = (repo_root / "site" / "mkdocs.yml").read_text(encoding="utf-8")
+    extra_css = (repo_root / "site" / "docs" / "stylesheets" / "extra.css").read_text(
+        encoding="utf-8"
+    )
+
+    # Core scaffold files exist.
     assert (output_dir / "index.md").exists()
-    assert (repo_root / "site" / "package.json").exists()
-    assert (repo_root / "site" / "postcss.config.mjs").exists()
-    assert (repo_root / "site" / "source.config.mjs").exists()
-    assert (repo_root / "site" / "next.config.mjs").exists()
-    assert (repo_root / "site" / "app" / "layout.tsx").exists()
-    assert (repo_root / "site" / "app" / "search" / "route.ts").exists()
-    assert (repo_root / "site" / "public" / "favicon.svg").exists()
+    assert (repo_root / "site" / "mkdocs.yml").exists()
+
+    # mkdocs.yml has the expected Material + pymdownx configuration.
+    assert 'site_name: "Demo"' in mkdocs_yml
+    assert "name: material" in mkdocs_yml
+    assert "pymdownx.blocks.admonition" in mkdocs_yml
+    assert "pymdownx.blocks.details" in mkdocs_yml
+    assert "pymdownx.blocks.tab" in mkdocs_yml
+    assert "format: !!python/name:pymdownx.superfences.fence_code_format" in mkdocs_yml
+    assert "site_dir: out" in mkdocs_yml
+
+    # Nav reflects the plan; endpoint_ref is consolidated into the API page.
+    assert "Auth: auth.md" in mkdocs_yml
+    assert "API Reference: api.md" in mkdocs_yml
+    assert "get-order.md" not in mkdocs_yml
+
+    # OpenAPI page + plugin wired in.
+    assert "swagger-ui-tag" in mkdocs_yml
+    assert (output_dir / "api.md").exists()
+    assert "<swagger-ui src=" in (output_dir / "api.md").read_text(encoding="utf-8")
+    assert (output_dir / "openapi" / "spec.json").exists()
+
+    # Brand colors mapped onto Material's CSS variables.
+    assert "--md-primary-fg-color: #EB3E25;" in extra_css
+
+    # Chatbot disabled → no chatbot page.
+    assert not (output_dir / "ask").exists()
+
+    # Fumadocs/Next.js artifacts removed; no stray root files.
+    assert not (repo_root / "site" / "next.config.mjs").exists()
+    assert not (repo_root / "site" / "app").exists()
+    assert not (repo_root / "site" / "package.json").exists()
     assert not (repo_root / "mint.json").exists()
-    assert not (repo_root / "app").exists()
-    assert not (repo_root / "package.json").exists()
 
-    page_tree = (repo_root / "site" / "lib" / "page-tree.generated.ts").read_text(
-        encoding="utf-8"
-    )
-    global_css = (repo_root / "site" / "app" / "global.css").read_text(encoding="utf-8")
-    next_config = (repo_root / "site" / "next.config.mjs").read_text(encoding="utf-8")
-    app_layout = (repo_root / "site" / "app" / "layout.tsx").read_text(encoding="utf-8")
-    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(
-        encoding="utf-8"
-    )
-    docs_page = (repo_root / "site" / "app" / "[[...slug]]" / "page.tsx").read_text(
-        encoding="utf-8"
-    )
-    api_page_component = (repo_root / "site" / "components" / "api-page.tsx").read_text(
-        encoding="utf-8"
-    )
-    openapi_lib = (repo_root / "site" / "lib" / "openapi.ts").read_text(
-        encoding="utf-8"
-    )
     auth_doc = (output_dir / "auth.md").read_text(encoding="utf-8")
-    assert '"url": "/"' in page_tree
-    assert '"name": "Core"' in page_tree
-    assert '"url": "/auth"' in page_tree
-    assert '"name": "API Reference"' in page_tree
-    assert '"url": "/api/get-order"' in page_tree
-    assert "--deepdoc-brand-primary: #EB3E25;" in global_css
-    assert ".deepdoc-chatbot-dock" not in global_css
-    assert ".deepdoc-chatbot-shell--visible" not in global_css
-    assert ".deepdoc-chatbot-shell--hidden" not in global_css
-    assert (repo_root / "site" / "app" / "ask" / "page.tsx").exists() is False
-    assert (repo_root / "site" / "components" / "chatbot-panel.tsx").exists() is False
-    assert (repo_root / "site" / "components" / "chatbot-toggle.tsx").exists() is False
-    assert (repo_root / "site" / "lib" / "chatbot-config.ts").exists() is False
-
-    package_json = json.loads(
-        (repo_root / "site" / "package.json").read_text(encoding="utf-8")
-    )
-    assert package_json["dependencies"]["fumadocs-openapi"] == "9.3.9"
-    assert package_json["dependencies"]["fumadocs-ui"] == "15.7.11"
-    assert package_json["dependencies"]["next"] == "15.3.0"
-    assert package_json["dependencies"]["react"] == "19.1.0"
-    assert package_json["dependencies"]["react-syntax-highlighter"] == "^15.6.1"
-    assert (
-        package_json["devDependencies"]["@types/react-syntax-highlighter"]
-        == "^15.5.13"
-    )
-    assert "fumadocs-ui/provider';" in app_layout
-    assert "NEXT_PUBLIC_DEEPDOC_SITE_BASE_PATH" in app_layout
-    assert (
-        "const searchApiPath = siteBasePath ? `${siteBasePath}/search` : '/search';"
-        in app_layout
-    )
-    assert "api: searchApiPath" in app_layout
-    assert 'title: "Demo"' in (output_dir / "index.md").read_text(encoding="utf-8")
-    assert "icon: 'favicon.svg'" in app_layout
-    assert "ChatbotToggle" not in app_layout
-    assert "provider/next" not in app_layout
-    assert "turbopack" not in next_config
-    assert "DEEPDOC_SITE_BASE_PATH" in next_config
-    assert "normalizedExplicitBasePath" in next_config
-    assert (
-        "siteBasePath = normalizedExplicitBasePath || githubPagesBasePath"
-        in next_config
-    )
-    assert "trailingSlash: useTrailingSlash" in next_config
-    assert "GITHUB_REPOSITORY" in next_config
-    assert "basePath: siteBasePath || undefined" in next_config
-    assert "assetPrefix: siteBasePath || undefined" in next_config
-    assert "APIPage" in mdx_components
-    assert "ComponentType" in docs_page
-    assert "TOCItemType" in docs_page
-    assert "page.data as { body:" in docs_page
-    assert "deepdoc_generated_at" in docs_page
-    assert "deepdoc_generated_commit" in docs_page
-    assert "Last indexed:" in docs_page
-    assert "Intl.DateTimeFormat('en-GB'" in docs_page
-    assert "import type { PageTree } from 'fumadocs-core/server';" in page_tree
-    assert "satisfies PageTree.Root" in page_tree
-    assert "APIPage as FumadocsAPIPage" in api_page_component
-    assert "createAPIPage" not in api_page_component
-    assert "createOpenAPI" in openapi_lib
-    assert "generateAPIParams" in openapi_lib
-    assert "getAPIPage" in openapi_lib
-    assert "manifest.json" in openapi_lib
-    assert "path.join(schemaDir, file)" in openapi_lib
-    assert "!/^manifest\\.json$/i.test(file)" in openapi_lib
-    assert "/^(openapi|swagger)(\\.|$)/i.test(file)" in openapi_lib
-    assert "openapiSource" not in openapi_lib
-    assert "openapiPlugin" not in openapi_lib
     assert auth_doc.startswith("---\n")
     assert 'title: "Auth"' in auth_doc
+    assert 'title: "Demo"' in (output_dir / "index.md").read_text(encoding="utf-8")
 
-    build_fumadocs_from_plan(
-        repo_root,
-        output_dir,
-        {
-            "project_name": "Demo",
-            "site": {
-                "repo_url": "https://example.com/repo",
-                "colors": {
-                    "primary": "#EB3E25",
-                    "light": "#EF624E",
-                    "dark": "#C1331F",
-                },
-            },
-        },
-        plan,
-        has_openapi=True,
-    )
-
-    assert (repo_root / "site" / "package.json").exists()
 
 
 def test_start_here_prompts_include_generation_placeholders() -> None:
@@ -216,7 +153,7 @@ def test_start_here_prompts_include_generation_placeholders() -> None:
         assert "{dependency_links}" in prompt
 
 
-def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(
+def test_build_mkdocs_preserves_handwritten_index_without_frontmatter(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -238,7 +175,7 @@ def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(
     (output_dir / "index.md").write_text(custom_index, encoding="utf-8")
     (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
-    build_fumadocs_from_plan(
+    build_mkdocs_from_plan(
         repo_root,
         output_dir,
         {"project_name": "Demo"},
@@ -256,7 +193,7 @@ def test_build_fumadocs_preserves_handwritten_index_without_frontmatter(
     assert auth_doc.startswith("---\n")
 
 
-def test_build_fumadocs_repairs_malformed_index_frontmatter(tmp_path: Path) -> None:
+def test_build_mkdocs_repairs_malformed_index_frontmatter(tmp_path: Path) -> None:
     repo_root = tmp_path / "repo"
     repo_root.mkdir()
     output_dir = repo_root / "docs"
@@ -285,7 +222,7 @@ It runs the admin platform.
     (output_dir / "index.md").write_text(malformed_index, encoding="utf-8")
     (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
-    build_fumadocs_from_plan(
+    build_mkdocs_from_plan(
         repo_root,
         output_dir,
         {"project_name": "Demo"},
@@ -303,7 +240,7 @@ It runs the admin platform.
     assert "## What This Does" in index_text
 
 
-def test_build_fumadocs_without_openapi_omits_api_route_scaffold(
+def test_build_mkdocs_without_openapi_omits_api_page(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -323,7 +260,7 @@ def test_build_fumadocs_without_openapi_omits_api_route_scaffold(
 
     (output_dir / "auth.md").write_text("# Auth\n", encoding="utf-8")
 
-    build_fumadocs_from_plan(
+    build_mkdocs_from_plan(
         repo_root,
         output_dir,
         {"project_name": "Demo"},
@@ -331,22 +268,14 @@ def test_build_fumadocs_without_openapi_omits_api_route_scaffold(
         has_openapi=False,
     )
 
-    mdx_components = (repo_root / "site" / "mdx-components.tsx").read_text(
-        encoding="utf-8"
-    )
-    assert not (
-        repo_root / "site" / "app" / "api" / "[[...slug]]" / "page.tsx"
-    ).exists()
-    assert not (
-        repo_root / "site" / "app" / "api" / "[[...slug]]" / "layout.tsx"
-    ).exists()
-    assert not (repo_root / "site" / "components" / "api-page.tsx").exists()
-    assert not (repo_root / "site" / "lib" / "openapi.ts").exists()
-    assert "@/components/api-page" not in mdx_components
-    assert "APIPage," not in mdx_components
+    mkdocs_yml = (repo_root / "site" / "mkdocs.yml").read_text(encoding="utf-8")
+    assert not (output_dir / "api.md").exists()
+    assert not (output_dir / "openapi").exists()
+    assert "swagger-ui-tag" not in mkdocs_yml
+    assert "API Reference: api.md" not in mkdocs_yml
 
 
-def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endpoint_pages(
+def test_build_mkdocs_renders_swagger_page_from_staged_spec(
     tmp_path: Path,
 ) -> None:
     repo_root = tmp_path / "repo"
@@ -354,16 +283,11 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
     output_dir = repo_root / "docs"
     output_dir.mkdir()
     (repo_root / "site" / "openapi").mkdir(parents=True)
-    (repo_root / "site" / "openapi" / "manifest.json").write_text(
+    # manifest.json is excluded; the real spec drives the Swagger page.
+    (repo_root / "site" / "openapi" / "manifest.json").write_text("[]", encoding="utf-8")
+    (repo_root / "site" / "openapi" / "deepdoc-openapi-0-health.json").write_text(
         json.dumps(
-            [
-                {
-                    "slug": "get-http-localhost-3000-health",
-                    "title": "Deep health check",
-                    "method": "GET",
-                    "path": "http://localhost:3000/health",
-                }
-            ]
+            {"openapi": "3.0.0", "info": {"title": "Health", "version": "1"}, "paths": {}}
         ),
         encoding="utf-8",
     )
@@ -386,7 +310,7 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
     (output_dir / "index.md").write_text("# Overview\n", encoding="utf-8")
     (output_dir / "operations-health.md").write_text("# Health\n", encoding="utf-8")
 
-    build_fumadocs_from_plan(
+    build_mkdocs_from_plan(
         repo_root,
         output_dir,
         {"project_name": "Demo"},
@@ -394,22 +318,33 @@ def test_build_fumadocs_surfaces_staged_openapi_operations_when_plan_has_no_endp
         has_openapi=True,
     )
 
-    page_tree = (repo_root / "site" / "lib" / "page-tree.generated.ts").read_text(
-        encoding="utf-8"
-    )
-    assert '"name": "API Playground"' in page_tree
-    assert '"url": "/api/get-http-localhost-3000-health"' in page_tree
-    assert '"name": "GET /health"' in page_tree
+    mkdocs_yml = (repo_root / "site" / "mkdocs.yml").read_text(encoding="utf-8")
+    api_md = (output_dir / "api.md").read_text(encoding="utf-8")
+    assert "swagger-ui-tag" in mkdocs_yml
+    assert "API Reference: api.md" in mkdocs_yml
+    assert '<swagger-ui src="openapi/deepdoc-openapi-0-health.json"/>' in api_md
+    assert (output_dir / "openapi" / "deepdoc-openapi-0-health.json").exists()
+    # The manifest itself must not be copied or rendered as a spec.
+    assert not (output_dir / "openapi" / "manifest.json").exists()
 
 
-def test_fumadocs_prompts_drop_mintlify_only_components() -> None:
-    assert "Mintlify" not in SYSTEM_V2
-    assert ":::note" in SYSTEM_V2
-    assert ":::cards" in SYSTEM_V2
-    assert ":::tabs{items=" in SYSTEM_V2
-    assert ":::accordions" in SYSTEM_V2
+def test_prompts_use_mkdocs_blocks_syntax() -> None:
+    # MkDocs Material pymdownx Blocks syntax is taught.
+    assert "/// note" in SYSTEM_V2
+    assert "/// tab |" in SYSTEM_V2
+    assert "/// details |" in SYSTEM_V2
+    assert "grid cards" in SYSTEM_V2
+
+    # Fumadocs remark-directives are not used as worked examples. They may only
+    # appear inside the explicit "NEVER write ..." prohibition line, so check for
+    # the directive at the start of a content line (how an example would appear).
+    for directive in ("\n:::cards", "\n:::steps", "\n:::accordions", "\n::step", "\n::card"):
+        assert directive not in SYSTEM_V2, f"unexpected directive example {directive!r}"
+
+    # Mintlify JSX components never appear at all.
     assert "<CardGroup" not in SYSTEM_V2
     assert "<AccordionGroup" not in SYSTEM_V2
+    assert "Mintlify" not in SYSTEM_V2
 
     for prompt in (ENDPOINT_BUCKET_V2, ENDPOINT_REF_V2):
         assert "ParamField" not in prompt
@@ -719,9 +654,9 @@ See [System Architecture & Overview](/architecture) first.
 
     repaired = repair_internal_doc_links(content, valid_urls, title_to_url, alias_map)
 
-    assert "[Database & Schema](/database-schema)" in repaired
-    assert "[System Architecture & Overview](/)" in repaired
-    assert 'title="Database & Schema" href="/database-schema"' in repaired
+    assert "[Database & Schema](database-schema.md)" in repaired
+    assert "[System Architecture & Overview](index.md)" in repaired
+    assert 'title="Database & Schema" href="database-schema.md"' in repaired
 
 
 def test_repair_internal_doc_links_strips_unresolvable_markdown_links() -> None:

@@ -42,7 +42,7 @@ Guidance for coding agents working in this repository.
 - `deepdoc/generator/evidence.py` — evidence pack assembly; `flow_context` included for buckets with `flow_id` generation hint; `generation_hints` null-guarded; Tier 0.5 (`_extract_owned_symbol_bodies`): when `owned_symbols` is set and >50% of a Tier 1 file's symbols are unowned, sends only owned symbol bodies + file header instead of full source; uses `Symbol.end_line` when `has_known_range()`, falls back to next-symbol boundary
 - `deepdoc/generator/consistency.py` — `CrossBucketConsistencyPass`; single post-generation LLM call that detects cross-link gaps between independently generated pages and appends `:::note[See also]` callouts; runs after `engine.generate_all()` in `pipeline_v2.py`; controlled by `consistency_pass` config key (default `true`); skips gracefully on LLM failure or already-linked pages
 - `deepdoc/generator/validation.py` — `PageValidator`; checks sections, files, routes, runtime/config/integration grounding, hallucinated paths/symbols, flow grounding, file coverage
-- `deepdoc/generator/post_processors.py` — MDX repair pipeline; `repair_mdx_component_blocks` calls `_repair_accordion_nesting` first; brace escaping skips lines containing `={`; `normalize_mdx_steps`, `escape_mdx_text_hazards`, `inject_source_files_disclosure`
+- `deepdoc/generator/post_processors.py` — MDX repair pipeline; `repair_mdx_component_blocks` calls `_repair_accordion_nesting` first; brace escaping skips lines containing `={`; `normalize_mdx_steps`, `escape_mdx_text_hazards`, `inject_source_files_disclosure`; **MDX hazard fixers** (all run in `generation.py` at all three post-processing call sites): `normalize_fumadocs_directives` (maps `:::warn`/`:::error`/`:::success` → valid fumadocs callout names), `fix_frontmatter_description` (strips trailing `::` artefacts from YAML `description:` field), `fix_bare_mermaid_fences` (inserts missing ` ```mermaid ` opening fence when LLM writes bare `mermaid` text), `fix_bare_language_markers` (fixes both `:typescript` suffix and standalone `typescript`-on-its-own-line patterns), `fix_leaf_card_directives` (converts `::card{...}\nCONTENT\n::` to `:::card{...}\nCONTENT\n:::` container directives)
 
 ### Chatbot
 - `deepdoc/chatbot/service.py` — `ChatbotQueryService`; `query`, `deep_research`, `code_deep`; re-exports `create_fastapi_app`; tests mock here
@@ -85,8 +85,10 @@ Guidance for coding agents working in this repository.
 ### Release and infrastructure
 - `pyproject.toml` — packaging, dependencies, pytest discovery
 - `README.md` — user-facing behavior and documented workflows
+- `CONTRIBUTING.md` — contributor guide: local setup, code style, testing expectations, PR process, release flows
 - `.github/workflows/release.yml` — Python package release automation (PyPI + GitHub)
 - `.github/workflows/release-vscode-extension.yml` — VS Code extension release automation
+- `examples/deepdoc-refresh.yml` — example GitHub Actions workflow for teams using DeepDoc to auto-refresh their own docs on push; **not** an active workflow in this repo (was moved out of `.github/workflows/` to prevent spurious CI runs)
 - `vscode-extension/package.json` — extension manifest, version, commands, settings
 - `vscode-extension/CHANGELOG.md` — extension release notes source
 

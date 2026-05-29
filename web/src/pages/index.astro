@@ -3,6 +3,7 @@ import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 import BackgroundRippleEffect from "../components/BackgroundRippleEffect.astro";
+import PipelineOrbit from "../components/PipelineOrbit.astro";
 
 const features = [
   {
@@ -549,18 +550,7 @@ const chatMessages = [
         </p>
       </div>
 
-      <div class="pipeline-stepper">
-        {pipeline.map((p, i) => {
-          const colors = ["#3778FF", "#9B7FFF", "#00E5A0", "#FF9E00", "#FF5F87"];
-          return (
-            <div class="pipeline-step" style={`--step-color: ${colors[i]}`}>
-              <div class="pipeline-step-num">0{i + 1}</div>
-              <div class="pipeline-step-name">{p.step}</div>
-              <div class="pipeline-step-note">{p.note}</div>
-            </div>
-          );
-        })}
-      </div>
+      <PipelineOrbit />
     </div>
   </section>
 

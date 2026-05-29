@@ -1,0 +1,619 @@
+---
+const phases = [
+  {
+    id: 1,
+    num: "01",
+    name: "Scan",
+    note: "Parse source files. Detect endpoints, runtime surfaces, integrations, and OpenAPI specs. No LLM calls.",
+    color: "#3778FF",
+    status: "completed",
+    energy: 100,
+    relatedIds: [2],
+    icon: `<circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>`,
+  },
+  {
+    id: 2,
+    num: "02",
+    name: "Plan",
+    note: "Multi-step LLM planner. Classify the repo, propose buckets, assign files, symbols, and artifacts.",
+    color: "#9B7FFF",
+    status: "completed",
+    energy: 85,
+    relatedIds: [1, 3],
+    icon: `<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>`,
+  },
+  {
+    id: 3,
+    num: "03",
+    name: "Generate",
+    note: "Build evidence packs per bucket. LLM call in parallel batches. Python-side MDX repair before write.",
+    color: "#00E5A0",
+    status: "in-progress",
+    energy: 65,
+    relatedIds: [2, 4],
+    icon: `<polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"/>`,
+  },
+  {
+    id: 4,
+    num: "04",
+    name: "API Ref",
+    note: "Stage OpenAPI assets into Fumadocs /api/* pages when a spec exists in the repo.",
+    color: "#FF9E00",
+    status: "pending",
+    energy: 45,
+    relatedIds: [3, 5],
+    icon: `<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>`,
+  },
+  {
+    id: 5,
+    num: "05",
+    name: "Build",
+    note: "Write the Fumadocs scaffold, page tree, nav, search route, and optional AI chatbot widget.",
+    color: "#FF5F87",
+    status: "pending",
+    energy: 20,
+    relatedIds: [4],
+    icon: `<path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/>`,
+  },
+];
+---
+
+<div class="orbit-wrapper" id="orbit-wrapper">
+
+  <!-- ── Orbital stage ──────────────────────────────────────── -->
+  <div class="orbit-stage" id="orbit-stage">
+
+    <!-- Orbit ring -->
+    <div class="orbit-ring"></div>
+
+    <!-- Central hub -->
+    <div class="orbit-hub" id="orbit-hub">
+      <div class="orbit-hub-ping orbit-hub-ping-1"></div>
+      <div class="orbit-hub-ping orbit-hub-ping-2"></div>
+      <div class="orbit-hub-core"></div>
+    </div>
+
+    <!-- Nodes -->
+    {phases.map((p) => (
+      <div
+        class="orbit-node"
+        id={`orbit-node-${p.id}`}
+        data-id={p.id}
+        data-color={p.color}
+        data-related={p.relatedIds.join(",")}
+        role="button"
+        tabindex="0"
+        aria-label={`Phase ${p.num}: ${p.name}`}
+      >
+        <!-- Glow aura -->
+        <div class="orbit-node-aura" style={`background: radial-gradient(circle, ${p.color}30 0%, transparent 70%)`}></div>
+        <!-- Icon circle -->
+        <div class="orbit-node-icon" style={`--nc: ${p.color}`}>
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            width="16" height="16"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            set:html={p.icon}
+          />
+        </div>
+        <!-- Label -->
+        <div class="orbit-node-label">{p.name}</div>
+      </div>
+    ))}
+  </div>
+
+  <!-- ── Info panel ─────────────────────────────────────────── -->
+  <div class="orbit-info" id="orbit-info">
+
+    <!-- Empty state -->
+    <div id="orbit-info-empty" class="orbit-info-empty">
+      <div class="orbit-info-hint-icon">
+        <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="10"/>
+          <path d="M12 8v4M12 16h.01"/>
+        </svg>
+      </div>
+      <p class="orbit-info-hint">Click any phase<br/>to explore the pipeline</p>
+    </div>
+
+    <!-- Detail state (hidden until a node is clicked) -->
+    <div id="orbit-info-detail" class="orbit-info-detail" style="display:none">
+      <div class="orbit-info-meta">
+        <span id="info-num" class="orbit-info-num"></span>
+        <span id="info-status" class="orbit-info-status"></span>
+      </div>
+      <h3 id="info-name" class="orbit-info-name"></h3>
+      <p id="info-note" class="orbit-info-note"></p>
+
+      <!-- Energy bar -->
+      <div class="orbit-info-energy">
+        <div class="orbit-info-energy-label">
+          <span>Energy level</span>
+          <span id="info-energy-val" class="orbit-info-energy-val"></span>
+        </div>
+        <div class="orbit-info-energy-track">
+          <div id="info-energy-bar" class="orbit-info-energy-bar"></div>
+        </div>
+      </div>
+
+      <!-- Related phases -->
+      <div id="info-related-wrap" class="orbit-info-related-wrap">
+        <div class="orbit-info-related-label">Connected phases</div>
+        <div id="info-related" class="orbit-info-related"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Styles ─────────────────────────────────────────────────── -->
+<style>
+  .orbit-wrapper {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    width: 100%;
+  }
+
+  /* Stage */
+  .orbit-stage {
+    position: relative;
+    flex-shrink: 0;
+    width: 440px;
+    height: 440px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Ring */
+  .orbit-ring {
+    position: absolute;
+    width: 380px;
+    height: 380px;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.07);
+    pointer-events: none;
+  }
+
+  /* Hub */
+  .orbit-hub {
+    position: absolute;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #9B7FFF, #3778FF, #00E5A0);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+    animation: hub-pulse 2.8s ease-in-out infinite;
+  }
+  .orbit-hub-ping {
+    position: absolute;
+    border-radius: 50%;
+    border: 1px solid rgba(255,255,255,0.18);
+    animation: hub-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+  }
+  .orbit-hub-ping-1 { width: 72px; height: 72px; }
+  .orbit-hub-ping-2 { width: 88px; height: 88px; animation-delay: 0.6s; opacity: 0.6; }
+  .orbit-hub-core {
+    width: 26px;
+    height: 26px;
+    border-radius: 50%;
+    background: rgba(255,255,255,0.85);
+    backdrop-filter: blur(8px);
+  }
+
+  /* Nodes */
+  .orbit-node {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    cursor: pointer;
+    transition: opacity 0.4s ease;
+  }
+  .orbit-node-aura {
+    position: absolute;
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+    transition: opacity 0.3s;
+    opacity: 0;
+  }
+  .orbit-node:hover .orbit-node-aura,
+  .orbit-node.is-active .orbit-node-aura {
+    opacity: 1;
+  }
+  .orbit-node-icon {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    border: 2px solid rgba(255,255,255,0.25);
+    background: var(--color-surface);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: rgba(255,255,255,0.7);
+    transform: translate(-50%, -50%);
+    transition: all 0.3s ease;
+    position: relative;
+  }
+  .orbit-node.is-active .orbit-node-icon {
+    background: var(--nc, #C2FF4D);
+    border-color: var(--nc, #C2FF4D);
+    color: #000;
+    transform: translate(-50%, -50%) scale(1.45);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--nc, #C2FF4D) 50%, transparent);
+  }
+  .orbit-node.is-related .orbit-node-icon {
+    border-color: var(--nc, #C2FF4D);
+    color: var(--nc, #C2FF4D);
+    animation: node-pulse 1.2s ease-in-out infinite;
+  }
+  .orbit-node-label {
+    position: absolute;
+    top: 28px;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+    font-family: var(--font-sans);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.55);
+    text-transform: uppercase;
+    pointer-events: none;
+    transition: color 0.3s, transform 0.3s;
+  }
+  .orbit-node.is-active .orbit-node-label {
+    color: #fff;
+    transform: translateX(-50%) scale(1.15);
+  }
+
+  /* Info panel */
+  .orbit-info {
+    flex: 1;
+    min-height: 300px;
+    border: 1px solid var(--color-line-strong);
+    border-radius: 18px;
+    background: var(--color-surface);
+    padding: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .orbit-info-empty {
+    text-align: center;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 12px;
+  }
+  .orbit-info-hint-icon {
+    color: var(--color-ink-faint);
+    opacity: 0.6;
+  }
+  .orbit-info-hint {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    color: var(--color-ink-faint);
+    line-height: 1.7;
+  }
+
+  .orbit-info-detail {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 18px;
+  }
+  .orbit-info-meta {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .orbit-info-num {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    letter-spacing: 0.12em;
+    color: var(--color-ink-faint);
+  }
+  .orbit-info-status {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    padding: 3px 10px;
+    border-radius: 100px;
+    border: 1px solid currentColor;
+  }
+  .orbit-info-name {
+    font-family: var(--font-sans);
+    font-size: 28px;
+    font-weight: 800;
+    color: var(--color-ink);
+    letter-spacing: -0.03em;
+    margin: 0;
+    line-height: 1.1;
+  }
+  .orbit-info-note {
+    font-family: var(--font-sans);
+    font-size: 14px;
+    line-height: 1.75;
+    color: var(--color-ink-muted);
+    margin: 0;
+  }
+  .orbit-info-energy {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .orbit-info-energy-label {
+    display: flex;
+    justify-content: space-between;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--color-ink-faint);
+    letter-spacing: 0.05em;
+  }
+  .orbit-info-energy-val { color: var(--color-ink-muted); }
+  .orbit-info-energy-track {
+    height: 3px;
+    background: var(--color-surface-raised);
+    border-radius: 4px;
+    overflow: hidden;
+  }
+  .orbit-info-energy-bar {
+    height: 100%;
+    border-radius: 4px;
+    transition: width 0.5s cubic-bezier(0.16,1,0.3,1);
+  }
+  .orbit-info-related-wrap { display: flex; flex-direction: column; gap: 8px; }
+  .orbit-info-related-label {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--color-ink-faint);
+  }
+  .orbit-info-related { display: flex; flex-wrap: wrap; gap: 6px; }
+  .orbit-related-btn {
+    font-family: var(--font-sans);
+    font-size: 12px;
+    padding: 4px 12px;
+    border-radius: 6px;
+    border: 1px solid var(--color-line-strong);
+    background: transparent;
+    color: var(--color-ink-muted);
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 5px;
+  }
+  .orbit-related-btn:hover {
+    background: var(--color-surface-raised);
+    color: var(--color-ink);
+    border-color: var(--color-ink-faint);
+  }
+
+  /* Keyframes */
+  @keyframes hub-pulse {
+    0%,100% { box-shadow: 0 0 0 0 rgba(155,127,255,0.3); }
+    50%      { box-shadow: 0 0 0 12px rgba(155,127,255,0); }
+  }
+  @keyframes hub-ping {
+    0%   { transform: scale(1); opacity: 0.5; }
+    100% { transform: scale(1.6); opacity: 0; }
+  }
+  @keyframes node-pulse {
+    0%,100% { box-shadow: 0 0 0 0 currentColor; opacity: 1; }
+    50%      { box-shadow: 0 0 0 5px transparent; opacity: 0.7; }
+  }
+
+  /* Responsive */
+  @media (max-width: 860px) {
+    .orbit-wrapper { flex-direction: column; gap: 24px; }
+    .orbit-stage { width: 340px; height: 340px; }
+    .orbit-ring  { width: 290px; height: 290px; }
+    .orbit-info  { width: 100%; min-height: unset; }
+  }
+  @media (max-width: 480px) {
+    .orbit-stage { width: 300px; height: 300px; }
+    .orbit-ring  { width: 256px; height: 256px; }
+  }
+</style>
+
+<!-- ── Script ─────────────────────────────────────────────────── -->
+<script define:vars={{ phases }}>
+  const RADIUS_DESKTOP = 185;
+  const RADIUS_TABLET  = 140;
+  const RADIUS_MOBILE  = 122;
+  const SPEED = 0.3;   // degrees per tick
+  const INTERVAL = 50; // ms
+
+  let angle = 0;
+  let autoRotate = true;
+  let activeId = null;
+
+  const stage    = document.getElementById('orbit-stage');
+  const wrapper  = document.getElementById('orbit-wrapper');
+  const infoWrap = document.getElementById('orbit-info');
+
+  // Collect node elements
+  const nodeEls = phases.map(p => document.getElementById(`orbit-node-${p.id}`));
+
+  function getRadius() {
+    const w = stage ? stage.offsetWidth : 440;
+    if (w <= 310) return RADIUS_MOBILE;
+    if (w <= 360) return RADIUS_TABLET;
+    return RADIUS_DESKTOP;
+  }
+
+  function tick() {
+    if (autoRotate) angle = (angle + SPEED) % 360;
+    const total = phases.length;
+    const r = getRadius();
+
+    nodeEls.forEach((el, i) => {
+      if (!el) return;
+      const nodeAngle = ((i / total) * 360 + angle) % 360;
+      const rad = (nodeAngle * Math.PI) / 180;
+      const x = r * Math.cos(rad);
+      const y = r * Math.sin(rad);
+      const zBase = Math.round(100 + 50 * Math.cos(rad));
+      const opBase = Math.max(0.4, 0.4 + 0.6 * ((1 + Math.sin(rad)) / 2));
+
+      el.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+      el.style.zIndex = activeId === phases[i].id ? '200' : String(zBase);
+
+      if (activeId === null) {
+        el.style.opacity = String(opBase);
+      } else if (activeId === phases[i].id) {
+        el.style.opacity = '1';
+      } else {
+        el.style.opacity = '0.25';
+      }
+    });
+  }
+
+  const timer = setInterval(tick, INTERVAL);
+
+  // ── Node click ─────────────────────────────────────────────
+  nodeEls.forEach((el, i) => {
+    if (!el) return;
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const id = phases[i].id;
+      if (activeId === id) {
+        deactivate();
+      } else {
+        activate(id);
+      }
+    });
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') el.click();
+    });
+  });
+
+  // Click outside → deactivate
+  document.addEventListener('click', (e) => {
+    if (stage && !stage.contains(e.target) && infoWrap && !infoWrap.contains(e.target)) {
+      deactivate();
+    }
+  });
+
+  function activate(id) {
+    activeId = id;
+    autoRotate = false;
+
+    const phase = phases.find(p => p.id === id);
+    if (!phase) return;
+
+    // Update node classes
+    nodeEls.forEach((el, i) => {
+      if (!el) return;
+      el.classList.remove('is-active', 'is-related');
+      if (phases[i].id === id) el.classList.add('is-active');
+      else if (phase.relatedIds.includes(phases[i].id)) el.classList.add('is-related');
+    });
+
+    // Update info panel
+    showDetail(phase);
+  }
+
+  function deactivate() {
+    activeId = null;
+    autoRotate = true;
+    nodeEls.forEach(el => el && el.classList.remove('is-active', 'is-related'));
+    showEmpty();
+  }
+
+  function showEmpty() {
+    const empty  = document.getElementById('orbit-info-empty');
+    const detail = document.getElementById('orbit-info-detail');
+    if (empty)  empty.style.display  = 'flex';
+    if (detail) detail.style.display = 'none';
+    if (infoWrap) infoWrap.style.borderColor = 'var(--color-line-strong)';
+  }
+
+  function showDetail(phase) {
+    const empty  = document.getElementById('orbit-info-empty');
+    const detail = document.getElementById('orbit-info-detail');
+    if (empty)  empty.style.display  = 'none';
+    if (detail) detail.style.display = 'flex';
+
+    // Border color matches phase
+    if (infoWrap) infoWrap.style.borderColor = phase.color + '60';
+
+    // Num
+    const numEl = document.getElementById('info-num');
+    if (numEl) numEl.textContent = phase.num;
+
+    // Status badge
+    const statusEl = document.getElementById('info-status');
+    if (statusEl) {
+      statusEl.textContent =
+        phase.status === 'completed'  ? 'Complete'    :
+        phase.status === 'in-progress'? 'In progress' : 'Pending';
+      statusEl.style.color = phase.color;
+      statusEl.style.borderColor = phase.color + '60';
+      statusEl.style.background  = phase.color + '12';
+    }
+
+    // Name
+    const nameEl = document.getElementById('info-name');
+    if (nameEl) {
+      nameEl.textContent = phase.name;
+      nameEl.style.color = 'var(--color-ink)';
+    }
+
+    // Note
+    const noteEl = document.getElementById('info-note');
+    if (noteEl) noteEl.textContent = phase.note;
+
+    // Energy
+    const energyVal = document.getElementById('info-energy-val');
+    const energyBar = document.getElementById('info-energy-bar');
+    if (energyVal) energyVal.textContent = phase.energy + '%';
+    if (energyBar) {
+      energyBar.style.width = phase.energy + '%';
+      energyBar.style.background = `linear-gradient(90deg, ${phase.color}aa, ${phase.color})`;
+    }
+
+    // Related
+    const relatedWrap = document.getElementById('info-related-wrap');
+    const relatedEl   = document.getElementById('info-related');
+    if (relatedEl && relatedWrap) {
+      if (phase.relatedIds.length === 0) {
+        relatedWrap.style.display = 'none';
+      } else {
+        relatedWrap.style.display = 'flex';
+        relatedEl.innerHTML = phase.relatedIds.map(rid => {
+          const rel = phases.find(p => p.id === rid);
+          if (!rel) return '';
+          return `<button class="orbit-related-btn" data-target="${rid}">
+            ${rel.name}
+            <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
+          </button>`;
+        }).join('');
+
+        relatedEl.querySelectorAll('.orbit-related-btn').forEach(btn => {
+          btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            activate(Number(btn.dataset.target));
+          });
+        });
+      }
+    }
+  }
+</script>

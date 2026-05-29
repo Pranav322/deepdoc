@@ -9,8 +9,8 @@ export const RemotionRoot = () => {
       component={DeepDocVideo}
       durationInFrames={T.TOTAL}
       fps={30}
-      width={1280}
-      height={720}
+      width={1920}
+      height={1080}
     />
   );
 };

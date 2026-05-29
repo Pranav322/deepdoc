@@ -9,6 +9,14 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.3.6] - 2026-05-29
+
+### Features
+
+- **Symbol-level evidence packs** — `EvidenceAssembler._build_source_context` now applies a focused "Tier 0.5" extraction for Tier 1 files (≤500 lines) when a bucket's `owned_symbols` is set and more than half the file's symbols are unowned. Only the owned symbol bodies + the file header (imports, module preamble) are sent to the LLM instead of the full file. Uses `Symbol.end_line` when available, falls back to next-symbol boundary inference. Consistent with the existing Tier 3 (`_extract_key_sections`) narrowing behaviour.
+
+- **Cross-bucket consistency pass** — A single post-generation LLM call now runs after all pages are generated. It receives compact per-page summaries (slug, title, type, H2 headings) and returns cross-linking gaps — pages that discuss concepts documented elsewhere but have no link to them. For each gap, a `:::note[See also]` callout is appended to the source page if the target slug is not already linked. Skips gracefully on LLM failure and on already-linked pages. Controlled by `consistency_pass: true/false` in config (default on).
+
 ## [2.3.5] - 2026-05-29
 
 ### Bug Fixes

@@ -18,7 +18,7 @@
 
 Auto-generate deep engineering documentation from real codebases using AI.
 
-DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich MDX pages with Mermaid diagrams, and builds a local-first Fumadocs site with Orama search.
+DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich Markdown pages with Mermaid diagrams, and builds a local-first MkDocs Material site with built-in search.
 
 ## Contents
 
@@ -43,11 +43,11 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **Bucket-based documentation architecture** — system, feature, endpoint, integration, and database buckets instead of one-file-per-page noise.
 - **Multi-step AI planner** — classifies the repo, proposes buckets, then assigns files, symbols, artifacts, and dependencies into a final reader-first plan.
 - **Giant-file handling** — large files are decomposed into feature-aligned clusters so a single controller can feed multiple doc pages.
-- **MDX-safe generation** — generated pages are repaired and validated in Python before being written; deploy-time quality gates block failed, invalid, or stub pages before the Fumadocs build.
+- **Stable plain-Markdown generation** — generated pages are plain CommonMark (no MDX/JSX compile step, so a page can never fail to build); they are repaired and validated in Python before being written, and deploy-time quality gates block failed, invalid, or stub pages before the build.
 - **Evidence-first chatbot answers** — final code proof is hydrated from archived source snippets with exact file paths and line ranges, not just retrieval guesses.
 - **Incremental updates** — `deepdoc update` regenerates only stale or structurally affected docs against the last synced commit.
-- **OpenAPI-aware API docs** — auto-detects OpenAPI/Swagger specs and stages interactive `/api/*` pages in the generated site.
-- **Local-first Fumadocs site** — generates a `site/` Next.js app with Fumadocs UI, Mermaid rendering, and built-in search; `deepdoc deploy` exports a static site to any host.
+- **OpenAPI-aware API docs** — auto-detects OpenAPI/Swagger specs and renders an interactive Swagger UI page (`mkdocs-swagger-ui-tag`) in the generated site.
+- **Local-first MkDocs Material site** — generates a `site/mkdocs.yml` (Material theme, Mermaid, built-in search); `deepdoc deploy` runs `mkdocs build` and exports a static site to any host. Pure Python — no Node.js required.
 
 Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider. Parses Python, JavaScript/TypeScript, Go, PHP, and Vue.
 
@@ -90,7 +90,14 @@ pip install click litellm gitpython rich pyyaml jinja2
 pip install -e . --no-deps
 ```
 
-You will also need **Node 18+** on `PATH` when you run `deepdoc serve` or `deepdoc deploy`. DeepDoc generation itself uses Python-side repair and validation; Node is only needed for the generated Fumadocs site.
+To preview or deploy the generated site you also need **MkDocs Material** (pure Python — no Node.js):
+
+```bash
+pip install mkdocs-material
+pip install mkdocs-swagger-ui-tag   # only when your repo has an OpenAPI/Swagger spec
+```
+
+`deepdoc serve` / `deepdoc deploy` will tell you the exact `pip install` command if MkDocs is missing.
 
 ### Verify installation
 
@@ -307,9 +314,9 @@ deepdoc generate --exclude "tests/**"
 
 1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
-3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through Python-side MDX repair, grounding validation, and bounded quality retries before being written to disk.
-4. **Phase 4: API Ref** — Stage OpenAPI assets for the generated Fumadocs `/api/*` pages when a spec exists.
-5. **Phase 5: Build** — Write the generated `site/` Fumadocs scaffold, page tree, search route, and static assets from the generated plan.
+3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through Python-side Markdown repair, grounding validation, and bounded quality retries before being written to disk.
+4. **Phase 4: API Ref** — Stage OpenAPI specs and render them on a single interactive Swagger UI page (`mkdocs-swagger-ui-tag`) when a spec exists.
+5. **Phase 5: Build** — Write the generated `site/mkdocs.yml` scaffold (Material theme), nav, and brand stylesheet from the generated plan.
 
 **Options:**
 
@@ -344,8 +351,8 @@ deepdoc update --deploy           # Update + deploy
    - **incremental** — regenerate only the stale bucket pages
    - **targeted replan** — new/deleted files or endpoint structure changes; re-plans affected buckets then regenerates them. Full replan is never triggered automatically for normal code changes.
 4. Compares the saved scan cache with the current scan so semantic endpoint changes can refresh impacted docs even when ownership files do not line up directly.
-5. Regenerates only the affected bucket pages. Deleted files are cleaned up in-place: orphaned buckets and their MDX pages are removed, partially-emptied buckets are marked stale and regenerated.
-6. Appends an entry to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.mdx` so the docs site always shows a current commit-by-commit change log.
+5. Regenerates only the affected bucket pages. Deleted files are cleaned up in-place: orphaned buckets and their Markdown pages are removed, partially-emptied buckets are marked stale and regenerated.
+6. Appends an entry to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.md` so the docs site always shows a current commit-by-commit change log.
 7. Incrementally refreshes the chatbot corpora from the same update run.
 8. Rebuilds site config and nav afterward.
 
@@ -357,7 +364,7 @@ Generation writes quality artifacts under `.deepdoc/`:
 - `.deepdoc/generation_quality.json` records invalid/degraded pages, coverage metrics, local setup warnings, and consistency summary data.
 - `.deepdoc/consistency_warnings.json` records warning-only cross-page identifier consistency findings.
 
-Generated MDX pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, and `deepdoc_prereqs` (prerequisite page slugs). The generated Fumadocs site renders a subtle "Last generated from commit ..." badge and wires prev/next navigation arrows automatically. Pages with prerequisites show a "Read first:" callout at the top.
+Generated Markdown pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, and `deepdoc_prereqs` (prerequisite page slugs). The MkDocs Material theme renders these pages with built-in navigation, search, and table of contents.
 
 **Options:**
 
@@ -379,26 +386,26 @@ This is useful after `generate` or `update` when you want a quick health check w
 
 ### `deepdoc serve`
 
-Preview the generated docs locally with live reload using the generated Fumadocs app in `site/`.
+Preview the generated docs locally with live reload using the generated MkDocs Material site in `site/`.
 
 ```bash
 deepdoc serve
 deepdoc serve --port 8001
 ```
 
-Requires Node.js >= 18 to be installed. Site dependencies are auto-installed into `site/node_modules/` on first run.
+Runs `mkdocs serve` against `site/mkdocs.yml`. Requires `pip install mkdocs-material` (pure Python — no Node.js).
 
 ### `deepdoc deploy`
 
-Build and export the generated Fumadocs site.
+Build and export the generated MkDocs Material site.
 
 ```bash
 deepdoc deploy
 ```
 
-This runs `next build` inside `site/` and writes the static export to `site/out/`. You can deploy that directory to Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any static host.
+This runs `mkdocs build` against `site/mkdocs.yml` and writes the static HTML to `site/out/`. You can deploy that directory to Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any static host.
 
-Before building, `deepdoc deploy` checks `.deepdoc/generation_quality.json` and generated MDX frontmatter. It refuses to deploy when the last generation has failed/invalid pages or when `docs/` still contains pages marked `deepdoc_status: "invalid"` or `stub: true`; rerun `deepdoc generate` after fixing those issues.
+Before building, `deepdoc deploy` checks `.deepdoc/generation_quality.json` and generated page frontmatter. It refuses to deploy when the last generation has failed/invalid pages or when `docs/` still contains pages marked `deepdoc_status: "invalid"` or `stub: true`; rerun `deepdoc generate` after fixing those issues.
 
 If you want GitHub Pages specifically, this repo includes a workflow at `.github/workflows/github-pages.yml` that publishes the checked-in `site/out/` export through the official Pages Actions flow. That means you do not need to move the export into a branch `docs/` folder.
 
@@ -645,7 +652,7 @@ site:
 | `project_name` | directory name | Project name used in site title |
 | `description` | `""` | Short project description |
 | `output_dir` | `docs` | Where generated markdown pages are written |
-| `site_dir` | `site` | Where the generated Fumadocs site lives |
+| `site_dir` | `site` | Where the generated MkDocs site config (`mkdocs.yml`) lives |
 | **LLM** | | |
 | `llm.provider` | `anthropic` | `anthropic`, `openai`, `azure`, `ollama`, or any LiteLLM alias |
 | `llm.model` | `claude-3-5-sonnet-20241022` | Model name (use provider prefix for non-Anthropic, e.g. `azure/gpt-4.1`) |
@@ -672,7 +679,7 @@ site:
 | `github_pages.branch` | `gh-pages` | Branch for GitHub Pages deploy |
 | `github_pages.remote` | `origin` | Git remote for deploy |
 | **Site** | | |
-| `site.repo_url` | `""` | Repo URL shown in the generated Fumadocs navigation |
+| `site.repo_url` | `""` | Repo URL shown in the generated MkDocs Material navigation |
 | `site.favicon` | `""` | Path to favicon |
 | `site.logo` | `""` | Path to logo |
 | **Compatibility** | | |
@@ -700,7 +707,7 @@ The chatbot has three independent model surfaces that you can mix across provide
 | `chatbot.answer.*` | Chatbot answer generation | GPT-4o-mini, Claude, Gemini Flash |
 | `chatbot.embeddings.*` | Vector embeddings for retrieval | text-embedding-3-large, Gemini text-embedding-004 |
 
-`deepdoc serve` auto-starts the chatbot backend alongside the Fumadocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
+`deepdoc serve` auto-starts the chatbot backend alongside the MkDocs site. The backend port is deterministically assigned from your repo path (range 8100–8799) unless you set an explicit `base_url`.
 
 ### Evidence-First Responses
 
@@ -1099,8 +1106,8 @@ During `deepdoc generate`, six corpora are built and stored in `.deepdoc/chatbot
 |--------|--------|-------------|
 | **Code chunks** | All parsed source files | Code split by line count with overlap, tagged with symbols and file paths |
 | **Artifact chunks** | Config files (Dockerfile, package.json, OpenAPI specs, etc.) | Non-code project files split similarly |
-| **Doc summary chunks** | Generated documentation pages | First sections extracted from each generated MDX page |
-| **Doc full chunks** | Generated documentation pages | Section-level chunks from the full generated MDX pages |
+| **Doc summary chunks** | Generated documentation pages | First sections extracted from each generated Markdown page |
+| **Doc full chunks** | Generated documentation pages | Section-level chunks from the full generated Markdown pages |
 | **Repo doc chunks** | Repo-authored docs such as `README.md`, `docs/`, design notes, and notebooks | Raw repo documentation kept separate from generated pages |
 | **Relationship chunks** | Imports, symbols, call graph, and graph-neighbor summaries | Lightweight graph-style retrieval context |
 
@@ -1189,7 +1196,7 @@ POST /query-context
 
 For local development, `deepdoc serve` handles everything automatically. For production:
 
-1. Deploy the Fumadocs static site (`site/out/`) to any static host.
+1. Deploy the MkDocs static site (`site/out/`) to any static host.
 2. Deploy `chatbot_backend/` separately to a Python-capable host.
 3. Set `chatbot.backend.base_url` in `.deepdoc.yaml` to point at the deployed backend URL.
 4. Rebuild the site so the frontend picks up the new backend URL: `deepdoc deploy`.
@@ -1305,20 +1312,17 @@ your-repo/
 ├── .deepdoc_manifest.json     # Legacy source hash manifest
 ├── .deepdoc_plan.json         # Legacy compatibility plan file
 ├── .deepdoc_file_map.json     # Legacy compatibility file map
-├── docs/                       # Generated MDX pages
-│   ├── index.mdx
-│   ├── architecture.mdx
-│   ├── setup-and-configuration.mdx
-│   ├── orders-api.mdx
-│   ├── get-api-v1-orders.mdx
+├── docs/                       # Generated Markdown pages
+│   ├── index.md
+│   ├── architecture.md
+│   ├── setup-and-configuration.md
+│   ├── api.md                  # Swagger UI page (when an OpenAPI spec exists)
+│   ├── openapi/                # Staged OpenAPI specs
 │   └── ...
-└── site/                       # Generated Fumadocs app
-    ├── app/
-    ├── components/
-    ├── lib/
-    ├── openapi/                # Staged OpenAPI assets (when a spec exists)
-    ├── public/
-    └── out/                    # Static export after `deepdoc deploy`
+└── site/                       # Generated MkDocs Material site
+    ├── mkdocs.yml
+    ├── docs/stylesheets/extra.css
+    └── out/                    # Static HTML after `deepdoc deploy`
 ```
 
 ---
@@ -1523,7 +1527,7 @@ deepdoc generate --force           # Full regen with new model
 ## Requirements
 
 - Python 3.10+
-- **Node 18+** on `PATH` — used by `deepdoc serve` and `deepdoc deploy` for the generated Fumadocs site
+- **MkDocs Material** (`pip install mkdocs-material`) — used by `deepdoc serve` and `deepdoc deploy` for the generated site. Pure Python, no Node.js. Add `mkdocs-swagger-ui-tag` when your repo has an OpenAPI/Swagger spec.
 - Git (for `deepdoc update` and `deepdoc deploy`)
 - An LLM API key (or Ollama running locally)
 

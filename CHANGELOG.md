@@ -9,6 +9,21 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [2.4.0] - 2026-05-29
+
+### Changed
+
+- **Site generator migrated from Fumadocs (Next.js/MDX) to MkDocs Material (pure Python).** Generated pages are now plain CommonMark `.md` rendered server-side — there is no JSX/MDX compile step, so a page can never fail to build. This removes the entire class of MDX brace/JSX escaping failures and eliminates the Node.js/npm dependency for previewing and deploying docs.
+  - `deepdoc serve` now runs `mkdocs serve`; `deepdoc deploy` runs `mkdocs build` and exports static HTML to `site/out/`. Both require `pip install mkdocs-material` (and `mkdocs-swagger-ui-tag` when an OpenAPI spec is present) instead of Node.js.
+  - The LLM now emits MkDocs Material **pymdownx Blocks** syntax (`/// note`, `/// tab | …`, `/// details | …`) and grid-cards HTML, taught uniformly across `system.py`, `page_types.py`, and `bucket_types.py`. The previously split-brained prompts (some teaching `:::` remark-directives, others raw `<Steps>`/`<Cards>`/`<Callout>` JSX) are unified.
+  - New canonical builder `deepdoc/site/builder/mkdocs_builder.py` (`build_mkdocs_from_plan`) writes `site/mkdocs.yml` (Material theme + Mermaid superfence), a brand stylesheet, the landing page (grid cards), and consolidates OpenAPI into a single `docs/api.md` Swagger UI page. `site_dir: out` avoids colliding with deepdoc's `site/` directory.
+  - Internal `/slug` links are rewritten to MkDocs-relative form (`/` → `index.md`, `/auth` → `auth.md`) by `repair_internal_doc_links` (single owner); the changelog page, consistency "See also" callouts, and short/stub-page notices all emit MkDocs syntax.
+
+### Removed
+
+- Deleted the Fumadocs/Next.js scaffold: `scaffold_files.py`, `chatbot_components.py`, `templates.py`, and the `engine.py` builder. The chatbot UI is no longer part of the generated site scaffold (the chatbot backend still runs via `deepdoc serve`); a MkDocs-native chatbot widget is planned as a follow-up.
+- Removed MDX-only post-processors (`escape_mdx_angle_hazards`, `normalize_fumadocs_directives`, `fix_leaf_card_directives`) — CommonMark needs no JSX escaping — and vestigial MDX compile-gate ledger fields.
+
 ## [2.3.6] - 2026-05-29
 
 ### Features

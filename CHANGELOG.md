@@ -9,6 +9,18 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [3.0.0] - 2026-05-30
+
+### 🎉 First Stable Release
+
+After 2 major pre-release iterations and months of production testing, DeepDoc v3.0.0 is the **first stable release**.
+
+#### Changed
+
+- **Version bump from 2.4.0 → 3.0.0** — signals API stability and production readiness. No breaking config or pipeline changes from v2.4.0.
+- **All web marketing pages updated** — hero badges, pipeline descriptions, and feature copy now reference v3.0 with stable-release messaging.
+- **README.md cleansed of Node.js references** — `node --version` verification replaced with `pip show mkdocs-material`; `actions/setup-node` steps removed from CI workflow examples.
+
 ## [2.4.0] - 2026-05-29
 
 ### Changed

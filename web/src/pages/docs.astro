@@ -37,22 +37,22 @@ const pipeline = [
     step: "Generate",
     num: "03",
     color: "#A5B4FC",
-    desc: "For each bucket: assemble an evidence pack (source snippets, artifact extracts, scan hits), call the LLM, receive MDX. Inline validation runs immediately — on failure the LLM is reprompted with the exact error. If still broken, JSX is stripped and a safe Markdown fallback is written. Nothing broken ever hits disk.",
-    output: "MDX pages on disk, per-page quality status, compile-gate log",
+    desc: "For each bucket: assemble an evidence pack (source snippets, artifact extracts, scan hits), call the LLM, receive Markdown. Python-side repair runs immediately — on failure the LLM is reprompted with quality feedback. Nothing broken ever hits disk.",
+    output: "Markdown pages on disk, per-page quality status, generation quality log",
   },
   {
     step: "API Ref",
     num: "04",
     color: "#C4B5FD",
-    desc: "When an OpenAPI spec is found during scan, stage the raw JSON/YAML alongside a Fumadocs-compatible manifest.json so the /api/* page tree renders interactive endpoint reference pages automatically.",
-    output: "openapi.json + manifest.json in site/app/api/",
+    desc: "When an OpenAPI spec is found during scan, stage the raw JSON/YAML and render a single interactive Swagger UI page via mkdocs-swagger-ui-tag.",
+    output: "docs/api.md — Swagger UI page from staged OpenAPI specs",
   },
   {
     step: "Build",
     num: "05",
     color: "#86EFAC",
-    desc: "Write the complete Fumadocs Next.js scaffold: fumadocs.config.ts, root layout.tsx, global.css, the page tree JSON, search route, and one page.tsx per MDX file. When chatbot is enabled, also emit the React chatbot widget, sidebar toggle, and inline chat components.",
-    output: "site/ — a production-ready Next.js Fumadocs project",
+    desc: "Write the MkDocs Material scaffold: site/mkdocs.yml (Material theme, Mermaid superfence, pymdownx Blocks), extra.css brand stylesheet, landing page grid cards, and nav structure from the plan. When chatbot is enabled, the chatbot backend runs alongside via deepdoc serve.",
+    output: "site/ — a configurable MkDocs Material project (pure Python)",
   },
 ];
 
@@ -60,7 +60,7 @@ const bucketTypes = [
   { type: "system",        color: "var(--color-accent)", desc: "Top-level architecture, setup guides, auth flows, observability, and ops runbooks. Every repo gets at least one." },
   { type: "feature",       color: "#A5B4FC", desc: "Business-logic workflows: checkout, refunds, onboarding, notifications. Scoped to how engineers think about the domain, not how files are laid out." },
   { type: "endpoint",      color: "#67E8F9", desc: "Endpoint-family API docs. One bucket per logical resource (e.g. all /orders/* routes). Enriched with scanned route metadata." },
-  { type: "endpoint_ref",  color: "#8B5CF6", desc: "Single-endpoint page backed by an OpenAPI spec. Rendered as an interactive Fumadocs API reference page at /api/{slug}." },
+  { type: "endpoint_ref",  color: "#8B5CF6", desc: "Single-endpoint page backed by an OpenAPI spec. Rendered as part of the Swagger UI API reference page." },
   { type: "integration",   color: "#86EFAC", desc: "Third-party system docs: payment gateways, delivery providers, webhook consumers, external APIs. Auto-detected from import patterns." },
   { type: "database",      color: "#FDE68A", desc: "Schema and data-layer docs. Grouped by model family when a repo has many models; a single overview page for smaller schemas." },
 ];
@@ -72,8 +72,8 @@ const cliCommands = [
       { flag: "--provider", val: "anthropic | openai | gemini | …", desc: "LLM provider (required). Sets llm.provider in .deepdoc.yaml." },
       { flag: "--model", val: "string", desc: "Override the default model for the chosen provider." },
       { flag: "--with-chatbot", val: "flag", desc: "Enable the chatbot module. Adds chatbot config block with sensible defaults." },
-      { flag: "--output-dir", val: "path", desc: "Where generated MDX pages land. Default: docs/" },
-      { flag: "--site-dir", val: "path", desc: "Where the Fumadocs scaffold is written. Default: site/" },
+      { flag: "--output-dir", val: "path", desc: "Where generated Markdown pages land. Default: docs/" },
+      { flag: "--site-dir", val: "path", desc: "Where the MkDocs site config is written. Default: site/" },
     ],
     desc: "Scaffold a .deepdoc.yaml config file in the current directory. Safe to re-run — only missing keys are added.",
   },
@@ -98,10 +98,10 @@ const cliCommands = [
   {
     cmd: "deepdoc serve",
     flags: [
-      { flag: "--port", val: "int", desc: "HTTP port for the Next.js dev server. Default: 3000." },
+      { flag: "--port", val: "int", desc: "HTTP port for the MkDocs dev server. Default: 3000." },
       { flag: "--open", val: "flag", desc: "Open the browser automatically after starting." },
     ],
-    desc: "cd into site/ and run next dev. Requires Node 18+ and an initial npm install (done automatically on first run).",
+    desc: "Run mkdocs serve against site/mkdocs.yml. Pure Python — no Node.js required.",
   },
   {
     cmd: "deepdoc deploy",
@@ -109,15 +109,15 @@ const cliCommands = [
       { flag: "--branch", val: "string", desc: "Target GitHub Pages branch. Default: gh-pages." },
       { flag: "--force", val: "flag", desc: "Force-push to the deploy branch." },
     ],
-    desc: "Build the Fumadocs site (next build) and push the output to GitHub Pages. Requires git remote origin to be set.",
+    desc: "Build the MkDocs Material site (mkdocs build) and export static HTML to site/out/. Pure Python, no Node.js.",
   },
 ];
 
 const configKeys = [
   { key: "project_name",         dflt: "(repo dir name)",   desc: "Human-readable project name used in site title and nav header." },
   { key: "description",          dflt: '""',                desc: "One-line summary shown in hero and meta description." },
-  { key: "output_dir",           dflt: '"docs"',            desc: "Where generated MDX pages are written." },
-  { key: "site_dir",             dflt: '"site"',            desc: "Where the Fumadocs Next.js scaffold is written." },
+  { key: "output_dir",         dflt: '"docs"',            desc: "Where generated Markdown pages are written." },
+  { key: "site_dir",             dflt: '"site"',            desc: "Where the MkDocs site config is written." },
   { key: "generation_mode",      dflt: '"feature_buckets"', desc: 'v2 bucket-based pipeline. Set "file_centric" for legacy v1 mode.' },
   { key: "max_pages",            dflt: "0",                 desc: "Cap on total pages generated. 0 = unlimited." },
   { key: "max_parallel_workers", dflt: "6",                 desc: "Concurrent LLM calls during generate phase." },
@@ -149,9 +149,9 @@ const modules = [
   },
   {
     path: "deepdoc/generator/",
-    role: "Phase 3 — MDX generation",
+    role: "Phase 3 — Markdown generation",
     exports: ["PageGenerator", "BucketGenerationEngine", "AssembledEvidence", "apply_mdx_compile_gate()"],
-    note: "post_processors.py handles MDX escaping, fence repair, and Mermaid diagram fixups after generation.",
+    note: "post_processors.py handles Markdown repair, fence fixes, and Mermaid diagram fixups after generation.",
   },
   {
     path: "deepdoc/parser/",
@@ -168,8 +168,8 @@ const modules = [
   {
     path: "deepdoc/site/builder/",
     role: "Phase 5 — scaffold generation",
-    exports: ["SiteBuilderEngine"],
-    note: "scaffold_files.py emits the Fumadocs project. chatbot_components.py emits React chatbot widget when chatbot.enabled = true.",
+    exports: ["build_mkdocs_from_plan()"],
+    note: "mkdocs_builder.py emits the MkDocs Material project: site/mkdocs.yml, extra.css, and landing page.",
   },
   {
     path: "deepdoc/llm/",
@@ -216,7 +216,7 @@ const modules = [
         style="border: 1px solid var(--color-line-strong); font-family: var(--font-mono); font-size: 11px; color: var(--color-ink-faint);"
       >
         <span class="h-1.5 w-1.5 rounded-full" style="background: var(--color-accent);"></span>
-        v2.3.0 · Python 3.10+ · Node 18+ · MIT
+        v3.0.0 · Python 3.10+ · MkDocs Material · MIT
       </div>
     </div>
   </div>
@@ -327,13 +327,13 @@ deepdoc generate
 
 <span class="acc">✓</span> Scan complete        — 312 files · 47 endpoints · 8 integrations
 <span class="acc">✓</span> Plan complete        — 34 buckets across 6 sections
-<span class="acc">✓</span> Generate complete    — 34 pages · 2 MDX fixes applied
+<span class="acc">✓</span> Generate complete    — 34 pages · 2 Markdown fixes applied
 <span class="acc">✓</span> Chatbot index built  — 1,247 chunks · 4.2 MB FAISS index
 <span class="acc">✓</span> Site scaffold written → site/
 
   Phase timings:  scan 4s · plan 18s · generate 72s · build 3s
 
-<span class="c"># Preview locally (Node 18+ required, deps auto-installed)</span>
+<span class="c"># Preview locally (pure Python — no Node.js required)</span>
 deepdoc serve
 
   Docs   → http://localhost:3000
@@ -428,7 +428,7 @@ deepdoc serve
                   <!-- Output labels inside pipeline -->
                   <text x="98" y="200" text-anchor="middle" fill="#525252" font-size="9">→ RepoScan</text>
                   <text x="258" y="200" text-anchor="middle" fill="#525252" font-size="9">→ DocPlan</text>
-                  <text x="418" y="200" text-anchor="middle" fill="#525252" font-size="9">→ MDX pages</text>
+                  <text x="418" y="200" text-anchor="middle" fill="#525252" font-size="9">→ Markdown pages</text>
                   <text x="578" y="200" text-anchor="middle" fill="#525252" font-size="9">→ manifest.json</text>
 
                   <!-- Arrow from Build down -->
@@ -442,16 +442,16 @@ deepdoc serve
 
                   <!-- Output boxes -->
                   <rect x="60" y="318" width="180" height="52" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                  <text x="150" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">site/app/</text>
-                  <text x="150" y="358" text-anchor="middle" fill="#525252" font-size="10">Fumadocs scaffold</text>
+                  <text x="150" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">site/mkdocs.yml</text>
+                  <text x="150" y="358" text-anchor="middle" fill="#525252" font-size="10">MkDocs Material config</text>
 
                   <rect x="280" y="318" width="180" height="52" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
                   <text x="370" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">.deepdoc/</text>
                   <text x="370" y="358" text-anchor="middle" fill="#525252" font-size="10">state ledger</text>
 
                   <rect x="500" y="318" width="180" height="52" rx="8" fill="#0a0a0a" stroke="rgba(255,255,255,0.1)" stroke-width="1"/>
-                  <text x="590" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">docs/*.mdx</text>
-                  <text x="590" y="358" text-anchor="middle" fill="#525252" font-size="10">MDX pages</text>
+                  <text x="590" y="340" text-anchor="middle" fill="#ededed" font-size="11" font-family="ui-monospace,monospace">docs/*.md</text>
+                  <text x="590" y="358" text-anchor="middle" fill="#525252" font-size="10">Markdown pages</text>
 
                   <!-- Chatbot divider -->
                   <line x1="20" y1="396" x2="720" y2="396" stroke="rgba(255,255,255,0.06)" stroke-width="1" stroke-dasharray="4 4"/>
@@ -492,10 +492,10 @@ deepdoc serve
                   { path: "deepdoc/planner/engine.py", role: "Multi-step LLM planner orchestration and bucket-scan entrypoint." },
                   { path: "deepdoc/planner/heuristics.py", role: "Public planning API: _merge_plan, _build_heuristic_assignment, _llm_step." },
                   { path: "deepdoc/generator/generation.py", role: "PageGenerator + BucketGenerationEngine. Batched parallel generation." },
-                  { path: "deepdoc/generator/mdx_compile_gate.py", role: "Node.js MDX validator + LLM-reprompt + JSX-strip fallback." },
+                  { path: "deepdoc/generator/validation.py", role: "PageValidator — file, route, symbol, and flow grounding checks." },
                   { path: "deepdoc/chatbot/service.py", role: "ChatbotQueryService. query / deep_research / code_deep modes." },
                   { path: "deepdoc/chatbot/retrieval_mixin.py", role: "All retrieval: FAISS + FTS, rerank, expansion, hit-selection." },
-                  { path: "deepdoc/site/builder/engine.py", role: "SiteBuilderEngine — writes the full Fumadocs scaffold." },
+                  { path: "deepdoc/site/builder/mkdocs_builder.py", role: "build_mkdocs_from_plan — writes the full MkDocs Material scaffold." },
                   { path: "deepdoc/persistence_v2.py", role: "Ledger, sync state, manifest, plan storage under .deepdoc/." },
                   { path: "deepdoc/smart_update_v2.py", role: "Incremental update logic — diff-based replan and regen." },
                 ].map(({ path, role }) => (
@@ -540,14 +540,15 @@ deepdoc serve
               ))}
             </div>
 
-            <!-- MDX Compile Gate callout -->
+            <!-- Markdown quality gate callout -->
             <div class="mt-8 rounded-2xl border border-[var(--color-line-strong)] bg-[var(--color-accent-dim)]/30 p-6">
-              <div class="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-accent)]">MDX Compile Gate</div>
+              <div class="mb-2 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-accent)]">Markdown Quality Gate</div>
               <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">
-                After each LLM generation call, DeepDoc spawns a lightweight Node.js validator that compiles
-                the MDX in isolation. If it throws, the exact compile error is injected back into a
-                reprompt call. If the reprompt still fails, JSX is stripped and a safe Markdown fallback
-                is written instead. <strong class="text-[var(--color-ink)]">Nothing broken ever reaches disk.</strong>
+                After each LLM call, DeepDoc runs a Python-side repair pipeline (fence fixup, Mermaid
+                normalization, link rewriting) and a validation pass (sections, files, routes,
+                symbols, flow grounding). On failure the LLM is reprompted with quality feedback.
+                Pages that still fail hard checks — truncated output or hallucinated paths — are
+                reported as invalid. <strong class="text-[var(--color-ink)]">Nothing broken ever reaches disk.</strong>
               </p>
             </div>
           </section>

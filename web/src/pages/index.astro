@@ -27,7 +27,7 @@ const pipeline = [
   { step: "Scan",     note: "Parse source. Detect endpoints, runtime surfaces, integrations, OpenAPI specs." },
   { step: "Plan",     note: "Multi-step LLM planner. Classify repo, propose buckets, assign files." },
   { step: "Generate", note: "Build evidence packs. LLM call per bucket. Python-side repair and grounding checks." },
-  { step: "API Ref",  note: "Stage OpenAPI assets into Fumadocs /api/* pages when a spec exists." },
+  { step: "API Ref",      note: "Stage OpenAPI specs into a single MkDocs Swagger UI page when a spec exists." },
   { step: "Build",    note: "Write site scaffold, page tree, nav, search, and optional chatbot widget." },
 ];
 
@@ -87,7 +87,7 @@ const chatMessages = [
               class="h-1.5 w-1.5 rounded-full"
               style="background: var(--color-accent);"
             ></span>
-            v2.3 — source-cited docs · AI chatbot
+            v3.0 — stable · source-cited docs · AI chatbot
           </div>
 
           <!-- Headline -->
@@ -208,7 +208,7 @@ const chatMessages = [
             class="anim-fade-up anim-delay-4 mt-5"
             style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);"
           >
-            Python 3.10 &middot; Node 18+ &middot; MIT license &middot; Any LLM provider
+            Python 3.10+ &middot; MIT license &middot; Any LLM provider
           </p>
         </div>
 
@@ -332,7 +332,7 @@ const chatMessages = [
             <span class="dot red"></span>
             <span class="dot yellow"></span>
             <span class="dot green"></span>
-            <span class="proof-url">generated Fumadocs site</span>
+            <span class="proof-url">generated MkDocs Material site</span>
           </div>
           <div class="proof-large-img-wrap">
             <img
@@ -547,7 +547,7 @@ const chatMessages = [
           Five phases. No magic.
         </h2>
         <p style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.7; color: var(--color-ink-muted); max-width: 480px;">
-          Every page is grounded in scanned evidence, repaired into valid MDX,
+          Every page is grounded in scanned evidence, repaired into valid Markdown,
           and checked for source coverage before the site builds.
         </p>
       </div>
@@ -816,7 +816,7 @@ $ deepdoc serve
       "pip install deepdoc", "deepdoc status", "deepdoc benchmark",
       "bucket_type", "evidence[]", "call_graph", "owned_files", "DocBucket",
       "topology", "scan_repo()", "--with-chatbot", "POST /query",
-      "POST /deep-research", "MDX", "faiss", "fastembed",
+      "POST /deep-research", "MkDocs", "faiss", "fastembed",
       "pipeline_v2", "chatbot.enabled", "1,247 chunks", "47 pages",
       "anthropic", "gpt-4o", "endpoint", "integration", "feature",
       "nav_shaping", "evidence_pack", "llm_step", "slug", "schema",

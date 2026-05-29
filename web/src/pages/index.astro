@@ -431,51 +431,104 @@ const chatMessages = [
   <section style="border-bottom: 1px solid var(--color-line);">
     <div class="mx-auto max-w-6xl px-6 py-20">
       <div class="mb-14 max-w-xl">
-        <div
-          style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
-        >
+        <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
           What it does
         </div>
-        <h2
-          class="display"
-          style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
-        >
+        <h2 class="display" style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);">
           One command. A docs site<br />your team won't ignore.
         </h2>
       </div>
 
-      <div class="grid grid-cols-1 gap-px md:grid-cols-3" style="background: var(--color-line); border-radius: 14px; overflow: hidden;">
-        {
-          features.map((f) => (
-            <div
-              class="flex flex-col gap-0 p-8 relative overflow-hidden"
-              style="background: var(--color-surface);"
-            >
-              <!-- Large decorative number -->
-              <div
-                aria-hidden="true"
-                style={`position: absolute; top: -8px; right: 16px; font-family: var(--font-display); font-size: 5rem; line-height: 1; color: var(--color-line-strong); user-select: none; pointer-events: none; font-weight: 400;`}
-              >
-                {f.num}
-              </div>
-              <div
-                style="font-family: var(--font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.14em; color: var(--color-accent); margin-bottom: 14px;"
-              >
-                {f.num}
-              </div>
-              <h3
-                style="font-family: var(--font-sans); font-size: 15px; font-weight: 500; color: var(--color-ink); margin-bottom: 10px; line-height: 1.3;"
-              >
-                {f.title}
-              </h3>
-              <p
-                style="font-family: var(--font-sans); font-size: 13px; line-height: 1.7; color: var(--color-ink-muted);"
-              >
-                {f.body}
-              </p>
+      <div class="features-bento">
+
+        <!-- 01: Bucket-based generation (wide) -->
+        <div class="feat-card feat-card-wide">
+          <div class="feat-num">01</div>
+          <h3 class="feat-title">Bucket-based generation</h3>
+          <p class="feat-body">
+            Architecture, endpoints, integrations, and schemas planned as cohesive docs —
+            not one noisy page per file. The planner classifies your repo and assigns
+            files to a reader-first structure.
+          </p>
+          <div class="feat-visual">
+            <div class="feat-visual-row">
+              <span class="feat-visual-files">auth.py, middleware.ts</span>
+              <span class="feat-visual-arrow">→</span>
+              <span class="feat-visual-bucket">Auth &amp; Permissions</span>
             </div>
-          ))
-        }
+            <div class="feat-visual-row">
+              <span class="feat-visual-files">billing/routes.py, usage.py</span>
+              <span class="feat-visual-arrow">→</span>
+              <span class="feat-visual-bucket">Billing &amp; Usage</span>
+            </div>
+            <div class="feat-visual-row">
+              <span class="feat-visual-files">api/webhooks.ts, stripe.py</span>
+              <span class="feat-visual-arrow">→</span>
+              <span class="feat-visual-bucket">Integrations</span>
+            </div>
+            <div class="feat-visual-row">
+              <span class="feat-visual-files">db/models.py, migrations/*.sql</span>
+              <span class="feat-visual-arrow">→</span>
+              <span class="feat-visual-bucket">Data &amp; Schema</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 02: Evidence-grounded chatbot (tall) -->
+        <div class="feat-card feat-card-tall">
+          <div class="feat-num">02</div>
+          <h3 class="feat-title">Evidence-grounded chatbot</h3>
+          <p class="feat-body">
+            An embedded assistant ships with the docs site. Answers come with
+            exact file paths and line ranges — not hallucinations.
+          </p>
+          <div class="feat-chat">
+            <div class="feat-chat-bubble user">
+              Where does billing verification happen?
+            </div>
+            <div class="feat-chat-bubble bot">
+              Payment verification runs in the Razorpay billing flow, persisted through usage records.
+              <div class="feat-chat-ref">↗ billing/routes.py:41-88</div>
+              <div class="feat-chat-ref">↗ services/usage.py:12-57</div>
+            </div>
+            <div class="feat-chat-bubble user">
+              How does the widget token flow work?
+            </div>
+            <div class="feat-chat-bubble bot">
+              The widget fetches a short-lived token from <code style="font-size:11px; opacity:0.8;">/api/widget-token</code>, then attaches it to every chat request.
+              <div class="feat-chat-ref">↗ api/widget.ts:18-64</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 03: Incremental updates (wide) -->
+        <div class="feat-card feat-card-wide">
+          <div class="feat-num">03</div>
+          <h3 class="feat-title">Incremental updates</h3>
+          <p class="feat-body">
+            <code style="font-family: var(--font-mono); font-size: 12px; opacity: 0.85;">deepdoc update</code> diffs against the last synced commit and regenerates
+            only affected buckets — smart enough to replan when new integrations appear.
+          </p>
+          <div class="feat-diff">
+            <div class="feat-diff-header">deepdoc update — 3 files changed</div>
+            <div class="feat-diff-row">
+              <span class="feat-diff-dot changed"></span>
+              <span class="feat-diff-label">billing/routes.py</span>
+              <span class="feat-diff-tag regen">regenerate</span>
+            </div>
+            <div class="feat-diff-row">
+              <span class="feat-diff-dot changed"></span>
+              <span class="feat-diff-label">services/stripe.py</span>
+              <span class="feat-diff-tag regen">regenerate</span>
+            </div>
+            <div class="feat-diff-row">
+              <span class="feat-diff-dot unchanged"></span>
+              <span class="feat-diff-label">db/models.py</span>
+              <span class="feat-diff-tag skip">skip</span>
+            </div>
+          </div>
+        </div>
+
       </div>
     </div>
   </section>
@@ -484,54 +537,30 @@ const chatMessages = [
   <section style="border-bottom: 1px solid var(--color-line);">
     <div class="mx-auto max-w-6xl px-6 py-20">
       <div class="mb-14 max-w-xl">
-        <div
-          style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
-        >
+        <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
           Pipeline
         </div>
-        <h2
-          class="display"
-          style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
-        >
+        <h2 class="display" style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);">
           Five phases. No magic.
         </h2>
-        <p
-          style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.7; color: var(--color-ink-muted); max-width: 480px;"
-        >
-          Every page is grounded in scanned evidence, repaired into safe Markdown,
-          and checked for source coverage before the site is built.
+        <p style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.7; color: var(--color-ink-muted); max-width: 480px;">
+          Every page is grounded in scanned evidence, repaired into valid MDX,
+          and checked for source coverage before the site builds.
         </p>
       </div>
 
-      <ol
-        class="grid grid-cols-1 md:grid-cols-5"
-        style="gap: 1px; background: var(--color-line); border-radius: 14px; overflow: hidden;"
-      >
-        {
-          pipeline.map((p, i) => (
-            <li
-              class="flex flex-col gap-3 p-6"
-              style="background: var(--color-surface);"
-            >
-              <div
-                style={`font-family: var(--font-mono); font-size: 11px; color: var(--color-accent);`}
-              >
-                0{i + 1}
-              </div>
-              <div
-                style="font-family: var(--font-sans); font-size: 14px; font-weight: 500; color: var(--color-ink); line-height: 1.3;"
-              >
-                {p.step}
-              </div>
-              <div
-                style="font-family: var(--font-sans); font-size: 12px; line-height: 1.65; color: var(--color-ink-muted);"
-              >
-                {p.note}
-              </div>
-            </li>
-          ))
-        }
-      </ol>
+      <div class="pipeline-stepper">
+        {pipeline.map((p, i) => {
+          const colors = ["#3778FF", "#9B7FFF", "#00E5A0", "#FF9E00", "#FF5F87"];
+          return (
+            <div class="pipeline-step" style={`--step-color: ${colors[i]}`}>
+              <div class="pipeline-step-num">0{i + 1}</div>
+              <div class="pipeline-step-name">{p.step}</div>
+              <div class="pipeline-step-note">{p.note}</div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   </section>
 

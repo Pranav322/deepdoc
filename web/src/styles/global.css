@@ -211,6 +211,8 @@ body {
 }
 .proof-large-window {
   border-radius: 18px;
+  display: flex;
+  flex-direction: column;
 }
 .proof-bar {
   display: flex;
@@ -236,8 +238,7 @@ body {
   aspect-ratio: 1.54 / 1;
   overflow: hidden;
 }
-.proof-image,
-.proof-large-window img {
+.proof-image {
   display: block;
   width: 100%;
   height: 100%;
@@ -357,8 +358,19 @@ body {
   gap: 18px;
   align-items: stretch;
 }
-.proof-large-window {
-  min-height: 460px;
+.proof-large-img-wrap {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+  min-height: 320px;
+}
+.proof-large-img-wrap img {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  object-position: top left;
 }
 .proof-side-stack {
   display: grid;

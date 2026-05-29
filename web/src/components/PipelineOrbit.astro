@@ -5,7 +5,7 @@ const phases = [
     num: "01",
     name: "Scan",
     note: "Parse source files. Detect endpoints, runtime surfaces, integrations, and OpenAPI specs. No LLM calls.",
-    color: "#C2FF4D",
+
     status: "completed",
     outputs: ["Call graph", "Endpoint map", "Integration list", "OpenAPI specs", "Runtime surfaces"],
     relatedIds: [2],
@@ -16,7 +16,7 @@ const phases = [
     num: "02",
     name: "Plan",
     note: "Multi-step LLM planner. Classify the repo, propose buckets, assign files, symbols, and artifacts.",
-    color: "#C2FF4D",
+
     status: "completed",
     outputs: ["Doc buckets", "Nav structure", "File assignments", "Domain clusters", "Flow hints"],
     relatedIds: [1, 3],
@@ -27,7 +27,7 @@ const phases = [
     num: "03",
     name: "Generate",
     note: "Build evidence packs per bucket. LLM call in parallel batches. Python-side MDX repair before write.",
-    color: "#C2FF4D",
+
     status: "in-progress",
     outputs: ["MDX pages", "Evidence packs", "Source citations", "Quality checks", "MDX repair"],
     relatedIds: [2, 4],
@@ -38,7 +38,7 @@ const phases = [
     num: "04",
     name: "API Ref",
     note: "Stage OpenAPI assets into Fumadocs /api/* pages when a spec exists in the repo.",
-    color: "#C2FF4D",
+
     status: "pending",
     outputs: ["/api/* pages", "Fumadocs schema", "OpenAPI assets", "Route docs"],
     relatedIds: [3, 5],
@@ -49,7 +49,7 @@ const phases = [
     num: "05",
     name: "Build",
     note: "Write the Fumadocs scaffold, page tree, nav, search route, and optional AI chatbot widget.",
-    color: "#C2FF4D",
+
     status: "pending",
     outputs: ["Docs site", "Page tree", "Search route", "Chatbot widget", "Changelog page"],
     relatedIds: [4],
@@ -79,16 +79,14 @@ const phases = [
         class="orbit-node"
         id={`orbit-node-${p.id}`}
         data-id={p.id}
-        data-color={p.color}
-        data-related={p.relatedIds.join(",")}
         role="button"
         tabindex="0"
         aria-label={`Phase ${p.num}: ${p.name}`}
       >
         <!-- Glow aura -->
-        <div class="orbit-node-aura" style={`background: radial-gradient(circle, ${p.color}30 0%, transparent 70%)`}></div>
+        <div class="orbit-node-aura"></div>
         <!-- Icon circle -->
-        <div class="orbit-node-icon" style={`--nc: ${p.color}`}>
+        <div class="orbit-node-icon">
           <svg
             xmlns="http://www.w3.org/2000/svg"
             width="16" height="16"
@@ -193,8 +191,8 @@ const phases = [
     width: 56px;
     height: 56px;
     border-radius: 50%;
-    background: radial-gradient(circle, rgba(194,255,77,0.25) 0%, var(--color-surface-high) 100%);
-    border: 1px solid rgba(194,255,77,0.3);
+    background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 25%, transparent) 0%, var(--color-surface-high) 100%);
+    border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -213,8 +211,8 @@ const phases = [
     width: 22px;
     height: 22px;
     border-radius: 50%;
-    background: #C2FF4D;
-    box-shadow: 0 0 16px rgba(194,255,77,0.5);
+    background: var(--color-accent);
+    box-shadow: 0 0 16px color-mix(in srgb, var(--color-accent) 50%, transparent);
   }
 
   /* Nodes — zero size so -50% translate = 0, nodes land exactly on ring */
@@ -238,6 +236,7 @@ const phases = [
     pointer-events: none;
     transition: opacity 0.3s;
     opacity: 0;
+    background: radial-gradient(circle, color-mix(in srgb, var(--color-accent) 18%, transparent) 0%, transparent 70%);
   }
   .orbit-node:hover .orbit-node-aura,
   .orbit-node.is-active .orbit-node-aura {
@@ -258,16 +257,16 @@ const phases = [
     position: relative;
   }
   .orbit-node.is-active .orbit-node-icon {
-    background: var(--nc, #C2FF4D);
-    border-color: var(--nc, #C2FF4D);
+    background: var(--color-accent);
+    border-color: var(--color-accent);
     color: #000;
     transform: translate(-50%, -50%) scale(1.45);
-    box-shadow: 0 0 24px color-mix(in srgb, var(--nc, #C2FF4D) 50%, transparent);
+    box-shadow: 0 0 24px color-mix(in srgb, var(--color-accent) 50%, transparent);
   }
   .orbit-node.is-related .orbit-node-icon {
-    border-color: var(--nc, #C2FF4D);
-    color: var(--nc, #C2FF4D);
-    background: color-mix(in srgb, var(--nc, #C2FF4D) 12%, var(--color-surface-raised));
+    border-color: var(--color-accent);
+    color: var(--color-accent);
+    background: color-mix(in srgb, var(--color-accent) 12%, var(--color-surface-raised));
     animation: node-pulse 1.2s ease-in-out infinite;
   }
   .orbit-node-label {
@@ -476,8 +475,8 @@ const phases = [
 
   /* Keyframes */
   @keyframes hub-pulse {
-    0%,100% { box-shadow: 0 0 0 0 rgba(194,255,77,0.2); }
-    50%      { box-shadow: 0 0 0 12px rgba(194,255,77,0); }
+    0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--color-accent) 20%, transparent); }
+    50%      { box-shadow: 0 0 0 12px transparent; }
   }
   @keyframes hub-ping {
     0%   { transform: scale(1); opacity: 0.5; }
@@ -628,8 +627,8 @@ const phases = [
     if (empty)  empty.style.display  = 'none';
     if (detail) detail.style.display = 'flex';
 
-    // Border color matches phase
-    if (infoWrap) infoWrap.style.borderColor = phase.color + '60';
+    // Border color uses theme-aware accent
+    if (infoWrap) infoWrap.style.borderColor = 'color-mix(in srgb, var(--color-accent) 37%, transparent)';
 
     // Num
     const numEl = document.getElementById('info-num');
@@ -641,9 +640,9 @@ const phases = [
       statusEl.textContent =
         phase.status === 'completed'  ? 'Complete'    :
         phase.status === 'in-progress'? 'In progress' : 'Pending';
-      statusEl.style.color = phase.color;
-      statusEl.style.borderColor = phase.color + '60';
-      statusEl.style.background  = phase.color + '12';
+      statusEl.style.color = 'var(--color-accent)';
+      statusEl.style.borderColor = 'color-mix(in srgb, var(--color-accent) 37%, transparent)';
+      statusEl.style.background  = 'color-mix(in srgb, var(--color-accent) 7%, transparent)';
     }
 
     // Name
@@ -664,9 +663,9 @@ const phases = [
       outputsWrap.style.display = 'flex';
       outputsEl.innerHTML = phase.outputs.map(o =>
         `<span class="orbit-output-tag" style="
-          background: color-mix(in srgb, ${phase.color} 10%, var(--color-surface-raised));
-          border-color: color-mix(in srgb, ${phase.color} 30%, transparent);
-          color: ${phase.color};
+          background: color-mix(in srgb, var(--color-accent) 10%, var(--color-surface-raised));
+          border-color: color-mix(in srgb, var(--color-accent) 30%, transparent);
+          color: var(--color-accent);
         ">${o}</span>`
       ).join('');
     }

@@ -1,6 +1,6 @@
-# DeepDoc — Marketing Site
+# DeepDoc — Web
 
-Public-facing website for DeepDoc at `https://deepdoc.dev`. Built with **Astro 5** and **Tailwind 4**. Ships zero client-side JS by default — static HTML and CSS only, with minimal hydration where needed.
+Public-facing website for DeepDoc at `https://deepdoc.tech`. Built with **Astro 5** and **Tailwind 4**. Ships zero client-side JS by default — static HTML and CSS only, with minimal hydration where needed.
 
 ## Stack
 

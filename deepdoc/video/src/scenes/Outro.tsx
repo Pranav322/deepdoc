@@ -7,7 +7,7 @@ import {
 } from "remotion";
 import { C, F } from "../constants";
 
-const TAGS = ["Python 3.10+", "Node 18+", "MIT License", "deepdoc.dev"];
+const TAGS = ["Python 3.10+", "Node 18+", "MIT License", "deepdoc.tech"];
 
 export const Outro = () => {
   const frame = useCurrentFrame();
@@ -82,7 +82,7 @@ export const Outro = () => {
           opacity: titleSpring,
           transform: `translateY(${(1 - titleSpring) * 48}px)`,
         }}>
-          deepdoc.dev
+          deepdoc.tech
         </h2>
 
         {/* Install command */}

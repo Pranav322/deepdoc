@@ -6,7 +6,7 @@ Guidance for coding agents working in this repository.
 - If you change core CLI behavior, persistence/state formats, routing semantics, or generated-site behavior, update this file in the same task. Also keep `README.md` in sync with actual codebase behavior.
 
 ## Repo Summary
-- Project name: `deepdoc` (v2.2.1)
+- Project name: `deepdoc` (v2.3.6)
 - Language/runtime: Python `>=3.10`
 - Packaging: setuptools via `pyproject.toml`
 - CLI entrypoint: `deepdoc = deepdoc.cli:main`
@@ -39,7 +39,8 @@ Guidance for coding agents working in this repository.
 
 ### Generator
 - `deepdoc/generator/generation.py` — `BucketGenerationEngine`; `_call_with_retry()` accepts `failure_prefix`; manifest loaded once per run (not per bucket); non-transient LLM errors (auth/quota/invalid model) raise immediately without retry
-- `deepdoc/generator/evidence.py` — evidence pack assembly; `flow_context` included for buckets with `flow_id` generation hint; `generation_hints` null-guarded
+- `deepdoc/generator/evidence.py` — evidence pack assembly; `flow_context` included for buckets with `flow_id` generation hint; `generation_hints` null-guarded; Tier 0.5 (`_extract_owned_symbol_bodies`): when `owned_symbols` is set and >50% of a Tier 1 file's symbols are unowned, sends only owned symbol bodies + file header instead of full source; uses `Symbol.end_line` when `has_known_range()`, falls back to next-symbol boundary
+- `deepdoc/generator/consistency.py` — `CrossBucketConsistencyPass`; single post-generation LLM call that detects cross-link gaps between independently generated pages and appends `:::note[See also]` callouts; runs after `engine.generate_all()` in `pipeline_v2.py`; controlled by `consistency_pass` config key (default `true`); skips gracefully on LLM failure or already-linked pages
 - `deepdoc/generator/validation.py` — `PageValidator`; checks sections, files, routes, runtime/config/integration grounding, hallucinated paths/symbols, flow grounding, file coverage
 - `deepdoc/generator/post_processors.py` — MDX repair pipeline; `repair_mdx_component_blocks` calls `_repair_accordion_nesting` first; brace escaping skips lines containing `={`; `normalize_mdx_steps`, `escape_mdx_text_hazards`, `inject_source_files_disclosure`
 
@@ -104,6 +105,7 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 - `_handle_deleted_files` in `SmartUpdater` is the single place that cleans orphaned buckets (removes from plan, deletes MDX, prunes ledger, cleans `nav_structure`). After it runs, orphaned slugs are filtered from `change_set.stale_bucket_slugs` to prevent redundant regeneration.
 - `_append_changelog()` must be called before `_rebuild_nav()` in `smart_update_v2.py` so the `whats-changed` page appears in nav on first run.
 - `pipeline_v2._build_site()` must be called after `_record_changelog()` for the same reason.
+- `CrossBucketConsistencyPass.run()` must be called after `engine.update_manifest(gen_results)` and before `summarize_generation_results()` in `pipeline_v2.py` so injected callouts are counted in the final summary and written to disk before any downstream site build step.
 - After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `docs/whats-changed.mdx` is regenerated. Do not skip these calls when adding new execution paths.
 - Targeted replans merge by stable bucket identity (`semantic_id`) and preserve existing slugs when the same concept is rediscovered.
 - Bucket slug collision guard: fallback slug generation appends `-2`, `-3`, … suffixes; a bucket that has already absorbed another cannot be absorbed again in the same consolidation pass (`merge_target_slugs` set).

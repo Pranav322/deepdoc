@@ -35,7 +35,7 @@ from rich.progress import (
 )
 
 from .. import __version__ as DEEPDOC_VERSION
-from ..llm import LLMClient
+from ..llm import LLMClient, is_retryable_llm_error
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
@@ -789,30 +789,6 @@ class BucketGenerationEngine:
                 elapsed_seconds=elapsed,
             )
 
-    @staticmethod
-    def _is_retryable(err_str: str) -> bool:
-        """Check if an error is transient and worth retrying."""
-        markers = (
-            "rate",
-            "429",
-            "overloaded",
-            "timeout",
-            "timed out",
-            "502",
-            "503",
-            "504",
-            "bad gateway",
-            "service unavailable",
-            "connection",
-            "temporary",
-            "throttl",
-            "capacity",
-            "server_error",
-            "internal_error",
-        )
-        lower = err_str.lower()
-        return any(m in lower for m in markers)
-
     def _call_with_retry(
         self,
         evidence: AssembledEvidence,
@@ -836,10 +812,9 @@ class BucketGenerationEngine:
                     failure_prefix=failure_prefix,
                 )
             except Exception as e:
-                err = str(e)
                 is_last = attempt == MAX_RETRIES - 1
 
-                if self._is_retryable(err):
+                if is_retryable_llm_error(e):
                     if is_last:
                         raise
                     # Exponential backoff with jitter to avoid thundering herd

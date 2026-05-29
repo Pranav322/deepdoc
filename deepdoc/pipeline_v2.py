@@ -41,7 +41,7 @@ from .generator import (
     repair_internal_doc_links,
     summarize_generation_results,
 )
-from .llm import LLMClient
+from .llm import LLMClient, is_retryable_llm_error
 from .manifest import Manifest, file_hash
 from .openapi import (
     extract_endpoints_from_spec,
@@ -1497,30 +1497,6 @@ class PipelineV2:
 
         return content
 
-    @staticmethod
-    def _is_retryable(err_str: str) -> bool:
-        """Check if an error is transient and worth retrying."""
-        markers = (
-            "rate",
-            "429",
-            "overloaded",
-            "timeout",
-            "timed out",
-            "502",
-            "503",
-            "504",
-            "bad gateway",
-            "service unavailable",
-            "connection",
-            "temporary",
-            "throttl",
-            "capacity",
-            "server_error",
-            "internal_error",
-        )
-        lower = err_str.lower()
-        return any(m in lower for m in markers)
-
     def _call_llm_with_retry(self, user_prompt: str) -> str:
         """Call LLM with exponential backoff + jitter on transient errors."""
         import random
@@ -1529,10 +1505,9 @@ class PipelineV2:
             try:
                 return self.llm.complete(SYSTEM_V2, user_prompt)
             except Exception as e:
-                err = str(e)
                 is_last = attempt == MAX_RETRIES - 1
 
-                if self._is_retryable(err):
+                if is_retryable_llm_error(e):
                     if is_last:
                         console.print(
                             f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]"

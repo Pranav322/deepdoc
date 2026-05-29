@@ -17,7 +17,7 @@ const PHASES = [
   {
     num: "03",
     name: "Generate",
-    desc: "Build evidence packs per bucket. LLM call in parallel batches. MDX compile-check before write.",
+    desc: "Build evidence packs per bucket. LLM call in parallel batches. Python-side MDX repair before write.",
     color: "#00E5A0",
   },
   {

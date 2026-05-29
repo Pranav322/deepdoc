@@ -71,7 +71,7 @@ export const Intro = () => {
             display: "inline-block",
           }}
         />
-        v2.1 · MDX compile gate · One-key chatbot
+        v2.3 · MDX-safe generation · One-key chatbot
       </div>
 
       {/* Main title */}

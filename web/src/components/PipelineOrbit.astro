@@ -177,7 +177,7 @@ const phases = [
     width: 380px;
     height: 380px;
     border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.07);
+    border: 1px solid var(--color-line-strong);
     pointer-events: none;
   }
 
@@ -197,7 +197,7 @@ const phases = [
   .orbit-hub-ping {
     position: absolute;
     border-radius: 50%;
-    border: 1px solid rgba(255,255,255,0.18);
+    border: 1px solid var(--color-line-strong);
     animation: hub-ping 2s cubic-bezier(0, 0, 0.2, 1) infinite;
   }
   .orbit-hub-ping-1 { width: 72px; height: 72px; }
@@ -210,11 +210,13 @@ const phases = [
     backdrop-filter: blur(8px);
   }
 
-  /* Nodes */
+  /* Nodes — zero size so -50% translate = 0, nodes land exactly on ring */
   .orbit-node {
     position: absolute;
     top: 50%;
     left: 50%;
+    width: 0;
+    height: 0;
     cursor: pointer;
     transition: opacity 0.4s ease;
   }
@@ -238,12 +240,12 @@ const phases = [
     width: 40px;
     height: 40px;
     border-radius: 50%;
-    border: 2px solid rgba(255,255,255,0.25);
-    background: var(--color-surface);
+    border: 2px solid var(--color-line-strong);
+    background: var(--color-surface-raised);
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(255,255,255,0.7);
+    color: var(--color-ink-muted);
     transform: translate(-50%, -50%);
     transition: all 0.3s ease;
     position: relative;
@@ -258,11 +260,12 @@ const phases = [
   .orbit-node.is-related .orbit-node-icon {
     border-color: var(--nc, #C2FF4D);
     color: var(--nc, #C2FF4D);
+    background: color-mix(in srgb, var(--nc, #C2FF4D) 12%, var(--color-surface-raised));
     animation: node-pulse 1.2s ease-in-out infinite;
   }
   .orbit-node-label {
     position: absolute;
-    top: 28px;
+    top: 26px;
     left: 50%;
     transform: translateX(-50%);
     white-space: nowrap;
@@ -270,13 +273,13 @@ const phases = [
     font-size: 11px;
     font-weight: 600;
     letter-spacing: 0.06em;
-    color: rgba(255,255,255,0.55);
+    color: var(--color-ink-muted);
     text-transform: uppercase;
     pointer-events: none;
     transition: color 0.3s, transform 0.3s;
   }
   .orbit-node.is-active .orbit-node-label {
-    color: #fff;
+    color: var(--color-ink);
     transform: translateX(-50%) scale(1.15);
   }
 
@@ -435,9 +438,9 @@ const phases = [
 
 <!-- ── Script ─────────────────────────────────────────────────── -->
 <script define:vars={{ phases }}>
-  const RADIUS_DESKTOP = 185;
-  const RADIUS_TABLET  = 140;
-  const RADIUS_MOBILE  = 122;
+  const RADIUS_DESKTOP = 190;
+  const RADIUS_TABLET  = 145;
+  const RADIUS_MOBILE  = 128;
   const SPEED = 0.3;   // degrees per tick
   const INTERVAL = 50; // ms
 

@@ -378,6 +378,12 @@ class PipelineV2:
         gen_results = engine.generate_all(force=force)
         phase_timings["generate"] = time.perf_counter() - phase_start
         engine.update_manifest(gen_results)
+
+        from .generator.consistency import CrossBucketConsistencyPass
+        injected = CrossBucketConsistencyPass(self.llm, self.output_dir, self.cfg).run(gen_results)
+        if injected:
+            console.print(f"[dim]  ↳ consistency pass: {injected} cross-link(s) injected[/dim]")
+
         generation_summary = summarize_generation_results(gen_results)
         stats["pages_generated"] = generation_summary.succeeded
         stats["pages_failed"] = generation_summary.failed

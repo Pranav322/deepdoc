@@ -105,7 +105,7 @@ pip install mkdocs-swagger-ui-tag   # only when your repo has an OpenAPI/Swagger
 deepdoc --version
 deepdoc --help
 python -m deepdoc --help
-node --version    # must report 18 or higher
+pip show mkdocs-material   # verify MkDocs Material is installed
 ```
 
 If you installed the chatbot extra, you can verify those dependencies with:
@@ -1398,10 +1398,6 @@ jobs:
         with:
           python-version: "3.11"
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-
       - name: Install dependencies
         run: |
           pip install deepdoc   # or: pip install "deepdoc[chatbot]" if you use chatbot features
@@ -1453,10 +1449,6 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
 
       - name: Install deepdoc
         run: pip install deepdoc

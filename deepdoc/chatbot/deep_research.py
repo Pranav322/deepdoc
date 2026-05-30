@@ -426,7 +426,7 @@ class DeepResearcher:
         step: int,
     ) -> ResearchStep:
         """Run a Tool-Using ReAct loop for a single sub-question."""
-        max_iterations = 3
+        max_iterations = 5
         chunks = self._retrieve_for_question(
             question,
             history,
@@ -468,8 +468,9 @@ class DeepResearcher:
             "You have access to the following initial evidence chunks from the codebase.\n\n"
             "If the evidence is sufficient, provide your final answer in plain text.\n"
             "If you need to explore the codebase further, you can use the following tools by outputting a JSON object and NOTHING else:\n"
-            '1. read_file: `{"action": "read_file", "path": "file/path.py", "start": 10, "end": 50}`\n'
-            '2. grep: `{"action": "grep", "pattern": "def main"}`\n\n'
+            '1. search: `{"action": "search", "query": "what you want to find"}`  — semantic search over the code index\n'
+            '2. read_file: `{"action": "read_file", "path": "file/path.py", "start": 10, "end": 50}`\n'
+            '3. grep: `{"action": "grep", "pattern": "def main"}`\n\n'
             "Answer ONLY based on evidence. Prefer a detailed, implementation-level walkthrough.\n\n"
             "## STRICT GROUNDING RULES\n"
             "- Do NOT invent, fabricate, or hallucinate any code, function names, class names, "
@@ -631,6 +632,35 @@ class DeepResearcher:
             if len(results) >= 30:
                 results.append("... [truncated due to length]")
             return "\n".join(results)
+
+        elif action == "search":
+            query = str(tool_call.get("query", "")).strip()
+            if not query or len(query) < 3:
+                return "Error: search requires a non-empty 'query' (min 3 characters)."
+            try:
+                retrieve_context = getattr(self.service, "retrieve_context", None)
+                if not callable(retrieve_context):
+                    return "Error: search tool unavailable."
+                context = retrieve_context(query, [], mode="fast")
+                code_hits = context.get("code_hits", [])[:8]
+                if not code_hits:
+                    return f"No code matches found for '{query}'."
+                parts = []
+                for i, hit in enumerate(code_hits, 1):
+                    record = getattr(hit, "record", hit)
+                    source = (
+                        getattr(record, "file_path", None)
+                        or getattr(record, "doc_path", None)
+                        or "unknown"
+                    )
+                    text = getattr(record, "text", "")[:1600]
+                    score = round(float(getattr(hit, "score", 0.0)), 3)
+                    parts.append(f"[{i}] {source} (score={score}):\n{text}")
+                    if source not in sources_used:
+                        sources_used.append(source)
+                return "\n\n".join(parts)
+            except Exception as e:
+                return f"Error: Search failed - {e}"
 
         return f"Error: Unknown action '{action}'"
 

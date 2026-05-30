@@ -49,7 +49,7 @@ from .constants import (
 )
 from .live_fallback_mixin import LiveFallbackMixin
 from .retrieval_mixin import RetrievalMixin
-from .routes import create_fastapi_app, QueryRequest, DeepResearchRequest, CodeDeepRequest
+from .routes import create_fastapi_app, QueryRequest, DeepRequest
 
 
 class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
@@ -106,7 +106,7 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
         ):
             logger.warning(
                 "Source archive empty or unreadable at %s while indexed corpora "
-                "exist. Live-fallback, evidence verification, and code-deep file "
+                "exist. Live-fallback, evidence verification, and deep mode file "
                 "inventory will be degraded. Run `deepdoc update` to rebuild.",
                 self.index_dir / "source_archive.json.gz",
             )
@@ -446,46 +446,24 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
             **self._workspace_defaults(),
         }
 
-    def deep_research(
-        self,
-        question: str,
-        history: list[dict[str, str]] | None = None,
-        max_rounds: int = 3,
-        *,
-        token_callback: "Callable[[str], None] | None" = None,
-    ) -> dict[str, Any]:
-        """Run a DeepResearch session: decompose → retrieve → synthesise.
-
-        Returns a ResearchResult with a comprehensive answer and source citations.
-        Requires an LLM client to be configured (llm= at construction time or via settings).
-
-        Args:
-            question: The research question to answer.
-            max_rounds: Maximum number of sub-questions to explore.
-
-        Returns:
-            ResearchResult with fields: original_question, steps, final_answer, all_sources, confidence.
-        """
-        retrieval_cfg = self.chat_cfg["retrieval"]
-        _, response = self._run_research_mode(
-            question,
-            history,
-            mode="deep",
-            max_rounds=max_rounds,
-            top_k=max(8, retrieval_cfg.get("deep_research_top_k", 10)),
-            token_callback=token_callback,
-        )
-        return response
-
-    def code_deep(
+    def deep(
         self,
         question: str,
         history: list[dict[str, str]] | None = None,
         max_rounds: int = 4,
         *,
         trace_callback: Callable[[dict[str, Any]], None] | None = None,
+        token_callback: "Callable[[str], None] | None" = None,
     ) -> dict[str, Any]:
-        retrieval_cfg = self._retrieval_profile("code_deep")
+        """Run an agentic deep research session over the codebase.
+
+        Decomposes the question into sub-questions, retrieves code-heavy evidence,
+        runs a tool-using ReAct loop (search / read_file / grep) for each, then
+        synthesises a comprehensive answer with source citations and a file inventory.
+        """
+        from .deep_research import DeepResearcher
+
+        retrieval_cfg = self._retrieval_profile("deep")
         trace: list[dict[str, Any]] = []
 
         def emit(event: dict[str, Any]) -> None:
@@ -496,56 +474,19 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
             if callable(callback):
                 callback(payload)
 
-        result, response = self._run_research_mode(
-            question,
-            history,
-            mode="code_deep",
-            max_rounds=max_rounds,
-            top_k=max(
-                10,
-                int(retrieval_cfg.get("code_deep_top_k", retrieval_cfg["top_k_code"])),
-            ),
-            trace_callback=emit,
-        )
-        response["trace"] = trace
-        response["response_mode"] = "code_deep"
-        response["research_mode"] = "code_deep"
-        response = self._finalize_answer_response(question, response, mode="code_deep")
-        response["trace"] = trace
-        response["file_inventory"] = self._collect_file_inventory(
-            question,
-            response,
-            result.all_sources,
-            retrieval_cfg,
-            trace,
-        )
-        return response
-
-    def _run_research_mode(
-        self,
-        question: str,
-        history: list[dict[str, str]] | None,
-        *,
-        mode: str,
-        max_rounds: int,
-        top_k: int,
-        trace_callback: Callable[[dict[str, Any]], None] | None = None,
-        token_callback: "Callable[[str], None] | None" = None,
-    ) -> tuple[Any, dict[str, Any]]:
-        from .deep_research import DeepResearcher
-
+        top_k = max(10, int(retrieval_cfg.get("deep_top_k_code", retrieval_cfg["top_k_code"])))
         researcher = DeepResearcher(
             service=self,
             llm=self._llm,
             top_k=top_k,
             max_rounds=max_rounds,
-            mode=mode,
-            trace_callback=trace_callback,
+            mode="deep",
+            trace_callback=emit,
         )
         researcher.synthesis_token_callback = token_callback
         result = researcher.research(question, history=history or [])
-        query_mode = "deep" if mode == "deep" else "code_deep"
-        response = self.query(question, history, mode=query_mode)
+
+        response = self.query(question, history, mode="deep")
         response.update(
             {
                 "answer": result.final_answer,
@@ -554,13 +495,17 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
                     sum(step.chunks_used for step in result.steps),
                 ),
                 "confidence": result.confidence,
-                "research_mode": mode,
+                "research_mode": "deep",
                 "research_sources": result.all_sources,
-                "response_mode": mode,
+                "response_mode": "deep",
             }
         )
-        response = self._finalize_answer_response(question, response, mode=mode)
-        return result, response
+        response = self._finalize_answer_response(question, response, mode="deep")
+        response["trace"] = trace
+        response["file_inventory"] = self._collect_file_inventory(
+            question, response, result.all_sources, retrieval_cfg, trace,
+        )
+        return response
 
     def _collect_file_inventory(
         self,
@@ -570,7 +515,7 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
         retrieval_cfg: dict[str, Any],
         trace: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
-        limit = max(8, int(retrieval_cfg.get("code_deep_file_inventory_limit", 18)))
+        limit = max(8, int(retrieval_cfg.get("deep_file_inventory_limit", 18)))
         inventory: dict[str, dict[str, Any]] = {}
 
         def add_entry(
@@ -696,21 +641,17 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
 
     def _retrieval_profile(self, mode: str) -> dict[str, Any]:
         base = deepcopy(self.chat_cfg["retrieval"])
-        mode_name = mode.strip().lower() if isinstance(mode, str) else "default"
+        mode_name = mode.strip().lower() if isinstance(mode, str) else "fast"
+
         if mode_name == "default":
             return base
+
         if mode_name == "deep":
-            deep_prompt_chars = base.get("deep_mode_max_prompt_chars")
-            if isinstance(deep_prompt_chars, int) and deep_prompt_chars > 0:
-                base["max_prompt_chars"] = deep_prompt_chars
-            return base
+            prompt_chars = base.get("deep_mode_max_prompt_chars")
+            if isinstance(prompt_chars, int) and prompt_chars > 0:
+                base["max_prompt_chars"] = prompt_chars
 
-        if mode_name == "code_deep":
-            code_prompt_chars = base.get("code_deep_mode_max_prompt_chars")
-            if isinstance(code_prompt_chars, int) and code_prompt_chars > 0:
-                base["max_prompt_chars"] = code_prompt_chars
-
-            code_top_k = base.get("code_deep_top_k")
+            code_top_k = base.get("deep_top_k_code")
             if isinstance(code_top_k, int) and code_top_k > 0:
                 base["top_k_code"] = max(base.get("top_k_code", code_top_k), code_top_k)
                 base["candidate_top_k_code"] = max(
@@ -718,18 +659,17 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
                     code_top_k * 2,
                 )
 
-            relationship_top_k = base.get("code_deep_top_k_relationship")
-            if isinstance(relationship_top_k, int) and relationship_top_k > 0:
+            rel_top_k = base.get("deep_top_k_relationship")
+            if isinstance(rel_top_k, int) and rel_top_k > 0:
                 base["top_k_relationship"] = max(
-                    base.get("top_k_relationship", relationship_top_k),
-                    relationship_top_k,
+                    base.get("top_k_relationship", rel_top_k), rel_top_k,
                 )
                 base["candidate_top_k_relationship"] = max(
-                    base.get("candidate_top_k_relationship", relationship_top_k * 2),
-                    relationship_top_k * 2,
+                    base.get("candidate_top_k_relationship", rel_top_k * 2),
+                    rel_top_k * 2,
                 )
 
-            docs_cap = base.get("code_deep_top_k_docs")
+            docs_cap = base.get("deep_top_k_docs")
             if isinstance(docs_cap, int) and docs_cap > 0:
                 base["top_k_docs"] = min(base.get("top_k_docs", docs_cap), docs_cap)
 
@@ -739,6 +679,7 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
             base["rerank"] = True
             return base
 
+        # fast mode (default for any unrecognised mode string)
         fast_prompt_chars = base.get("fast_mode_max_prompt_chars")
         if isinstance(fast_prompt_chars, int) and fast_prompt_chars > 0:
             base["max_prompt_chars"] = fast_prompt_chars

@@ -668,15 +668,15 @@ class AnswerMixin:
                     reason=str(row.get("reason", "") or ""),
                 )
             )
-        if mode == "code_deep" and not evidence:
-            diagnostics.warnings.append("No source/config evidence was available for Code Deep.")
+        if mode == "deep" and not evidence:
+            diagnostics.warnings.append("No source/config evidence was available for deep mode.")
         return evidence, diagnostics
 
     def _evidence_role(self, row: dict[str, Any], *, source_kind: str, mode: str) -> str:
         reason = str(row.get("reason", "") or "")
         if source_kind == "config" or row.get("artifact_type"):
             return "config"
-        if reason in {"investigation_step", "research_step"} or mode == "code_deep":
+        if reason in {"investigation_step", "research_step"} or mode == "deep":
             return "implementation"
         if reason == "mentioned_source":
             return "supporting"

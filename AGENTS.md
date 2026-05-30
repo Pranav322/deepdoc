@@ -45,12 +45,12 @@ Guidance for coding agents working in this repository.
 - `deepdoc/generator/post_processors.py` — framework-neutral Markdown repair pipeline (all run in `generation.py` at all three post-processing call sites): `fix_mermaid_diagrams`, fence repair (`repair_unbalanced_code_fences`, `repair_dangling_plain_fences`), `normalize_html_code_blocks`, `normalize_explanatory_lines_outside_fences`, `fix_frontmatter_description` (strips trailing `::` artefacts from YAML `description:`), `fix_bare_mermaid_fences`, `fix_bare_language_markers`, and `repair_internal_doc_links`. **Link rewriting:** `repair_internal_doc_links` is the single owner that validates `/slug` links against the page tree and rewrites them to MkDocs-relative form via `_to_mkdocs_relative` (`/` → `index.md`, `/auth` → `auth.md`, `/api` → `api.md`, `/api/*` left as-is); the glossary linker emits `domain-glossary.md#slug` directly. No MDX/JSX escaping or Shiki-language normalization exists — MkDocs renders plain CommonMark and Pygments degrades gracefully, so `escape_mdx_*`, `normalize_fumadocs_directives`, `fix_leaf_card_directives`, `normalize_code_fence_languages`, and `repair_split_object_code_fences` were all removed.
 
 ### Chatbot
-- `deepdoc/chatbot/service.py` — `ChatbotQueryService`; `query`, `deep_research`, `code_deep`; re-exports `create_fastapi_app`; tests mock here
-- `deepdoc/chatbot/retrieval_mixin.py` — hybrid retrieval: FAISS + SQLite FTS + symbol chunks + relationship chunks; adjacent window stitching
+- `deepdoc/chatbot/service.py` — `ChatbotQueryService`; two public modes: `query(mode="fast")` (single-pass FAISS) and `deep()` (agentic, code-heavy); re-exports `create_fastapi_app`; tests mock here
+- `deepdoc/chatbot/retrieval_mixin.py` — hybrid retrieval: FAISS + SQLite FTS + symbol chunks + relationship chunks; adjacent window stitching; `_evidence_priority`: code/product chunks score above docs (docs get +0.2 vs code +2.5)
 - `deepdoc/chatbot/answer_mixin.py` — LLM answer generation, continuation; citation dedup key is `(path, start_line, end_line)`; leading `./` stripped from citation paths
-- `deepdoc/chatbot/deep_research.py` — `DeepResearcher` multi-step research loop with `synthesis_token_callback`
-- `deepdoc/chatbot/live_fallback_mixin.py` — live filesystem fallback retrieval for deep-research mode
-- `deepdoc/chatbot/routes.py` — FastAPI app factory; all SSE streaming endpoints use `tokens.get(timeout=30)` with `ping` keepalive events to prevent indefinite hangs
+- `deepdoc/chatbot/deep_research.py` — `DeepResearcher` multi-step ReAct loop; agent tools: `search` (semantic FAISS), `read_file` (source archive), `grep` (regex); max 5 iterations per sub-question; `synthesis_token_callback`
+- `deepdoc/chatbot/live_fallback_mixin.py` — live filesystem fallback retrieval (keyword-based, archive zip) for deep mode
+- `deepdoc/chatbot/routes.py` — FastAPI app factory; two endpoints: `POST /query` (fast), `POST /deep` (agentic); SSE variants `/query/stream` and `/deep/stream`; all SSE endpoints use `timeout=30` + `ping` keepalive
 - `deepdoc/chatbot/providers.py` — `LiteLLMChatClient` (including `complete_stream()`), embedding clients; Azure `api_version` propagated from `llm.*` config
 - `deepdoc/chatbot/indexer.py` — `ChatbotIndexer`; FAISS invalid-embedding filter (score ≤ -0.5)
 - `deepdoc/chatbot/source_archive.py` — `build_source_archive`, `update_source_archive`; archived source is the proof for evidence hydration

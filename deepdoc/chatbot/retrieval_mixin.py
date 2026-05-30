@@ -780,8 +780,10 @@ class RetrievalMixin:
         source_kind = record.source_kind or ""
         if source_kind == "product":
             priority += 0.8 if supporting_requested else 2.5
-        elif source_kind in {"config", "docs", "ops", "tooling"}:
+        elif source_kind in {"config", "ops", "tooling"}:
             priority += 1.2
+        elif source_kind == "docs":
+            priority += 0.2
         elif source_kind in {"test", "fixture", "example", "generated"}:
             priority += 4.5 if supporting_requested else -1.0
 

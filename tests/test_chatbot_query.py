@@ -1298,7 +1298,7 @@ def test_research_finalize_adds_missing_evidence_ids(tmp_path: Path) -> None:
                 "relationship_citations": [],
                 "doc_links": [],
             },
-            mode="code_deep",
+            mode="deep",
         )
 
     assert "`js/app.js:1-3` [E1]" in result["answer"]
@@ -1465,10 +1465,10 @@ def test_code_deep_ood_gate_respects_symbol_context(tmp_path: Path) -> None:
         ),
     ):
         service = ChatbotQueryService(repo_root, {"chatbot": {"enabled": True}})
-        result = service.code_deep("Where is `PAYMENTS_HOST` defined?", max_rounds=1)
+        result = service.deep("Where is `PAYMENTS_HOST` defined?", max_rounds=1)
 
     assert result["confidence"] != "out_of_scope_confidence"
-    assert result["research_mode"] == "code_deep"
+    assert result["research_mode"] == "deep"
     assert result["used_chunks"] > 0
     assert result["evidence"]
     assert result["evidence"][0]["file_path"] == "src/payments.py"
@@ -1530,7 +1530,7 @@ def test_deep_research_uses_live_repo_fallback_when_index_is_empty(
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.deep_research("How does `PAYMENTS_HOST` work?", max_rounds=1)
+        result = service.deep("How does `PAYMENTS_HOST` work?", max_rounds=1)
 
     assert result["answer"].startswith("Deep answer grounded in `src/payments.py`.")
     assert "`src/payments.py:1-1` [E1]" in result["answer"]
@@ -1623,7 +1623,7 @@ def test_deep_research_handles_invalid_read_file_arguments(tmp_path: Path) -> No
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.deep_research("Explain PAYMENTS_HOST", max_rounds=1)
+        result = service.deep("Explain PAYMENTS_HOST", max_rounds=1)
 
     assert result["answer"].startswith("Deep answer grounded in `src/payments.py`.")
     assert "`src/payments.py:1-1` [E1]" in result["answer"]
@@ -1692,7 +1692,7 @@ def test_deep_research_does_not_cite_missing_read_file_target(tmp_path: Path) ->
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.deep_research("Tell me all schemas", max_rounds=1)
+        result = service.deep("Tell me all schemas", max_rounds=1)
 
     assert (
         result["answer"] == "Could not find schema definitions from current evidence."
@@ -1763,7 +1763,7 @@ def test_deep_research_grep_adds_matched_files_to_sources(tmp_path: Path) -> Non
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.deep_research("Where is PAYMENTS_HOST defined?", max_rounds=1)
+        result = service.deep("Where is PAYMENTS_HOST defined?", max_rounds=1)
 
     assert result["answer"].startswith("Deep answer grounded in `src/payments.py`.")
     assert "`src/payments.py:1-1` [E1]" in result["answer"]
@@ -2009,7 +2009,7 @@ def test_deep_research_uses_extended_chunk_evidence(tmp_path: Path) -> None:
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.deep_research("How does payments work?", max_rounds=1)
+        result = service.deep("How does payments work?", max_rounds=1)
 
     assert result["answer"] == "Final answer"
 
@@ -2089,7 +2089,7 @@ def test_deep_research_schema_question_uses_original_question_retrieval(
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.deep_research("tell me all the schemabeing used", max_rounds=1)
+        result = service.deep("tell me all the schemabeing used", max_rounds=1)
 
     assert result["answer"].startswith("Schema is defined in `src/models.py`.")
     assert "`src/models.py:1-4` [E1]" in result["answer"]
@@ -2965,7 +2965,7 @@ def test_fastapi_deep_research_endpoint_uses_shared_history(tmp_path: Path) -> N
         app = create_fastapi_app(repo_root, cfg)
         client = TestClient(app)
         response = client.post(
-            "/deep-research",
+            "/deep",
             json={
                 "question": "How does auth work?",
                 "history": [
@@ -3077,13 +3077,13 @@ def test_code_deep_returns_trace_and_file_inventory(tmp_path: Path) -> None:
         ),
     ):
         service = ChatbotQueryService(repo_root, cfg)
-        result = service.code_deep(
+        result = service.deep(
             "Where is auth defined and which middleware runs?",
             max_rounds=2,
         )
 
-    assert result["research_mode"] == "code_deep"
-    assert result["response_mode"] == "code_deep"
+    assert result["research_mode"] == "deep"
+    assert result["response_mode"] == "deep"
     phases = {entry["phase"] for entry in result["trace"]}
     assert {"start", "decompose", "step_start", "step_done", "done"}.issubset(phases)
     inventory_paths = {entry["file_path"] for entry in result["file_inventory"]}
@@ -3158,13 +3158,13 @@ def test_fastapi_code_deep_endpoint_returns_trace_and_inventory(tmp_path: Path) 
         app = create_fastapi_app(repo_root, {"chatbot": {"enabled": True}})
         client = TestClient(app)
         response = client.post(
-            "/code-deep",
+            "/deep",
             json={"question": "Where is auth defined?", "history": []},
         )
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["research_mode"] == "code_deep"
+    assert payload["research_mode"] == "deep"
     assert payload["trace"]
     assert payload["file_inventory"]
 
@@ -3221,7 +3221,7 @@ def test_fastapi_code_deep_stream_emits_trace_result_and_done(tmp_path: Path) ->
         client = TestClient(app)
         with client.stream(
             "POST",
-            "/code-deep/stream",
+            "/deep/stream",
             json={"question": "Where is auth defined?", "history": []},
         ) as response:
             body = "".join(chunk for chunk in response.iter_text())
@@ -3230,4 +3230,4 @@ def test_fastapi_code_deep_stream_emits_trace_result_and_done(tmp_path: Path) ->
     assert "event: trace" in body
     assert "event: result" in body
     assert "event: done" in body
-    assert '"research_mode": "code_deep"' in body
+    assert '"research_mode": "deep"' in body

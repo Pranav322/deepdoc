@@ -13,11 +13,9 @@ from .post_processors import (
     build_internal_doc_link_maps,
     fix_file_references,
     fix_mermaid_diagrams,
-    normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
     repair_internal_doc_links,
-    repair_split_object_code_fences,
     repair_dangling_plain_fences,
     repair_unbalanced_code_fences,
 )

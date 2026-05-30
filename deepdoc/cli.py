@@ -974,7 +974,7 @@ def serve(port):
 
     \b
     Run `deepdoc generate` first so the generated MkDocs site and docs exist.
-    Requires MkDocs Material: pip install mkdocs-material
+    Requires the site extra: pip install 'deepdoc[site]'
     """
     _load_or_exit()
     cfg = _load_or_exit()
@@ -1026,7 +1026,7 @@ def serve(port):
         pass
     except FileNotFoundError:
         console.print(
-            "[red]mkdocs not found. Install it: [bold]pip install mkdocs-material[/bold][/red]"
+            "[red]mkdocs not found. Install it: [bold]pip install 'deepdoc[site]'[/bold][/red]"
         )
         sys.exit(1)
     finally:
@@ -1107,7 +1107,7 @@ def _deploy():
             console.print("[red]Build failed.[/red]")
     except FileNotFoundError:
         console.print(
-            "[red]mkdocs not found. Install it: [bold]pip install mkdocs-material[/bold][/red]"
+            "[red]mkdocs not found. Install it: [bold]pip install 'deepdoc[site]'[/bold][/red]"
         )
         sys.exit(1)
 
@@ -1132,9 +1132,9 @@ def _ensure_mkdocs_installed(cfg: dict) -> None:
             missing.append("mkdocs-swagger-ui-tag")
 
     if missing:
-        pkgs = " ".join(dict.fromkeys(missing))
         raise click.ClickException(
-            f"MkDocs is not installed. Install it with:\n    pip install {pkgs}"
+            "MkDocs is not installed. Install the site extra with:\n"
+            "    pip install 'deepdoc[site]'"
         )
 
 

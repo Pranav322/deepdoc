@@ -90,14 +90,13 @@ pip install click litellm gitpython rich pyyaml jinja2
 pip install -e . --no-deps
 ```
 
-To preview or deploy the generated site you also need **MkDocs Material** (pure Python — no Node.js):
+To preview or deploy the generated site you also need **MkDocs Material** (pure Python — no Node.js). Install the `site` extra:
 
 ```bash
-pip install mkdocs-material
-pip install mkdocs-swagger-ui-tag   # only when your repo has an OpenAPI/Swagger spec
+pip install 'deepdoc[site]'   # mkdocs-material + pymdown-extensions + mkdocs-swagger-ui-tag
 ```
 
-`deepdoc serve` / `deepdoc deploy` will tell you the exact `pip install` command if MkDocs is missing.
+`deepdoc serve` / `deepdoc deploy` will tell you to run `pip install 'deepdoc[site]'` if MkDocs is missing.
 
 ### Verify installation
 

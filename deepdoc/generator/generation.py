@@ -60,12 +60,10 @@ from .post_processors import (
     fix_frontmatter_description,
     fix_mermaid_diagrams,
     inject_source_files_disclosure,
-    normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
     repair_dangling_plain_fences,
     repair_internal_doc_links,
-    repair_split_object_code_fences,
     repair_unbalanced_code_fences,
     strip_leaked_provenance_fields,
 )
@@ -622,8 +620,6 @@ class BucketGenerationEngine:
                 bucket.owned_files,
             )
             content = normalize_html_code_blocks(content)
-            content = normalize_code_fence_languages(content)
-            content = repair_split_object_code_fences(content)
             content = repair_unbalanced_code_fences(content)
             content = normalize_explanatory_lines_outside_fences(content)
             content = repair_dangling_plain_fences(content)
@@ -663,8 +659,6 @@ class BucketGenerationEngine:
                         bucket.owned_files,
                     )
                     content = normalize_html_code_blocks(content)
-                    content = normalize_code_fence_languages(content)
-                    content = repair_split_object_code_fences(content)
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)
@@ -706,8 +700,6 @@ class BucketGenerationEngine:
                         bucket.owned_files,
                     )
                     content = normalize_html_code_blocks(content)
-                    content = normalize_code_fence_languages(content)
-                    content = repair_split_object_code_fences(content)
                     content = repair_unbalanced_code_fences(content)
                     content = normalize_explanatory_lines_outside_fences(content)
                     content = repair_dangling_plain_fences(content)

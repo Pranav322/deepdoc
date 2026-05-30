@@ -6,10 +6,8 @@ from pathlib import Path
 from deepdoc.generator import (
     _fix_mermaid_diagram,
     build_internal_doc_link_maps,
-    normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
-    repair_split_object_code_fences,
     repair_dangling_plain_fences,
     repair_internal_doc_links,
     repair_unbalanced_code_fences,
@@ -480,33 +478,6 @@ def test_stage_openapi_assets_stages_multiple_specs(tmp_path: Path) -> None:
     assert len(staged_specs) == 2
 
 
-def test_normalize_code_fence_languages_rewrites_env_aliases() -> None:
-    content = """```env
-SECRET_KEY=test
-```
-
-```dotenv
-DEBUG=False
-```
-"""
-
-    normalized = normalize_code_fence_languages(content)
-
-    assert "```bash\nSECRET_KEY=test" in normalized
-    assert "```bash\nDEBUG=False" in normalized
-
-
-def test_normalize_code_fence_languages_rewrites_indented_env_aliases() -> None:
-    content = """  ```env
-  CLIMES_URL=https://api.climes.io/
-  ```
-"""
-
-    normalized = normalize_code_fence_languages(content)
-
-    assert "  ```bash" in normalized
-
-
 def test_normalize_html_code_blocks_converts_pre_code_to_fences() -> None:
     content = """<pre><code>git clone &lt;repo-url&gt;
 cd app
@@ -617,23 +588,6 @@ def test_repair_dangling_plain_fences_drops_fence_before_closing_tab() -> None:
 
     assert repaired.count("```") == 2
     assert "Expected: HTML login page.\n    ```\n  </Tab>" not in repaired
-
-
-def test_repair_split_object_code_fences_stitches_body_back_into_fence() -> None:
-    content = """```typescript
-// ReturnDetailsPayload
-{
-```
-  response: {
-    order: []
-  }
-}
-```
-"""
-
-    repaired = repair_split_object_code_fences(content)
-
-    assert "```typescript\n// ReturnDetailsPayload\n{\n  response: {\n    order: []\n  }\n}\n```" in repaired
 
 
 def test_repair_internal_doc_links_rewrites_aliases_using_page_titles() -> None:
@@ -907,3 +861,59 @@ def test_fix_mermaid_diagram_sanitizes_flowchart_edge_labels_with_punctuation() 
 
     assert "Client -->|HTTP REST Webhook| API" in fixed
     assert "Inventory -->|DB Cache| DB" in fixed
+
+
+def test_mkdocs_build_smoke(tmp_path) -> None:
+    """End-to-end: the generated mkdocs.yml + /// Blocks content builds under --strict.
+
+    Skips unless the `site` extra is installed (mkdocs-material + pymdownx), so it
+    runs in CI with `pip install deepdoc[site]` but not in a bare dev env.
+    """
+    import subprocess
+    import sys
+
+    pytest = __import__("pytest")
+    pytest.importorskip("mkdocs")
+    pytest.importorskip("material")
+    pytest.importorskip("pymdownx")
+
+    repo_root = tmp_path / "repo"
+    output_dir = repo_root / "docs"
+    output_dir.mkdir(parents=True)
+
+    overview = make_bucket(
+        "Overview", "overview", ["README.md"],
+        generation_hints={"is_introduction_page": True},
+    )
+    auth = make_bucket("Auth", "auth", ["auth.py"], section="Core")
+    plan = make_plan([overview, auth])
+    plan.nav_structure = {"Core": ["auth"]}
+
+    # Exercise every native construct the new prompts emit + MDX-crash hazards.
+    (output_dir / "auth.md").write_text(
+        "# Auth\n\n"
+        "Prose with a stray `x < 5` and a `{config}` brace.\n\n"
+        "/// note | Heads up\nBlocks admonition, no indentation.\n///\n\n"
+        "//// tab | Python\n```python\nx = 1\n```\n////\n\n"
+        "```mermaid\nflowchart TD\n    A --> B\n```\n",
+        encoding="utf-8",
+    )
+
+    build_mkdocs_from_plan(
+        repo_root, output_dir,
+        {"project_name": "Smoke", "site": {"colors": {}}},
+        plan, has_openapi=False,
+    )
+
+    result = subprocess.run(
+        [sys.executable, "-m", "mkdocs", "build", "--strict",
+         "-f", str(repo_root / "site" / "mkdocs.yml")],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, f"mkdocs build failed:\n{result.stdout}\n{result.stderr}"
+
+    out_html = repo_root / "site" / "out" / "auth" / "index.html"
+    assert out_html.exists()
+    rendered = out_html.read_text(encoding="utf-8")
+    assert 'class="admonition note"' in rendered
+    assert "/// note" not in rendered  # directive rendered, not leaked as text

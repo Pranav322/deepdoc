@@ -20,7 +20,7 @@ def test_ensure_mkdocs_installed_raises_when_missing(monkeypatch) -> None:
         cli._ensure_mkdocs_installed({})
 
     assert "pip install" in str(exc.value)
-    assert "mkdocs-material" in str(exc.value)
+    assert "deepdoc[site]" in str(exc.value)
 
 
 def test_ensure_mkdocs_installed_passes_when_present(monkeypatch) -> None:

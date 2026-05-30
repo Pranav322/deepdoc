@@ -4,8 +4,8 @@ Flow:
     1. SCAN  — collect file tree, symbols, endpoints, OpenAPI specs (no LLM)
     2. PLAN  — multi-step bucket planner (3 LLM calls) OR legacy single-call planner
     3. GENERATE — execute plan page-by-page, batched (N LLM calls)
-    4. API REF — stage OpenAPI assets for generated Fumadocs API reference pages
-    5. BUILD — write the generated Fumadocs site scaffold + page tree
+    4. API REF — stage OpenAPI assets for the generated MkDocs API reference page
+    5. BUILD — write the generated MkDocs Material site (mkdocs.yml + nav)
 
 The manifest tracks: source_file → content_hash → [page_slugs]
 So `deepdoc update` can diff changed files → find affected pages → regenerate only those.
@@ -34,7 +34,6 @@ from .chatbot.settings import chatbot_enabled
 from .generator import (
     build_internal_doc_link_maps,
     BucketGenerationEngine,
-    normalize_code_fence_languages,
     normalize_explanatory_lines_outside_fences,
     repair_dangling_plain_fences,
     repair_unbalanced_code_fences,
@@ -192,7 +191,7 @@ def stage_openapi_assets(
     plan: "DocPlan | None" = None,
     scanned_endpoints: list[dict] | None = None,
 ) -> bool:
-    """Stage all detected OpenAPI specs for the generated Fumadocs app."""
+    """Stage all detected OpenAPI specs for the generated MkDocs site."""
     site_openapi_dir = repo_root / "site" / "openapi"
     site_openapi_dir.mkdir(parents=True, exist_ok=True)
 
@@ -224,8 +223,8 @@ def stage_openapi_assets(
             )
             continue
 
-        # Bake the server base path into each path key so Fumadocs can do a
-        # direct dict lookup (it does not prepend the server URL itself).
+        # Bake the server base path into each path key so the rendered spec
+        # shows full paths without relying on the server URL prefix.
         base_path = _spec_base_path(spec)
         if base_path and not any(
             k.startswith(base_path) for k in spec.get("paths", {})
@@ -266,7 +265,7 @@ def stage_openapi_assets(
         if manifest:
             combined_manifest.extend(manifest)
             console.print(
-                f"[green]✓[/green] Staged {len(manifest)} Fumadocs OpenAPI pages from {spec_rel_path}"
+                f"[green]✓[/green] Staged {len(manifest)} OpenAPI endpoints from {spec_rel_path}"
             )
             continue
 
@@ -816,7 +815,6 @@ class PipelineV2:
         # Post-process: validate Mermaid diagrams and file references
         raw = self._validate_and_fix_mermaid(raw)
         raw = self._validate_file_refs(raw, scan, page)
-        raw = normalize_code_fence_languages(raw)
         raw = repair_unbalanced_code_fences(raw)
         raw = normalize_explanatory_lines_outside_fences(raw)
         raw = repair_dangling_plain_fences(raw)
@@ -1591,7 +1589,7 @@ class PipelineV2:
             )
 
     def _setup_playground(self, scan: RepoScan, plan: "DocPlan | None" = None) -> bool:
-        """Stage OpenAPI assets for the generated Fumadocs API reference route."""
+        """Stage OpenAPI assets for the generated MkDocs API reference page."""
         return stage_openapi_assets(
             self.repo_root,
             scan.openapi_paths,

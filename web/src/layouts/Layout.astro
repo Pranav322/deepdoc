@@ -4,14 +4,32 @@ import "../styles/global.css";
 export interface Props {
   title?: string;
   description?: string;
+  /** Path or URL to the social card image (defaults to the site OG image). */
+  image?: string;
+  /** Set true on thin or in-progress pages to keep them out of search results. */
+  noindex?: boolean;
 }
 
 const {
   title = "DeepDoc — Engineering docs your team will actually read",
   description = "DeepDoc generates evidence-grounded internal documentation from your codebase — architecture, endpoints, integrations, runtime surfaces — with a chatbot that answers from real source.",
+  image = "/proof-docs.png",
+  noindex = false,
 } = Astro.props;
 
 const canonical = new URL(Astro.url.pathname, Astro.site).toString();
+const ogImage = new URL(image, Astro.site).toString();
+
+const jsonLd = {
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  name: "DeepDoc",
+  applicationCategory: "DeveloperApplication",
+  operatingSystem: "macOS, Linux, Windows",
+  description,
+  url: Astro.site?.toString(),
+  offers: { "@type": "Offer", price: "0", priceCurrency: "USD" },
+};
 ---
 
 <!doctype html>
@@ -19,21 +37,31 @@ const canonical = new URL(Astro.url.pathname, Astro.site).toString();
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="color-scheme" content="dark" />
+    <meta name="color-scheme" content="dark light" />
+    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="generator" content={Astro.generator} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" href={canonical} />
+    {noindex && <meta name="robots" content="noindex, nofollow" />}
 
     <title>{title}</title>
     <meta name="description" content={description} />
 
     <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="DeepDoc" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:title" content={title} />
     <meta property="og:description" content={description} />
     <meta property="og:url" content={canonical} />
+    <meta property="og:image" content={ogImage} />
+    <meta property="og:image:alt" content={title} />
 
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="twitter:title" content={title} />
     <meta name="twitter:description" content={description} />
+    <meta name="twitter:image" content={ogImage} />
+
+    <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
 
     <!-- Fonts: DM Serif Display + DM Sans + JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />

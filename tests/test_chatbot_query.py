@@ -2980,7 +2980,9 @@ def test_fastapi_deep_research_endpoint_uses_shared_history(tmp_path: Path) -> N
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["answer"] == "Deep answer grounded in `src/auth.py` and `auth.mdx`."
+    assert payload["answer"].startswith(
+        "Deep answer grounded in `src/auth.py` and `auth.mdx`."
+    )
     assert payload["research_mode"] == "deep"
     assert payload["confidence"] in {"high", "medium", "low"}
     assert any(

@@ -9,6 +9,25 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [3.1.0] - 2026-06-08
+
+### Features
+
+- **MkDocs-native chatbot widget + `/ask` answer workspace.** Delivers the in-site chat experience promised as a follow-up in 2.4.0 — a self-contained vanilla-JS floating "dock" injected on every page plus a full-page `/ask` workspace, generated directly into the MkDocs Material site (no Node/Next.js). Submitting a question opens `/ask/?q=…&mode=fast|deep`; answers stream over SSE with inline **Source evidence** cards (click to open a dark code modal with the snippet, line range, language, and symbol tags) and a **Read next** doc list. In **Deep Research** mode the page also shows a collapsible **Research steps** panel that traces the agent's decompose → retrieve → tool-call → synthesise timeline, and a collapsible **Files explored** list from the run's file inventory. Scaffolded only when `chatbot.enabled` is true.
+- **`search` tool in the deep-research agent loop.** `DeepResearcher` now runs semantic FAISS `search` alongside `read_file` and `grep` inside its ReAct loop.
+- **`[site]` install extra.** `pip install "deepdoc[site]"` pulls MkDocs Material + pymdown-extensions + the Swagger UI plugin, so previewing/deploying the generated site no longer needs a separate manual install.
+
+### Changed
+
+- **Chatbot query surface collapsed from three modes to two — `fast` and `deep`.** `POST /query` is a single-pass FAISS answer; `POST /deep` is the agentic ReAct researcher. Routes, service, config, and scaffold were simplified accordingly (`routes.py` shed ~100 lines).
+- **`/ask` workspace hardened against MkDocs `navigation.instant`.** The page's chrome-hiding `dd-ask-page` body class is now toggled per-navigation via Material's `document$` instead of a one-shot add, so clicking a source no longer lands on an unstyled docs page until a manual refresh.
+- **Tighter, correct answer rendering.** The in-answer Markdown renderer is now block-aware (consecutive bullets share one `<ul>`, paragraphs wrap in `<p>`, no stray `<br>` around block elements), fixing runaway vertical whitespace; the fast/deep toggle now syncs `?mode=` into the URL; and the `/ask` visual scale (title, radii, shadows, padding) was tightened.
+- **Answer sidebar surfaces more of the retrieval payload** — folds in `relationship`/`live-fallback` code citations and `repo-doc`/`doc` references that were previously computed but dropped. `confidence` and internal `diagnostics` are intentionally not shown.
+
+### Removed
+
+- **Dropped the MDX-only post-processors** left over from the Fumadocs era (`post_processors.py` shed ~96 lines) — CommonMark output needs no JSX/brace escaping. Completes the MkDocs migration cleanup begun in 2.4.0.
+
 ## [3.0.0] - 2026-05-30
 
 ### 🎉 First Stable Release

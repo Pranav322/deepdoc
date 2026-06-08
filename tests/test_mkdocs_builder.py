@@ -88,9 +88,7 @@ def test_build_mkdocs_from_plan_creates_site_scaffold(tmp_path: Path) -> None:
     )
 
     mkdocs_yml = (repo_root / "site" / "mkdocs.yml").read_text(encoding="utf-8")
-    extra_css = (repo_root / "site" / "docs" / "stylesheets" / "extra.css").read_text(
-        encoding="utf-8"
-    )
+    extra_css = (output_dir / "stylesheets" / "extra.css").read_text(encoding="utf-8")
 
     # Core scaffold files exist.
     assert (output_dir / "index.md").exists()

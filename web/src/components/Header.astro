@@ -1,4 +1,5 @@
 ---
+import Logo from "./Logo.astro";
 const pathname = Astro.url.pathname;
 const nav = [
   { label: "Docs", href: "/docs" },
@@ -14,11 +15,9 @@ const nav = [
 >
   <div class="mx-auto flex h-[52px] max-w-6xl items-center justify-between px-6">
 
-    <!-- Cursive wordmark logo -->
-    <a href="/" class="group flex items-center gap-2.5" style="text-decoration: none;">
-      <span class="logo-word transition-opacity group-hover:opacity-80" style="font-size: 1.35rem;">
-        <span class="logo-d">D</span><span class="logo-rest">eepDoc</span>
-      </span>
+    <!-- Brand logo -->
+    <a href="/" class="group flex items-center gap-2.5 transition-opacity hover:opacity-80" style="text-decoration: none;">
+      <Logo size={26} wordSize="1.2rem" />
       <span
         class="hidden sm:inline-flex items-center rounded-full px-2.5 py-[3px]"
         style="background: color-mix(in srgb, var(--color-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent); font-family: var(--font-mono); font-size: 10px; color: var(--color-accent); font-weight: 600; margin-top: 2px;"

@@ -1,4 +1,5 @@
 ---
+import Logo from "./Logo.astro";
 const year = new Date().getFullYear();
 const links = [
   { label: "GitHub", href: "https://github.com/tss-pranavkumar/deepdoc" },
@@ -15,9 +16,7 @@ const links = [
     style="font-family: var(--font-sans);"
   >
     <div class="flex items-center gap-2.5">
-      <span class="logo-word" style="font-size: 1.1rem;">
-        <span class="logo-d">D</span><span class="logo-rest" style="color: var(--color-ink-faint);">eepDoc</span>
-      </span>
+      <Logo size={20} wordSize="1rem" wordColor="var(--color-ink-muted)" />
       <span style="font-size: 13px; color: var(--color-ink-faint);">&middot; MIT &middot; &copy; {year}</span>
     </div>
 

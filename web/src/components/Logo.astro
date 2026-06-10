@@ -1,0 +1,53 @@
+---
+/**
+ * DeepDoc brand logo — single source of truth for the mark.
+ * The "depth D": a geometric D with two receding echo strokes that read as
+ * layers / depth = "Deep". Mark uses --color-accent so it adapts dark↔light.
+ *
+ *   variant="full"  → mark + "DeepDoc" wordmark (default)
+ *   variant="mark"  → mark only
+ */
+interface Props {
+  variant?: "full" | "mark";
+  size?: number; // mark height in px
+  wordSize?: string; // wordmark font-size (CSS length)
+  wordColor?: string; // wordmark color
+  class?: string;
+}
+const {
+  variant = "full",
+  size = 26,
+  wordSize = "1.15rem",
+  wordColor = "var(--color-ink)",
+  class: className = "",
+} = Astro.props;
+
+const D = "M14 9 H24 A15 15 0 0 1 24 39 H14"; // outer D contour (no counter)
+---
+
+<span class={`dd-logo ${className}`}>
+  <svg
+    class="dd-mark"
+    width={size}
+    height={size}
+    viewBox="0 0 48 48"
+    fill="none"
+    role="img"
+    aria-label="DeepDoc"
+  >
+    <path class="dd-echo dd-echo-2" d={D} transform="translate(6 6)" />
+    <path class="dd-echo dd-echo-1" d={D} transform="translate(3 3)" />
+    <path
+      class="dd-front"
+      fill-rule="evenodd"
+      d="M14 9 H24 A15 15 0 0 1 24 39 H14 Z M20 15 H24 A9 9 0 0 1 24 33 H20 Z"
+    ></path>
+  </svg>
+  {
+    variant === "full" && (
+      <span class="dd-word" style={`font-size:${wordSize};color:${wordColor}`}>
+        DeepDoc
+      </span>
+    )
+  }
+</span>

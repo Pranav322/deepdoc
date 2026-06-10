@@ -63,6 +63,11 @@ Issues = "https://github.com/tss-pranavkumar/deepdoc/issues"
 where = ["."]
 include = ["deepdoc*"]
 
+[tool.setuptools.package-data]
+# Vendored client libraries the site builder copies into generated sites
+# (markdown rendering + syntax highlighting for the chatbot /ask workspace).
+"deepdoc.site.builder" = ["vendor/*.js", "vendor/*.css"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]

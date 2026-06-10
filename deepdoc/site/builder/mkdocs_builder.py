@@ -440,7 +440,23 @@ def _write_mkdocs_scaffold(
         (actual_docs_dir / "stylesheets" / "chatbot-ask.css").write_text(
             _ask_page_css(), encoding="utf-8"
         )
+        _copy_vendor_assets(js_dir, actual_docs_dir / "stylesheets")
         _ensure_ask_page(actual_docs_dir, project_name)
+
+
+# Vendored client libraries (bundled, no CDN) the chatbot /ask workspace needs:
+# markdown-it for CommonMark/GFM rendering and highlight.js for syntax colors.
+_VENDOR_DIR = Path(__file__).resolve().parent / "vendor"
+_VENDOR_JS = ("markdown-it.min.js", "highlight.min.js")
+_VENDOR_CSS = ("hljs-theme.css",)
+
+
+def _copy_vendor_assets(js_dir: Path, css_dir: Path) -> None:
+    """Copy the bundled markdown/highlight libraries into the generated site."""
+    for name in _VENDOR_JS:
+        (js_dir / name).write_bytes((_VENDOR_DIR / name).read_bytes())
+    for name in _VENDOR_CSS:
+        (css_dir / name).write_bytes((_VENDOR_DIR / name).read_bytes())
 
 
 def _mkdocs_yml(
@@ -463,10 +479,18 @@ def _mkdocs_yml(
     )
 
     chatbot_css_line = (
-        "\n  - stylesheets/chatbot.css\n  - stylesheets/chatbot-ask.css" if chatbot else ""
+        # hljs theme first so chatbot-ask.css can override its base bg/padding.
+        "\n  - stylesheets/hljs-theme.css"
+        "\n  - stylesheets/chatbot.css\n  - stylesheets/chatbot-ask.css"
+        if chatbot
+        else ""
     )
     chatbot_js_block = (
         "\nextra_javascript:\n"
+        # Vendored libs first — they define window.markdownit / window.hljs
+        # that chatbot-ask.js consumes when rendering answers.
+        "  - javascripts/markdown-it.min.js\n"
+        "  - javascripts/highlight.min.js\n"
         "  - javascripts/chatbot-config.js\n"
         "  - javascripts/chatbot.js\n"
         "  - javascripts/chatbot-ask.js\n"
@@ -610,8 +634,6 @@ def _chatbot_widget_js() -> str:
 
   var API = (window.__DEEPDOC_CHATBOT_URL__ || '').replace(/\/$/, '');
   if (!API) return;
-  // On /ask page the full-page UI handles everything — no FAB
-  if (document.getElementById('dd-ask-root')) return;
 
   var SUGGESTED = [
     'How does authentication work?',
@@ -624,76 +646,97 @@ def _chatbot_widget_js() -> str:
   var SVG_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
 
   var _mode = 'fast';
+  var overlay = null, fab = null, popup = null, inp = null, isOpen = false;
 
-  var overlay = mk('div', { id: 'dd-ov' });
-  var fab = mk('button', { id: 'dd-fab', 'aria-label': 'Ask AI about this codebase' });
-  fab.innerHTML = SVG_CHAT + '<span>Ask AI</span>';
+  // Build the FAB + popup and wire listeners. Invoked by sync() whenever we are
+  // on a docs page that does not already have one.
+  function build() {
+    overlay = mk('div', { id: 'dd-ov' });
+    fab = mk('button', { id: 'dd-fab', 'aria-label': 'Ask AI about this codebase' });
+    fab.innerHTML = SVG_CHAT + '<span>Ask AI</span>';
 
-  var popup = mk('div', { id: 'dd-popup', 'aria-hidden': 'true', role: 'dialog', 'aria-label': 'Ask the codebase' });
-  popup.innerHTML = [
-    '<div class="dd-dock">',
-    '  <div class="dd-dock-meta">',
-    '    <p class="dd-eyebrow"><span class="dd-eyebrow-dot"></span>Ask the codebase</p>',
-    '    <p class="dd-dock-sub">Start with a question about architecture, files, or behavior.</p>',
-    '  </div>',
-    '  <div class="dd-modes" role="tablist">',
-    '    <button class="dd-mode dd-mode-on" type="button" data-mode="fast" role="tab" aria-selected="true">Fast</button>',
-    '    <button class="dd-mode" type="button" data-mode="deep" role="tab" aria-selected="false">Deep Research</button>',
-    '  </div>',
-    '  <form id="dd-popup-form" class="dd-dock-row" autocomplete="off">',
-    '    <textarea id="dd-popup-inp" rows="1" placeholder="Where is auth handled? How is deployment configured?"></textarea>',
-    '    <button type="submit" id="dd-popup-sub" aria-label="Ask">' + SVG_ARROW + '<span>Ask</span></button>',
-    '  </form>',
-    '  <div id="dd-popup-sugs">',
-    SUGGESTED.map(function (s) {
-      return '<button class="dd-sug-pill" type="button">' + esc(s) + '</button>';
-    }).join(''),
-    '  </div>',
-    '</div>',
-  ].join('');
+    popup = mk('div', { id: 'dd-popup', 'aria-hidden': 'true', role: 'dialog', 'aria-label': 'Ask the codebase' });
+    popup.innerHTML = [
+      '<div class="dd-dock">',
+      '  <div class="dd-dock-head">',
+      '    <p class="dd-eyebrow"><span class="dd-eyebrow-dot"></span>Ask the codebase</p>',
+      '    <div class="dd-modes" role="radiogroup" aria-label="Answer depth">',
+      '      <button class="dd-mode dd-mode-on" type="button" data-mode="fast" role="radio" aria-checked="true">Fast</button>',
+      '      <button class="dd-mode" type="button" data-mode="deep" role="radio" aria-checked="false">Deep Research</button>',
+      '    </div>',
+      '  </div>',
+      '  <form id="dd-popup-form" class="dd-dock-row" autocomplete="off">',
+      '    <textarea id="dd-popup-inp" rows="1" placeholder="Where is auth handled? How is deployment configured?"></textarea>',
+      '    <button type="submit" id="dd-popup-sub" aria-label="Ask">' + SVG_ARROW + '<span>Ask</span></button>',
+      '  </form>',
+      '  <div id="dd-popup-sugs">',
+      SUGGESTED.slice(0, 3).map(function (s) {
+        return '<button class="dd-sug-pill" type="button">' + esc(s) + '</button>';
+      }).join(''),
+      '  </div>',
+      '</div>',
+    ].join('');
 
-  document.body.appendChild(overlay);
-  document.body.appendChild(fab);
-  document.body.appendChild(popup);
+    document.body.appendChild(overlay);
+    document.body.appendChild(fab);
+    document.body.appendChild(popup);
+    inp = popup.querySelector('#dd-popup-inp');
+    isOpen = false;
 
-  var inp = document.getElementById('dd-popup-inp');
-  var isOpen = false;
+    fab.addEventListener('click', function () { isOpen ? close() : show(); });
+    overlay.addEventListener('click', close);
 
-  fab.addEventListener('click', function () { isOpen ? close() : show(); });
-  overlay.addEventListener('click', close);
-  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen) close(); });
-
-  popup.querySelector('.dd-modes').addEventListener('click', function (e) {
-    var t = e.target.closest && e.target.closest('.dd-mode');
-    if (!t) return;
-    _mode = t.dataset.mode;
-    popup.querySelectorAll('.dd-mode').forEach(function (b) {
-      var on = b.dataset.mode === _mode;
-      b.classList.toggle('dd-mode-on', on);
-      b.setAttribute('aria-selected', on ? 'true' : 'false');
+    popup.querySelector('.dd-modes').addEventListener('click', function (e) {
+      var t = e.target.closest && e.target.closest('.dd-mode');
+      if (!t) return;
+      _mode = t.dataset.mode;
+      popup.querySelectorAll('.dd-mode').forEach(function (b) {
+        var on = b.dataset.mode === _mode;
+        b.classList.toggle('dd-mode-on', on);
+        b.setAttribute('aria-checked', on ? 'true' : 'false');
+      });
+      inp.focus();
     });
-    inp.focus();
-  });
 
-  document.getElementById('dd-popup-form').addEventListener('submit', function (e) {
-    e.preventDefault();
-    var q = inp.value.trim();
-    if (q) goAsk(q);
-  });
+    popup.querySelector('#dd-popup-form').addEventListener('submit', function (e) {
+      e.preventDefault();
+      var q = inp.value.trim();
+      if (q) goAsk(q);
+    });
 
-  inp.addEventListener('keydown', function (e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); var q = inp.value.trim(); if (q) goAsk(q); }
-  });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); var q = inp.value.trim(); if (q) goAsk(q); }
+    });
 
-  inp.addEventListener('input', function () {
-    this.style.height = 'auto';
-    this.style.height = Math.min(this.scrollHeight, 120) + 'px';
-  });
+    inp.addEventListener('input', function () {
+      this.style.height = 'auto';
+      this.style.height = Math.min(this.scrollHeight, 120) + 'px';
+    });
 
-  document.getElementById('dd-popup-sugs').addEventListener('click', function (e) {
-    var b = e.target.closest && e.target.closest('.dd-sug-pill');
-    if (b) goAsk(b.textContent.trim());
-  });
+    popup.querySelector('#dd-popup-sugs').addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('.dd-sug-pill');
+      if (b) goAsk(b.textContent.trim());
+    });
+  }
+
+  function teardown() {
+    if (!fab) return;
+    close();
+    overlay.remove(); fab.remove(); popup.remove();
+    overlay = fab = popup = inp = null;
+  }
+
+  // Re-evaluate on every navigation. Material `navigation.instant` swaps page
+  // content without re-running this script, and /ask is reached via a full load
+  // then SPA-navigated back — so a one-shot injector leaves the FAB missing
+  // until a hard refresh. Hide it on /ask; (re)inject it on every docs page.
+  function sync() {
+    if (document.getElementById('dd-ask-root')) {
+      teardown();
+    } else if (!fab || !document.body.contains(fab)) {
+      build();
+    }
+  }
 
   function show() {
     isOpen = true;
@@ -701,15 +744,14 @@ def _chatbot_widget_js() -> str:
     popup.setAttribute('aria-hidden', 'false');
     overlay.classList.add('dd-ov-on');
     fab.classList.add('dd-fab-on');
-    setTimeout(function () { inp.focus(); }, 40);
+    setTimeout(function () { if (inp) inp.focus(); }, 40);
   }
 
   function close() {
     isOpen = false;
-    popup.classList.remove('dd-popup-on');
-    popup.setAttribute('aria-hidden', 'true');
-    overlay.classList.remove('dd-ov-on');
-    fab.classList.remove('dd-fab-on');
+    if (popup) { popup.classList.remove('dd-popup-on'); popup.setAttribute('aria-hidden', 'true'); }
+    if (overlay) overlay.classList.remove('dd-ov-on');
+    if (fab) fab.classList.remove('dd-fab-on');
   }
 
   function goAsk(question) {
@@ -726,6 +768,15 @@ def _chatbot_widget_js() -> str:
     Object.keys(attrs || {}).forEach(function (k) { el.setAttribute(k, attrs[k]); });
     return el;
   }
+
+  // Escape closes the popup (attached once, document-level).
+  document.addEventListener('keydown', function (e) { if (e.key === 'Escape' && isOpen) close(); });
+
+  if (window.document$ && typeof window.document$.subscribe === 'function') {
+    window.document$.subscribe(sync);
+  } else {
+    sync();
+  }
 })();
 """
 
@@ -738,7 +789,10 @@ def _chatbot_css() -> str:
   --dd-light:  var(--md-primary-fg-color--light, #ff7a5c);
   --dd-dark:   var(--md-primary-fg-color--dark, #9c2a16);
   --dd-border: var(--md-default-fg-color--lightest, rgba(0,0,0,.08));
-  --dd-muted:  var(--md-default-fg-color--light, rgba(0,0,0,.55));
+  /* Material's own secondary-text token (resolves to ~4.6:1 light / ~4.9:1 slate,
+     both >= WCAG AA). The opaque fallback keeps muted text legible if the Material
+     vars are ever absent — never the old rgba(...,.55) that failed AA. */
+  --dd-muted:  var(--md-default-fg-color--light, #6e6e73);
   --dd-fg:     var(--md-default-fg-color, #1c1c1c);
   --dd-bg:     var(--md-default-bg-color, #fff);
 }
@@ -775,22 +829,23 @@ def _chatbot_css() -> str:
 #dd-fab:active { transform: translateY(0); }
 #dd-fab.dd-fab-on { opacity: 0; transform: scale(.9); pointer-events: none; }
 
-/* ── Quick-ask dock popup (centered) ─────────────────────────────────────── */
+/* ── Quick-ask dock popup (centered near the bottom, DeepWiki-subtle) ─────── */
 #dd-popup {
   position: fixed;
   left: 50%; bottom: clamp(1rem, 3vw, 2rem);
   transform: translateX(-50%);
   z-index: 300;
-  width: min(40rem, calc(100vw - 1.5rem));
+  width: min(38rem, calc(100vw - 2rem));
   display: none;
 }
 #dd-popup.dd-popup-on { display: block; }
 .dd-dock {
-  border: 1px solid color-mix(in srgb, var(--dd-light) 8%, var(--dd-border) 92%);
-  border-radius: 1.4rem;
-  padding: .95rem;
+  border: 1px solid color-mix(in srgb, var(--dd-light) 6%, var(--dd-border) 94%);
+  border-radius: 1.1rem;
+  padding: .8rem;
   background: color-mix(in srgb, var(--dd-bg) 98.5%, var(--dd-light) 1.5%);
-  box-shadow: 0 24px 60px rgba(131, 39, 25, .12), 0 6px 16px rgba(235, 62, 37, .06);
+  /* Soft, neutral lift — subtle like DeepWiki, not a heavy brand-tinted slab. */
+  box-shadow: 0 14px 36px rgba(15, 18, 30, .12), 0 2px 8px rgba(15, 18, 30, .06);
   backdrop-filter: blur(8px);
   transform-origin: center bottom;
 }
@@ -800,9 +855,13 @@ def _chatbot_css() -> str:
   to   { opacity: 1; transform: none; }
 }
 
-.dd-dock-meta { margin-bottom: .7rem; }
+/* Eyebrow + mode pills share one row so the dock stays compact. */
+.dd-dock-head {
+  display: flex; align-items: center; justify-content: space-between;
+  gap: .75rem; flex-wrap: wrap; margin-bottom: .6rem;
+}
 .dd-eyebrow {
-  display: inline-flex; align-items: center; gap: .5rem; margin: 0 0 .3rem;
+  display: inline-flex; align-items: center; gap: .5rem; margin: 0;
   font-size: .74rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
   color: color-mix(in srgb, var(--dd-dark) 70%, var(--dd-muted) 30%);
 }
@@ -817,14 +876,13 @@ def _chatbot_css() -> str:
   70%  { box-shadow: 0 0 0 .42rem rgba(235, 62, 37, 0); }
   100% { box-shadow: 0 0 0 0 rgba(235, 62, 37, 0); }
 }
-.dd-dock-sub { margin: 0; font-size: .82rem; color: var(--dd-muted); }
 
 /* ── Mode pills ──────────────────────────────────────────────────────────── */
-.dd-modes { display: flex; gap: .45rem; margin-bottom: .7rem; }
+.dd-modes { display: flex; gap: .4rem; flex-shrink: 0; }
 .dd-mode {
   border: 1px solid color-mix(in srgb, var(--dd-light) 12%, var(--dd-border) 88%);
-  border-radius: 999px; padding: .4rem .85rem;
-  font-size: .8rem; font-weight: 600; font-family: inherit; cursor: pointer;
+  border-radius: 999px; padding: .32rem .8rem;
+  font-size: .78rem; font-weight: 600; font-family: inherit; cursor: pointer;
   color: var(--dd-muted);
   background: color-mix(in srgb, var(--dd-bg) 90%, var(--dd-light) 10%);
   transition: background .16s ease, color .16s ease, border-color .16s ease;
@@ -841,12 +899,12 @@ def _chatbot_css() -> str:
 #dd-popup-inp {
   resize: none;
   border: 1px solid color-mix(in srgb, var(--dd-light) 8%, var(--dd-border) 92%);
-  border-radius: 1rem;
+  border-radius: .85rem;
   background: var(--dd-bg);
-  padding: .8rem .95rem;
+  padding: .7rem .9rem;
   font-size: .86rem; font-family: inherit; outline: none;
   color: var(--dd-fg); line-height: 1.5;
-  min-height: 2.9rem; max-height: 8rem; overflow-y: auto;
+  min-height: 2.6rem; max-height: 8rem; overflow-y: auto;
   box-shadow: inset 0 1px 0 rgba(255,255,255,.4);
   transition: outline .12s, border-color .12s;
 }
@@ -854,7 +912,7 @@ def _chatbot_css() -> str:
 #dd-popup-inp::placeholder { color: color-mix(in srgb, var(--dd-muted) 70%, transparent 30%); }
 #dd-popup-sub {
   display: inline-flex; align-items: center; gap: .4rem;
-  border: none; border-radius: 999px; padding: .8rem 1.15rem; cursor: pointer;
+  border: none; border-radius: 999px; padding: .7rem 1.1rem; cursor: pointer;
   font-size: .84rem; font-weight: 600; font-family: inherit; color: #fff;
   background: linear-gradient(135deg, var(--dd-light), var(--dd-brand) 58%, var(--dd-dark));
   box-shadow: 0 10px 22px rgba(193, 51, 31, .16);
@@ -865,7 +923,7 @@ def _chatbot_css() -> str:
 #dd-popup-sub:active { transform: translateY(0); }
 
 /* ── Suggestion pills ────────────────────────────────────────────────────── */
-#dd-popup-sugs { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .7rem; }
+#dd-popup-sugs { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
 .dd-sug-pill {
   padding: .4rem .7rem;
   background: color-mix(in srgb, var(--dd-bg) 93%, var(--dd-light) 7%);
@@ -884,6 +942,14 @@ def _chatbot_css() -> str:
 @media (max-width: 520px) {
   .dd-dock-row { grid-template-columns: minmax(0,1fr); }
   #dd-popup-sub { justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #dd-fab, .dd-mode, .dd-sug-pill, #dd-popup-sub { transition: none; }
+  #dd-fab:hover, #dd-popup-sub:hover { transform: none; }
+  .dd-eyebrow-dot { animation: none; }
+  #dd-popup.dd-popup-on .dd-dock,
+  #dd-ov.dd-ov-on { animation: none; }
 }
 """
 
@@ -913,6 +979,10 @@ def _ask_page_js() -> str:
   var API = (window.__DEEPDOC_CHATBOT_URL__ || '').replace(/\/$/, '');
 
   var _hist = [], _mode = 'fast', _ctrl = null, _rid = 0, _modal = null;
+  // Streaming render state: while true, code fences skip the (costly) syntax
+  // highlighter and renders are time-throttled, so a heavier markdown parser
+  // never re-parses the whole answer on every single token (was O(n^2)).
+  var _streaming = false, _streamTimer = null, _lastRender = 0;
 
   var SVG = {
     spark: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z"/></svg>',
@@ -1050,6 +1120,9 @@ def _ask_page_js() -> str:
     if (_ctrl) _ctrl.abort();
     _ctrl = new AbortController();
     var myId = ++_rid;
+    // Reset streaming-render state for this turn (cancel any stale throttle).
+    _streaming = false; _lastRender = 0;
+    if (_streamTimer) { clearTimeout(_streamTimer); _streamTimer = null; }
 
     titleEl.textContent = question;
     ledeEl.textContent = _mode === 'deep'
@@ -1075,6 +1148,22 @@ def _ask_page_js() -> str:
     bodyEl.appendChild(research); bodyEl.appendChild(typEl); bodyEl.appendChild(txtEl);
     lock(true);
 
+    // Throttled streaming render: at most one paint per ~80ms regardless of
+    // token rate. Avoids re-parsing the whole answer on every token; the final
+    // authoritative (syntax-highlighted) render happens once in finish().
+    function streamRender() {
+      var nowT = Date.now();
+      if (nowT - _lastRender >= 80) {
+        _lastRender = nowT;
+        txtEl.innerHTML = md(stream) + '<span class="dda-cur"></span>';
+      } else if (!_streamTimer) {
+        _streamTimer = setTimeout(function () {
+          _streamTimer = null; _lastRender = Date.now();
+          if (_rid === myId && _streaming) txtEl.innerHTML = md(stream) + '<span class="dda-cur"></span>';
+        }, 80);
+      }
+    }
+
     var endpoint = _mode === 'deep' ? '/deep/stream' : '/query/stream';
     var reqBody  = { question: question, history: _hist.slice(-6) };
     if (_mode === 'deep') reqBody.max_rounds = 4;
@@ -1098,9 +1187,9 @@ def _ask_page_js() -> str:
             try {
               var d = JSON.parse(ev.data);
               if (ev.event === 'token') {
-                if (!gotToken) { typEl.style.display = 'none'; gotToken = true; }
+                if (!gotToken) { typEl.style.display = 'none'; gotToken = true; _streaming = true; }
                 stream += d.text || '';
-                txtEl.innerHTML = md(stream) + '<span class="dda-cur"></span>';
+                streamRender();
               } else if (ev.event === 'trace') {
                 typEl.style.display = 'none'; addStep(research, d);
               } else if (ev.event === 'result') {
@@ -1116,6 +1205,8 @@ def _ask_page_js() -> str:
       return pump();
     }).catch(function (err) {
       if (err.name === 'AbortError' || _rid !== myId) return;
+      _streaming = false;
+      if (_streamTimer) { clearTimeout(_streamTimer); _streamTimer = null; }
       typEl.style.display = 'none';
       txtEl.innerHTML = '<span class="dda-err">' + esc(err.message || 'Something went wrong') + '</span>';
     }).finally(function () { if (_rid === myId) lock(false); });
@@ -1123,6 +1214,9 @@ def _ask_page_js() -> str:
 
   function finish(myId, question, research, typEl, txtEl, stream, res) {
     if (_rid !== myId) return;
+    // End streaming so the final render runs the syntax highlighter.
+    _streaming = false;
+    if (_streamTimer) { clearTimeout(_streamTimer); _streamTimer = null; }
     typEl.style.display = 'none';
     var cur = txtEl.querySelector('.dda-cur'); if (cur) cur.remove();
     // Collapse the live research trace once the answer has landed — it stays
@@ -1336,7 +1430,9 @@ def _ask_page_js() -> str:
       var tagWrap = ov.querySelector('.dda-modal-tags');
       syms.forEach(function (s) { var t = mk('span', { class: 'dda-modal-tag' }); t.textContent = s; tagWrap.appendChild(t); });
     }
-    ov.querySelector('.dda-modal-pre code').textContent = snippet;
+    var mcode = ov.querySelector('.dda-modal-pre code');
+    mcode.textContent = snippet;
+    hlEl(mcode, snippet, lang);
     ov.addEventListener('click', function (e) { if (e.target === ov) closeModal(); });
     ov.querySelector('.dda-modal-x').addEventListener('click', closeModal);
     document.body.appendChild(ov);
@@ -1367,53 +1463,53 @@ def _ask_page_js() -> str:
     });
     return { events: evs, remainder: rem };
   }
+  // Markdown rendering via the bundled markdown-it. html:false means any raw
+  // HTML in the model's output is escaped (XSS-safe — the old renderer also
+  // never emitted raw HTML). The fence rule is overridden to keep our code-card
+  // chrome (language label + copy button) and to run highlight.js — but only
+  // once streaming has finished, since _streaming guards that hot path.
+  var MD = null;
+  function getMD() {
+    if (MD) return MD;
+    if (!window.markdownit) return null;
+    MD = window.markdownit({ html: false, linkify: true, breaks: false });
+    // Linkify only explicit []() links and real http(s):// URLs — not bare
+    // domains/emails the model may mention in prose (avoids surprise links).
+    MD.linkify.set({ fuzzyLink: false, fuzzyEmail: false });
+    MD.renderer.rules.fence = function (tokens, idx) {
+      var t = tokens[idx];
+      var lang = (t.info || '').trim().split(/\s+/)[0];
+      var code = t.content.replace(/\n$/, '');
+      var inner;
+      if (!_streaming && window.hljs && lang && window.hljs.getLanguage(lang)) {
+        try { inner = window.hljs.highlight(code, { language: lang, ignoreIllegals: true }).value; }
+        catch (e) { inner = esc(code); }
+      } else {
+        inner = esc(code);
+      }
+      return '<div class="dda-code-wrap"><div class="dda-code-hdr">'
+        + (lang ? '<span class="dda-lang">' + esc(lang) + '</span>' : '<span></span>')
+        + '<button class="dda-copy" type="button" data-code="' + esc(code) + '">' + SVG.copy + '<span>Copy</span></button>'
+        + '</div><pre class="dda-pre"><code class="hljs">' + inner + '</code></pre></div>';
+    };
+    return MD;
+  }
   function md(text) {
     if (!text) return '';
-    var saved = [];
-    var t = text.replace(/```([\s\S]*?)```/g, function (m) {
-      var lang = (m.match(/^```(\w+)/) || ['',''])[1];
-      var code = m.replace(/^```\w*\n?/, '').replace(/\n?```$/, '');
-      saved.push(
-        '<div class="dda-code-wrap">' +
-        '<div class="dda-code-hdr">' +
-        (lang ? '<span class="dda-lang">' + esc(lang) + '</span>' : '<span></span>') +
-        '<button class="dda-copy" type="button" data-code="' + esc(code) + '">' + SVG.copy + '<span>Copy</span></button>' +
-        '</div><pre class="dda-pre"><code>' + esc(code) + '</code></pre></div>'
-      );
-      return '\x00' + (saved.length - 1) + '\x00';
-    });
-    t = t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
-    t = t
-      .replace(/`([^`\n]+)`/g, '<code>$1</code>')
-      .replace(/\*\*([^*\n]+)\*\*/g, '<strong>$1</strong>')
-      .replace(/\*([^*\n]+)\*/g, '<em>$1</em>')
-      .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-      .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
-      .replace(/^# (.+)$/gm,   '<h1>$1</h1>');
-    // Block-aware assembly. Consecutive bullets join into ONE <ul> (a blank
-    // line between them does not split the list), paragraphs wrap in <p> with
-    // soft <br> breaks, and no <br> is emitted around block elements — this is
-    // what kills the runaway vertical whitespace from the old br-join.
-    var lines = t.split('\n'), out = [], inList = false, para = [];
-    function flushP() { if (para.length) { out.push('<p>' + para.join('<br>') + '</p>'); para = []; } }
-    function closeL() { if (inList) { out.push('</ul>'); inList = false; } }
-    var BLOCK = /^\s*<h[1-3]>|^\s*\x00\d+\x00\s*$/;
-    lines.forEach(function (ln) {
-      if (/^\s*[-*] /.test(ln)) {
-        flushP();
-        if (!inList) { out.push('<ul>'); inList = true; }
-        out.push('<li>' + ln.replace(/^\s*[-*] /, '') + '</li>');
-      } else if (/^\s*$/.test(ln)) {
-        flushP();                 // blank line ends a paragraph but keeps an open list intact
-      } else if (BLOCK.test(ln)) {
-        flushP(); closeL(); out.push(ln);
-      } else {
-        closeL(); para.push(ln);
-      }
-    });
-    flushP(); closeL();
-    t = out.join('\n');
-    return t.replace(/\x00(\d+)\x00/g, function (_, i) { return saved[+i]; });
+    var inst = getMD();
+    if (inst) return inst.render(text);
+    // Fallback only if the bundled lib failed to load: safe escaped paragraphs.
+    return '<p>' + esc(text).replace(/\n{2,}/g, '</p><p>').replace(/\n/g, '<br>') + '</p>';
+  }
+  // Syntax-highlight a <code> element in place (used by the evidence modal).
+  function hlEl(codeEl, text, lang) {
+    if (!window.hljs) return;
+    try {
+      codeEl.innerHTML = (lang && window.hljs.getLanguage(lang))
+        ? window.hljs.highlight(text, { language: lang, ignoreIllegals: true }).value
+        : window.hljs.highlightAuto(text).value;
+      codeEl.classList.add('hljs');
+    } catch (e) {}
   }
   function esc(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
@@ -1447,7 +1543,10 @@ def _ask_page_css() -> str:
   --dd-light:  var(--md-primary-fg-color--light, #ff7a5c);
   --dd-dark:   var(--md-primary-fg-color--dark, #9c2a16);
   --dd-border: var(--md-default-fg-color--lightest, rgba(0,0,0,.07));
-  --dd-muted:  var(--md-default-fg-color--light, rgba(0,0,0,.5));
+  /* Material's own secondary-text token (resolves to ~4.6:1 light / ~4.9:1 slate,
+     both >= WCAG AA). The opaque fallback keeps muted text legible if the Material
+     vars are ever absent — never the old rgba(...,.5) that failed AA. */
+  --dd-muted:  var(--md-default-fg-color--light, #6e6e73);
   --dd-fg:     var(--md-default-fg-color, #1d1d1f);
   --dd-bg:     var(--md-default-bg-color, #fff);
   --dd-code-bg: #1b1d28;
@@ -1673,6 +1772,19 @@ def _ask_page_css() -> str:
 .dda-txt strong { font-weight: 600; }
 .dda-txt a { color: var(--dd-dark); text-decoration-color: color-mix(in srgb, var(--dd-brand) 36%, currentColor 64%); }
 .dda-txt a:hover { color: var(--dd-brand); }
+.dda-txt ul ul, .dda-txt ol ol, .dda-txt ul ol, .dda-txt ol ul { margin: .15rem 0; }
+.dda-txt blockquote {
+  margin: .7rem 0; padding: .15rem .9rem;
+  border-left: 3px solid color-mix(in srgb, var(--dd-brand) 40%, var(--dd-border) 60%);
+  color: var(--dd-muted);
+}
+.dda-txt hr { border: 0; border-top: 1px solid var(--dd-border); margin: 1.1rem 0; }
+.dda-txt table { width: 100%; border-collapse: collapse; margin: .8rem 0; font-size: .92em; }
+.dda-txt th, .dda-txt td {
+  border: 1px solid color-mix(in srgb, var(--dd-light) 12%, var(--dd-border) 88%);
+  padding: .4rem .6rem; text-align: left; vertical-align: top;
+}
+.dda-txt th { background: color-mix(in srgb, var(--dd-bg) 90%, var(--dd-light) 10%); font-weight: 600; }
 
 /* -- Code blocks in answer (dark, traffic-light header) -------------------- */
 .dda-code-wrap {
@@ -1704,6 +1816,8 @@ def _ask_page_css() -> str:
   color: #e5e7eb; background: var(--dd-code-bg);
 }
 .dda-pre code { background: none; padding: 0; border: none; color: #e5e7eb; font-family: inherit; }
+/* hljs token colors render on our card background, not the theme's own block bg/padding. */
+.dda-pre code.hljs, .dda-modal-pre code.hljs { background: transparent; padding: 0; }
 .dda-err { color: #c62828; font-size: .86rem; }
 
 /* -- Streaming cursor ------------------------------------------------------ */
@@ -1905,6 +2019,13 @@ def _ask_page_css() -> str:
   .ddp-dock-shell { width: calc(100vw - 1rem); }
   .ddp-dock-row { grid-template-columns: minmax(0,1fr); }
   #ddp-sub { justify-content: center; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .dd-eyebrow-dot, .dda-typing span, .dda-cur, .dda-step,
+  .dda-modal-ov, .dda-modal { animation: none; }
+  .dda-src-clickable, #ddp-sub, .ddp-mode, .ddp-back, .ddp-clear, .dda-copy { transition: none; }
+  .dda-src-clickable:hover, #ddp-sub:hover { transform: none; }
 }
 """
 

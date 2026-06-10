@@ -1011,7 +1011,7 @@ def _ask_page_js() -> str:
     '  </div>',
     '  <div class="ddp-grid">',
     '    <section class="ddp-panel">',
-    '      <div class="ddp-panel-hd"><p class="ddp-panel-q" id="ddp-qlabel">Ready when you are</p><h2 id="ddp-qtext" hidden></h2></div>',
+    '      <div class="ddp-panel-hd"><p class="ddp-panel-q" id="ddp-qlabel">Ready when you are</p></div>',
     '      <div class="ddp-panel-bd" id="ddp-body">',
     '        <div class="ddp-empty" id="ddp-empty">Ask a question below and this page becomes a focused answer workspace with citations and related docs.</div>',
     '      </div>',
@@ -1044,13 +1044,85 @@ def _ask_page_js() -> str:
   var ledeEl  = document.getElementById('ddp-lede');
   var chipEl  = document.getElementById('ddp-chip');
   var qlabel  = document.getElementById('ddp-qlabel');
-  var qtext   = document.getElementById('ddp-qtext');
   var bodyEl  = document.getElementById('ddp-body');
   var srcEl   = document.getElementById('ddp-sources');
   var dockEye = document.getElementById('ddp-dock-eyebrow');
   var dockSub = document.getElementById('ddp-dock-sub');
   var inpEl   = document.getElementById('ddp-inp');
   var subEl   = document.getElementById('ddp-sub');
+
+  // -- Conversation thread (client-side only, session-scoped) -----------------
+  // Turns live in memory + sessionStorage — nothing is stored server-side. The
+  // storage dies with the tab; the "New" button clears it explicitly.
+  var _turns = [], _savedSources = null;
+  var STORE_KEY = 'dd-ask-thread:' + window.location.pathname;
+
+  function saveThread() {
+    try {
+      sessionStorage.setItem(STORE_KEY, JSON.stringify({ turns: _turns, sources: _savedSources }));
+    } catch (e) {}
+  }
+  function clearThread() {
+    try { sessionStorage.removeItem(STORE_KEY); } catch (e) {}
+  }
+  // Append a new Q/A turn shell (question header) to the panel body.
+  function newTurn(q) {
+    var empty = bodyEl.querySelector('.ddp-empty'); if (empty) empty.remove();
+    var turn = mk('section', { class: 'dda-turn' });
+    var qh = mk('div', { class: 'dda-turn-q' });
+    var ql = mk('span', { class: 'dda-turn-q-lbl' }); ql.textContent = 'You asked';
+    var qp = mk('p', { class: 'dda-turn-q-txt' }); qp.textContent = q;
+    qh.appendChild(ql); qh.appendChild(qp); turn.appendChild(qh);
+    bodyEl.appendChild(turn);
+    return turn;
+  }
+  // Rebuild the visible thread (and the backend history) from sessionStorage.
+  function restoreThread() {
+    var data = null;
+    try { data = JSON.parse(sessionStorage.getItem(STORE_KEY) || 'null'); } catch (e) {}
+    if (!data || !Array.isArray(data.turns) || !data.turns.length) return false;
+    _turns = data.turns; _savedSources = data.sources || null;
+    bodyEl.innerHTML = '';
+    _hist = [];
+    _turns.forEach(function (t) {
+      var turn = newTurn(t.q);
+      var txt = mk('div', { class: 'dda-txt' }); txt.innerHTML = md(t.a || '');
+      turn.appendChild(txt);
+      _hist.push({ role: 'user', content: t.q });
+      _hist.push({ role: 'assistant', content: t.a || '' });
+    });
+    if (_hist.length > 10) _hist = _hist.slice(-10);
+    var last = _turns[_turns.length - 1];
+    titleEl.textContent = last.q;
+    qlabel.textContent = 'Conversation';
+    dockEye.textContent = 'Ask a follow-up';
+    dockSub.textContent = 'Stay on this page and keep the answer flow going.';
+    if (_savedSources) {
+      renderSources(_savedSources.cites || [], _savedSources.refs || [], _savedSources.inv || []);
+      renderChip((_savedSources.cites || []).length, last.mode);
+    }
+    scrollBottom();
+    return true;
+  }
+
+  // -- Auto-scroll: stick to bottom while streaming unless the user scrolls up.
+  var _pinned = true;
+  root.addEventListener('scroll', function () {
+    _pinned = root.scrollHeight - root.scrollTop - root.clientHeight < 140;
+  }, { passive: true });
+  function scrollBottom() { root.scrollTop = root.scrollHeight; }
+  function autoScroll() { if (_pinned) scrollBottom(); }
+
+  function stripQParam() {
+    try {
+      var u = new URL(window.location.href);
+      if (u.searchParams.has('q')) {
+        u.searchParams.delete('q');
+        var qs = u.searchParams.toString();
+        history.replaceState(null, '', u.pathname + (qs ? '?' + qs : ''));
+      }
+    } catch (e) {}
+  }
 
   // -- Mode toggles -----------------------------------------------------------
   function setMode(m) {
@@ -1076,10 +1148,11 @@ def _ask_page_js() -> str:
   document.getElementById('ddp-clear').addEventListener('click', function () {
     if (_ctrl) { _ctrl.abort(); _ctrl = null; }
     _hist = []; _rid = 0;
+    _turns = []; _savedSources = null; clearThread();
     titleEl.textContent = 'Ask the codebase';
     ledeEl.textContent = 'Grounded answers with citations straight from your source.';
     chipEl.hidden = true;
-    qlabel.textContent = 'Ready when you are'; qtext.hidden = true; qtext.textContent = '';
+    qlabel.textContent = 'Ready when you are';
     dockEye.textContent = 'Ask the codebase';
     dockSub.textContent = 'Start with a question about architecture, files, or behavior.';
     bodyEl.innerHTML = '<div class="ddp-empty">Ask a question below and this page becomes a focused answer workspace with citations and related docs.</div>';
@@ -1124,16 +1197,25 @@ def _ask_page_js() -> str:
     _streaming = false; _lastRender = 0;
     if (_streamTimer) { clearTimeout(_streamTimer); _streamTimer = null; }
 
+    var turnMode = _mode;
     titleEl.textContent = question;
-    ledeEl.textContent = _mode === 'deep'
+    ledeEl.textContent = turnMode === 'deep'
       ? 'Deep research — tracing code paths across the repository.'
       : 'Fast answer — grounded in the most relevant indexed evidence.';
-    qlabel.textContent = 'Question';
-    qtext.textContent = question; qtext.hidden = false;
+    qlabel.textContent = 'Conversation';
     dockEye.textContent = 'Ask a follow-up';
     dockSub.textContent = 'Stay on this page and keep the answer flow going.';
+    // Drop ?q= once the question is asked so a reload restores the saved
+    // thread instead of re-running the boot question.
+    stripQParam();
 
-    bodyEl.innerHTML = '';
+    // A superseded in-flight turn keeps its partial text; strip its live
+    // cursor and typing dots so only the new turn looks active.
+    var oldCur = bodyEl.querySelector('.dda-cur'); if (oldCur) oldCur.remove();
+    bodyEl.querySelectorAll('.dda-typing').forEach(function (t) { t.style.display = 'none'; });
+    bodyEl.querySelectorAll('.dda-research:not(.dda-research-done)').forEach(function (r) { r.classList.add('dda-research-done'); r.open = false; });
+
+    var turn = newTurn(question);
     var research = mk('details', { class: 'dda-research' });
     research.hidden = true;
     research.innerHTML =
@@ -1145,7 +1227,8 @@ def _ask_page_js() -> str:
     research.appendChild(stepsEl);
     var typEl   = mk('div', { class: 'dda-typing' }); typEl.innerHTML = '<span></span><span></span><span></span>';
     var txtEl   = mk('div', { class: 'dda-txt' });
-    bodyEl.appendChild(research); bodyEl.appendChild(typEl); bodyEl.appendChild(txtEl);
+    turn.appendChild(research); turn.appendChild(typEl); turn.appendChild(txtEl);
+    _pinned = true; scrollBottom();
     lock(true);
 
     // Throttled streaming render: at most one paint per ~80ms regardless of
@@ -1156,10 +1239,14 @@ def _ask_page_js() -> str:
       if (nowT - _lastRender >= 80) {
         _lastRender = nowT;
         txtEl.innerHTML = md(stream) + '<span class="dda-cur"></span>';
+        autoScroll();
       } else if (!_streamTimer) {
         _streamTimer = setTimeout(function () {
           _streamTimer = null; _lastRender = Date.now();
-          if (_rid === myId && _streaming) txtEl.innerHTML = md(stream) + '<span class="dda-cur"></span>';
+          if (_rid === myId && _streaming) {
+            txtEl.innerHTML = md(stream) + '<span class="dda-cur"></span>';
+            autoScroll();
+          }
         }, 80);
       }
     }
@@ -1179,7 +1266,7 @@ def _ask_page_js() -> str:
       function pump() {
         if (_rid !== myId) return;
         return reader.read().then(function (chunk) {
-          if (chunk.done) { finish(myId, question, research, typEl, txtEl, stream, result); return; }
+          if (chunk.done) { finish(myId, question, turnMode, research, typEl, txtEl, stream, result); return; }
           buf += dec.decode(chunk.value, { stream: true });
           var p = parseSse(buf); buf = p.remainder;
           p.events.forEach(function (ev) {
@@ -1212,7 +1299,7 @@ def _ask_page_js() -> str:
     }).finally(function () { if (_rid === myId) lock(false); });
   }
 
-  function finish(myId, question, research, typEl, txtEl, stream, res) {
+  function finish(myId, question, turnMode, research, typEl, txtEl, stream, res) {
     if (_rid !== myId) return;
     // End streaming so the final render runs the syntax highlighter.
     _streaming = false;
@@ -1222,18 +1309,26 @@ def _ask_page_js() -> str:
     // Collapse the live research trace once the answer has landed — it stays
     // available on demand but no longer competes with the answer for space.
     if (research) { research.classList.add('dda-research-done'); research.open = false; }
-    if (!res) return;
-    txtEl.innerHTML = md(res.answer || stream);
+    var answer = (res && res.answer) || stream;
+    if (!answer) return;
+    txtEl.innerHTML = md(answer);
     _hist.push({ role: 'user', content: question });
-    _hist.push({ role: 'assistant', content: res.answer || stream });
+    _hist.push({ role: 'assistant', content: answer });
     if (_hist.length > 10) _hist = _hist.slice(-10);
-    renderChip(res);
-    renderSources(res);
+    _turns.push({ q: question, a: answer, mode: turnMode });
+    if (_turns.length > 20) _turns = _turns.slice(-20);
+    if (res) {
+      var cites = normalizeCites(res), refs = normalizeRefs(res), inv = normalizeInv(res);
+      _savedSources = { cites: cites, refs: refs, inv: inv, mode: turnMode };
+      renderChip(cites.length, turnMode);
+      renderSources(cites, refs, inv);
+    }
+    saveThread();
+    autoScroll();
   }
 
-  function renderChip(res) {
-    var n = normalizeCites(res).length;
-    chipEl.textContent = (_mode === 'deep' ? 'Deep Research' : 'Fast') + (n ? ' · ' + n + ' source' + (n === 1 ? '' : 's') : '');
+  function renderChip(count, mode) {
+    chipEl.textContent = (mode === 'deep' ? 'Deep Research' : 'Fast') + (count ? ' · ' + count + ' source' + (count === 1 ? '' : 's') : '');
     chipEl.hidden = false;
   }
 
@@ -1276,12 +1371,15 @@ def _ask_page_js() -> str:
     (res.doc_links || []).forEach(function (d) { push(d.title, d.url, d.doc_path); });
     return list;
   }
-  function renderSources(res) {
-    var cites = normalizeCites(res), refs = normalizeRefs(res);
-    var inv = (res.file_inventory || []).filter(function (f) {
+  function normalizeInv(res) {
+    return (res.file_inventory || []).filter(function (f) {
       var p = f.file_path || '';
       return p && p.indexOf('docs/') !== 0 && p.indexOf('.deepdoc') !== 0;
     });
+  }
+  // Takes pre-normalized arrays so a sessionStorage restore can re-render the
+  // sidebar without the original response object.
+  function renderSources(cites, refs, inv) {
     srcEl.innerHTML = '';
     if (!cites.length && !refs.length && !inv.length) {
       srcEl.innerHTML = '<div class="ddp-side-empty">No citations were returned for this answer.</div>';
@@ -1403,6 +1501,7 @@ def _ask_page_js() -> str:
       var steps = stepsEl.querySelectorAll('.dda-step:not(.dda-step-sub)').length;
       meta.textContent = steps + ' step' + n(steps);
     }
+    autoScroll();
   }
 
   // -- Code modal -------------------------------------------------------------
@@ -1522,13 +1621,17 @@ def _ask_page_js() -> str:
 
   // -- Boot -------------------------------------------------------------------
   var _params = new URLSearchParams(window.location.search);
-  var initQ = _params.get('q');
+  var initQ = (_params.get('q') || '').trim();
   setMode(_params.get('mode'));
-  if (initQ && API) {
-    ask(initQ.trim());
-  } else if (!API) {
+  var restored = API ? restoreThread() : false;
+  if (!API) {
     bodyEl.innerHTML = '<div class="ddp-empty" style="color:#c62828">Backend not configured. Run <code>deepdoc serve</code> first.</div>';
+  } else if (initQ && !(restored && _turns[_turns.length - 1].q === initQ)) {
+    // Fresh question from the FAB or a shared link. A reload right after
+    // asking lands here too, unless the thread already ends with this question.
+    ask(initQ);
   } else {
+    stripQParam();
     inpEl.focus();
   }
 })();
@@ -1649,12 +1752,23 @@ def _ask_page_css() -> str:
   margin: 0; font-size: .64rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
   color: var(--dd-muted);
 }
-.ddp-panel-hd h2 {
-  margin: .3rem 0 0; font-size: .92rem; font-weight: 600; letter-spacing: -.015em;
-  color: var(--dd-fg); line-height: 1.3; overflow-wrap: anywhere;
-}
-.ddp-panel-hd h2[hidden] { display: none; }
 .ddp-panel-bd { padding: .8rem .9rem .9rem; }
+
+/* -- Conversation turns ----------------------------------------------------- */
+.dda-turn + .dda-turn {
+  border-top: 1px solid color-mix(in srgb, var(--dd-light) 8%, var(--dd-border) 92%);
+  margin-top: 1rem; padding-top: 1rem;
+}
+.dda-turn-q { margin: 0 0 .55rem; }
+.dda-turn-q-lbl {
+  display: block; margin-bottom: .15rem;
+  font-size: .62rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+  color: var(--dd-muted);
+}
+.dda-turn-q-txt {
+  margin: 0; font-size: .95rem; font-weight: 600; line-height: 1.35;
+  color: var(--dd-fg); overflow-wrap: anywhere;
+}
 .ddp-empty {
   border: 1px dashed color-mix(in srgb, var(--dd-light) 18%, var(--dd-border) 82%);
   border-radius: .6rem; padding: .85rem .9rem;

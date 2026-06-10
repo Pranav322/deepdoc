@@ -9,6 +9,20 @@ The automated release workflow reads the section that matches the version in
 
 - Ongoing development.
 
+## [3.2.0] - 2026-06-10
+
+### Features
+
+- **Client-side conversation thread on `/ask`.** Each question appends a `.dda-turn` section (question header + optional research trace + answer body) to the panel — nothing is replaced on follow-up, so the entire Q/A history stays scrollable. Turns (capped at 20) and the latest sidebar sources persist to `sessionStorage` (per-tab, namespaced by `window.location.pathname`, never sent to the server) and are restored automatically on page reload. The "New" button clears both in-memory state and storage. Auto-scroll sticks to the bottom while streaming and detaches when the user scrolls more than 140 px above the fold. The last ~10 turns are threaded to the backend as `history` context on follow-up questions.
+
+### Changed
+
+- **Answer rendering rebuilt on vendored markdown-it + highlight.js.** Answers are now proper Markdown — links, ordered/unordered lists, tables, blockquotes, and fenced code blocks with syntax highlighting — using offline-bundled libs (`deepdoc/site/builder/vendor/`). No CDN or network access at render time. The `fence` rule emits `.dda-code-wrap` cards with a language label and a one-click copy button; `html: false` ensures raw HTML in answers is escaped (XSS-safe). Streaming renders are throttled to ~80 ms so the parser never runs per-token; the final syntax-highlighted pass runs once at stream end.
+- **SPA-aware FAB lifecycle.** The quick-ask FAB now subscribes to Material's `document$` observable and calls `sync()` on every navigation — `build()` re-injects the FAB on docs pages (idempotent), `teardown()` removes it on `/ask`. Previously the FAB disappeared after navigating `/ask → back` via `navigation.instant` (which does not re-run `extra_javascript`) and required a hard refresh to recover.
+- **Centered quick-ask popup.** `#dd-popup` is now centered horizontally at the bottom of the viewport (`left: 50%` / `translateX(-50%)`, `transform-origin: center bottom`) instead of anchored to the bottom-right corner.
+- **Compact dock with proper radiogroup ARIA.** The floating dock was tightened to a single header row; the Fast / Deep Research mode selector is now a `role="radiogroup"` of `role="radio"` / `aria-checked` pills instead of the old tablist/aria-selected markup.
+- **WCAG AA muted color.** Muted text now uses Material's `--md-default-fg-color--light` (opaque `#6e6e73` fallback) instead of `rgba(0,0,0,.5)`, which failed contrast in light mode.
+
 ## [3.1.0] - 2026-06-08
 
 ### Features

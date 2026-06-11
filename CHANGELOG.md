@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
+## [3.3.1] - 2026-06-11
+
+### Fixed
+
+- **Removed suggestion pills from quick-ask popup dock.** Deleted the `SUGGESTED` array of example questions and all associated rendering, click handler, and CSS. Textarea placeholder changed to neutral text.
+- **Research steps panel now auto-collapses when deep research is done** (on SSE `done` phase, not at `finish`). Previously the expanded trace stayed open until the full answer finished streaming, hiding the answer below it. Now the panel collapses as soon as research signals completion, giving the answer full viewport space.
+
 ## [3.3.0] - 2026-06-11
 
 ### Fixed

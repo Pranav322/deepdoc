@@ -16,14 +16,8 @@ const nav = [
   <div class="mx-auto flex h-[52px] max-w-6xl items-center justify-between px-6">
 
     <!-- Brand logo -->
-    <a href="/" class="group flex items-center gap-2.5 transition-opacity hover:opacity-80" style="text-decoration: none;">
+    <a href="/" class="group flex items-center transition-opacity hover:opacity-80" style="text-decoration: none;">
       <Logo size={26} wordSize="1.2rem" />
-      <span
-        class="hidden sm:inline-flex items-center rounded-full px-2.5 py-[3px]"
-        style="background: color-mix(in srgb, var(--color-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 30%, transparent); font-family: var(--font-mono); font-size: 10px; color: var(--color-accent); font-weight: 600; margin-top: 2px;"
-      >
-        STABLE
-      </span>
     </a>
 
     <!-- Nav + theme toggle -->
@@ -35,11 +29,13 @@ const nav = [
             return (
               <a
                 href={item.href}
-                class="rounded-md px-3 py-1.5 text-[13px] transition-colors"
-                style={`font-family: var(--font-sans); color: ${isActive ? 'var(--color-ink)' : 'var(--color-ink-muted)'}; font-weight: 400; text-decoration: none;`}
+                class="rounded-md px-3 py-1.5 text-[14px] transition-colors"
+                style={`font-family: var(--font-sans); color: ${isActive ? 'var(--color-ink)' : 'color-mix(in srgb, var(--color-ink) 72%, var(--color-ink-muted))'}; font-weight: 500; text-decoration: none;`}
                 target={item.external ? "_blank" : undefined}
                 rel={item.external ? "noreferrer" : undefined}
                 aria-current={isActive ? "page" : undefined}
+                onmouseover="this.style.color='var(--color-ink)'"
+                onmouseout={`this.style.color='${isActive ? 'var(--color-ink)' : 'color-mix(in srgb, var(--color-ink) 72%, var(--color-ink-muted))'}'`}
               >
                 {item.label}
               </a>

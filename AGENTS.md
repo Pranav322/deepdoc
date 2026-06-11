@@ -297,10 +297,22 @@ web/
   src/
     layouts/Layout.astro     ← single shared layout; owns all <head> SEO/meta
     pages/                    ← index.astro, docs.astro, changelog.astro (file-based routing)
-    components/               ← Header, Footer, hero/background components
+    components/               ← Header, Footer, Logo, PipelineOrbit, CodeToDocs (hero SVG animation)
     styles/global.css
   public/                    ← static assets, favicon.svg, robots.txt, OG image (proof-docs.png)
 ```
+
+### Brand logo (`components/Logo.astro`)
+Single source of truth for the mark + wordmark (used by Header and Footer). `variant="full"` renders a **merged lockup**: the accent D mark is the leading letter, followed by "eepDoc" — never render the mark next to the full word "DeepDoc" (reads as a repeated D). The mark is em-sized off `wordSize` to match the wordmark cap height. Its scoped `<style>` block owns all `dd-*` styling; do not style `dd-*` classes from `global.css`. Accessibility: the container carries `role="img" aria-label="DeepDoc"`; mark and partial word are `aria-hidden`.
+
+### Landing hero (`index.astro`)
+Centered, eraser.io-style: badge → headline (dual accent emphasis: "codebase" + "actually read.") → short sub → CTAs → full-width product window (`.hero-stage`/`.hero-window` in `global.css`) with the chat-proof card overlaid bottom-right (stacks static below 640px). `BackgroundRippleEffect.astro` (interactive cell grid, masked toward the top) renders behind the hero content alongside `.hero-halo`. `CodeToDocs.astro` (code→docs SVG/SMIL animation) is currently **unused** — kept for potential reuse; do not re-add it to the hero without being asked.
+
+### Features bento (`index.astro` "What it does")
+Real cards (18px gaps, 20px radius) with accent corner-glow background, top hairline shine, hover lift + accent border, and a staggered scroll-reveal (IntersectionObserver adds `.in-view`; gated behind `html.js` so no-JS users still see cards; respects `prefers-reduced-motion`). The chatbot card ends with a typing-indicator bubble and query-mode pills (`.feat-modes`).
+
+### Landing page copy & section rhythm
+Marketing copy is **outcome-led, not implementation-led** — say "your docs stay organized / answers cite real files / updates regenerate only what changed", never "bucket", "planner", or "evidence packs" on the landing page (the Pipeline orbit describes mechanics in plain language). Section order: hero → works-with strip → demo video → features bento → pipeline → getting started → CTA (the old "Product proof" section was removed as redundant with the hero window). `.section-raised` (in `global.css`) is applied to the video and getting-started sections to break up the dark stretches — keep roughly alternating dark/raised bands. Header is logo-only (no STABLE chip); nav links are 14px/500.
 
 ### SEO
 - All meta lives in `Layout.astro`: title, description, canonical, OG (incl. `og:image`/`og:image:alt`), Twitter card, `SoftwareApplication` JSON-LD, `theme-color`. Pages override via the `title`/`description`/`image`/`noindex` props.

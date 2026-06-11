@@ -15,10 +15,10 @@ const phases = [
     id: 2,
     num: "02",
     name: "Plan",
-    note: "Multi-step LLM planner. Classify the repo, propose buckets, assign files, symbols, and artifacts.",
+    note: "Decides which pages your docs need and which files belong to each — before writing a word.",
 
     status: "completed",
-    outputs: ["Doc buckets", "Nav structure", "File assignments", "Domain clusters", "Flow hints"],
+    outputs: ["Page plan", "Nav structure", "File assignments", "Domain clusters", "Flow hints"],
     relatedIds: [1, 3],
     icon: `<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/>`,
   },
@@ -26,7 +26,7 @@ const phases = [
     id: 3,
     num: "03",
     name: "Generate",
-    note: "Build evidence packs per bucket. LLM call in parallel batches. Python-side Markdown repair before write.",
+    note: "Writes every page from real code evidence, in parallel — and repairs the Markdown before anything lands.",
 
     status: "in-progress",
     outputs: ["Markdown pages", "Evidence packs", "Source citations", "Quality checks", "Markdown repair"],

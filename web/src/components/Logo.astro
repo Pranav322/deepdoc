@@ -4,12 +4,13 @@
  * The "depth D": a geometric D with two receding echo strokes that read as
  * layers / depth = "Deep". Mark uses --color-accent so it adapts dark↔light.
  *
- *   variant="full"  → mark + "DeepDoc" wordmark (default)
+ *   variant="full"  → merged lockup: the mark IS the leading "D", followed
+ *                     by "eepDoc" — reads as one word, no repeated D (default)
  *   variant="mark"  → mark only
  */
 interface Props {
   variant?: "full" | "mark";
-  size?: number; // mark height in px
+  size?: number; // mark height in px (mark variant only; full sizes off wordSize)
   wordSize?: string; // wordmark font-size (CSS length)
   wordColor?: string; // wordmark color
   class?: string;
@@ -23,17 +24,24 @@ const {
 } = Astro.props;
 
 const D = "M14 9 H24 A15 15 0 0 1 24 39 H14"; // outer D contour (no counter)
+const merged = variant === "full";
 ---
 
-<span class={`dd-logo ${className}`}>
+<span
+  class={`dd-logo ${merged ? "dd-logo-merged" : ""} ${className}`}
+  role={merged ? "img" : undefined}
+  aria-label={merged ? "DeepDoc" : undefined}
+  style={merged ? `font-size:${wordSize}` : undefined}
+>
   <svg
-    class="dd-mark"
+    class={`dd-mark ${merged ? "dd-mark-merged" : ""}`}
     width={size}
     height={size}
     viewBox="0 0 48 48"
     fill="none"
-    role="img"
-    aria-label="DeepDoc"
+    role={merged ? undefined : "img"}
+    aria-label={merged ? undefined : "DeepDoc"}
+    aria-hidden={merged ? "true" : undefined}
   >
     <path class="dd-echo dd-echo-2" d={D} transform="translate(6 6)" />
     <path class="dd-echo dd-echo-1" d={D} transform="translate(3 3)" />
@@ -44,10 +52,50 @@ const D = "M14 9 H24 A15 15 0 0 1 24 39 H14"; // outer D contour (no counter)
     ></path>
   </svg>
   {
-    variant === "full" && (
-      <span class="dd-word" style={`font-size:${wordSize};color:${wordColor}`}>
-        DeepDoc
+    merged && (
+      <span class="dd-word" aria-hidden="true" style={`color:${wordColor}`}>
+        eepDoc
       </span>
     )
   }
 </span>
+
+<style>
+  .dd-logo {
+    display: inline-flex;
+    align-items: center;
+    line-height: 1;
+    vertical-align: middle;
+  }
+  .dd-mark {
+    display: block;
+    flex-shrink: 0;
+  }
+  /* Merged lockup: size the mark so the D matches the wordmark cap height,
+     crop the viewBox's empty left padding, and tuck "eepDoc" against it. */
+  .dd-mark-merged {
+    width: 1.16em;
+    height: 1.16em;
+    margin-left: -0.33em;
+    margin-right: 0.04em;
+    transform: translateY(-0.05em);
+  }
+  .dd-front {
+    fill: var(--color-accent);
+  }
+  .dd-echo {
+    fill: none;
+    stroke: var(--color-accent);
+    stroke-width: 2;
+    stroke-linecap: round;
+  }
+  .dd-echo-1 { opacity: 0.4; }
+  .dd-echo-2 { opacity: 0.18; }
+  .dd-word {
+    font-family: var(--font-sans);
+    font-weight: 600;
+    font-size: 1em;
+    letter-spacing: -0.015em;
+    line-height: 1;
+  }
+</style>

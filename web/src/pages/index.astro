@@ -2,8 +2,9 @@
 import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
-import BackgroundRippleEffect from "../components/BackgroundRippleEffect.astro";
 import PipelineOrbit from "../components/PipelineOrbit.astro";
+import BackgroundRippleEffect from "../components/BackgroundRippleEffect.astro";
+import CodeToDocs from "../components/CodeToDocs.astro";
 
 const features = [
   {
@@ -33,12 +34,6 @@ const pipeline = [
 
 const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAPI"];
 
-const proofStats = [
-  { value: "47", label: "docs pages planned from source" },
-  { value: "1,247", label: "chatbot chunks indexed locally" },
-  { value: "3", label: "query modes for answers" },
-];
-
 const chatMessages = [
   {
     role: "You",
@@ -51,6 +46,7 @@ const chatMessages = [
     refs: ["billing/routes.py:41-88", "services/usage.py:12-57"],
   },
 ];
+
 ---
 
 <Layout>
@@ -61,59 +57,48 @@ const chatMessages = [
     class="relative overflow-hidden"
     style="border-bottom: 1px solid var(--color-line);"
   >
-    <!-- Aurora background -->
-    <div aria-hidden="true" class="hero-aurora" style="position:absolute;inset:0;overflow:hidden;mask-image:linear-gradient(to bottom,black 0%,black 55%,transparent 100%);-webkit-mask-image:linear-gradient(to bottom,black 0%,black 55%,transparent 100%);pointer-events:none;">
-      <!-- Chartreuse — left anchor -->
-      <div style="position:absolute;top:-20%;left:-8%;width:65%;height:100%;background:radial-gradient(ellipse at 40% 40%,rgba(194,255,77,0.13) 0%,transparent 68%);filter:blur(48px);animation:blob-1 14s ease-in-out infinite;will-change:transform;"></div>
-      <!-- Electric blue — right -->
-      <div style="position:absolute;top:-10%;right:-12%;width:60%;height:90%;background:radial-gradient(ellipse at 60% 35%,rgba(55,120,255,0.10) 0%,transparent 65%);filter:blur(64px);animation:blob-2 19s ease-in-out infinite;will-change:transform;"></div>
-      <!-- Chartreuse accent — lower right -->
-      <div style="position:absolute;bottom:0%;right:15%;width:38%;height:55%;background:radial-gradient(ellipse at 50% 60%,rgba(194,255,77,0.07) 0%,transparent 65%);filter:blur(56px);animation:blob-3 23s ease-in-out infinite;will-change:transform;"></div>
-    </div>
+    <!-- Single calm halo behind the headline -->
+    <div class="hero-halo" aria-hidden="true"></div>
 
     <BackgroundRippleEffect />
 
-    <div class="relative z-10 mx-auto max-w-6xl px-6 pt-24 pb-20 md:pt-32 md:pb-28">
-      <div class="grid grid-cols-1 items-center gap-12 lg:grid-cols-[0.94fr_1.06fr]">
+    <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
+      <div class="flex flex-col items-center text-center">
 
-        <!-- Left: copy -->
-        <div>
-          <!-- Version badge — STABLE -->
-          <div
-            class="anim-fade-up mb-8 inline-flex items-center gap-2.5 rounded-full px-4 py-1.5"
-            style="background: color-mix(in srgb, var(--color-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); font-family: var(--font-mono); font-size: 12px; color: var(--color-accent);"
-          >
-            <span
-              class="h-2 w-2 rounded-full"
-              style="background: var(--color-accent); box-shadow: 0 0 6px var(--color-accent);"
-            ></span>
-            <strong style="font-weight: 600;">v3.2 STABLE</strong>
-            <span style="opacity: 0.5; margin: 0 1px;">·</span>
-            source-cited docs · in-site AI chat · conversation history
-          </div>
+        <!-- Version badge — STABLE -->
+        <div
+          class="anim-fade-up mb-5 inline-flex items-center gap-2.5 rounded-full px-4 py-1.5"
+          style="background: color-mix(in srgb, var(--color-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); font-family: var(--font-mono); font-size: 12px; color: var(--color-accent);"
+        >
+          <span
+            class="h-2 w-2 rounded-full"
+            style="background: var(--color-accent); box-shadow: 0 0 6px var(--color-accent);"
+          ></span>
+          <strong style="font-weight: 600;">v3.2 STABLE</strong>
+          <span style="opacity: 0.5; margin: 0 1px;">·</span>
+          in-site AI chat
+        </div>
 
-          <!-- Headline -->
-          <h1
-            class="anim-fade-up anim-delay-1 display"
-            style="font-size: clamp(2.6rem, 6vw, 4.25rem); color: var(--color-ink); max-width: 640px;"
-          >
-            Engineering docs<br />
-            your team will<br />
-            <span class="accent-italic">actually read.</span>
-          </h1>
+        <!-- Headline -->
+        <h1
+          class="anim-fade-up anim-delay-1 display"
+          style="font-size: clamp(2.5rem, 5.2vw, 4.25rem); color: var(--color-ink); max-width: 960px;"
+        >
+          Turn any <span class="accent-italic">codebase</span> into docs<br class="hidden sm:inline" />
+          your team will <span class="accent-italic">actually read.</span>
+        </h1>
 
-          <!-- Sub -->
-          <p
-            class="anim-fade-up anim-delay-2 mt-6 max-w-lg leading-relaxed"
-            style="font-size: 1rem; color: var(--color-ink-muted); font-family: var(--font-sans);"
-          >
-            DeepDoc generates internal documentation from your codebase —
-            architecture, endpoints, integrations, runtime surfaces — and ships an
-            embedded chatbot that answers from real source with exact file paths.
-          </p>
+        <!-- Sub -->
+        <p
+          class="anim-fade-up anim-delay-2 mt-6 max-w-xl leading-relaxed"
+          style="font-size: 1.0625rem; color: var(--color-ink-muted); font-family: var(--font-sans);"
+        >
+          Generate complete documentation from your repository — with an AI
+          assistant that answers using your actual source code.
+        </p>
 
-          <!-- CTAs -->
-          <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col gap-3 sm:flex-row sm:items-center">
+        <!-- CTAs -->
+        <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
             <span id="copy-sr" aria-live="polite" class="sr-only"></span>
             <button
               id="copy-install"
@@ -170,81 +155,40 @@ const chatMessages = [
 
           </div>
 
-          <a
-            href="#product-proof"
-            class="anim-fade-up anim-delay-4 mt-5 inline-flex items-center gap-2 text-[13px] transition-opacity"
-            style="font-family: var(--font-sans); color: var(--color-accent); text-decoration: none;"
-            onmouseover="this.style.opacity='0.72'"
-            onmouseout="this.style.opacity='1'"
-          >
-            See the generated site and chatbot
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-          </a>
-
-          <div class="anim-fade-up anim-delay-4 mt-8 grid max-w-xl grid-cols-3 gap-px overflow-hidden rounded-xl" style="background: var(--color-line); border: 1px solid var(--color-line);">
-            {
-              proofStats.map((stat) => (
-                <div style="background: color-mix(in oklab, var(--color-surface-raised) 64%, transparent); padding: 16px 14px;">
-                  <div class="display" style="font-size: clamp(1.35rem, 3vw, 2rem); color: var(--color-ink); line-height: 1;">
-                    {stat.value}
-                  </div>
-                  <div style="margin-top: 7px; font-family: var(--font-sans); font-size: 11px; line-height: 1.35; color: var(--color-ink-faint);">
-                    {stat.label}
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-
           <p
-            class="anim-fade-up anim-delay-4 mt-5"
+            class="anim-fade-up anim-delay-4 mt-6"
             style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);"
           >
             Python 3.10+ &middot; MIT license &middot; Any LLM provider
           </p>
         </div>
 
-        <!-- Right: product proof -->
-        <div class="anim-fade-up anim-delay-3 proof-stage">
-          <div class="proof-glow" aria-hidden="true"></div>
-          <div class="proof-window">
+        <!-- Full-width product window -->
+        <div class="anim-fade-up anim-delay-4 hero-stage">
+          <div class="hero-glow" aria-hidden="true"></div>
+          <div class="hero-window">
             <div class="proof-bar">
               <span class="dot red"></span>
               <span class="dot yellow"></span>
               <span class="dot green"></span>
               <span class="proof-url">deepdoc.local/docs/contextly-platform-overview</span>
             </div>
-            <div class="proof-image-wrap">
+            <div class="hero-image-wrap">
               <img
                 src="/proof-docs-dark.png"
                 alt="Generated DeepDoc documentation site for the Contextly platform, showing structured navigation and source-grounded content"
-                class="proof-image proof-image-dark"
+                class="proof-image-dark"
                 loading="eager"
                 decoding="async"
               />
               <img
                 src="/proof-docs.png"
                 alt="Generated DeepDoc documentation site for the Contextly platform, showing structured navigation and source-grounded content"
-                class="proof-image proof-image-light"
+                class="proof-image-light"
                 loading="eager"
                 decoding="async"
               />
             </div>
-          </div>
-
-          <div class="proof-chip chip-left">
-            <span class="chip-kicker">Generated nav</span>
-            <span>14 repo-aware sections</span>
           </div>
 
           <div class="chat-proof-card">
@@ -269,8 +213,6 @@ const chatMessages = [
             }
           </div>
         </div>
-
-      </div>
     </div>
   </section>
 
@@ -301,95 +243,10 @@ const chatMessages = [
     </div>
   </section>
 
-  <!-- ── Product proof ───────────────────────────────────────────── -->
-  <section id="product-proof" style="border-bottom: 1px solid var(--color-line); position: relative; overflow: hidden;">
-    <div class="mx-auto max-w-6xl px-6 py-20">
-      <div class="mb-12 grid grid-cols-1 items-end gap-8 lg:grid-cols-[0.9fr_1.1fr]">
-        <div>
-          <div
-            style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
-          >
-            Product proof
-          </div>
-          <h2
-            class="display"
-            style="font-size: clamp(1.9rem, 4vw, 3rem); color: var(--color-ink);"
-          >
-            A complete docs site,
-            <span class="accent-italic"> not a markdown dump.</span>
-          </h2>
-        </div>
-        <p
-          style="font-family: var(--font-sans); font-size: 14px; line-height: 1.75; color: var(--color-ink-muted); max-width: 540px;"
-        >
-          DeepDoc plans the sidebar, writes grounded pages, adds source-file disclosures,
-          stages API reference pages, and embeds a chatbot that can answer across the
-          same indexed codebase.
-        </p>
-      </div>
-
-      <div class="proof-grid">
-        <div class="proof-large-window">
-          <div class="proof-bar">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
-            <span class="proof-url">generated MkDocs Material site</span>
-          </div>
-          <div class="proof-large-img-wrap">
-            <img
-              src="/proof-docs-dark.png"
-              alt="Generated documentation page with sidebar navigation, table of contents, and source-grounded overview content"
-              class="proof-image-dark"
-              loading="lazy"
-              decoding="async"
-            />
-            <img
-              src="/proof-docs.png"
-              alt="Generated documentation page with sidebar navigation, table of contents, and source-grounded overview content"
-              class="proof-image-light"
-              loading="lazy"
-              decoding="async"
-            />
-          </div>
-        </div>
-
-        <div class="proof-side-stack">
-          <div class="proof-panel">
-            <div class="panel-kicker">Chatbot included</div>
-            <h3>Ask the docs like a teammate.</h3>
-            <p>
-              The assistant uses generated docs for orientation and source archives for proof,
-              so answers come back with real paths and line ranges.
-            </p>
-            <div class="mini-chat">
-              <div class="mini-question">How does the embedded widget reach the backend?</div>
-              <div class="mini-answer">
-                It uses the widget token flow, then sends chat requests through the API client.
-                <span>widget/client.ts:18-64</span>
-                <span>api/chat.py:33-91</span>
-              </div>
-            </div>
-          </div>
-
-          <div class="proof-panel compact">
-            <div class="panel-kicker">What ships</div>
-            <ul>
-              <li>Structured docs nav from the planner</li>
-              <li>Mermaid diagrams and API reference pages</li>
-              <li>Incremental updates from git diffs</li>
-              <li>Local chatbot index and source archive</li>
-            </ul>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
   <!-- ── Demo video ──────────────────────────────────────────────── -->
-  <section style="border-bottom: 1px solid var(--color-line);">
-    <div class="mx-auto max-w-6xl px-6 py-20">
-      <div class="mb-10 flex items-end justify-between gap-4 flex-wrap">
+  <section class="section-raised">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="mb-8 flex items-end justify-between gap-4 flex-wrap">
         <div>
           <div
             style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
@@ -434,8 +291,8 @@ const chatMessages = [
 
   <!-- ── Features ────────────────────────────────────────────────── -->
   <section style="border-bottom: 1px solid var(--color-line);">
-    <div class="mx-auto max-w-6xl px-6 py-20">
-      <div class="mb-14 max-w-xl">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="mb-10 max-w-xl">
         <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
           What it does
         </div>
@@ -446,14 +303,13 @@ const chatMessages = [
 
       <div class="features-bento">
 
-        <!-- 01: Bucket-based generation (wide) -->
+        <!-- 01: Organized docs (wide) -->
         <div class="feat-card feat-card-wide">
           <div class="feat-num">01</div>
-          <h3 class="feat-title">Bucket-based generation</h3>
+          <h3 class="feat-title">Your docs stay organized</h3>
           <p class="feat-body">
-            Architecture, endpoints, integrations, and schemas planned as cohesive docs —
-            not one noisy page per file. The planner classifies your repo and assigns
-            files to a reader-first structure.
+            Architecture, endpoints, integrations, and schemas — grouped the way
+            readers actually look for them, not one noisy page per file.
           </p>
           <div class="feat-visual">
             <div class="feat-visual-row">
@@ -479,14 +335,14 @@ const chatMessages = [
           </div>
         </div>
 
-        <!-- 02: Evidence-grounded chatbot (tall) -->
+        <!-- 02: AI answers cite real files (tall) -->
         <div class="feat-card feat-card-tall">
           <div class="feat-num">02</div>
-          <h3 class="feat-title">Evidence-grounded chatbot</h3>
+          <h3 class="feat-title">AI answers cite real files</h3>
           <p class="feat-body">
-            An embedded assistant ships with the docs site. Answers come with
-            exact file paths and line ranges — not hallucinations. Ask
-            follow-ups; the full conversation thread stays scrollable in-page.
+            Ask your docs anything. Every answer points to exact file paths and
+            line ranges from your actual source — not hallucinations. Follow-ups
+            keep the whole thread in-page.
           </p>
           <div class="feat-chat">
             <div class="feat-chat-bubble user">
@@ -504,16 +360,26 @@ const chatMessages = [
               The widget fetches a short-lived token from <code style="font-size:11px; opacity:0.8;">/api/widget-token</code>, then attaches it to every chat request.
               <div class="feat-chat-ref">↗ api/widget.ts:18-64</div>
             </div>
+            <div class="feat-chat-bubble bot feat-chat-typing" aria-hidden="true">
+              <span class="feat-typing-dot"></span>
+              <span class="feat-typing-dot"></span>
+              <span class="feat-typing-dot"></span>
+            </div>
+          </div>
+          <div class="feat-modes">
+            <span class="feat-mode active">fast lookup</span>
+            <span class="feat-mode">deep research</span>
+            <span class="feat-mode">code-first</span>
           </div>
         </div>
 
-        <!-- 03: Incremental updates (wide) -->
+        <!-- 03: Updates regenerate only what changed (wide) -->
         <div class="feat-card feat-card-wide">
           <div class="feat-num">03</div>
-          <h3 class="feat-title">Incremental updates</h3>
+          <h3 class="feat-title">Updates regenerate only what changed</h3>
           <p class="feat-body">
-            <code style="font-family: var(--font-mono); font-size: 12px; opacity: 0.85;">deepdoc update</code> diffs against the last synced commit and regenerates
-            only affected buckets — smart enough to replan when new integrations appear.
+            Push a commit, run <code style="font-family: var(--font-mono); font-size: 12px; opacity: 0.85;">deepdoc update</code>, and only the affected pages
+            regenerate. Your docs keep up without a full rebuild.
           </p>
           <div class="feat-diff">
             <div class="feat-diff-header">deepdoc update — 3 files changed</div>
@@ -541,8 +407,8 @@ const chatMessages = [
 
   <!-- ── Pipeline ────────────────────────────────────────────────── -->
   <section style="border-bottom: 1px solid var(--color-line);">
-    <div class="mx-auto max-w-6xl px-6 py-20">
-      <div class="mb-14 max-w-xl">
+    <div class="mx-auto max-w-6xl px-6 py-16">
+      <div class="mb-10 max-w-xl">
         <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
           Pipeline
         </div>
@@ -560,8 +426,8 @@ const chatMessages = [
   </section>
 
   <!-- ── Getting started ─────────────────────────────────────────── -->
-  <section style="border-bottom: 1px solid var(--color-line);">
-    <div class="mx-auto max-w-6xl px-6 py-20">
+  <section class="section-raised">
+    <div class="mx-auto max-w-6xl px-6 py-16">
       <div class="grid grid-cols-1 items-start gap-12 lg:grid-cols-2">
         <!-- Left: copy -->
         <div>
@@ -581,7 +447,7 @@ const chatMessages = [
           >
             Initialize against any Python, JavaScript/TypeScript, Go, PHP, or Vue
             codebase. Set one API key. Generate. The chatbot inherits the same key
-            automatically and runs embeddings locally via fastembed.
+            and runs fully on your machine.
           </p>
           <a
             href="/docs"
@@ -636,7 +502,7 @@ $ deepdoc serve
   <!-- ── CTA strip ───────────────────────────────────────────────── -->
   <section style="position: relative; overflow: hidden;">
     <canvas id="cta-canvas" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: block;"></canvas>
-    <div class="mx-auto max-w-6xl px-6 py-20 flex flex-col items-center text-center gap-6" style="position: relative; z-index: 1;">
+    <div class="mx-auto max-w-6xl px-6 py-16 flex flex-col items-center text-center gap-6" style="position: relative; z-index: 1;">
       <h2
         class="display"
         style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink); max-width: 520px;"
@@ -701,6 +567,31 @@ $ deepdoc serve
   }
   attachCopy("copy-install", "copy-sr", "copy-icon", "check-icon");
   attachCopy("copy-install-2");
+
+  // ── Feature cards: staggered scroll reveal ────────────────────────
+  (function () {
+    document.documentElement.classList.add("js");
+    const cards = document.querySelectorAll<HTMLElement>(".feat-card");
+    if (!cards.length || !("IntersectionObserver" in window)) {
+      cards.forEach((c) => c.classList.add("in-view"));
+      return;
+    }
+    const ob = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("in-view");
+            ob.unobserve(entry.target);
+          }
+        }
+      },
+      { threshold: 0.15 }
+    );
+    cards.forEach((card, i) => {
+      card.style.setProperty("--reveal-delay", `${(i % 3) * 110}ms`);
+      ob.observe(card);
+    });
+  })();
 
   // ── Hero terminal typewriter ──────────────────────────────────────
   (function () {

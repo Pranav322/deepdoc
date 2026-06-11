@@ -1,0 +1,291 @@
+---
+/**
+ * CodeToDocs — the hero centerpiece. One coupled composition: a messy repo
+ * window feeds through a glowing energy spine into the DeepDoc node, and out
+ * the other side a clean docs site assembles itself. Pure CSS/SVG + SMIL
+ * particle motion, theme-aware via CSS variables, honors prefers-reduced-motion.
+ */
+---
+
+<div class="ctd-wrap" aria-hidden="true">
+  <svg
+    class="ctd-svg"
+    viewBox="0 0 1120 320"
+    xmlns="http://www.w3.org/2000/svg"
+    fill="none"
+    preserveAspectRatio="xMidYMid meet"
+  >
+    <defs>
+      <filter id="ctd-blur" x="-60%" y="-60%" width="220%" height="220%">
+        <feGaussianBlur stdDeviation="28" />
+      </filter>
+      <filter id="ctd-shadow" x="-30%" y="-30%" width="160%" height="160%">
+        <feDropShadow dx="0" dy="14" stdDeviation="16" flood-color="#000" flood-opacity="0.3" />
+      </filter>
+      <linearGradient id="ctd-spine" x1="0" y1="0" x2="1" y2="0">
+        <stop offset="0"   stop-color="var(--color-accent)" stop-opacity="0" />
+        <stop offset="0.5" stop-color="var(--color-accent)" stop-opacity="0.5" />
+        <stop offset="1"   stop-color="var(--color-accent)" stop-opacity="0" />
+      </linearGradient>
+    </defs>
+
+    <!-- Soft stage glow behind the node, bleeding toward both windows -->
+    <ellipse cx="560" cy="156" rx="260" ry="110" fill="var(--color-accent)" opacity="0.05" filter="url(#ctd-blur)" />
+
+    <!-- Energy spine: one continuous bar tying the composition together -->
+    <rect class="ctd-spine" x="400" y="154.5" width="320" height="3" rx="1.5" fill="url(#ctd-spine)" />
+
+    <!-- ── Act 1: the messy repo window ─────────────────────────────── -->
+    <g class="ctd-messy" transform="rotate(-1.4 224 156)">
+      <rect x="24" y="36" width="400" height="240" rx="12" filter="url(#ctd-shadow)"
+        fill="color-mix(in oklab, var(--color-surface-raised) 86%, transparent)"
+        stroke="var(--color-line-strong)" />
+      <circle cx="44" cy="52" r="3" fill="var(--color-ink-faint)" opacity="0.55" />
+      <circle cx="56" cy="52" r="3" fill="var(--color-ink-faint)" opacity="0.4" />
+      <circle cx="68" cy="52" r="3" fill="var(--color-ink-faint)" opacity="0.25" />
+      <text x="224" y="56" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--color-ink-faint)">src/ · 214 files · 0 docs</text>
+      <line x1="24" y1="66" x2="424" y2="66" stroke="var(--color-line)" />
+
+      <g font-family="var(--font-mono)" font-size="12.5" fill="var(--color-ink-faint)">
+        <text class="ctd-glitch g1" x="46"  y="96">def proc2(x,_y):  # ???</text>
+        <text class="ctd-glitch g2" x="72"  y="121">tmp = db.qry("SELCT *")</text>
+        <text x="46"  y="146">if(!cfg??y) retrn None</text>
+        <text class="ctd-glitch g3" x="84"  y="171"># TODO: fix l8r (2019)</text>
+        <text x="46"  y="196">catch(e){"{"} /* shrug */ {"}"}</text>
+        <text class="ctd-glitch g4" x="72"  y="221">utils_final_v3_REAL.py</text>
+        <text x="46"  y="246">x$=fn(q,_v)=&gt;{"{"}...{"}"}</text>
+      </g>
+
+      <!-- mounted label chip -->
+      <g>
+        <rect x="42" y="27" width="118" height="18" rx="9"
+          fill="color-mix(in oklab, var(--color-surface-high) 92%, transparent)"
+          stroke="var(--color-line-strong)" />
+        <text x="101" y="39.5" text-anchor="middle" font-family="var(--font-mono)" font-size="9" letter-spacing="0.1em" fill="var(--color-ink-muted)">YOUR CODEBASE</text>
+      </g>
+    </g>
+
+    <!-- ── Beams in ─────────────────────────────────────────────────── -->
+    <g class="ctd-flows" stroke="var(--color-accent)" stroke-width="1.2">
+      <path class="ctd-flow" d="M424 96 C 470 96, 495 134, 524 148" />
+      <path class="ctd-flow f3" d="M424 216 C 470 216, 495 178, 524 164" />
+    </g>
+
+    <!-- ── Act 2: the DeepDoc node ──────────────────────────────────── -->
+    <g class="ctd-node">
+      <circle class="ctd-node-glow" cx="560" cy="156" r="46" fill="var(--color-accent)" opacity="0.1" />
+      <circle cx="560" cy="156" r="32"
+        fill="color-mix(in oklab, var(--color-surface-raised) 88%, transparent)"
+        stroke="var(--color-accent)" stroke-width="1.4" />
+      <circle class="ctd-node-ring2" cx="560" cy="156" r="32" stroke="var(--color-accent)" stroke-width="1" />
+      <!-- orbiting satellite -->
+      <g class="ctd-orbit">
+        <circle cx="560" cy="112" r="2.5" fill="var(--color-accent)" opacity="0.7" />
+      </g>
+      <!-- open-book glyph -->
+      <g stroke="var(--color-accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M 560 146 C 555.5 142.5, 548.5 142.5, 545 145 L 545 168 C 548.5 165.5, 555.5 165.5, 560 169 C 564.5 165.5, 571.5 165.5, 575 168 L 575 145 C 571.5 142.5, 564.5 142.5, 560 146 Z" />
+        <path d="M 560 146 L 560 169" />
+      </g>
+    </g>
+
+    <!-- ── Beams out ────────────────────────────────────────────────── -->
+    <g class="ctd-flows" stroke="var(--color-accent)" stroke-width="1.2">
+      <path class="ctd-flow f4" d="M596 148 C 625 134, 650 100, 696 96" />
+      <path class="ctd-flow f5" d="M596 164 C 625 178, 650 212, 696 216" />
+    </g>
+
+    <!-- ── Traveling particles (SMIL) ───────────────────────────────── -->
+    <g class="ctd-dots" fill="var(--color-accent)">
+      <circle r="2.5" opacity="0.9">
+        <animateMotion dur="1.9s" repeatCount="indefinite" path="M424 96 C 470 96, 495 134, 524 148" />
+      </circle>
+      <circle r="2.5" opacity="0.9">
+        <animateMotion dur="2.2s" begin="1s" repeatCount="indefinite" path="M424 216 C 470 216, 495 178, 524 164" />
+      </circle>
+      <circle r="2" opacity="0.8">
+        <animateMotion dur="1.6s" begin="0.3s" repeatCount="indefinite" path="M410 156 L 526 156" />
+      </circle>
+      <circle r="2.5" opacity="0.9">
+        <animateMotion dur="1.8s" begin="0.5s" repeatCount="indefinite" path="M596 148 C 625 134, 650 100, 696 96" />
+      </circle>
+      <circle r="2.5" opacity="0.9">
+        <animateMotion dur="2.1s" begin="1.3s" repeatCount="indefinite" path="M596 164 C 625 178, 650 212, 696 216" />
+      </circle>
+      <circle r="2" opacity="0.8">
+        <animateMotion dur="1.7s" begin="0.9s" repeatCount="indefinite" path="M594 156 L 710 156" />
+      </circle>
+    </g>
+
+    <!-- ── Act 3: the docs site, assembling itself ──────────────────── -->
+    <g class="ctd-page">
+      <rect x="696" y="28" width="400" height="256" rx="12" filter="url(#ctd-shadow)"
+        fill="color-mix(in oklab, var(--color-surface-raised) 94%, transparent)"
+        stroke="color-mix(in srgb, var(--color-accent) 26%, var(--color-line-strong))" />
+      <circle cx="714" cy="44" r="3" fill="var(--color-ink-faint)" opacity="0.55" />
+      <circle cx="726" cy="44" r="3" fill="var(--color-ink-faint)" opacity="0.4" />
+      <circle cx="738" cy="44" r="3" fill="var(--color-ink-faint)" opacity="0.25" />
+      <text x="896" y="48" text-anchor="middle" font-family="var(--font-mono)" font-size="10" fill="var(--color-ink-faint)">docs/architecture.md</text>
+      <line x1="696" y1="58" x2="1096" y2="58" stroke="var(--color-line)" />
+
+      <!-- sidebar nav -->
+      <rect class="ctd-line l1" x="714" y="76" width="76" height="8" rx="4" fill="var(--color-accent)" opacity="0.75" />
+      <rect class="ctd-line l2" x="714" y="98" width="62" height="7" rx="3.5" fill="var(--color-ink-muted)" opacity="0.45" />
+      <rect class="ctd-line l3" x="714" y="119" width="70" height="7" rx="3.5" fill="var(--color-ink-muted)" opacity="0.4" />
+      <rect class="ctd-line l4" x="714" y="140" width="56" height="7" rx="3.5" fill="var(--color-ink-muted)" opacity="0.35" />
+      <line x1="806" y1="72" x2="806" y2="268" stroke="var(--color-line)" />
+
+      <!-- main column -->
+      <rect class="ctd-line l2" x="824" y="76" width="162" height="11" rx="4" fill="var(--color-ink)" opacity="0.88" />
+      <rect class="ctd-line l3" x="824" y="102" width="244" height="6" rx="3" fill="var(--color-ink-muted)" opacity="0.55" />
+      <rect class="ctd-line l4" x="824" y="118" width="216" height="6" rx="3" fill="var(--color-ink-muted)" opacity="0.45" />
+      <rect class="ctd-line l5" x="824" y="134" width="230" height="6" rx="3" fill="var(--color-ink-muted)" opacity="0.5" />
+      <rect class="ctd-line l6" x="824" y="160" width="108" height="9" rx="4" fill="var(--color-ink)" opacity="0.72" />
+      <rect class="ctd-line l7" x="824" y="182" width="222" height="6" rx="3" fill="var(--color-ink-muted)" opacity="0.45" />
+      <rect class="ctd-line l8" x="824" y="198" width="190" height="6" rx="3" fill="var(--color-ink-muted)" opacity="0.4" />
+
+      <!-- citation chip + verified check -->
+      <g class="ctd-cite">
+        <rect x="824" y="226" width="172" height="19" rx="9.5"
+          fill="color-mix(in srgb, var(--color-accent) 8%, transparent)"
+          stroke="color-mix(in srgb, var(--color-accent) 35%, transparent)" />
+        <text x="834" y="239" font-family="var(--font-mono)" font-size="9" fill="var(--color-accent)">↗ billing/routes.py:41-88</text>
+      </g>
+      <g class="ctd-check">
+        <circle cx="1066" cy="236" r="10" fill="color-mix(in srgb, var(--color-accent) 14%, transparent)" stroke="color-mix(in srgb, var(--color-accent) 45%, transparent)" />
+        <path d="M 1061 236 L 1064.5 239.5 L 1071 232.5" stroke="var(--color-accent)" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" />
+      </g>
+
+      <!-- mounted label chip -->
+      <g>
+        <rect x="714" y="19" width="122" height="18" rx="9"
+          fill="color-mix(in srgb, var(--color-accent) 10%, transparent)"
+          stroke="color-mix(in srgb, var(--color-accent) 32%, transparent)" />
+        <text x="775" y="31.5" text-anchor="middle" font-family="var(--font-mono)" font-size="9" letter-spacing="0.1em" fill="var(--color-accent)">YOUR DOCS SITE</text>
+      </g>
+    </g>
+  </svg>
+</div>
+
+<style>
+  .ctd-wrap {
+    max-width: 1080px;
+    margin: 0 auto;
+  }
+  .ctd-svg {
+    display: block;
+    width: 100%;
+    height: auto;
+    overflow: visible;
+  }
+
+  /* Energy spine shimmer */
+  .ctd-spine {
+    animation: ctd-shimmer 3.4s ease-in-out infinite;
+  }
+  @keyframes ctd-shimmer {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 1; }
+  }
+
+  /* Messy code: occasional nervous jitter on a few lines */
+  .ctd-glitch {
+    animation: ctd-jitter 7s steps(2, jump-none) infinite;
+  }
+  .ctd-glitch.g2 { animation-delay: -2.4s; animation-duration: 8.5s; }
+  .ctd-glitch.g3 { animation-delay: -4.8s; animation-duration: 6.5s; }
+  .ctd-glitch.g4 { animation-delay: -1.6s; animation-duration: 9.5s; }
+
+  @keyframes ctd-jitter {
+    0%, 91%, 100% { transform: translateX(0); opacity: 1; }
+    93%           { transform: translateX(2px); opacity: 0.7; }
+    95%           { transform: translateX(-1.5px); opacity: 1; }
+    97%           { transform: translateX(1px); opacity: 0.85; }
+  }
+
+  /* Beams: dashed current flowing toward / out of the node */
+  .ctd-flow {
+    stroke-dasharray: 4 8;
+    opacity: 0.45;
+    animation: ctd-dash 1.5s linear infinite;
+  }
+  .ctd-flow.f3 { animation-delay: -0.5s; }
+  .ctd-flow.f4 { animation-delay: -0.3s; }
+  .ctd-flow.f5 { animation-delay: -0.8s; }
+
+  @keyframes ctd-dash {
+    to { stroke-dashoffset: -24; }
+  }
+
+  /* Node: breathing glow, expanding pulse, orbiting satellite */
+  .ctd-node-glow {
+    transform-origin: 560px 156px;
+    animation: ctd-breathe 3.4s ease-in-out infinite;
+  }
+  @keyframes ctd-breathe {
+    0%, 100% { transform: scale(1);    opacity: 0.08; }
+    50%      { transform: scale(1.16); opacity: 0.16; }
+  }
+  .ctd-node-ring2 {
+    transform-origin: 560px 156px;
+    animation: ctd-pulse 3.4s ease-out infinite;
+  }
+  @keyframes ctd-pulse {
+    0%   { transform: scale(1);    opacity: 0.6; }
+    70%  { transform: scale(1.7); opacity: 0; }
+    100% { transform: scale(1.7); opacity: 0; }
+  }
+  .ctd-orbit {
+    transform-origin: 560px 156px;
+    animation: ctd-spin 9s linear infinite;
+  }
+  @keyframes ctd-spin {
+    to { transform: rotate(360deg); }
+  }
+
+  /* Docs page: lines type themselves in, hold, reset (staggered) */
+  .ctd-line {
+    transform-origin: left center;
+    transform-box: fill-box;
+    animation: ctd-build 10s cubic-bezier(0.22, 1, 0.36, 1) infinite backwards;
+  }
+  .ctd-line.l1 { animation-delay: 0.3s; }
+  .ctd-line.l2 { animation-delay: 0.8s; }
+  .ctd-line.l3 { animation-delay: 1.3s; }
+  .ctd-line.l4 { animation-delay: 1.8s; }
+  .ctd-line.l5 { animation-delay: 2.3s; }
+  .ctd-line.l6 { animation-delay: 2.8s; }
+  .ctd-line.l7 { animation-delay: 3.3s; }
+  .ctd-line.l8 { animation-delay: 3.8s; }
+
+  @keyframes ctd-build {
+    0%   { transform: scaleX(0); }
+    6%   { transform: scaleX(1); }
+    90%  { transform: scaleX(1); }
+    95%  { transform: scaleX(0); }
+    100% { transform: scaleX(0); }
+  }
+
+  /* Citation chip + check: pop in after the lines, fade for reset */
+  .ctd-cite, .ctd-check {
+    animation: ctd-pop 10s ease infinite backwards;
+  }
+  .ctd-cite  { animation-delay: 4.4s; }
+  .ctd-check { animation-delay: 4.8s; }
+
+  @keyframes ctd-pop {
+    0%, 2% { opacity: 0; }
+    7%     { opacity: 1; }
+    86%    { opacity: 1; }
+    93%    { opacity: 0; }
+    100%   { opacity: 0; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .ctd-spine, .ctd-glitch, .ctd-flow, .ctd-node-glow, .ctd-node-ring2,
+    .ctd-orbit, .ctd-line, .ctd-cite, .ctd-check {
+      animation: none;
+    }
+    .ctd-dots { display: none; }
+  }
+</style>

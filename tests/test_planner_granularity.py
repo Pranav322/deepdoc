@@ -24,6 +24,7 @@ from deepdoc.planner.endpoint_refs import _auto_generate_endpoint_refs
 from deepdoc.planner.heuristics import _build_heuristic_assignment, _validate_coverage
 from deepdoc.planner.nav_shaping import _shape_plan_nav
 from deepdoc.planner.specializations import _ensure_database_runtime_and_interface_buckets
+from deepdoc.planner.topology import TopologyCluster, TopologyMap
 from deepdoc.prompts import PROMPT_STYLE_TEMPLATES
 from deepdoc.site.builder import build_mkdocs_from_plan
 
@@ -674,12 +675,12 @@ def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
     assert "setup" not in slugs
 
     sections = list(shaped.nav_structure.keys())
-    # Phase 5: endpoint-family buckets are tier-1 (user-facing), so they sort before
-    # tier-2 feature sections. LLM-assigned section names are trusted as-is.
+    # Phase 5: sections ordered by topology cluster depth (Architecture has shallower
+    # depth than API Reference, so it sorts before the endpoint family).
     assert sections[:3] == [
         "Start Here",
-        "API Reference > Orders API",
         "Architecture",
+        "API Reference > Orders API",
     ]
     assert shaped.nav_structure["Start Here"] == [
         "start-here",
@@ -690,6 +691,139 @@ def test_shape_plan_nav_backend_uses_reader_flow_and_dedupes_setup() -> None:
         "orders-api",
         "get-orders-id",
     ]
+
+
+def test_section_sort_key_orders_by_topology_depth() -> None:
+    clusters = [
+        TopologyCluster(
+            cluster_id="c1",
+            entry_files=["api/handlers.py"],
+            entry_symbols=["handle_request"],
+            all_files=["api/handlers.py"],
+            min_depth=0,
+            max_depth=0,
+            side_effects=[],
+            external_calls=[],
+            shared_dep_files=[],
+            avg_indegree=1.0,
+            is_foundational=False,
+        ),
+        TopologyCluster(
+            cluster_id="c2",
+            entry_files=["domain/orders.py"],
+            entry_symbols=["place_order"],
+            all_files=["domain/orders.py"],
+            min_depth=2,
+            max_depth=3,
+            side_effects=[],
+            external_calls=[],
+            shared_dep_files=[],
+            avg_indegree=0.5,
+            is_foundational=False,
+        ),
+        TopologyCluster(
+            cluster_id="c3",
+            entry_files=["db/models.py"],
+            entry_symbols=[],
+            all_files=["db/models.py"],
+            min_depth=5,
+            max_depth=6,
+            side_effects=[],
+            external_calls=[],
+            shared_dep_files=[],
+            avg_indegree=0.1,
+            is_foundational=True,
+        ),
+    ]
+    tmap = TopologyMap(
+        clusters=clusters,
+        file_indegree={},
+        file_call_depth={},
+        file_cluster_id={},
+        foundational_files=[],
+    )
+    scan = RepoScan(
+        file_tree={},
+        file_summaries={},
+        api_endpoints=[],
+        languages={"python": 1},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=3,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+        topology_map=tmap,
+    )
+    classification: dict[str, Any] = {
+        "repo_profile": {"primary_type": "backend_service"},
+        "cluster_names": {
+            "c1": {"name": "API Handlers", "section": "Entry Points"},
+            "c2": {"name": "Order Domain", "section": "Domain Logic"},
+            "c3": {"name": "Database Models", "section": "Foundation"},
+        },
+    }
+    plan = DocPlan(
+        buckets=[
+            DocBucket(
+                bucket_type="start_here_index",
+                title="Start Here",
+                slug="start-here",
+                section="Start Here",
+                description="Orientation",
+                generation_hints={"preserve_section": True},
+                priority=-20,
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="API Handlers",
+                slug="api-handlers",
+                section="Entry Points",
+                description="Entry points",
+                owned_files=["api/handlers.py"],
+                priority=10,
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="Order Domain",
+                slug="order-domain",
+                section="Domain Logic",
+                description="Domain logic",
+                owned_files=["domain/orders.py"],
+                priority=20,
+            ),
+            DocBucket(
+                bucket_type="feature",
+                title="Database Models",
+                slug="database-models",
+                section="Foundation",
+                description="DB models",
+                owned_files=["db/models.py"],
+                priority=30,
+            ),
+            DocBucket(
+                bucket_type="testing",
+                title="Testing",
+                slug="testing",
+                section="Testing",
+                description="Tests",
+                priority=90,
+            ),
+        ],
+        nav_structure={},
+        skipped_files=[],
+        classification={"repo_profile": {"primary_type": "backend_service"}},
+    )
+    shaped = _shape_plan_nav(plan, classification, scan)
+
+    sections = list(shaped.nav_structure.keys())
+    assert sections == [
+        "Start Here",
+        "Entry Points",
+        "Domain Logic",
+        "Foundation",
+        "Testing",
+    ], f"Expected topology-depth order, got {sections}"
 
 
 def test_shape_plan_nav_recategorizes_path_slug_backend_sections() -> None:

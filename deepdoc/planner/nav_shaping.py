@@ -121,23 +121,10 @@ def _shape_plan_nav(
             continue
         _append_nav_slug(nav, "API Reference", bucket.slug)
 
-    # Build section → tier map for three-tier nav ordering
-    slug_to_bucket_map = {bucket.slug: bucket for bucket in plan.buckets}
-    section_buckets_by_top: dict[str, list[DocBucket]] = defaultdict(list)
-    for section, slugs in nav.items():
-        top_section = _section_top(section)
-        for slug in slugs:
-            if slug in slug_to_bucket_map:
-                section_buckets_by_top[top_section].append(slug_to_bucket_map[slug])
-    section_tier_map = {
-        top: _compute_section_tier(buckets_list)
-        for top, buckets_list in section_buckets_by_top.items()
-    }
-
     section_order = {section: idx for idx, section in enumerate(nav.keys())}
     ordered_sections = sorted(
         nav.keys(),
-        key=lambda section: _section_sort_key(section, primary, section_depth, section_order, section_tier_map),
+        key=lambda section: _section_sort_key(section, primary, section_depth, section_order),
     )
 
     plan.nav_structure = {
@@ -330,49 +317,27 @@ def _build_section_depth_map(
     return section_depth
 
 
-def _compute_section_tier(buckets_in_section: list[DocBucket]) -> int:
-    """Return 1=user-facing, 2=domain/feature, 3=infrastructure.
-
-    Tier 1: sections containing intro, endpoint family, or endpoint-detail buckets.
-    Tier 2: sections containing feature/integration/database/endpoint bucket types.
-    Tier 3: everything else (foundational, infrastructure, utility).
-    """
-    for b in buckets_in_section:
-        hints = b.generation_hints or {}
-        if (
-            hints.get("is_introduction_page")
-            or hints.get("is_endpoint_family")
-            or hints.get("include_endpoint_detail")
-        ):
-            return 1
-    for b in buckets_in_section:
-        if b.bucket_type in ("feature", "integration", "database", "endpoint", "endpoint_ref"):
-            return 2
-    return 3
-
-
 def _section_sort_key(
     section: str,
     primary: str,
     section_depth: dict[str, int],
     section_order: dict[str, int],
-    section_tier_map: dict[str, int] | None = None,
 ) -> tuple:
     """Sort key for nav sections.
 
     Pins Start Here / Overview first and tail sections (Testing, CI/CD, Supporting
-    Material) last. Everything in between is ordered by three tiers that preserve
-    a newcomer reading journey (user-facing → domain/feature → infrastructure),
-    with topology depth as a tiebreaker within each tier.
+    Material) last. Everything in between is ordered by topology depth:
+    entry-point-facing sections (depth 0-1) first, domain logic (depth 2-3) in
+    the middle, foundational sections (depth 4+) at the end.
     """
     top = _section_top(section)
 
     _FIRST = {"Start Here": 0, "Overview": 1}
     _LAST = {
-        "Testing": 57,
-        "CI/CD and Release": 58,
-        "CI/CD & Release": 58,
-        "Supporting Material": 59,
+        "Testing": 997,
+        "CI/CD and Release": 998,
+        "CI/CD & Release": 998,
+        "Supporting Material": 999,
     }
 
     if top in _FIRST:
@@ -380,10 +345,16 @@ def _section_sort_key(
     if top in _LAST:
         return (_LAST[top], section_order.get(section, 999), section)
 
-    # Three-tier middle: user-facing (10+) → domain/feature (20+) → infrastructure (30+)
-    # Within each tier, topology depth orders entry-point-facing sections first.
-    tier = (section_tier_map or {}).get(top, 3)
-    tier_base = 10 * tier
     depth = section_depth.get(top, 50)
+    # Three tiers derived purely from topology depth:
+    #   depth 0-1 = entry-point-facing → user-facing (base 10)
+    #   depth 2-3 = domain logic (base 20)
+    #   depth 4+  = foundational/infrastructure (base 30)
+    if depth <= 1:
+        tier_base = 10
+    elif depth <= 3:
+        tier_base = 20
+    else:
+        tier_base = 30
     child_rank = 0 if section == top else 1
     return (tier_base + depth, child_rank, section_order.get(section, 999), section)

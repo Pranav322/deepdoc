@@ -33,20 +33,6 @@ _DEFAULT_DARK = "#C1331F"
 # Nav ordering + legacy filename migration (formerly in the Fumadocs engine)
 # ─────────────────────────────────────────────────────────────────────────────
 
-_SECTION_PRIORITY: tuple[str, ...] = (
-    "Start Here",
-    "System",
-    "Architecture",
-    "Features",
-    "Workflows",
-    "Integrations",
-    "API",
-    "API Reference",
-    "Database",
-    "Operations",
-    "Research Context",
-)
-
 _START_HERE_SLUG_ORDER: tuple[str, ...] = (
     "start-here",
     "local-development-setup",
@@ -54,15 +40,6 @@ _START_HERE_SLUG_ORDER: tuple[str, ...] = (
     "debug-runbook",
     "whats-changed",
 )
-
-
-def _section_rank(name: str) -> int:
-    """Stable sort key for nav sections — earlier = closer to a newcomer's first read."""
-    top = name.split(" > ", 1)[0].strip()
-    for i, known in enumerate(_SECTION_PRIORITY):
-        if top.lower() == known.lower():
-            return i
-    return len(_SECTION_PRIORITY) + abs(hash(top)) % 1000
 
 
 def _start_here_page_rank(slug: str) -> int:
@@ -162,8 +139,8 @@ def _build_nav_from_plan(
     """Build a MkDocs ``nav:`` list from the saved nav structure.
 
     Output shape (list of str | {title: path} | {title: [items]}) matches MkDocs'
-    nav schema. Ordering reuses the same section/start-here ranking as the legacy
-    builder via :func:`_section_rank` and :func:`_start_here_page_rank`.
+    nav schema. Section ordering uses the planner-set ``_order`` value (topology depth);
+    Start Here pages use :func:`_start_here_page_rank` for internal ordering.
     """
 
     def is_overview(page: Any) -> bool:
@@ -270,7 +247,7 @@ def _tree_to_mkdocs_items(
     result: list[Any] = []
     sorted_items = sorted(
         tree.items(),
-        key=lambda item: (_section_rank(item[0]), item[1]["_order"]),
+        key=lambda item: item[1]["_order"],
     )
     for name, data in sorted_items:
         pages = list(data["_pages"])
@@ -307,7 +284,7 @@ def _ensure_landing_page(output_dir: Path, project_name: str, plan: DocPlan) -> 
         desc = (getattr(page, "description", None) or "").strip()
         sections.setdefault(section, []).append((page.title, page.slug, desc))
 
-    ordered_section_names = sorted(sections.keys(), key=_section_rank)
+    ordered_section_names = list(sections.keys())
     for section_name in ordered_section_names:
         if section_name.strip().lower() == "start here":
             sections[section_name].sort(

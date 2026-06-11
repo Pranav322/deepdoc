@@ -5,9 +5,20 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
-## Unreleased
+## [3.3.0] - 2026-06-11
 
-- Ongoing development.
+### Fixed
+
+- **`_LAST` nav pins now work without a topology map.** Bumped Testing/CI-CD/Supporting Material values from 57-59 to 997-999 so they always sort last even when no call graph data exists. Previously they sorted before unclassified fallback sections, putting Testing right after Start Here in repos without topology data.
+
+### Changed
+
+- **Nav ordering driven purely by topology depth.** Removed `_compute_section_tier()` (hardcoded bucket-type overrides) and `_SECTION_PRIORITY` from site builder (re-sorted after planner). Site builder now preserves planner's topology-driven `_order`. LLM-proposed sections land at their correct depth position instead of hash order.
+- **Dead code cleanup.** Removed unused `_section_rank()` from `heuristics.py` and `mkdocs_builder.py`.
+
+### Tests
+
+- **Added `test_section_sort_key_orders_by_topology_depth`** — end-to-end topology-depth ordering with clusters at depths 0, 2, 5.
 
 ## [3.2.0] - 2026-06-10
 

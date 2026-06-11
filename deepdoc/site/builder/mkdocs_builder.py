@@ -612,13 +612,6 @@ def _chatbot_widget_js() -> str:
   var API = (window.__DEEPDOC_CHATBOT_URL__ || '').replace(/\/$/, '');
   if (!API) return;
 
-  var SUGGESTED = [
-    'How does authentication work?',
-    'Walk me through the data model',
-    'Where are API routes defined?',
-    'What happens on a deploy?',
-  ];
-
   var SVG_CHAT  = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>';
   var SVG_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="5" y1="12" x2="19" y2="12"/><polyline points="12 5 19 12 12 19"/></svg>';
 
@@ -643,15 +636,10 @@ def _chatbot_widget_js() -> str:
       '    </div>',
       '  </div>',
       '  <form id="dd-popup-form" class="dd-dock-row" autocomplete="off">',
-      '    <textarea id="dd-popup-inp" rows="1" placeholder="Where is auth handled? How is deployment configured?"></textarea>',
+      '    <textarea id="dd-popup-inp" rows="1" placeholder="Ask a question about the codebase..."></textarea>',
       '    <button type="submit" id="dd-popup-sub" aria-label="Ask">' + SVG_ARROW + '<span>Ask</span></button>',
       '  </form>',
-      '  <div id="dd-popup-sugs">',
-      SUGGESTED.slice(0, 3).map(function (s) {
-        return '<button class="dd-sug-pill" type="button">' + esc(s) + '</button>';
-      }).join(''),
-      '  </div>',
-      '</div>',
+          '</div>',
     ].join('');
 
     document.body.appendChild(overlay);
@@ -690,10 +678,6 @@ def _chatbot_widget_js() -> str:
       this.style.height = Math.min(this.scrollHeight, 120) + 'px';
     });
 
-    popup.querySelector('#dd-popup-sugs').addEventListener('click', function (e) {
-      var b = e.target.closest && e.target.closest('.dd-sug-pill');
-      if (b) goAsk(b.textContent.trim());
-    });
   }
 
   function teardown() {
@@ -899,30 +883,13 @@ def _chatbot_css() -> str:
 #dd-popup-sub:hover { transform: translateY(-1px); box-shadow: 0 14px 28px rgba(193, 51, 31, .22); filter: saturate(1.05); }
 #dd-popup-sub:active { transform: translateY(0); }
 
-/* ── Suggestion pills ────────────────────────────────────────────────────── */
-#dd-popup-sugs { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .55rem; }
-.dd-sug-pill {
-  padding: .4rem .7rem;
-  background: color-mix(in srgb, var(--dd-bg) 93%, var(--dd-light) 7%);
-  border: 1px solid var(--dd-border);
-  border-radius: 999px;
-  font-size: .76rem; font-family: inherit;
-  color: var(--dd-muted); cursor: pointer; line-height: 1.3;
-  transition: background .12s, border-color .12s, color .12s;
-}
-.dd-sug-pill:hover {
-  border-color: color-mix(in srgb, var(--dd-brand) 42%, var(--dd-border) 58%);
-  color: var(--dd-dark);
-  background: color-mix(in srgb, var(--dd-bg) 72%, var(--dd-light) 28%);
-}
-
 @media (max-width: 520px) {
   .dd-dock-row { grid-template-columns: minmax(0,1fr); }
   #dd-popup-sub { justify-content: center; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  #dd-fab, .dd-mode, .dd-sug-pill, #dd-popup-sub { transition: none; }
+  #dd-fab, .dd-mode, #dd-popup-sub { transition: none; }
   #dd-fab:hover, #dd-popup-sub:hover { transform: none; }
   .dd-eyebrow-dot { animation: none; }
   #dd-popup.dd-popup-on .dd-dock,
@@ -1478,6 +1445,9 @@ def _ask_page_js() -> str:
       var steps = stepsEl.querySelectorAll('.dda-step:not(.dda-step-sub)').length;
       meta.textContent = steps + ' step' + n(steps);
     }
+    // Collapse the research trace once it signals done — the answer is
+    // streaming in below and should occupy full viewport space.
+    if (phase === 'done') { research.classList.add('dda-research-done'); research.open = false; }
     autoScroll();
   }
 

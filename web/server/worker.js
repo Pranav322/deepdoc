@@ -9,7 +9,6 @@ const DATA_DIR = process.env.DATA_DIR || '/data';
 
 async function runJob(owner, repo, generation) {
   const repoDir = path.join(DATA_DIR, owner, repo);
-  const siteDir = path.join(repoDir, 'site');
 
   // Convenience — all log/status calls carry generation so stale workers self-abort
   const log = (msg) => addLog(owner, repo, msg, generation);
@@ -66,22 +65,11 @@ async function runJob(owner, repo, generation) {
     if (!alive()) return;
     log('[generate] Done.');
 
-    // ── 4. npm install ────────────────────────────────────────────────
-    log('[build] Installing Next.js dependencies...');
-    await run('npm', ['install', '--no-audit', '--no-fund'], siteDir, owner, repo, generation);
-    if (!alive()) return;
-
-    // ── 5. next build ─────────────────────────────────────────────────
-    log('[build] Building static site...');
-    await run('npm', ['run', 'build'], siteDir, owner, repo, generation, {
-      DEEPDOC_SITE_BASE_PATH: `${owner}/${repo}`,
-    });
+    // ── 4. mkdocs build ───────────────────────────────────────────────
+    log('[build] Building static site with MkDocs...');
+    await run('mkdocs', ['build', '--config-file', 'site/mkdocs.yml'], repoDir, owner, repo, generation);
     if (!alive()) return;
     log('[build] Done.');
-
-    // ── 6. Cleanup node_modules ───────────────────────────────────────
-    log('[build] Cleaning up node_modules...');
-    fs.rmSync(path.join(siteDir, 'node_modules'), { recursive: true, force: true });
 
     setStatus(owner, repo, 'done', generation);
     log(`[done] Docs ready at /${owner}/${repo}`, generation);

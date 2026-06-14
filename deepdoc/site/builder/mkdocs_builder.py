@@ -484,6 +484,9 @@ site_dir: out
 {not_in_nav_block}
 theme:
   name: material
+  font:
+    text: Inter
+    code: JetBrains Mono
   palette:
     - media: "(prefers-color-scheme: light)"
       scheme: default
@@ -557,6 +560,35 @@ def _extra_css(cfg: dict[str, Any]) -> str:
 [data-md-color-scheme="slate"] {{
   --md-primary-fg-color: {primary};
   --md-accent-fg-color: {light};
+}}
+
+/* ── Sidebar nav: distinguish sections from page links ── */
+
+/* Space above each section block */
+.md-nav--primary .md-nav__item--section {{
+  margin-top: 1.1rem;
+}}
+.md-nav--primary .md-nav__list > .md-nav__item--section:first-child {{
+  margin-top: 0.25rem;
+}}
+
+/* Section labels: small-caps, muted, with a bottom rule */
+.md-nav--primary .md-nav__item--section > .md-nav__link {{
+  font-size: 0.65rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  opacity: 0.55;
+  padding-bottom: 0.3rem;
+  margin-bottom: 0.15rem;
+  border-bottom: 1px solid var(--md-default-fg-color--lightest);
+  pointer-events: none;
+}}
+
+/* Page links inside a section: indent so hierarchy is clear */
+.md-nav--primary .md-nav__item--section .md-nav__item > .md-nav__link {{
+  padding-left: 0.75rem;
+  font-size: 0.72rem;
 }}
 """
 

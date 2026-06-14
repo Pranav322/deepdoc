@@ -22,7 +22,6 @@ app.get('/:owner/:repo/_status', (req, res) => {
 
   res.setHeader('Content-Type', 'text/event-stream');
   res.setHeader('Cache-Control', 'no-cache');
-  res.setHeader('Connection', 'keep-alive');
   res.setHeader('X-Accel-Buffering', 'no');
   res.flushHeaders();
 
@@ -83,9 +82,11 @@ app.get('/:owner/:repo', (req, res) => {
     // Old worker detects generation mismatch and self-aborts
   }
 
-  // ── Already built → serve docs ──────────────────────────────────────────
+  // ── Already built → serve with base tag so relative asset paths resolve ──
   if (!force && fs.existsSync(indexFile)) {
-    return res.sendFile(indexFile);
+    const html = fs.readFileSync(indexFile, 'utf-8');
+    const patched = html.replace('<head>', `<head><base href="/${owner}/${repo}/">`);
+    return res.type('html').send(patched);
   }
 
   const job = getJob(owner, repo);

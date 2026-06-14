@@ -25,6 +25,9 @@ ssh -i "$SSH_KEY" root@${DROPLET_IP} bash << 'REMOTE'
 
   cd "$DEST" && npm install --omit=dev --prefer-offline
 
+  echo "==> Upgrading deepdoc + mkdocs..."
+  pip3 install --upgrade deepdoc mkdocs-material mkdocs-swagger-ui-tag --break-system-packages --ignore-installed
+
   systemctl restart deepdoc-server
   echo "✓ Restarted."
   systemctl status deepdoc-server --no-pager | head -8

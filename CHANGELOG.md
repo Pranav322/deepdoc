@@ -5,6 +5,23 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
+## [0.4.1] - 2026-06-15
+
+### Fixed
+
+- **Mermaid diagrams now render in the generated site.** Replaced the unreliable CDN `type="module"` script (which never re-fires on Next.js client-side navigation) with a `MermaidRunner` React client component that re-runs `mermaid.run()` on every route change via `usePathname`. `mermaid` is now an explicit npm dependency (`^11.4.1`) in the site template.
+- **Mermaid syntax errors caused by backticks in node labels.** Mermaid 11+ treats backtick-delimited text inside node labels as its own markdown string syntax, breaking diagrams with LLM-generated file citations like `` ["foo() (`bar.py:10`)"] ``. The post-processor now strips backticks from all double-quoted string tokens inside mermaid blocks before saving.
+- **`/ask` page: `file_inventory` crash.** `file_inventory` items from the backend are dicts with a `file_path` key, not raw strings. The frontend was calling `.split('/')` on an object, causing a runtime TypeError.
+- **`/ask` page: deep research progress bar now fills forward.** The animated bar no longer dances left-right; it fills progressively based on research milestones (`start` → 8%, `decompose` → 18%, each `step_done` → up to 82%, `synthesise_start` → 88%, `done` → 100%) with a smooth CSS transition.
+
+### Changed
+
+- **`/ask` page: full trace data surfaced in right pane.** `tool_call` trace events now show the actual action and file path (e.g. `read deepdoc/chatbot/service.py`); `decompose` events expand into the sub-question list; `step_done` events list files found per step. Previously all trace fields beyond `phase` and `message` were discarded.
+- **`/ask` page: right pane uses compact clickable file rows instead of inline code cards.** Each evidence item is a single row (file name, directory, line number). Clicking opens a full dark code modal with the complete snippet — no truncation. `file_inventory` (all files researched) appears as an "Also researched" list below evidence.
+- **`/ask` page: redesigned to match DeepWiki aesthetic.** Question renders as an `<h1>` heading. Warm-gray OKLCH palette throughout. Shimmer skeleton loading. Dark charcoal send button. Trace moved to right pane during deep research, replaced by file rows when done.
+
+---
+
 ## [0.4.0] - 2026-06-15
 
 ### Changed

@@ -23,7 +23,8 @@
     "rehype-stringify": "^10.0.1",
     "@shikijs/rehype": "^3.7.0",
     "unist-util-visit": "^5.0.0",
-    "gray-matter": "^4.0.3"
+    "gray-matter": "^4.0.3",
+    "mermaid": "^11.4.1"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

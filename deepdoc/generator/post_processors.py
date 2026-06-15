@@ -139,6 +139,14 @@ def _fix_mermaid_diagram(diagram: str) -> str:
                 line,
             )
 
+        # Fix: backticks inside double-quoted node labels break Mermaid 11+
+        # e.g. ["foo() (`bar.py:10`)"]  →  ["foo() (bar.py:10)"]
+        line = re.sub(
+            r'("(?:[^"\\]|\\.)*")',
+            lambda m: m.group(0).replace('`', ''),
+            line,
+        )
+
         # Fix: Node labels with colons not in quotes
         line = re.sub(
             r'\[([^\]"]*:[^\]"]*)\]',

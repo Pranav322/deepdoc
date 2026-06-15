@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
+## [0.4.0] - 2026-06-15
+
+### Changed
+
+- **Site builder migrated from MkDocs to Next.js + Fumadocs.** Generated docs now run on a Next.js 15 + Fumadocs shell that reads plain `.md` files at runtime via remark/rehype — no MDX compile step, so LLM-generated content with `{`, `<`, or unbalanced fences can never crash a build. `deepdoc serve` runs `next dev`; `deepdoc deploy` runs `next build` and exports to `site/out/`. Requires Node ≥ 18.
+- **Chatbot `/ask` workspace redesigned.** Two-pane layout: left pane streams the answer with deep-research trace inline (trace disappears when done); right pane shows sources and references for both fast and deep mode. Ask bar is a centred card matching the docs content width.
+- **Bottom-fixed ask bar.** Replaces the FAB popup with a floating input bar that sits precisely over the docs content area using Fumadocs CSS layout variables, collapsing correctly on mobile.
+- **Sidebar footer.** Commit SHA and generation date appear at the bottom of the docs sidebar.
+- **Chatbot response length now matches question intent.** Greetings and small-talk get a 1–3 sentence reply; technical questions remain thorough with full code and evidence citations.
+
+---
+
+## Pre-release history
+
+> Versions below were internal iterations before public release. Kept for reference.
+
 ## [3.3.1] - 2026-06-11
 
 ### Fixed

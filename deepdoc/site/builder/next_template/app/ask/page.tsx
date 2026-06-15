@@ -12,6 +12,8 @@ interface Evidence {
   language: string;
   role: string;
   title: string;
+  symbol_names: string[];
+  reason: string;
 }
 
 interface Reference {
@@ -24,6 +26,21 @@ interface TraceStep {
   phase: string;
   message: string;
   timestamp: number;
+  // decompose
+  sub_questions?: string[];
+  // tool_call
+  action?: string;
+  path?: string;
+  pattern?: string;
+  output_preview?: string;
+  // step context
+  step?: number;
+  question?: string;
+  // step_done
+  sources?: string[];
+  chunks_used?: number;
+  // retrieve
+  retrieved?: number;
 }
 
 interface Turn {
@@ -33,13 +50,24 @@ interface Turn {
   evidence: Evidence[];
   references: Reference[];
   trace: TraceStep[];
+  file_inventory: string[];
   done: boolean;
   error?: string;
+}
+
+interface OpenFile {
+  file_path: string;
+  start_line: number;
+  end_line: number;
+  snippet: string;
+  language: string;
+  title: string;
 }
 
 export default function AskPage() {
   const [turns, setTurns] = useState<Turn[]>([]);
   const [streaming, setStreaming] = useState(false);
+  const [openFile, setOpenFile] = useState<OpenFile | null>(null);
   const backendUrlRef = useRef('');
   const answerBottomRef = useRef<HTMLDivElement>(null);
   const router = useRouter();
@@ -53,6 +81,13 @@ export default function AskPage() {
     answerBottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [turns]);
 
+  // Close modal on Escape
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') setOpenFile(null); };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   const submitQuestion = useCallback(async (q: string, m: 'fast' | 'deep') => {
     const url = backendUrlRef.current;
     if (!q.trim() || !url) return;
@@ -60,7 +95,8 @@ export default function AskPage() {
     const turnIdx = turns.length;
     setStreaming(true);
     setTurns(prev => [...prev, {
-      question: q, mode: m, answer: '', evidence: [], references: [], trace: [], done: false,
+      question: q, mode: m, answer: '', evidence: [], references: [],
+      trace: [], file_inventory: [], done: false,
     }]);
 
     const history = turns.flatMap(t => [
@@ -124,6 +160,16 @@ export default function AskPage() {
                     phase: evt.phase ?? '',
                     message: evt.message ?? '',
                     timestamp: evt.timestamp ?? 0,
+                    sub_questions: evt.sub_questions,
+                    action: evt.action,
+                    path: evt.path,
+                    pattern: evt.pattern,
+                    output_preview: evt.output_preview,
+                    step: evt.step,
+                    question: evt.question,
+                    sources: evt.sources,
+                    chunks_used: evt.chunks_used,
+                    retrieved: evt.retrieved,
                   }],
                 };
                 return next;
@@ -135,6 +181,7 @@ export default function AskPage() {
                   ...next[turnIdx],
                   evidence: evt.evidence ?? [],
                   references: evt.references ?? [],
+                  file_inventory: evt.file_inventory ?? [],
                   done: true,
                 };
                 return next;
@@ -238,11 +285,13 @@ export default function AskPage() {
 
         <aside className="dda-aside">
           {currentTurn
-            ? <SourcePanel turn={currentTurn} />
+            ? <SourcePanel turn={currentTurn} onOpenFile={setOpenFile} />
             : <EmptyAside />
           }
         </aside>
       </div>
+
+      {openFile && <FileModal file={openFile} onClose={() => setOpenFile(null)} />}
 
       <style>{`
         /* ── Root ── */
@@ -307,9 +356,7 @@ export default function AskPage() {
         .dda-empty-sub { font-size: 13px; color: oklch(60% 0.007 70); font-weight: 400; }
 
         /* ── Turn ── */
-        .dda-turn {
-          max-width: 660px; margin: 0 auto 3.5rem;
-        }
+        .dda-turn { max-width: 660px; margin: 0 auto 3.5rem; }
         .dda-turn-meta { margin-bottom: 1.4rem; }
         .dda-question {
           font-size: 23px; font-weight: 620; line-height: 1.3;
@@ -337,7 +384,6 @@ export default function AskPage() {
         }
 
         /* ── Answer ── */
-        .dda-answer-region { }
         .dda-answer {
           font-size: 15px; line-height: 1.8;
           color: oklch(18% 0.008 70);
@@ -470,7 +516,7 @@ export default function AskPage() {
 
         /* ── Right pane ── */
         .dda-aside {
-          width: 420px; flex-shrink: 0;
+          width: 320px; flex-shrink: 0;
           overflow-y: auto;
           background: oklch(96% 0.006 70);
         }
@@ -484,20 +530,20 @@ export default function AskPage() {
         .dda-aside-empty svg { opacity: 0.22; }
         .dda-aside-empty p { margin: 0; }
 
-        /* Trace / analyzing panel */
+        /* ── Trace panel ── */
         .dda-trace-card {
-          margin: 1.25rem;
+          margin: 1rem;
           background: oklch(99.5% 0.003 70);
           border: 1px solid oklch(89% 0.006 70);
           border-radius: 10px; overflow: hidden;
         }
         .dda-trace-top {
           display: flex; align-items: center; justify-content: space-between;
-          padding: 10px 13px 9px;
+          padding: 10px 12px 9px;
         }
         .dda-trace-label {
           display: flex; align-items: center; gap: 7px;
-          font-size: 12.5px; font-weight: 600;
+          font-size: 12px; font-weight: 600;
           color: oklch(28% 0.008 70);
         }
         .dda-trace-orb {
@@ -505,11 +551,9 @@ export default function AskPage() {
           background: oklch(60% 0.16 50);
           animation: dda-pulse-dot 1.4s ease-in-out infinite;
         }
-        .dda-trace-n {
-          font-size: 11px; color: oklch(56% 0.007 70);
-        }
+        .dda-trace-n { font-size: 11px; color: oklch(56% 0.007 70); }
         .dda-trace-bar {
-          height: 2px; margin: 0 13px 10px;
+          height: 2px; margin: 0 12px 10px;
           background: oklch(89% 0.006 70);
           border-radius: 2px; overflow: hidden;
         }
@@ -525,14 +569,12 @@ export default function AskPage() {
         }
         .dda-trace-list { border-top: 1px solid oklch(92% 0.005 70); }
         .dda-trace-row {
-          display: flex; align-items: baseline; gap: 8px;
-          padding: 6px 13px; font-size: 12.5px;
+          padding: 6px 12px; font-size: 12px;
           color: oklch(40% 0.007 70); line-height: 1.45;
-        }
-        .dda-trace-row + .dda-trace-row {
           border-top: 1px solid oklch(94% 0.005 70);
         }
-        .dda-trace-dash { color: oklch(70% 0.006 70); flex-shrink: 0; }
+        .dda-trace-row:first-child { border-top: none; }
+        .dda-trace-row-main { display: flex; align-items: baseline; gap: 6px; }
         .dda-trace-tag {
           flex-shrink: 0; font-size: 10px; font-weight: 700;
           text-transform: uppercase; letter-spacing: 0.06em;
@@ -540,52 +582,85 @@ export default function AskPage() {
           color: oklch(50% 0.007 70);
           border-radius: 3px; padding: 1px 5px;
         }
-
-        /* File viewer cards */
-        .dda-file-card {
-          margin: 1.25rem 1.25rem 0;
-          background: oklch(99.5% 0.003 70);
-          border: 1px solid oklch(89% 0.006 70);
-          border-radius: 8px; overflow: hidden;
+        .dda-trace-tag-tool {
+          background: oklch(95% 0.03 260);
+          color: oklch(44% 0.09 260);
         }
-        .dda-file-card:last-of-type { margin-bottom: 1.25rem; }
-        .dda-file-head {
-          display: flex; align-items: center; gap: 7px;
-          padding: 7px 10px;
-          background: oklch(95% 0.005 70);
-          border-bottom: 1px solid oklch(90% 0.006 70);
+        .dda-trace-tag-step {
+          background: oklch(95.5% 0.04 55);
+          color: oklch(46% 0.13 46);
         }
-        .dda-file-head-icon { color: oklch(60% 0.006 70); flex-shrink: 0; }
-        .dda-file-path {
+        .dda-trace-mono {
           font-family: ui-monospace, "SF Mono", Menlo, monospace;
-          font-size: 11.5px; color: oklch(26% 0.009 70);
-          flex: 1; min-width: 0;
-          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          font-size: 11px; color: oklch(34% 0.009 250);
+          background: oklch(93% 0.005 250);
+          border-radius: 3px; padding: 0 4px;
+          max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+          display: inline-block;
         }
-        .dda-file-lines {
-          font-size: 10.5px; color: oklch(58% 0.007 70); flex-shrink: 0;
-          font-family: ui-monospace, Menlo, monospace;
+        .dda-trace-subqs { margin: 4px 0 2px 0; padding: 0; list-style: none; }
+        .dda-trace-subq {
+          font-size: 11px; color: oklch(34% 0.008 70);
+          padding: 2px 0 2px 10px;
+          position: relative;
         }
-        .dda-file-snippet {
-          padding: 9px 11px;
-          font-family: ui-monospace, "SF Mono", Menlo, monospace;
-          font-size: 11.5px; line-height: 1.6;
-          color: oklch(24% 0.008 250);
-          background: oklch(97% 0.004 250);
-          white-space: pre-wrap; word-break: break-all;
-          max-height: 160px; overflow: hidden;
+        .dda-trace-subq::before {
+          content: ''; position: absolute; left: 2px; top: 8px;
+          width: 4px; height: 4px; border-radius: 50%;
+          background: oklch(68% 0.007 70);
         }
 
-        /* Ref list */
-        .dda-refs { margin: 1.25rem; }
-        .dda-refs-heading {
+        /* ── File list (right pane after done) ── */
+        .dda-pane-section { padding: 1rem; }
+        .dda-pane-heading {
           font-size: 10.5px; font-weight: 700; text-transform: uppercase;
           letter-spacing: 0.08em; color: oklch(58% 0.007 70);
-          margin: 0 0 8px;
+          margin: 0 0 6px;
         }
+        .dda-file-list { display: flex; flex-direction: column; gap: 2px; }
+        .dda-file-row {
+          display: flex; align-items: center; gap: 7px;
+          padding: 6px 9px; border-radius: 6px;
+          cursor: pointer;
+          transition: background 0.1s;
+          background: oklch(99.5% 0.003 70);
+          border: 1px solid oklch(90% 0.006 70);
+        }
+        .dda-file-row:hover { background: oklch(97% 0.008 70); border-color: oklch(84% 0.008 70); }
+        .dda-file-row-icon { color: oklch(60% 0.006 70); flex-shrink: 0; }
+        .dda-file-row-info { flex: 1; min-width: 0; }
+        .dda-file-row-name {
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 11.5px; color: oklch(22% 0.009 70);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .dda-file-row-sub {
+          font-size: 10.5px; color: oklch(58% 0.007 70);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+          margin-top: 1px;
+        }
+        .dda-file-row-lines {
+          font-family: ui-monospace, Menlo, monospace;
+          font-size: 10px; color: oklch(62% 0.007 70); flex-shrink: 0;
+        }
+        .dda-file-row-arrow { color: oklch(72% 0.006 70); flex-shrink: 0; }
+
+        /* Inventory file rows (no snippet, smaller) */
+        .dda-inv-row {
+          display: flex; align-items: center; gap: 6px;
+          padding: 5px 8px; border-radius: 5px;
+          background: transparent;
+          border: none; cursor: default;
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 11px; color: oklch(40% 0.008 70);
+          white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .dda-inv-row svg { flex-shrink: 0; color: oklch(68% 0.006 70); }
+
+        /* Ref list */
         .dda-ref {
           display: flex; align-items: center; gap: 6px;
-          padding: 6px 0; font-size: 13px;
+          padding: 5px 0; font-size: 12.5px;
           color: oklch(44% 0.007 70);
           border-bottom: 1px solid oklch(91% 0.005 70);
         }
@@ -593,8 +668,78 @@ export default function AskPage() {
         .dda-ref a { color: var(--brand, #eb3e25); text-decoration: none; }
         .dda-ref a:hover { text-decoration: underline; }
 
-        /* ── Aside skeleton (fast loading) ── */
-        .dda-aside-skel { padding: 1.25rem; display: flex; flex-direction: column; gap: 9px; }
+        /* ── Aside skeleton ── */
+        .dda-aside-skel { padding: 1rem; display: flex; flex-direction: column; gap: 8px; }
+
+        /* ── File modal ── */
+        .dda-modal-backdrop {
+          position: fixed; inset: 0; z-index: 1000;
+          background: oklch(8% 0.008 70 / 0.55);
+          backdrop-filter: blur(4px);
+          display: flex; align-items: center; justify-content: center;
+          padding: 2rem;
+          animation: dda-backdrop-in 0.15s ease-out;
+        }
+        @keyframes dda-backdrop-in { from { opacity: 0; } to { opacity: 1; } }
+        .dda-modal {
+          background: oklch(13% 0.007 250);
+          border: 1px solid oklch(22% 0.008 250);
+          border-radius: 12px;
+          width: min(860px, 100%);
+          max-height: 80vh;
+          display: flex; flex-direction: column;
+          box-shadow: 0 24px 60px oklch(0% 0 0 / 0.5);
+          animation: dda-modal-in 0.15s ease-out;
+          overflow: hidden;
+        }
+        @keyframes dda-modal-in {
+          from { opacity: 0; transform: translateY(8px) scale(0.98); }
+          to { opacity: 1; transform: none; }
+        }
+        .dda-modal-head {
+          display: flex; align-items: center; gap: 10px;
+          padding: 10px 14px;
+          border-bottom: 1px solid oklch(22% 0.008 250);
+          flex-shrink: 0;
+        }
+        .dda-modal-path {
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 12.5px; color: oklch(80% 0.008 70);
+          flex: 1; min-width: 0;
+          overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+        .dda-modal-lines {
+          font-family: ui-monospace, Menlo, monospace;
+          font-size: 11px; color: oklch(52% 0.007 70); flex-shrink: 0;
+        }
+        .dda-modal-lang {
+          font-size: 10.5px; font-weight: 600; text-transform: uppercase;
+          letter-spacing: 0.06em; color: oklch(50% 0.007 70);
+          background: oklch(20% 0.007 250);
+          border-radius: 3px; padding: 2px 6px; flex-shrink: 0;
+        }
+        .dda-modal-close {
+          display: flex; align-items: center; justify-content: center;
+          width: 26px; height: 26px; border-radius: 6px;
+          background: none; border: none; cursor: pointer;
+          color: oklch(52% 0.007 70);
+          transition: background 0.1s, color 0.1s;
+          flex-shrink: 0;
+        }
+        .dda-modal-close:hover {
+          background: oklch(20% 0.007 250); color: oklch(80% 0.008 70);
+        }
+        .dda-modal-body {
+          overflow-y: auto; flex: 1;
+        }
+        .dda-modal-code {
+          margin: 0; padding: 1.25rem 1.5rem;
+          font-family: ui-monospace, "SF Mono", Menlo, monospace;
+          font-size: 12.5px; line-height: 1.7;
+          color: oklch(85% 0.007 70);
+          white-space: pre; tab-size: 2;
+          overflow-x: auto;
+        }
 
         /* ── Responsive ── */
         @media (max-width: 900px) {
@@ -733,16 +878,97 @@ function EmptyAside() {
   );
 }
 
+/* ── Trace row renderer ──────────────────────────────────────────────────────── */
+
+function TraceRow({ step }: { step: TraceStep }) {
+  const { phase, message, sub_questions, action, path, pattern, sources } = step;
+
+  const tagClass = (phase === 'tool_call' || phase === 'tool_result')
+    ? 'dda-trace-tag dda-trace-tag-tool'
+    : (phase === 'step_start' || phase === 'step_done')
+    ? 'dda-trace-tag dda-trace-tag-step'
+    : 'dda-trace-tag';
+
+  // Tool call: show action + path/pattern inline
+  if (phase === 'tool_call' && (path || pattern)) {
+    const label = action === 'read_file' ? 'read' : action === 'grep' ? 'grep' : action ?? 'tool';
+    const target = path || pattern || '';
+    const short = target.split('/').slice(-2).join('/');
+    return (
+      <div className="dda-trace-row">
+        <div className="dda-trace-row-main">
+          <span className={tagClass}>{label}</span>
+          <span className="dda-trace-mono" title={target}>{short}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // Decompose: show sub-questions list
+  if (phase === 'decompose' && sub_questions && sub_questions.length > 0) {
+    return (
+      <div className="dda-trace-row">
+        <div className="dda-trace-row-main">
+          <span className={tagClass}>{phase}</span>
+          <span>{message}</span>
+        </div>
+        <ul className="dda-trace-subqs">
+          {sub_questions.map((q, i) => (
+            <li key={i} className="dda-trace-subq">{q}</li>
+          ))}
+        </ul>
+      </div>
+    );
+  }
+
+  // Step done: show sources found
+  if (phase === 'step_done' && sources && sources.length > 0) {
+    return (
+      <div className="dda-trace-row">
+        <div className="dda-trace-row-main">
+          <span className={tagClass}>{phase}</span>
+          <span>{sources.length} file{sources.length !== 1 ? 's' : ''} found</span>
+        </div>
+        <ul className="dda-trace-subqs">
+          {sources.slice(0, 4).map((s, i) => (
+            <li key={i} className="dda-trace-subq" style={{ fontFamily: 'ui-monospace, Menlo, monospace', fontSize: 10.5 }}>
+              {s.split('/').slice(-2).join('/')}
+            </li>
+          ))}
+          {sources.length > 4 && (
+            <li className="dda-trace-subq" style={{ color: 'oklch(60% 0.007 70)' }}>+{sources.length - 4} more</li>
+          )}
+        </ul>
+      </div>
+    );
+  }
+
+  // Default
+  return (
+    <div className="dda-trace-row">
+      <div className="dda-trace-row-main">
+        {phase && <span className={tagClass}>{phase}</span>}
+        <span>{message || phase}</span>
+      </div>
+    </div>
+  );
+}
+
 /* ── Source panel ────────────────────────────────────────────────────────────── */
 
-function SourcePanel({ turn }: { turn: Turn }) {
+function SourcePanel({ turn, onOpenFile }: {
+  turn: Turn;
+  onOpenFile: (f: OpenFile) => void;
+}) {
   const hasEvidence = turn.evidence.length > 0;
   const hasRefs = turn.references.length > 0;
-  const showTrace = !turn.done && turn.mode === 'deep' && turn.trace.length > 0;
+  const hasInventory = turn.file_inventory.length > 0;
+  const showTrace = !turn.answer && !turn.done && turn.mode === 'deep' && turn.trace.length > 0;
   const showSkeleton = !turn.done && !hasEvidence && !showTrace;
 
   return (
     <>
+      {/* Trace: during research, before answer starts */}
       {showTrace && (
         <div className="dda-trace-card">
           <div className="dda-trace-top">
@@ -750,59 +976,100 @@ function SourcePanel({ turn }: { turn: Turn }) {
               <span className="dda-trace-orb" />
               Analyzing codebase
             </span>
-            <span className="dda-trace-n">{turn.trace.length} step{turn.trace.length !== 1 ? 's' : ''}</span>
+            <span className="dda-trace-n">{turn.trace.length}</span>
           </div>
           <div className="dda-trace-bar">
             <div className="dda-trace-bar-fill" />
           </div>
           <div className="dda-trace-list">
-            {turn.trace.map((s, i) => (
-              <div key={i} className="dda-trace-row">
-                <span className="dda-trace-dash">–</span>
-                {s.phase && <span className="dda-trace-tag">{s.phase}</span>}
-                <span>{s.message || s.phase}</span>
+            {turn.trace.map((s, i) => <TraceRow key={i} step={s} />)}
+          </div>
+        </div>
+      )}
+
+      {/* Skeleton: fast mode loading */}
+      {showSkeleton && (
+        <div className="dda-aside-skel">
+          <div className="dda-skel" style={{ width: '55%', height: 11 }} />
+          <div className="dda-skel" style={{ width: '100%', height: 40, borderRadius: 6 }} />
+          <div className="dda-skel" style={{ width: '100%', height: 40, borderRadius: 6 }} />
+          <div className="dda-skel" style={{ width: '45%', height: 11, marginTop: 4 }} />
+          <div className="dda-skel" style={{ width: '100%', height: 40, borderRadius: 6 }} />
+        </div>
+      )}
+
+      {/* Evidence: clickable file rows */}
+      {hasEvidence && (
+        <div className="dda-pane-section">
+          <p className="dda-pane-heading">Sources ({turn.evidence.length})</p>
+          <div className="dda-file-list">
+            {turn.evidence.map((e, i) => {
+              const name = e.file_path.split('/').pop() ?? e.file_path;
+              const dir = e.file_path.includes('/')
+                ? e.file_path.split('/').slice(0, -1).join('/')
+                : '';
+              return (
+                <button
+                  key={i}
+                  className="dda-file-row"
+                  onClick={() => onOpenFile({
+                    file_path: e.file_path,
+                    start_line: e.start_line,
+                    end_line: e.end_line,
+                    snippet: e.snippet,
+                    language: e.language,
+                    title: e.title,
+                  })}
+                  title={`${e.file_path}:${e.start_line}–${e.end_line}`}
+                >
+                  <span className="dda-file-row-icon">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                      <polyline points="14 2 14 8 20 8" />
+                    </svg>
+                  </span>
+                  <span className="dda-file-row-info">
+                    <div className="dda-file-row-name">{name}</div>
+                    {dir && <div className="dda-file-row-sub">{dir}</div>}
+                  </span>
+                  {e.start_line > 0 && (
+                    <span className="dda-file-row-lines">:{e.start_line}</span>
+                  )}
+                  <span className="dda-file-row-arrow">
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+                      <path d="M9 18l6-6-6-6" />
+                    </svg>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* File inventory (all files researched, no snippets) */}
+      {hasInventory && (
+        <div className="dda-pane-section" style={{ paddingTop: hasEvidence ? 0 : undefined }}>
+          <p className="dda-pane-heading">Also researched</p>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+            {turn.file_inventory.map((f, i) => (
+              <div key={i} className="dda-inv-row">
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                  <polyline points="14 2 14 8 20 8" />
+                </svg>
+                {f.split('/').slice(-2).join('/')}
               </div>
             ))}
           </div>
         </div>
       )}
 
-      {showSkeleton && (
-        <div className="dda-aside-skel">
-          <div className="dda-skel" style={{ width: '55%', height: 11 }} />
-          <div className="dda-skel" style={{ width: '100%', height: 72, borderRadius: 7 }} />
-          <div className="dda-skel" style={{ width: '45%', height: 11, marginTop: 4 }} />
-          <div className="dda-skel" style={{ width: '100%', height: 52, borderRadius: 7 }} />
-          <div className="dda-skel" style={{ width: '100%', height: 52, borderRadius: 7 }} />
-        </div>
-      )}
-
-      {hasEvidence && turn.evidence.slice(0, 6).map((e, i) => (
-        <div key={i} className="dda-file-card">
-          <div className="dda-file-head">
-            <span className="dda-file-head-icon">
-              <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                <polyline points="14 2 14 8 20 8" />
-              </svg>
-            </span>
-            <span className="dda-file-path">{e.file_path}</span>
-            {e.start_line > 0 && (
-              <span className="dda-file-lines">:{e.start_line}–{e.end_line}</span>
-            )}
-          </div>
-          {e.snippet && (
-            <div className="dda-file-snippet">
-              {e.snippet.slice(0, 420)}{e.snippet.length > 420 ? '\n…' : ''}
-            </div>
-          )}
-        </div>
-      ))}
-
+      {/* References */}
       {hasRefs && (
-        <div className="dda-refs">
-          <p className="dda-refs-heading">References</p>
-          {turn.references.slice(0, 6).map((r, i) => (
+        <div className="dda-pane-section" style={{ paddingTop: (hasEvidence || hasInventory) ? 0 : undefined }}>
+          <p className="dda-pane-heading">References</p>
+          {turn.references.map((r, i) => (
             <div key={i} className="dda-ref">
               <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true" style={{ flexShrink: 0 }}>
                 <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -817,6 +1084,48 @@ function SourcePanel({ turn }: { turn: Turn }) {
         </div>
       )}
     </>
+  );
+}
+
+/* ── File modal ──────────────────────────────────────────────────────────────── */
+
+function FileModal({ file, onClose }: { file: OpenFile; onClose: () => void }) {
+  const lang = file.language || file.file_path.split('.').pop() || '';
+  const escaped = file.snippet
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  return (
+    <div
+      className="dda-modal-backdrop"
+      onClick={e => { if (e.target === e.currentTarget) onClose(); }}
+      role="dialog"
+      aria-modal="true"
+      aria-label={file.file_path}
+    >
+      <div className="dda-modal">
+        <div className="dda-modal-head">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="oklch(52% 0.007 70)" strokeWidth="2" aria-hidden="true" style={{ flexShrink: 0 }}>
+            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+            <polyline points="14 2 14 8 20 8" />
+          </svg>
+          <span className="dda-modal-path">{file.file_path}</span>
+          {file.start_line > 0 && (
+            <span className="dda-modal-lines">:{file.start_line}–{file.end_line}</span>
+          )}
+          {lang && <span className="dda-modal-lang">{lang}</span>}
+          <button className="dda-modal-close" onClick={onClose} aria-label="Close">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" aria-hidden="true">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
+        <div className="dda-modal-body">
+          <pre className="dda-modal-code" dangerouslySetInnerHTML={{ __html: escaped }} />
+        </div>
+      </div>
+    </div>
   );
 }
 

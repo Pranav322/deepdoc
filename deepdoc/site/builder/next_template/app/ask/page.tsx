@@ -561,11 +561,7 @@ export default function AskPage() {
           height: 100%;
           background: linear-gradient(90deg, oklch(60% 0.16 50), oklch(68% 0.14 60));
           border-radius: 2px;
-          animation: dda-bar-anim 1.8s ease-in-out infinite alternate;
-        }
-        @keyframes dda-bar-anim {
-          0% { width: 30%; opacity: 0.6; }
-          100% { width: 85%; opacity: 1; }
+          transition: width 0.6s cubic-bezier(0.25, 0.46, 0.45, 0.94);
         }
         .dda-trace-list { border-top: 1px solid oklch(92% 0.005 70); }
         .dda-trace-row {
@@ -969,23 +965,34 @@ function SourcePanel({ turn, onOpenFile }: {
   return (
     <>
       {/* Trace: during research, before answer starts */}
-      {showTrace && (
+      {showTrace && (() => {
+        const phases = turn.trace.map(s => s.phase);
+        const stepsDone = phases.filter(p => p === 'step_done').length;
+        const MAX_ROUNDS = 4;
+        let pct = 5;
+        if (phases.includes('done')) pct = 100;
+        else if (phases.includes('synthesise_start')) pct = 88;
+        else if (stepsDone > 0) pct = Math.min(82, 18 + (stepsDone / MAX_ROUNDS) * 64);
+        else if (phases.includes('decompose')) pct = 18;
+        else if (phases.includes('start')) pct = 8;
+        return (
         <div className="dda-trace-card">
           <div className="dda-trace-top">
             <span className="dda-trace-label">
               <span className="dda-trace-orb" />
               Analyzing codebase
             </span>
-            <span className="dda-trace-n">{turn.trace.length}</span>
+            <span className="dda-trace-n">{Math.round(pct)}%</span>
           </div>
           <div className="dda-trace-bar">
-            <div className="dda-trace-bar-fill" />
+            <div className="dda-trace-bar-fill" style={{ width: `${pct}%` }} />
           </div>
           <div className="dda-trace-list">
             {turn.trace.map((s, i) => <TraceRow key={i} step={s} />)}
           </div>
         </div>
-      )}
+        );
+      })()}
 
       {/* Skeleton: fast mode loading */}
       {showSkeleton && (
@@ -1052,15 +1059,18 @@ function SourcePanel({ turn, onOpenFile }: {
         <div className="dda-pane-section" style={{ paddingTop: hasEvidence ? 0 : undefined }}>
           <p className="dda-pane-heading">Also researched</p>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {turn.file_inventory.map((f, i) => (
-              <div key={i} className="dda-inv-row">
-                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                </svg>
-                {f.split('/').slice(-2).join('/')}
-              </div>
-            ))}
+            {turn.file_inventory.map((f, i) => {
+              const fp = typeof f === 'string' ? f : (f as Record<string, unknown>).file_path as string ?? '';
+              return (
+                <div key={i} className="dda-inv-row">
+                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden="true">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                  </svg>
+                  {fp.split('/').slice(-2).join('/')}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}

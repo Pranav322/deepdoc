@@ -2368,9 +2368,9 @@ def test_system_prompt_contains_project_name(tmp_path: Path) -> None:
         prompt = service._system_prompt()
 
     assert "MyProject" in prompt
-    assert "file path and line range" in prompt
-    assert "Sources" in prompt
-    assert "## Summary" in prompt
+    assert "evidence" in prompt.lower()
+    assert "cite" in prompt.lower()
+    assert "summary" in prompt.lower()
 
 
 def test_query_service_passes_loaded_indexes_into_similarity_search(

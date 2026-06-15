@@ -324,20 +324,22 @@ def test_build_mkdocs_renders_swagger_page_from_staged_spec(
     assert not (output_dir / "openapi" / "manifest.json").exists()
 
 
-def test_prompts_use_mkdocs_blocks_syntax() -> None:
-    # MkDocs Material pymdownx Blocks syntax is taught.
-    assert "/// note" in SYSTEM_V2
-    assert "/// tab |" in SYSTEM_V2
-    assert "/// details |" in SYSTEM_V2
-    assert "grid cards" in SYSTEM_V2
+def test_prompts_use_github_alert_syntax() -> None:
+    # GitHub Alert syntax is taught (Next.js / Fumadocs site).
+    assert "> [!NOTE]" in SYSTEM_V2
+    assert "> [!WARNING]" in SYSTEM_V2
+    assert "> [!TIP]" in SYSTEM_V2
+    assert "<details>" in SYSTEM_V2
 
-    # Fumadocs remark-directives are not used as worked examples. They may only
-    # appear inside the explicit "NEVER write ..." prohibition line, so check for
-    # the directive at the start of a content line (how an example would appear).
-    for directive in ("\n:::cards", "\n:::steps", "\n:::accordions", "\n::step", "\n::card"):
-        assert directive not in SYSTEM_V2, f"unexpected directive example {directive!r}"
+    # MkDocs pymdownx Blocks syntax must NOT appear as content examples
+    # (only allowed inside the NEVER prohibition line, not as standalone usage).
+    import re
+    # Count lines that START with "/// " (i.e., a real usage example, not a mention)
+    example_lines = [l for l in SYSTEM_V2.splitlines() if re.match(r'^/// (note|tab|details|tip|warning|info)', l)]
+    assert example_lines == [], f"Found MkDocs block examples: {example_lines}"
+    assert "grid cards" not in SYSTEM_V2
 
-    # Mintlify JSX components never appear at all.
+    # JSX components never appear.
     assert "<CardGroup" not in SYSTEM_V2
     assert "<AccordionGroup" not in SYSTEM_V2
     assert "Mintlify" not in SYSTEM_V2
@@ -606,9 +608,10 @@ See [System Architecture & Overview](/architecture) first.
 
     repaired = repair_internal_doc_links(content, valid_urls, title_to_url, alias_map)
 
-    assert "[Database & Schema](database-schema.md)" in repaired
-    assert "[System Architecture & Overview](index.md)" in repaired
-    assert 'title="Database & Schema" href="database-schema.md"' in repaired
+    # Next.js uses root-absolute /slug paths — no .md extension rewriting.
+    assert "[Database & Schema](/database-schema)" in repaired
+    assert "[System Architecture & Overview](/)" in repaired
+    assert 'title="Database & Schema" href="/database-schema"' in repaired
 
 
 def test_repair_internal_doc_links_strips_unresolvable_markdown_links() -> None:

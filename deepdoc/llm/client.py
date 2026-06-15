@@ -119,10 +119,12 @@ class LLMClient:
                 "╚══════════════════════════════════════════════════════════════════════╝\n"
             )
 
-        # Set API key in environment so LiteLLM picks it up automatically
-        api_key = resolve_api_key(cfg)
-        if api_key and api_key_env:
-            os.environ[api_key_env] = api_key
+        # Resolve and store key so it can be passed directly to litellm.completion()
+        # (litellm may pick up a stale AZURE_OPENAI_API_KEY from the environment
+        # instead of AZURE_API_KEY — passing api_key explicitly avoids this)
+        self.api_key = resolve_api_key(cfg) or None
+        if self.api_key and api_key_env:
+            os.environ[api_key_env] = self.api_key
 
     def complete(self, system: str, user: str) -> str:
         """Send a chat completion request and return the response text."""
@@ -145,6 +147,8 @@ class LLMClient:
                 kwargs["base_url"] = self.base_url
             if self.api_version:
                 kwargs["api_version"] = self.api_version
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
 
             response = litellm.completion(**kwargs)
             return response.choices[0].message.content or ""
@@ -177,6 +181,8 @@ class LLMClient:
                 kwargs["base_url"] = self.base_url
             if self.api_version:
                 kwargs["api_version"] = self.api_version
+            if self.api_key:
+                kwargs["api_key"] = self.api_key
 
             for chunk in litellm.completion(**kwargs):
                 delta = chunk.choices[0].delta

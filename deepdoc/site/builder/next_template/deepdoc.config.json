@@ -1,0 +1,13 @@
+{
+  "project_name": "Docs",
+  "nav": [],
+  "colors": {
+    "primary": "#eb3e25",
+    "light": "#ef624e",
+    "dark": "#c1331f"
+  },
+  "chatbot": {
+    "enabled": false,
+    "backend_url": ""
+  }
+}

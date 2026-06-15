@@ -379,8 +379,8 @@ def generate(
       1. Scan       Collect files, symbols, endpoints, and OpenAPI specs
       2. Plan       Build a bucket-based docs plan with the LLM
       3. Generate   Write pages batch-by-batch
-      4. API Ref     Stage OpenAPI assets for the MkDocs API reference page
-      5. Build      Write the generated MkDocs Material site scaffold
+      4. API Ref     Stage OpenAPI assets for the API reference page
+      5. Build      Write the Next.js + Fumadocs site scaffold
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
@@ -967,27 +967,28 @@ def benchmark(
     "--port",
     default=3000,
     show_default=True,
-    help="Port to bind the local MkDocs development server to.",
+    help="Port to bind the Next.js development server to.",
 )
 def serve(port):
     """Preview the generated docs locally with live reload.
 
     \b
-    Run `deepdoc generate` first so the generated MkDocs site and docs exist.
-    Requires the site extra: pip install 'deepdoc[site]'
+    Run `deepdoc generate` first so the Next.js site scaffold and docs exist.
+    Requires Node.js >=18: https://nodejs.org
     """
-    _load_or_exit()
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
     site_dir = repo_root / "site"
 
-    mkdocs_yml = site_dir / "mkdocs.yml"
-    if not mkdocs_yml.exists():
+    pkg_json = site_dir / "package.json"
+    if not pkg_json.exists():
         console.print(
-            "[red]site/mkdocs.yml not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
-    _ensure_mkdocs_installed(cfg)
+
+    _ensure_node_installed()
+    _ensure_node_modules(site_dir)
 
     preview_url = f"http://localhost:{port}"
     console.print(
@@ -1000,33 +1001,25 @@ def serve(port):
         if cfg.get("chatbot", {}).get("enabled"):
             backend_proc, _ = _start_chatbot_backend(repo_root, cfg, port)
 
-        # Auto-open browser after a short delay to let MkDocs start
         import threading
         import webbrowser
 
         def _open_browser():
             import time
-
-            time.sleep(2)
+            time.sleep(3)
             webbrowser.open(preview_url)
 
         threading.Thread(target=_open_browser, daemon=True).start()
 
         subprocess.run(
-            [
-                "mkdocs",
-                "serve",
-                "--config-file",
-                str(mkdocs_yml),
-                "--dev-addr",
-                f"127.0.0.1:{port}",
-            ],
+            ["npx", "next", "dev", "--port", str(port)],
+            cwd=str(site_dir),
         )
     except KeyboardInterrupt:
         pass
     except FileNotFoundError:
         console.print(
-            "[red]mkdocs not found. Install it: [bold]pip install 'deepdoc[site]'[/bold][/red]"
+            "[red]npx not found. Install Node.js >=18 from [bold]https://nodejs.org[/bold][/red]"
         )
         sys.exit(1)
     finally:
@@ -1048,19 +1041,20 @@ def _deploy():
     """Deploy the generated documentation.
 
     \b
-    MkDocs builds a static HTML site:
+    Next.js builds a static HTML site:
       1. Run `deepdoc deploy`
       2. Publish `site/out/` to any static host
+    Requires Node.js >=18: https://nodejs.org
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
     site_dir = repo_root / "site"
     output_dir = repo_root / str(cfg.get("output_dir", "docs") or "docs")
 
-    mkdocs_yml = site_dir / "mkdocs.yml"
-    if not mkdocs_yml.exists():
+    pkg_json = site_dir / "package.json"
+    if not pkg_json.exists():
         console.print(
-            "[red]site/mkdocs.yml not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
 
@@ -1072,11 +1066,12 @@ def _deploy():
             + "\nRun `deepdoc generate` again after fixing the generation issues."
         )
 
-    _ensure_mkdocs_installed(cfg)
+    _ensure_node_installed()
+    _ensure_node_modules(site_dir)
 
     console.print(
         Panel.fit(
-            "[bold]MkDocs Deployment:[/bold]\n\n"
+            "[bold]Next.js Deployment:[/bold]\n\n"
             "1. [bold cyan]Static build:[/bold cyan]\n"
             "   Run: [bold]deepdoc deploy[/bold]\n"
             "   Publish [bold]site/out/[/bold] to any static host\n\n"
@@ -1096,7 +1091,8 @@ def _deploy():
     console.print("\n[dim]Running static build...[/dim]")
     try:
         build_result = subprocess.run(
-            ["mkdocs", "build", "--config-file", str(mkdocs_yml)],
+            ["npx", "next", "build"],
+            cwd=str(site_dir),
             capture_output=False,
         )
         if build_result.returncode == 0:
@@ -1107,35 +1103,39 @@ def _deploy():
             console.print("[red]Build failed.[/red]")
     except FileNotFoundError:
         console.print(
-            "[red]mkdocs not found. Install it: [bold]pip install 'deepdoc[site]'[/bold][/red]"
+            "[red]npx not found. Install Node.js >=18 from [bold]https://nodejs.org[/bold][/red]"
         )
         sys.exit(1)
 
 
-def _ensure_mkdocs_installed(cfg: dict) -> None:
-    """Verify MkDocs Material (and the Swagger plugin when needed) is importable.
-
-    MkDocs is a user-installed Python dependency, not bundled with deepdoc. If it
-    is missing we fail fast with a clear pip command rather than a cryptic
-    FileNotFoundError when the subprocess tries to run.
-    """
-    import importlib.util
-
-    missing: list[str] = []
-    if importlib.util.find_spec("mkdocs") is None:
-        missing.append("mkdocs-material")
-    elif importlib.util.find_spec("material") is None:
-        missing.append("mkdocs-material")
-    if importlib.util.find_spec("mkdocs_swagger_ui_tag") is None:
-        # Only required when an OpenAPI spec was staged.
-        if (_find_repo_root() / "site" / "openapi").exists():
-            missing.append("mkdocs-swagger-ui-tag")
-
-    if missing:
-        raise click.ClickException(
-            "MkDocs is not installed. Install the site extra with:\n"
-            "    pip install 'deepdoc[site]'"
+def _ensure_node_installed() -> None:
+    """Verify Node.js >=18 is available."""
+    try:
+        result = subprocess.run(
+            ["node", "--version"], capture_output=True, text=True, timeout=5
         )
+        version = result.stdout.strip().lstrip("v")
+        major = int(version.split(".")[0]) if version else 0
+        if major < 18:
+            raise click.ClickException(
+                f"Node.js >=18 is required (found {version}). "
+                "Download it from https://nodejs.org"
+            )
+    except FileNotFoundError:
+        raise click.ClickException(
+            "Node.js not found. Install Node.js >=18 from https://nodejs.org"
+        )
+
+
+def _ensure_node_modules(site_dir) -> None:
+    """Run npm install in site_dir if node_modules is missing."""
+    from pathlib import Path
+    nm = Path(site_dir) / "node_modules"
+    if not nm.exists():
+        console.print("[dim]Installing npm dependencies (first run only)…[/dim]")
+        result = subprocess.run(["npm", "install"], cwd=str(site_dir))
+        if result.returncode != 0:
+            raise click.ClickException("npm install failed. Check your Node.js installation.")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -72,7 +72,7 @@ def _build_md(entries: list[dict]) -> str:
 
     if not entries:
         lines.append(
-            "/// note\nNo changelog entries yet. Run `deepdoc generate` to create the first entry.\n///"
+            "> [!NOTE]\n> No changelog entries yet. Run `deepdoc generate` to create the first entry."
         )
         return "\n".join(lines)
 
@@ -87,7 +87,8 @@ def _build_md(entries: list[dict]) -> str:
         strategy_label = _STRATEGY_LABEL.get(strategy, strategy)
 
         title = f"{date} — {msg[:72]} ({sha})"
-        lines.append(f"/// details | {title}")
+        lines.append(f"<details>")
+        lines.append(f"<summary>{title}</summary>")
         lines.append("")
 
         # Commit metadata row
@@ -108,17 +109,17 @@ def _build_md(entries: list[dict]) -> str:
                 lines.append("**Pages generated:**")
                 lines.append("")
                 for s in pages:
-                    lines.append(f"- [{_slug_to_title(s)}]({s}.md)")
+                    lines.append(f"- [{_slug_to_title(s)}](/{s})")
         else:
             # Pages updated
             if pages:
                 lines.append(f"**{len(pages)} page(s) updated:**")
                 lines.append("")
                 for s in pages:
-                    lines.append(f"- [{_slug_to_title(s)}]({s}.md)")
+                    lines.append(f"- [{_slug_to_title(s)}](/{s})")
             else:
                 lines.append(
-                    "/// info\nNo pages were regenerated — only metadata or chatbot corpora were refreshed.\n///"
+                    "> [!INFO]\n> No pages were regenerated — only metadata or chatbot corpora were refreshed."
                 )
 
             # Source files that changed
@@ -147,7 +148,7 @@ def _build_md(entries: list[dict]) -> str:
                 )
 
         lines.append("")
-        lines.append("///")
+        lines.append("</details>")
 
     return "\n".join(lines)
 

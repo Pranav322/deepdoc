@@ -65,9 +65,14 @@ async function runJob(owner, repo, generation) {
     if (!alive()) return;
     log('[generate] Done.');
 
-    // ── 4. mkdocs build ───────────────────────────────────────────────
-    log('[build] Building static site with MkDocs...');
-    await run('mkdocs', ['build', '--config-file', 'site/mkdocs.yml'], repoDir, owner, repo, generation);
+    // ── 4. next build ─────────────────────────────────────────────────
+    log('[build] Installing npm deps...');
+    await run('npm', ['ci', '--prefer-offline'], path.join(repoDir, 'site'), owner, repo, generation);
+    if (!alive()) return;
+    log('[build] Building static site with Next.js...');
+    await run('npx', ['next', 'build'], path.join(repoDir, 'site'), owner, repo, generation, {
+      NEXT_PUBLIC_BASE_PATH: `/${owner}/${repo}`,
+    });
     if (!alive()) return;
     log('[build] Done.');
 

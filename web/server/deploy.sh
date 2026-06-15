@@ -25,8 +25,9 @@ ssh -i "$SSH_KEY" root@${DROPLET_IP} bash << 'REMOTE'
 
   cd "$DEST" && npm install --omit=dev --prefer-offline
 
-  echo "==> Upgrading deepdoc + mkdocs..."
-  pip3 install --upgrade deepdoc mkdocs-material mkdocs-swagger-ui-tag --break-system-packages --ignore-installed
+  echo "==> Upgrading deepdoc..."
+  pip3 install --upgrade deepdoc --break-system-packages --ignore-installed
+  # Note: site generation now uses Next.js — no mkdocs-material needed
 
   systemctl restart deepdoc-server
   echo "✓ Restarted."

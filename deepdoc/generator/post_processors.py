@@ -269,23 +269,8 @@ def _normalize_internal_doc_url(target: str) -> str:
 
 
 def _to_mkdocs_relative(url: str) -> str:
-    """Convert a validated root-absolute doc URL (``/slug``) into a MkDocs-relative
-    ``.md`` path so links resolve in the statically built site.
-
-    ``/`` → ``index.md``; ``/auth`` → ``auth.md``; ``/glossary#term`` → ``glossary.md#term``.
-    External links, protocol-relative links, ``/api/`` pages, and targets that already
-    point at a file are returned unchanged.
-    """
-    if not url.startswith("/") or url.startswith("//") or url.startswith("/api/"):
-        return url
-    path, sep, frag = url.partition("#")
-    if path in ("", "/"):
-        return "index.md" + (sep + frag if sep else "")
-    slug = path[1:]
-    last_segment = slug.rsplit("/", 1)[-1]
-    if "." in last_segment:  # already a file reference
-        return url
-    return f"{slug}.md" + (sep + frag if sep else "")
+    """Identity function — kept for compatibility. Next.js uses root-absolute /slug paths natively."""
+    return url
 
 
 def _normalize_doc_title_key(value: str) -> str:

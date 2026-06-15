@@ -24,8 +24,9 @@ echo "==> deepdoc..."
 # Install from PyPI. If not published yet, replace with:
 #   git clone https://github.com/YOUR_ORG/codewiki /opt/codewiki
 #   pip3 install -e /opt/codewiki --break-system-packages
-pip3 install deepdoc mkdocs-material mkdocs-swagger-ui-tag --break-system-packages 2>/dev/null || \
-  pip3 install deepdoc mkdocs-material mkdocs-swagger-ui-tag --break-system-packages --upgrade
+pip3 install deepdoc --break-system-packages 2>/dev/null || \
+  pip3 install deepdoc --break-system-packages --upgrade
+# Note: site generation now uses Next.js (Node.js already installed above) — no mkdocs needed
 
 echo "==> deepdoc check..."
 deepdoc --version || deepdoc --help | head -1

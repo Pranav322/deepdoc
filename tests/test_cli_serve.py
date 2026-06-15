@@ -7,30 +7,28 @@ from click.testing import CliRunner
 from deepdoc import cli
 
 
-def test_ensure_mkdocs_installed_raises_when_missing(monkeypatch) -> None:
-    import importlib
-
-    # mkdocs absent → clear ClickException with a pip command.
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: None)
-    monkeypatch.setattr(cli, "_find_repo_root", lambda: Path("/nonexistent"))
-
+def test_ensure_node_installed_raises_when_missing(monkeypatch) -> None:
     import pytest
 
+    # node not found → clear ClickException with nodejs.org URL.
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()))
+
     with pytest.raises(cli.click.ClickException) as exc:
-        cli._ensure_mkdocs_installed({})
+        cli._ensure_node_installed()
 
-    assert "pip install" in str(exc.value)
-    assert "deepdoc[site]" in str(exc.value)
+    assert "Node.js" in str(exc.value)
+    assert "nodejs.org" in str(exc.value)
 
 
-def test_ensure_mkdocs_installed_passes_when_present(monkeypatch) -> None:
-    import importlib
+def test_ensure_node_installed_passes_when_present(monkeypatch) -> None:
+    import subprocess as sp
 
-    # All specs resolve → no exception. No OpenAPI dir, so swagger plugin not required.
-    monkeypatch.setattr(importlib.util, "find_spec", lambda name: object())
-    monkeypatch.setattr(cli, "_find_repo_root", lambda: Path("/nonexistent"))
+    class _FakeResult:
+        stdout = "v20.0.0\n"
+        returncode = 0
 
-    cli._ensure_mkdocs_installed({})  # should not raise
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: _FakeResult())
+    cli._ensure_node_installed()  # should not raise
 
 
 def test_find_available_loopback_port_skips_busy_port(monkeypatch) -> None:
@@ -81,7 +79,7 @@ def test_deploy_refuses_invalid_generated_docs(monkeypatch, tmp_path: Path) -> N
     docs_dir.mkdir()
     quality_dir.mkdir()
 
-    (site_dir / "mkdocs.yml").write_text("site_name: Demo\n", encoding="utf-8")
+    (site_dir / "package.json").write_text('{"name":"deepdoc-site"}\n', encoding="utf-8")
     (docs_dir / "start-here.md").write_text(
         '---\ndeepdoc_status: "invalid"\n---\n', encoding="utf-8"
     )

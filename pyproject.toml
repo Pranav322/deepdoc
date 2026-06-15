@@ -44,12 +44,8 @@ chatbot = [
     "httpx>=0.27",
     "fastembed>=0.3.0",
 ]
-site = [
-    "mkdocs>=1.6",
-    "mkdocs-material>=9.5",
-    "pymdown-extensions>=10.0",
-    "mkdocs-swagger-ui-tag>=0.6",
-]
+# The generated site is now Next.js + Fumadocs (Node.js >=18 required for serve/deploy).
+# No Python site-generation dependencies needed — Node/npm are installed separately.
 
 [project.scripts]
 deepdoc = "deepdoc.cli:main"
@@ -64,9 +60,14 @@ where = ["."]
 include = ["deepdoc*"]
 
 [tool.setuptools.package-data]
-# Vendored client libraries the site builder copies into generated sites
-# (markdown rendering + syntax highlighting for the chatbot /ask workspace).
-"deepdoc.site.builder" = ["vendor/*.js", "vendor/*.css"]
+# Vendored client libraries (kept for compatibility with chatbot components)
+# and the Next.js + Fumadocs site shell template.
+"deepdoc.site.builder" = [
+  "vendor/*.js",
+  "vendor/*.css",
+  "next_template/**/*",
+  "next_template/**/.*",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -1337,13 +1337,13 @@ class SmartUpdater:
         return merged_plan, added, list(set(updated_existing_slugs))
 
     def _rebuild_nav(self, plan: DocPlan) -> None:
-        """Rebuild the generated MkDocs Material site from the current plan."""
+        """Rebuild the Next.js + Fumadocs site scaffold from the current plan."""
         try:
             from .pipeline_v2 import stage_openapi_assets
-            from .site.builder import build_mkdocs_from_plan
+            from .site.builder import build_next_from_plan
 
             has_openapi = stage_openapi_assets(self.repo_root)
-            build_mkdocs_from_plan(
+            build_next_from_plan(
                 self.repo_root, self.output_dir, self.cfg, plan, has_openapi
             )
             console.print("[green]✓[/green] Site nav rebuilt")

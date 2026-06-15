@@ -4,8 +4,8 @@ Flow:
     1. SCAN  — collect file tree, symbols, endpoints, OpenAPI specs (no LLM)
     2. PLAN  — multi-step bucket planner (3 LLM calls) OR legacy single-call planner
     3. GENERATE — execute plan page-by-page, batched (N LLM calls)
-    4. API REF — stage OpenAPI assets for the generated MkDocs API reference page
-    5. BUILD — write the generated MkDocs Material site (mkdocs.yml + nav)
+    4. API REF — stage OpenAPI assets for the generated API reference page
+    5. BUILD — write the Next.js + Fumadocs site scaffold (site/ + deepdoc.config.json)
 
 The manifest tracks: source_file → content_hash → [page_slugs]
 So `deepdoc update` can diff changed files → find affected pages → regenerate only those.
@@ -191,7 +191,7 @@ def stage_openapi_assets(
     plan: "DocPlan | None" = None,
     scanned_endpoints: list[dict] | None = None,
 ) -> bool:
-    """Stage all detected OpenAPI specs for the generated MkDocs site."""
+    """Stage all detected OpenAPI specs for the generated site."""
     site_openapi_dir = repo_root / "site" / "openapi"
     site_openapi_dir.mkdir(parents=True, exist_ok=True)
 
@@ -1589,7 +1589,7 @@ class PipelineV2:
             )
 
     def _setup_playground(self, scan: RepoScan, plan: "DocPlan | None" = None) -> bool:
-        """Stage OpenAPI assets for the generated MkDocs API reference page."""
+        """Stage OpenAPI assets for the generated API reference page."""
         return stage_openapi_assets(
             self.repo_root,
             scan.openapi_paths,
@@ -1602,13 +1602,13 @@ class PipelineV2:
     # ──────────────────────────────────────────────────────────────────────
 
     def _build_site(self, plan: DocPlan, has_openapi: bool) -> None:
-        """Build the generated MkDocs Material site from the AI's nav plan."""
-        from .site.builder import build_mkdocs_from_plan
+        """Build the Next.js + Fumadocs site scaffold from the AI's nav plan."""
+        from .site.builder import build_next_from_plan
 
-        build_mkdocs_from_plan(
+        build_next_from_plan(
             self.repo_root, self.output_dir, self.cfg, plan, has_openapi
         )
-        console.print("[green]✓[/green] MkDocs site built")
+        console.print("[green]✓[/green] Next.js site scaffold written")
 
     # ──────────────────────────────────────────────────────────────────────
     # Persistence helpers

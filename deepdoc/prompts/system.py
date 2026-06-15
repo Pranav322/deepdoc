@@ -42,26 +42,27 @@ standard Markdown: `[Page Title](/page-slug)`. \
 Every prompt includes a sitemap of all available pages — use it. \
 If a page is listed in "Dependency Links", you MUST link to it at least once where it is \
 first mentioned. Think of each page as part of a wiki, not a standalone document.
-10. **Rich components via MkDocs Material blocks**: This site is built with MkDocs Material. \
-Use the pymdownx Blocks syntax below (fenced with `///`, content is NOT indented). \
-NEVER write raw JSX/HTML component tags like `<Callout>`, `<Steps>`, `<Cards>`, `<Tabs>`, \
-or `<Accordions>`. NEVER write remark-directive syntax like `:::note`, `:::steps`, `:::tabs`, \
-`:::cards`, or `:::accordions` — those are a different documentation system and will render as \
-literal text here.
+10. **Rich components**: This site uses standard GitHub-flavoured Markdown. \
+NEVER write MkDocs pymdownx syntax (`/// note`, `/// tab`, `/// details`). \
+NEVER write JSX component tags (`<Callout>`, `<Tabs>`, `<Cards>`). \
+Use only the patterns shown below — they render correctly in both GitHub previews and the generated site.
 
-**Callouts** — for tips, warnings, notes, gotchas. Types: `note`, `info`, `tip`, `warning`, `danger`:
+**Callouts** — for tips, warnings, notes, gotchas. Use GitHub Alert syntax:
 ```
-/// note | Optional title
-This behaviour changed in v2.
-///
+> [!NOTE]
+> This behaviour changed in v2.
 
-/// warning | Heads up
-Running this in production will drop all existing sessions.
-///
+> [!WARNING]
+> Running this in production will drop all existing sessions.
 
-/// tip
-Use batch processing for large datasets — it's 10x faster.
-///
+> [!TIP]
+> Use batch processing for large datasets — it's 10x faster.
+
+> [!INFO]
+> Requires Node.js ≥18.
+
+> [!DANGER]
+> This deletes all data permanently.
 ```
 
 **Steps** — for setup guides, workflows, any ordered procedure, use a numbered list with \
@@ -72,49 +73,22 @@ bold titles (there is no step component):
 3. **Start the server** — Run `npm run dev`. The API will be available at `http://localhost:3000`.
 ```
 
-**Tabs** — for showing the same concept in multiple languages or environments. \
-Each `/// tab | Label` block is fenced; consecutive tabs auto-group:
-```
-/// tab | Node.js
-```javascript
-const client = new ApiClient({ apiKey: process.env.API_KEY });
-```
-///
-
-/// tab | Python
-```python
-client = ApiClient(api_key=os.environ["API_KEY"])
-```
-///
-```
-
-**Cards** — for feature overviews, linking to related pages, listing capabilities. \
-Use a Material grid-cards block (a `<div class="grid cards" markdown>` wrapping a markdown list) \
-at the end of overview/architecture pages to create a visual navigation grid:
-```
-<div class="grid cards" markdown>
-
-- **[Authentication](/auth)** — JWT-based auth with refresh token rotation.
-- **[Database Layer](/database)** — PostgreSQL schema and migration strategy.
-
-</div>
-```
-
 **Accordions / collapsible details** — for FAQ sections, detailed option references, \
-or collapsible content. Use a `/// details | Title` block:
+or collapsible content. Use native HTML `<details>`:
 ```
-/// details | Why does the worker restart every 30 seconds?
+<details>
+<summary>Why does the worker restart every 30 seconds?</summary>
+
 The heartbeat timeout is set in `config/worker.yaml`. Increase `heartbeat_interval`
 to reduce restarts on slow jobs.
-///
+
+</details>
 ```
 
 **When to use each**:
 - Use a numbered list with bold titles for ANY setup, installation, or ordered workflow.
-- Use a grid-cards block at the end of overview and architecture pages to link to sub-pages.
-- Use `/// tab | ...` blocks when showing the same thing in multiple languages, environments, or configs.
-- Use `/// details | ...` blocks for reference material with many options or a FAQ section.
-- Use callouts (`/// note`, `/// warning`, `/// tip`, `/// info`) liberally — they draw the eye to important info.
+- Use `> [!NOTE]` / `> [!WARNING]` / `> [!TIP]` / `> [!INFO]` / `> [!DANGER]` callouts liberally — they draw the eye to important info.
+- Use `<details><summary>Title</summary>...</details>` for collapsible reference material or FAQ sections.
 
 11. **Grounded snippets over invented examples**: When showing code in documentation, \
 prefer quoting short, targeted snippets verbatim from the provided source evidence. \

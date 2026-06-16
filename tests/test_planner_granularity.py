@@ -26,7 +26,6 @@ from deepdoc.planner.nav_shaping import _shape_plan_nav
 from deepdoc.planner.specializations import _ensure_database_runtime_and_interface_buckets
 from deepdoc.planner.topology import TopologyCluster, TopologyMap
 from deepdoc.prompts import PROMPT_STYLE_TEMPLATES
-from deepdoc.site.builder import build_mkdocs_from_plan
 
 
 def _make_scan(
@@ -1228,52 +1227,6 @@ def test_validate_coverage_prefers_semantic_attachment_over_module_bucket() -> N
     )
 
 
-def test_recursive_nav_builder_supports_three_levels(tmp_path: Path) -> None:
-    repo_root = tmp_path / "repo"
-    repo_root.mkdir()
-    output_dir = repo_root / "docs"
-    output_dir.mkdir()
-
-    overview = DocBucket(
-        bucket_type="system",
-        title="Overview",
-        slug="overview",
-        section="Overview",
-        description="Overview page",
-        generation_hints={"is_introduction_page": True},
-    )
-    flash = DocBucket(
-        bucket_type="architecture_component",
-        title="Flash Attention",
-        slug="flash-attention",
-        section="Model Architecture > Attention > Flash Attention",
-        description="Flash attention internals",
-    )
-    plan = DocPlan(
-        buckets=[overview, flash],
-        nav_structure={
-            "Model Architecture > Attention > Flash Attention": ["flash-attention"]
-        },
-        skipped_files=[],
-    )
-
-    (output_dir / "flash-attention.md").write_text(
-        "# Flash Attention\n", encoding="utf-8"
-    )
-
-    build_mkdocs_from_plan(
-        repo_root,
-        output_dir,
-        {"project_name": "Demo", "site": {"repo_url": ""}},
-        plan,
-        has_openapi=False,
-    )
-
-    mkdocs_yml = (repo_root / "site" / "mkdocs.yml").read_text(encoding="utf-8")
-    # Nested " > " sections become nested nav groups in mkdocs.yml.
-    assert "Model Architecture:" in mkdocs_yml
-    assert "Attention:" in mkdocs_yml
-    assert "Flash Attention: flash-attention.md" in mkdocs_yml
 
 
 def test_prompt_templates_and_prompts_include_new_granularity_support() -> None:

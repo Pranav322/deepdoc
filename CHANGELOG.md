@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
+## [0.4.2] - 2026-06-23
+
+### Fixed
+
+- **Falcon class-based routes now detect inherited HTTP methods.** `find_falcon_responders` recurses into same-file base classes, so `class UserResource(BaseResource)` correctly picks up `on_get`/`on_delete` methods defined only in the base class. An `_visited` frozenset prevents infinite loops in diamond-inheritance edge cases.
+
+### Improved
+
+- **Topology: import-indegree foundational detection.** Heavily-imported files like `models.py`, `constants.py`, and `exceptions.py` are now correctly flagged as foundational even when they have few call-graph edges. The new `_build_import_maps` helper resolves raw import strings to repo file paths and augments the call indegree used for foundational detection.
+- **Topology: import edges in orphan cluster assignment.** Unassigned files that only import from a cluster (without direct call edges) now score against that cluster at 0.5 weight, reducing coin-flip placements into the largest cluster.
+- **Topology: cross-edge density as a cluster merge signal.** Two clusters with heavy inter-cluster call traffic now merge even when their file Jaccard is below the 0.60 threshold. The new `_CROSS_EDGE_DENSITY = 0.35` constant controls the cutoff, preventing tightly coupled micro-clusters from producing separate doc pages.
+
 ## [0.4.1] - 2026-06-15
 
 ### Fixed

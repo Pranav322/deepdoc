@@ -263,6 +263,31 @@ app.add_route('/login', Login())
     assert endpoint.middleware == ["AuthMiddleware", "TraceMiddleware"]
 
 
+def test_falcon_inherited_responders_from_base_class():
+    content = """
+import falcon
+
+class BaseResource:
+    def on_get(self, req, res):
+        pass
+    def on_delete(self, req, res):
+        pass
+
+class UserResource(BaseResource):
+    def on_post(self, req, res):
+        pass
+
+app = falcon.App()
+app.add_route('/users', UserResource())
+"""
+    endpoints = detect_endpoints(Path("app.py"), content, "python")
+    user_endpoints = [ep for ep in endpoints if ep.path == "/users"]
+    methods = {ep.method for ep in user_endpoints}
+    assert "GET" in methods, "inherited on_get not detected"
+    assert "POST" in methods, "own on_post not detected"
+    assert "DELETE" in methods, "inherited on_delete not detected"
+
+
 def test_scan_repo_detects_vue_projects_and_sfc_signals(tmp_path):
     repo_root = tmp_path / "vue-app"
     component_dir = repo_root / "src" / "components"

@@ -114,8 +114,20 @@ def _fallback_falcon_path(path_expr: str) -> str:
     return "".join(string_parts)
 
 
-def find_falcon_responders(content: str, class_name: str) -> list[str]:
-    """Find all on_* methods in a Falcon resource class."""
+def _base_class_name(class_body: str) -> str:
+    """Return the first base class name from a class definition line, or ''."""
+    m = re.match(r"class\s+\w+\s*\(\s*([A-Za-z_]\w*)", class_body)
+    return m.group(1) if m else ""
+
+
+def find_falcon_responders(
+    content: str,
+    class_name: str,
+    _visited: frozenset[str] | None = None,
+) -> list[str]:
+    """Find all on_* methods in a Falcon resource class, including inherited ones."""
+    if _visited is None:
+        _visited = frozenset()
     methods: list[str] = []
     class_pattern = re.compile(
         rf"class\s+{re.escape(class_name)}\b.*?(?=\nclass\s|\Z)",
@@ -128,6 +140,14 @@ def find_falcon_responders(content: str, class_name: str) -> list[str]:
             method_name = match.group(1)
             http_method = method_name.replace("on_", "").upper()
             methods.append(http_method)
+        base = _base_class_name(class_body)
+        if base and base not in _visited:
+            inherited = find_falcon_responders(
+                content, base, _visited | {class_name}
+            )
+            for m in inherited:
+                if m not in methods:
+                    methods.append(m)
     return methods
 
 

@@ -41,6 +41,11 @@ _MAX_CLUSTER_DEPTH = 4
 # docs/planner_tuning.md.
 _MERGE_JACCARD = 0.60
 
+# Two clusters whose cross-call ratio exceeds this threshold merge even when
+# their file-Jaccard is low. Prevents tightly coupled micro-clusters from
+# getting separate doc pages.
+_CROSS_EDGE_DENSITY = 0.35
+
 
 @dataclass
 class TopologyCluster:
@@ -124,8 +129,16 @@ def build_topology_map(scan: "RepoScan") -> TopologyMap:
     }
 
     # ── 3. Foundational files ─────────────────────────────────────────────
+    # Augment call indegree with import indegree so that heavily-imported files
+    # (models.py, constants.py, exceptions.py) are treated as foundational even
+    # when they have few direct call-graph edges.
+    import_indegree, file_imports = _build_import_maps(scan, repo_files)
+    effective_indegree = {
+        f: max(file_indegree.get(f, 0), import_indegree.get(f, 0))
+        for f in repo_files
+    }
     threshold = max(3, int(len(repo_files) * _FOUNDATIONAL_FRACTION))
-    foundational_set = {f for f, deg in file_indegree.items() if deg >= threshold}
+    foundational_set = {f for f, deg in effective_indegree.items() if deg >= threshold}
 
     # ── 4. Entry-point files ──────────────────────────────────────────────
     entry_point_files: set[str] = set()
@@ -211,7 +224,9 @@ def build_topology_map(scan: "RepoScan") -> TopologyMap:
         if f not in file_cluster_id and f not in foundational_set
     ]
     for f in sorted(unassigned):
-        best_cid = _best_cluster_for_orphan(f, file_calls, file_called_by, proto)
+        best_cid = _best_cluster_for_orphan(
+            f, file_calls, file_called_by, proto, file_imports
+        )
         if best_cid:
             file_cluster_id[f] = best_cid
             proto[best_cid].add(f)
@@ -221,7 +236,7 @@ def build_topology_map(scan: "RepoScan") -> TopologyMap:
             proto[fallback].add(f)
 
     # ── 7. Merge high-overlap clusters ───────────────────────────────────
-    merged = _merge_proto_clusters(proto, file_cluster_id)
+    merged = _merge_proto_clusters(proto, file_cluster_id, file_calls)
 
     # ── 8. Build TopologyCluster objects ─────────────────────────────────
     clusters: list[TopologyCluster] = []
@@ -313,10 +328,12 @@ def _empty_map() -> TopologyMap:
 def _merge_proto_clusters(
     proto: dict[str, set[str]],
     file_cluster_id: dict[str, str],
+    file_calls: dict[str, set[str]] | None = None,
 ) -> dict[str, set[str]]:
-    """Merge clusters whose file Jaccard overlap exceeds _MERGE_JACCARD."""
+    """Merge clusters whose file Jaccard overlap or cross-call density is high."""
     cluster_ids = list(proto.keys())
     parent: dict[str, str] = {}
+    _fc = file_calls or {}
 
     def find(cid: str) -> str:
         while cid in parent:
@@ -347,6 +364,12 @@ def _merge_proto_clusters(
             jaccard = len(si & sj) / len(si | sj)
             if jaccard >= _MERGE_JACCARD:
                 union(ci, cj)
+                continue
+            # Also merge when cross-call traffic between the two clusters is dense
+            cross = sum(1 for f in si for c in _fc.get(f, set()) if c in sj)
+            cross += sum(1 for f in sj for c in _fc.get(f, set()) if c in si)
+            if cross and cross / min(len(si), len(sj)) >= _CROSS_EDGE_DENSITY:
+                union(ci, cj)
 
     # Re-assign file_cluster_id to canonical roots
     for f in list(file_cluster_id.keys()):
@@ -355,14 +378,79 @@ def _merge_proto_clusters(
     return {find(cid): files for cid, files in proto.items() if files}
 
 
+def _build_import_maps(
+    scan: "RepoScan",
+    repo_files: set[str],
+) -> tuple[dict[str, int], dict[str, set[str]]]:
+    """Build import indegree and file→imported-files adjacency in one pass.
+
+    Resolves relative and absolute imports to repo file paths; ignores
+    third-party/stdlib. Returns (indegree, file_imports) where:
+      - indegree[f] = number of distinct repo files that import f
+      - file_imports[f] = set of repo files that f imports
+    """
+    indegree: dict[str, int] = defaultdict(int)
+    file_imports: dict[str, set[str]] = defaultdict(set)
+
+    _suffix_index: dict[str, list[str]] = defaultdict(list)
+    for rp in repo_files:
+        no_ext = re.sub(r"\.[^/]+$", "", rp)
+        _suffix_index[no_ext].append(rp)
+        _suffix_index[no_ext.replace("/", ".")].append(rp)
+
+    import_re = re.compile(
+        r"^(?:from\s+([\w.]+)\s+import|import\s+([\w.]+))", re.MULTILINE
+    )
+
+    for src_path, pf in scan.parsed_files.items():
+        if src_path not in repo_files:
+            continue
+        pkg_dir = src_path.rsplit("/", 1)[0] if "/" in src_path else ""
+
+        for imp_str in pf.imports:
+            m = import_re.match(imp_str.strip())
+            if not m:
+                continue
+            module = (m.group(1) or m.group(2) or "").strip()
+            if not module:
+                continue
+
+            candidates: list[str] = []
+
+            if module.startswith("."):
+                dots = len(module) - len(module.lstrip("."))
+                rel_mod = module[dots:].replace(".", "/")
+                base = pkg_dir
+                for _ in range(dots - 1):
+                    base = base.rsplit("/", 1)[0] if "/" in base else ""
+                rel_path = f"{base}/{rel_mod}".lstrip("/") if rel_mod else base
+                for ext in (".py", "/__init__.py"):
+                    candidates.append(rel_path + ext)
+            else:
+                as_path = module.replace(".", "/")
+                for ext in (".py", "/__init__.py"):
+                    candidates.append(as_path + ext)
+                candidates.extend(_suffix_index.get(module, []))
+                candidates.extend(_suffix_index.get(as_path, []))
+
+            for candidate in candidates:
+                if candidate in repo_files and candidate != src_path:
+                    indegree[candidate] += 1
+                    file_imports[src_path].add(candidate)
+                    break
+
+    return dict(indegree), dict(file_imports)
+
+
 def _best_cluster_for_orphan(
     file_path: str,
     file_calls: dict[str, set[str]],
     file_called_by: dict[str, set[str]],
     proto: dict[str, set[str]],
+    import_targets: dict[str, set[str]] | None = None,
 ) -> str | None:
-    """Find the cluster an unassigned file has the most call relationships with."""
-    scores: dict[str, int] = defaultdict(int)
+    """Find the cluster an unassigned file has the most relationships with."""
+    scores: dict[str, float] = defaultdict(float)
     cluster_file_index: dict[str, str] = {}
     for cid, files in proto.items():
         for f in files:
@@ -377,6 +465,12 @@ def _best_cluster_for_orphan(
         cid = cluster_file_index.get(caller)
         if cid:
             scores[cid] += 1
+
+    # Import edges provide a weaker signal than call edges
+    for imp_target in (import_targets or {}).get(file_path, set()):
+        cid = cluster_file_index.get(imp_target)
+        if cid:
+            scores[cid] += 0.5
 
     if not scores:
         return None

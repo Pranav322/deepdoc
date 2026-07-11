@@ -189,8 +189,16 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             "Never merge unrelated topics just to reduce page count."
         )
 
+    # Measurement run: the historical [:18000] cap silently dropped tail
+    # clusters on big repos. Send the full cluster list and report its size
+    # so we can see how large this actually grows before deciding on a fix.
+    console.print(
+        f"  [dim]propose input sizes: named_clusters={len(named_clusters_str):,} chars "
+        f"(old cap 18,000{' — WOULD HAVE TRUNCATED' if len(named_clusters_str) > 18000 else ''}), "
+        f"endpoints={len(endpoints_str):,} chars (old cap 12,000)[/dim]"
+    )
     propose_prompt = PROPOSE_PROMPT.format(
-        named_clusters=named_clusters_str[:18000],
+        named_clusters=named_clusters_str,
         endpoint_count=len(published_endpoints),
         endpoints=endpoints_str[:12000],
         integration_signals=integration_signals,
@@ -228,9 +236,14 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     all_files_str = "\n".join(f"- {f}" for f in sorted(scan.file_summaries.keys()))
     setup_artifacts_str = "\n".join(f"- {f}" for f in scan.config_files) or "(none)"
 
+    console.print(
+        f"  [dim]assign input sizes: all_files={len(all_files_str):,} chars "
+        f"(old cap 12,000{' — WOULD HAVE TRUNCATED' if len(all_files_str) > 12000 else ''}), "
+        f"proposed_buckets={len(proposed_buckets_str):,} chars (cap 15,000 kept)[/dim]"
+    )
     assign_prompt = ASSIGN_PROMPT.format(
         proposed_buckets=proposed_buckets_str[:15000],
-        all_files=all_files_str[:12000],
+        all_files=all_files_str,
         endpoints=endpoints_str[:3000],
         giant_files=giant_files_str,
         setup_artifacts=setup_artifacts_str,

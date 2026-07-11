@@ -258,7 +258,7 @@ class PageGenerator:
 BATCH_SIZE = 10
 RATE_LIMIT_PAUSE = 0.5  # seconds between batches (Azure rarely 429s within quota)
 RATE_LIMIT_BACKOFF = 3.0  # initial backoff on 429; doubles each retry
-MAX_RETRIES = 5
+MAX_RETRIES = 3
 MAX_PARALLEL_WORKERS = 6  # LLM concurrency — safe for most Azure/OpenAI deployments
 
 
@@ -817,7 +817,7 @@ class BucketGenerationEngine:
                     if is_last:
                         raise
                     # Exponential backoff with jitter to avoid thundering herd
-                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
+                    wait = min(RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5), 20.0)
                     console.print(
                         f"    [yellow]⏳ Transient error ({evidence.bucket.title}) — "
                         f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"
@@ -1123,7 +1123,7 @@ Re-run `deepdoc generate` to retry.
         for idx, rel_path in enumerate(evidence_files[:50], start=1):
             path = self.repo_root / rel_path
             try:
-                content = path.read_text(encoding="utf-8", errors="replace")
+                content = self.scan.file_contents.get(rel_path) or path.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 continue
             lines = content.splitlines()

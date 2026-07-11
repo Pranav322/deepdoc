@@ -75,7 +75,7 @@ console = Console()
 BATCH_SIZE = 10
 RATE_LIMIT_PAUSE = 0.5
 RATE_LIMIT_BACKOFF = 3.0
-MAX_RETRIES = 5
+MAX_RETRIES = 3
 
 
 def _page_is_overview(page: Any) -> bool:
@@ -1511,7 +1511,7 @@ class PipelineV2:
                             f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]"
                         )
                         raise
-                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
+                    wait = min(RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5), 20.0)
                     console.print(
                         f"    [yellow]⏳ Transient error — waiting {wait:.1f}s before retry {attempt + 1}/{MAX_RETRIES}...[/yellow]"
                     )

@@ -70,29 +70,37 @@ def resolve_repo_endpoints(
     file_contents: dict[str, str],
 ) -> list[APIEndpoint]:
     """Resolve repo-level route metadata without changing the public contract."""
-    js_index = _build_js_index(file_contents)
-    py_index = _build_python_index(file_contents)
-    go_index = _build_go_index(repo_root, file_contents)
+    required_frameworks = {e.framework.lower() for e in endpoints if e.framework}
+
+    js_index = None
+    if required_frameworks & {"express", "fastify"}:
+        js_index = _build_js_index(file_contents)
+    py_index = None
+    if required_frameworks & {"falcon", "django"}:
+        py_index = _build_python_index(file_contents)
+    go_index = None
+    if "go" in required_frameworks:
+        go_index = _build_go_index(repo_root, file_contents)
 
     resolved: list[APIEndpoint] = []
     has_django = False
     for endpoint in endpoints:
         framework = (endpoint.framework or "").lower()
-        if framework == "express":
+        if framework == "express" and js_index:
             resolved.extend(_resolve_express_endpoint(repo_root, endpoint, js_index))
-        elif framework == "fastify":
+        elif framework == "fastify" and js_index:
             resolved.extend(_resolve_fastify_endpoint(repo_root, endpoint, js_index))
-        elif framework == "falcon":
+        elif framework == "falcon" and py_index:
             resolved.extend(
                 _resolve_falcon_endpoint(repo_root, endpoint, file_contents, py_index)
             )
-        elif framework == "go":
+        elif framework == "go" and go_index:
             resolved.extend(_resolve_go_endpoint(repo_root, endpoint, go_index))
         elif framework == "django":
             has_django = True
         else:
             resolved.append(_normalize_endpoint(repo_root, endpoint))
-    if has_django:
+    if has_django and py_index:
         resolved.extend(
             _resolve_django_repo_endpoints(repo_root, file_contents, py_index)
         )

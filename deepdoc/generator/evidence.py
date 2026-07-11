@@ -251,11 +251,11 @@ class EvidenceAssembler:
             if not src_path.exists():
                 continue
             try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
+                content = self.scan.file_contents.get(src_file) or src_path.read_text(encoding="utf-8", errors="replace")
                 line_count = len(content.splitlines())
                 parsed = self.scan.parsed_files.get(src_file)
-                if not parsed:
-                    parsed = parse_file(src_path)
+                if not parsed and content:
+                    parsed = parse_file(src_path, content=content)
                 files_data.append((src_file, content, line_count, parsed))
             except Exception:
                 continue
@@ -636,7 +636,7 @@ class EvidenceAssembler:
         if not src_path.exists():
             return ""
         try:
-            file_content = src_path.read_text(encoding="utf-8", errors="replace")
+            file_content = self.scan.file_contents.get(file_path) or src_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             return ""
 
@@ -810,7 +810,7 @@ class EvidenceAssembler:
             if not src_path.exists():
                 continue
             try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
+                content = self.scan.file_contents.get(src_file) or src_path.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 continue
             for pattern in self._ENV_VAR_PATTERNS:

@@ -497,7 +497,7 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                 file_frameworks[rel] = sorted(set(matched_frameworks))
 
             # Parse symbols
-            parsed = parse_file(fpath)
+            parsed = parse_file(fpath, content=file_contents[rel])
             if parsed:
                 parsed_files[rel] = parsed
                 summary_parts = []

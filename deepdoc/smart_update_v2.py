@@ -51,6 +51,7 @@ from .persistence_v2 import (
     save_sync_receipt,
     save_sync_state,
 )
+from .telemetry import RunTelemetry
 from .v2_models import DocPlan, endpoint_owned_files, tracked_bucket_files
 
 console = Console()
@@ -172,14 +173,31 @@ class SmartUpdater:
         self.repo_root = repo_root
         self.cfg = cfg
         self.output_dir = repo_root / cfg.get("output_dir", "docs")
-        self.llm = LLMClient(cfg)
+        self.telemetry = RunTelemetry(repo_root, "update")
+        self.llm = LLMClient(cfg, telemetry=self.telemetry)
         self.manifest = Manifest(self.output_dir)
 
     def update(
         self, since: str = "HEAD~1", force_replan: bool = False
     ) -> dict[str, Any]:
-        with deepdoc_state_lock(self.repo_root):
-            return self._update_locked(since=since, force_replan=force_replan)
+        try:
+            with deepdoc_state_lock(self.repo_root):
+                stats = self._update_locked(
+                    since=since,
+                    force_replan=force_replan,
+                )
+            self.telemetry.finish(
+                stats.get("status", "success"),
+                strategy=stats.get("strategy", "unknown"),
+                changes=stats.get("changes", 0),
+                pages_updated=stats.get("pages_updated", 0),
+                pages_failed=stats.get("pages_failed", 0),
+                pages_skipped=stats.get("pages_skipped", 0),
+            )
+            return stats
+        except BaseException as exc:
+            self.telemetry.finish("failed", error_type=type(exc).__name__)
+            raise
 
     def _update_locked(
         self, since: str = "HEAD~1", force_replan: bool = False
@@ -209,12 +227,13 @@ class SmartUpdater:
         )
 
         # ── Step 2: Build sync plan ────────────────────────────────────
-        sync_plan = self._build_sync_plan(
-            plan,
-            since=since,
-            sync_state=sync_state,
-            force_replan=force_replan,
-        )
+        with self.telemetry.span("update.build_sync_plan"):
+            sync_plan = self._build_sync_plan(
+                plan,
+                since=since,
+                sync_state=sync_state,
+                force_replan=force_replan,
+            )
         change_set = sync_plan.change_set
         self._print_change_set(change_set)
         stats["changes"] = change_set.total_changes
@@ -267,7 +286,8 @@ class SmartUpdater:
                     border_style="yellow",
                 )
             )
-            run_result = self._full_replan_and_generate()
+            with self.telemetry.span("update.full_replan"):
+                run_result = self._full_replan_and_generate()
 
         elif sync_plan.strategy == "targeted_replan":
             reasons: list[str] = []
@@ -291,7 +311,8 @@ class SmartUpdater:
                     border_style="cyan",
                 )
             )
-            run_result = self._targeted_replan(plan, change_set)
+            with self.telemetry.span("update.targeted_replan"):
+                run_result = self._targeted_replan(plan, change_set)
 
         else:  # incremental
             console.print(
@@ -301,7 +322,8 @@ class SmartUpdater:
                     border_style="green",
                 )
             )
-            run_result = self._incremental_update(plan, change_set)
+            with self.telemetry.span("update.incremental"):
+                run_result = self._incremental_update(plan, change_set)
 
         executed_strategy = run_result.strategy
         stats["strategy"] = executed_strategy
@@ -391,7 +413,11 @@ class SmartUpdater:
         """Run the full pipeline from scratch."""
         from .pipeline_v2 import PipelineV2
 
-        pipeline = PipelineV2(self.repo_root, self.cfg)
+        pipeline = PipelineV2(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
         result = pipeline.run(force=True, reconcile=True)
         chatbot_stats = result.get("chatbot", {}) if isinstance(result, dict) else {}
         return UpdateRunResult(
@@ -557,7 +583,9 @@ class SmartUpdater:
                 from .chatbot.indexer import ChatbotIndexer
 
                 chatbot_stats = ChatbotIndexer(
-                    self.repo_root, self.cfg
+                    self.repo_root,
+                    self.cfg,
+                    telemetry=self.telemetry,
                 ).sync_incremental(
                     plan=merged_plan,
                     scan=scan,
@@ -657,7 +685,9 @@ class SmartUpdater:
                 from .chatbot.indexer import ChatbotIndexer
 
                 chatbot_stats = ChatbotIndexer(
-                    self.repo_root, self.cfg
+                    self.repo_root,
+                    self.cfg,
+                    telemetry=self.telemetry,
                 ).sync_incremental(
                     plan=plan,
                     scan=scan,

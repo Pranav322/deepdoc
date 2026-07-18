@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 from .common import *
 from .bucket_refinement import (
     _proposal_bucket_tokens, _is_low_value_utility_bucket, _is_incidental_http_bucket,
@@ -75,7 +77,14 @@ def _llm_step(llm: LLMClient, system: str, prompt: str, step_name: str) -> dict 
     """Execute a single LLM planning step with error handling."""
     response = None
     try:
-        response = llm.complete(system, prompt)
+        telemetry = getattr(llm, "telemetry", None)
+        operation = (
+            telemetry.operation(f"planner.{step_name}")
+            if telemetry is not None
+            else nullcontext()
+        )
+        with operation:
+            response = llm.complete(system, prompt)
     except Exception as e:
         console.print(f"[red]✗ LLM call failed for {step_name}: {e}[/red]")
         return None

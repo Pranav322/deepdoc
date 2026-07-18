@@ -13,6 +13,7 @@ Phase 3 of the bucket-based doc pipeline:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import hashlib
 import json
 import re
@@ -247,7 +248,21 @@ class PageGenerator:
                 f"{quality_feedback}\n"
             )
 
-        return self.llm.complete(SYSTEM_V2, user_prompt)
+        telemetry = getattr(self.llm, "telemetry", None)
+        stage = "full_rewrite" if failure_prefix else (
+            "quality_retry" if quality_feedback else "draft"
+        )
+        operation = (
+            telemetry.operation(
+                f"generation.{bucket.slug}",
+                stage=stage,
+                bucket_type=bucket.bucket_type,
+            )
+            if telemetry is not None
+            else nullcontext()
+        )
+        with operation:
+            return self.llm.complete(SYSTEM_V2, user_prompt)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -592,7 +607,18 @@ class BucketGenerationEngine:
 
         try:
             # Step 1: Assemble evidence
-            evidence = self.assembler.assemble(bucket)
+            telemetry = getattr(self.llm, "telemetry", None)
+            evidence_span = (
+                telemetry.span("generation.evidence")
+                if telemetry is not None
+                else nullcontext()
+            )
+            with evidence_span:
+                evidence = self.assembler.assemble(bucket)
+            if telemetry is not None:
+                telemetry.counter("evidence.characters", evidence.total_evidence_chars)
+                telemetry.counter("evidence.files_raw", evidence.files_included_raw)
+                telemetry.counter("evidence.files_compressed", evidence.files_compressed)
             degraded = False
 
             if evidence.files_compressed > 0:
@@ -637,7 +663,13 @@ class BucketGenerationEngine:
             )
 
             # Step 5: Validate
-            validation = self.validator.validate(content, bucket, evidence)
+            validation_span = (
+                telemetry.span("generation.validation")
+                if telemetry is not None
+                else nullcontext()
+            )
+            with validation_span:
+                validation = self.validator.validate(content, bucket, evidence)
 
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
@@ -673,7 +705,13 @@ class BucketGenerationEngine:
                         self._doc_title_to_url,
                         self._doc_alias_map,
                     )
-                    validation = self.validator.validate(content, bucket, evidence)
+                    validation_span = (
+                        telemetry.span("generation.validation")
+                        if telemetry is not None
+                        else nullcontext()
+                    )
+                    with validation_span:
+                        validation = self.validator.validate(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -714,7 +752,13 @@ class BucketGenerationEngine:
                         self._doc_title_to_url,
                         self._doc_alias_map,
                     )
-                    validation = self.validator.validate(content, bucket, evidence)
+                    validation_span = (
+                        telemetry.span("generation.validation")
+                        if telemetry is not None
+                        else nullcontext()
+                    )
+                    with validation_span:
+                        validation = self.validator.validate(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -743,6 +787,8 @@ class BucketGenerationEngine:
             doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(content, encoding="utf-8")
+            if telemetry is not None:
+                telemetry.counter("generation.page_bytes_written", len(content.encode("utf-8")))
 
             if validation is not None and not validation.is_valid:
                 console.print(
@@ -809,6 +855,10 @@ class BucketGenerationEngine:
                         raise
                     # Exponential backoff with jitter to avoid thundering herd
                     wait = min(RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5), 20.0)
+                    telemetry = getattr(getattr(self, "llm", None), "telemetry", None)
+                    if telemetry is not None:
+                        telemetry.counter("llm.retries")
+                        telemetry.counter("llm.backoff_seconds", wait)
                     console.print(
                         f"    [yellow]⏳ Transient error ({evidence.bucket.title}) — "
                         f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"

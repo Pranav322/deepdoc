@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from rich.console import Console
 
 from ..v2_models import DocPlan, RepoScan
+from ..telemetry import RunTelemetry
 from .chunker import (
     build_artifact_chunks,
     build_call_graph_chunks,
@@ -44,12 +46,21 @@ CHATBOT_CORPUS_SCHEMA_VERSION = 5
 class ChatbotIndexer:
     """Builds and refreshes chatbot corpora."""
 
-    def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        cfg: dict[str, Any],
+        telemetry: RunTelemetry | None = None,
+    ) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
         self.chatbot_cfg = get_chatbot_cfg(cfg)
         self.index_dir = chatbot_index_dir(repo_root, cfg)
         self.embedding_client = build_embedding_client(cfg)
+        self.telemetry = telemetry
+
+    def _span(self, name: str):
+        return self.telemetry.span(name) if self.telemetry is not None else nullcontext()
 
     def sync_full(
         self,
@@ -62,34 +73,42 @@ class ChatbotIndexer:
         console.print(
             "[dim]Chatbot sync: building code/symbol/artifact/doc/repo-doc/relationship corpora...[/dim]"
         )
-        code_records = build_code_chunks(scan, plan, self.cfg)
-        symbol_records = build_symbol_chunks(scan, plan, self.cfg)
-        artifact_records = build_artifact_chunks(
-            self.repo_root, scan, plan, output_dir, self.cfg
-        )
-        doc_summary_records = build_doc_summary_chunks(
-            output_dir, plan, self.cfg, has_openapi=has_openapi
-        )
-        doc_full_records = build_doc_full_chunks(
-            output_dir, plan, self.cfg, has_openapi=has_openapi
-        )
-        repo_doc_records = build_repo_doc_chunks(
-            self.repo_root,
-            scan,
-            plan,
-            self.cfg,
-            output_dir=output_dir,
-        )
-        relationship_records = build_relationship_chunks(scan, plan, self.cfg)
+        with self._span("chatbot.chunk.code"):
+            code_records = build_code_chunks(scan, plan, self.cfg)
+        with self._span("chatbot.chunk.symbol"):
+            symbol_records = build_symbol_chunks(scan, plan, self.cfg)
+        with self._span("chatbot.chunk.artifact"):
+            artifact_records = build_artifact_chunks(
+                self.repo_root, scan, plan, output_dir, self.cfg
+            )
+        with self._span("chatbot.chunk.doc_summary"):
+            doc_summary_records = build_doc_summary_chunks(
+                output_dir, plan, self.cfg, has_openapi=has_openapi
+            )
+        with self._span("chatbot.chunk.doc_full"):
+            doc_full_records = build_doc_full_chunks(
+                output_dir, plan, self.cfg, has_openapi=has_openapi
+            )
+        with self._span("chatbot.chunk.repo_doc"):
+            repo_doc_records = build_repo_doc_chunks(
+                self.repo_root,
+                scan,
+                plan,
+                self.cfg,
+                output_dir=output_dir,
+            )
+        with self._span("chatbot.chunk.relationship"):
+            relationship_records = build_relationship_chunks(scan, plan, self.cfg)
 
         # Call graph chunks — index execution chains for deep chatbot retrieval
         cg_chunks = []
         graph_chunks = []
         if hasattr(scan, "call_graph") and scan.call_graph is not None:
-            cg_chunks = build_call_graph_chunks(
-                scan.call_graph, scan.parsed_files, plan=plan
-            )
-            graph_chunks = build_graph_relation_chunks(scan.call_graph, plan=plan)
+            with self._span("chatbot.chunk.call_graph"):
+                cg_chunks = build_call_graph_chunks(
+                    scan.call_graph, scan.parsed_files, plan=plan
+                )
+                graph_chunks = build_graph_relation_chunks(scan.call_graph, plan=plan)
             relationship_records.extend(cg_chunks)
             relationship_records.extend(graph_chunks)
 
@@ -108,10 +127,13 @@ class ChatbotIndexer:
         self._save_records("repo_doc", repo_doc_records)
         self._save_records("relationship", relationship_records)
         console.print("[dim]Chatbot sync: packing full source text archive...[/dim]")
-        build_source_archive(self.repo_root, self.index_dir, self.cfg)
-        manifest = save_index_manifest(self.index_dir)
+        with self._span("chatbot.source_archive"):
+            build_source_archive(self.repo_root, self.index_dir, self.cfg)
+        with self._span("chatbot.index_manifest"):
+            manifest = save_index_manifest(self.index_dir)
         console.print("[dim]Chatbot sync: scaffolding backend...[/dim]")
-        scaffold_chatbot_backend(self.repo_root, self.cfg)
+        with self._span("chatbot.backend_scaffold"):
+            scaffold_chatbot_backend(self.repo_root, self.cfg)
         return {
             "code_chunks": len(code_records),
             "symbol_chunks": len(symbol_records),
@@ -399,16 +421,20 @@ class ChatbotIndexer:
         console.print(
             f"[dim]Chatbot sync: embedding {corpus} corpus ({len(records)} records)...[/dim]"
         )
-        vectors = (
-            self.embedding_client.embed([record.text for record in records])
-            if records
-            else []
-        )
+        with self._span(f"chatbot.embed.{corpus}"):
+            vectors = (
+                self.embedding_client.embed([record.text for record in records])
+                if records
+                else []
+            )
         meta = {
             "embedding_model": service_model_identity(self.chatbot_cfg["embeddings"]),
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
         }
-        save_corpus(self.index_dir, corpus, records, vectors, meta=meta)
+        with self._span(f"chatbot.write.{corpus}"):
+            save_corpus(self.index_dir, corpus, records, vectors, meta=meta)
+        if self.telemetry is not None:
+            self.telemetry.counter(f"chatbot.records.{corpus}", len(records))
         console.print(
             f"[dim]Chatbot sync: saved {corpus} corpus ({len(records)} records).[/dim]"
         )

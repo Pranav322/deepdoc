@@ -958,6 +958,90 @@ def benchmark(
 
 
 # ─────────────────────────────────────────────────────────────────────────────
+# performance
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@main.command(short_help="Show timing, token, retry, and I/O metrics for recent runs.")
+def performance() -> None:
+    """Show the latest local DeepDoc performance record."""
+    from .telemetry import load_performance_runs
+
+    repo_root = _find_repo_root()
+    runs = load_performance_runs(repo_root)
+    if not runs:
+        console.print(
+            "[dim]No performance history found. Run [bold]deepdoc generate[/bold] "
+            "or [bold]deepdoc update[/bold] first.[/dim]"
+        )
+        return
+
+    latest = runs[-1]
+    previous = runs[-2] if len(runs) > 1 else None
+    total_seconds = float(latest.get("total_seconds", 0.0) or 0.0)
+    comparison = ""
+    if previous:
+        previous_seconds = float(previous.get("total_seconds", 0.0) or 0.0)
+        if previous_seconds > 0:
+            delta = ((total_seconds - previous_seconds) / previous_seconds) * 100.0
+            comparison = f" ({delta:+.1f}% vs previous)"
+
+    console.print(
+        Panel.fit(
+            "[bold]DeepDoc Performance[/bold]\n\n"
+            f"  Command:  [cyan]{latest.get('command', 'unknown')}[/cyan]\n"
+            f"  Status:   [cyan]{latest.get('status', 'unknown')}[/cyan]\n"
+            f"  Started:  [cyan]{latest.get('started_at', 'unknown')}[/cyan]\n"
+            f"  Duration: [cyan]{total_seconds:.2f}s{comparison}[/cyan]",
+            border_style="blue",
+        )
+    )
+
+    spans = latest.get("spans", {}) or {}
+    if spans:
+        table = Table(title="Phase Timings", show_header=True, header_style="bold")
+        table.add_column("Phase", style="cyan")
+        table.add_column("Seconds", justify="right")
+        table.add_column("Share", justify="right")
+        table.add_column("Calls", justify="right")
+        for name, payload in sorted(
+            spans.items(),
+            key=lambda item: -float(item[1].get("duration_seconds", 0.0)),
+        ):
+            duration = float(payload.get("duration_seconds", 0.0) or 0.0)
+            share = (duration / total_seconds * 100.0) if total_seconds else 0.0
+            table.add_row(
+                name,
+                f"{duration:.2f}",
+                f"{share:.1f}%",
+                str(payload.get("count", 0)),
+            )
+        console.print(table)
+
+    llm_calls = latest.get("llm_calls", []) or []
+    if llm_calls:
+        prompt_tokens = sum(int(call.get("prompt_tokens", 0) or 0) for call in llm_calls)
+        completion_tokens = sum(
+            int(call.get("completion_tokens", 0) or 0) for call in llm_calls
+        )
+        model_seconds = sum(
+            float(call.get("duration_seconds", 0.0) or 0.0) for call in llm_calls
+        )
+        failed = sum(call.get("status") == "failed" for call in llm_calls)
+        console.print(
+            Panel.fit(
+                "[bold]LLM Usage[/bold]\n\n"
+                f"  Calls:             [cyan]{len(llm_calls)}[/cyan]\n"
+                f"  Model wait:        [cyan]{model_seconds:.2f}s[/cyan]\n"
+                f"  Prompt tokens:     [cyan]{prompt_tokens:,}[/cyan]\n"
+                f"  Completion tokens: [cyan]{completion_tokens:,}[/cyan]\n"
+                f"  Failed calls:      [cyan]{failed}[/cyan]",
+                border_style="magenta",
+            )
+        )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
 # serve
 # ─────────────────────────────────────────────────────────────────────────────
 

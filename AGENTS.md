@@ -68,6 +68,7 @@ Guidance for coding agents working in this repository.
 
 ### Other modules
 - `deepdoc/llm/retry.py` — `is_retryable_llm_error()`; single source of truth for transient-vs-fatal LLM error classification (used by both retry loops)
+- `deepdoc/telemetry.py` — thread-safe, fail-open run telemetry; writes sanitized rotating JSONL under `.deepdoc/performance/` and exposes latest-run loaders for `deepdoc performance`
 - `deepdoc/plan_contract.py` — structural generation gate and canonical bucket output/site paths; rejects missing/multiple introductions, duplicate slugs/output writers, unresolved nav slugs, and duplicate nav references before workers start
 - `deepdoc/call_graph.py` — `CallGraph`; function-level call extraction; `CALL_KIND_LOCAL`, `CALL_KIND_CELERY`, `CALL_KIND_SIGNAL`, `CALL_KIND_EVENT`; current resolution is the baseline Python (Django/Falcon/DRF) and JS/TS (Express/Node) implementation. The import-evidence resolver, Go/PHP edges, and cross-file Python inheritance walk remain parked on `wip/audit-fixes-2026-07-10` and are not part of `main`.
 - `deepdoc/manifest.py` — `Manifest` class; tracks file → content-hash → doc-path; stored at `{output_dir}/.deepdoc_manifest.json`
@@ -119,7 +120,7 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 - Bucket slug collision guard: fallback slug generation appends `-2`, `-3`, … suffixes; a bucket that has already absorbed another cannot be absorbed again in the same consolidation pass (`merge_target_slugs` set).
 - `_decompose_buckets` is canonical in `bucket_refinement.py` only — the duplicate was removed from `heuristics.py`.
 - `_normalize_nav_section` is canonical in `nav_shaping.py` only — the duplicate was removed from `heuristics.py`.
-- `_llm_step` currently calls `LLMClient.complete()` directly and prints failures; it does not emit per-call model, prompt-size, elapsed-time, or response-size telemetry. Do not claim those measurements are available until instrumentation is implemented and tested. A prior `Rich.Live()` wrapper was removed because concurrent planner workers corrupted terminal output.
+- `_llm_step` labels planner calls through the shared telemetry operation context; `LLMClient` records model wait, character counts, actual provider tokens when available, labelled estimates otherwise, finish reason, and failure type without storing prompt/response text. A prior `Rich.Live()` wrapper was removed because concurrent planner workers corrupted terminal output.
 - Phase 1 performance fixes on `main`: `parse_file()` accepts cached content from `scan_repo`; primary generation evidence reads prefer `scan.file_contents`; route resolution builds only framework-required JS/Python/Go indexes; both generation retry loops use at most 3 attempts with exponential waits capped at 20 seconds. Preserve disk fallbacks for files absent from the scan cache.
 - Transient/non-transient LLM error classification is centralized in `deepdoc/llm/retry.py::is_retryable_llm_error()` (exported from `deepdoc.llm`). Both retry loops — `generator/generation.py::_call_with_retry()` and `pipeline_v2.py::_call_llm_with_retry()` — call it with the exception object; do **not** reintroduce a local `_is_retryable`. It classifies by litellm/openai exception *class name* along the `__cause__`/`__context__` chain (`LLMClient.complete` wraps failures in `RuntimeError(...) from e`, so the original type survives), with a substring fallback for message-only inputs. HTTP **500** / "the server had an error" (the common Azure/OpenAI blip) is **retryable**; auth/invalid-model/bad-request stay fatal and raise immediately.
 - MDX brace escaping (`{…}` → `&#123;…&#125;`) skips lines containing `={` to avoid mangling JSX prop assignments.
@@ -212,6 +213,7 @@ deepdoc init
 deepdoc generate
 deepdoc update
 deepdoc status
+deepdoc performance
 deepdoc clean
 deepdoc config show
 deepdoc config set llm.model gpt-4o
@@ -223,6 +225,7 @@ deepdoc benchmark
 Notes:
 - `deepdoc clean` — removes `.deepdoc.yaml`, generated docs, and saved state; prompts for confirmation unless `--yes`.
 - `deepdoc status` — shows all generated pages, staleness, and quality status.
+- `deepdoc performance` — shows the latest sanitized generate/update timing and LLM usage record from the 10 MB rotating local history.
 - `deepdoc benchmark` — runs the planner quality scorecard against a gold manifest catalog.
 - `deepdoc deploy` — runs `npm install` (if needed) + `next build` inside `site/` and exports static HTML to `site/out/`; blocked by the quality gate if failed/invalid/stub pages exist. Requires Node.js ≥18 (no Python site deps needed).
 - `deepdoc serve` and `deepdoc deploy` assume generated site files already exist under `site/`.

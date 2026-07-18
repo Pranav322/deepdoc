@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
+## Unreleased
+
+### Added
+
+- **Local pipeline performance telemetry.** `deepdoc generate` and
+  `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
+  retry backoff, evidence size, page-write bytes, and chatbot indexing stages in
+  a rotating `.deepdoc/performance/runs.jsonl` history. The new
+  `deepdoc performance` command renders the latest phase and model breakdown.
+
 ## [0.4.2] - 2026-06-23
 
 ### Fixed

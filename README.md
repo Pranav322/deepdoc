@@ -377,6 +377,20 @@ deepdoc status
 
 This is useful after `generate` or `update` when you want a quick health check without opening the site.
 
+### `deepdoc performance`
+
+Show the latest local pipeline timings, LLM token usage, retries, and I/O counters.
+
+```bash
+deepdoc performance
+```
+
+DeepDoc stores one sanitized JSON record per completed `generate` or `update`
+under `.deepdoc/performance/runs.jsonl`. Records contain measurements only—never
+source code, prompts, generated content, API keys, or endpoint URLs. The history
+rotates when it reaches 10 MB, and the command compares the latest duration with
+the previous run when available.
+
 ### `deepdoc serve`
 
 Preview the generated docs locally with live reload using the Next.js + Fumadocs site in `site/`.

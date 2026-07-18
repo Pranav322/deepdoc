@@ -78,7 +78,7 @@ are much stronger candidates.
 
 ## Priority 0 — Measurement Gaps
 
-### P0.1 — Pipeline timings omit major serial work
+### P0.1 — Completed: end-to-end pipeline telemetry
 
 **Locations:** `pipeline_v2.py:376-382,386-406,435-454,470-516,588-597`
 
@@ -87,12 +87,12 @@ linking, changelog generation, chatbot indexing, source archive creation,
 backend scaffolding, and final sync-state persistence are not separately timed.
 This can make the timing summary point at the wrong phase.
 
-**Action:** Add timings for scan collection, parsing, routes, scanner families,
-call graph, topology, every planner LLM step, evidence assembly, model wait,
-validation, consistency, glossary, persistence, changelog, site scaffold,
-chatbot chunking, embedding, corpus writes, archive writes, and final sync.
-Also record prompt tokens, evidence characters by category, cache hits, files
-read, bytes read/written, retry counts, and provider throttling.
+**Resolution:** Generate/update runs now persist sanitized, thread-safe phase,
+LLM, retry, evidence, page-write, and chatbot-index telemetry to a rotating
+`.deepdoc/performance/runs.jsonl` history. `deepdoc performance` renders the
+latest breakdown and previous-run duration comparison. Prompt/response text,
+source content, endpoint URLs, and secrets are never recorded. Scanner-family,
+file-read, and route/topology granularity remains tracked separately under P0.2.
 
 ### P0.2 — No scan subphase visibility
 

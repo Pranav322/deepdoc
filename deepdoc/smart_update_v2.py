@@ -578,7 +578,6 @@ class SmartUpdater:
         )
         engine.plan = mini_plan
         gen_results = engine.generate_all(force=True)
-        engine.update_manifest(gen_results)
         save_all(merged_plan, scan, gen_results, self.repo_root, self.output_dir)
         chatbot_ok = True
         updated_slugs = sorted(
@@ -674,7 +673,6 @@ class SmartUpdater:
             engine.plan = mini_plan
 
             gen_results = engine.generate_all(force=True)
-            engine.update_manifest(gen_results)
         else:
             console.print(
                 "[green]✓ No stale buckets. Refreshing chatbot indexes only.[/green]"

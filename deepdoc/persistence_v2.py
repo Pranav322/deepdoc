@@ -680,7 +680,10 @@ def scan_cache_age_seconds(repo_root: Path) -> float | None:
 
 
 def save_generation_ledger(
-    results: list[Any], repo_root: Path, output_dir: Path
+    results: list[Any],
+    repo_root: Path,
+    output_dir: Path,
+    file_content_hashes: dict[str, str] | None = None,
 ) -> None:
     """Save a per-page generation record to .deepdoc/ledger.json.
 
@@ -753,7 +756,11 @@ def save_generation_ledger(
 
         # File hashes at generation time (for smart invalidation)
         file_hashes: dict[str, str] = {}
+        cached_hashes = file_content_hashes or {}
         for src_file in tracked_bucket_files(bucket):
+            if cached_hashes.get(src_file):
+                file_hashes[src_file] = cached_hashes[src_file]
+                continue
             src_path = repo_root / src_file
             if src_path.exists():
                 try:
@@ -975,7 +982,14 @@ def save_all(
         except Exception:
             pass  # scan cache is best-effort
     if results:
-        save_generation_ledger(results, repo_root, output_dir)
+        save_generation_ledger(
+            results,
+            repo_root,
+            output_dir,
+            file_content_hashes=(
+                getattr(scan, "file_content_hashes", {}) if scan is not None else {}
+            ),
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

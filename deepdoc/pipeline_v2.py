@@ -414,8 +414,6 @@ class PipelineV2:
         with self.telemetry.span("pipeline.generate_pages"):
             gen_results = engine.generate_all(force=force)
         phase_timings["generate"] = time.perf_counter() - phase_start
-        engine.update_manifest(gen_results)
-
         from .generator.consistency import CrossBucketConsistencyPass
         with self.telemetry.span("pipeline.consistency"):
             injected = CrossBucketConsistencyPass(

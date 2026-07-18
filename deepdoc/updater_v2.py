@@ -307,7 +307,6 @@ class UpdaterV2:
         engine.plan = mini_plan
 
         gen_results = engine.generate_all(force=True)
-        engine.update_manifest(gen_results)
 
         # Step 4: Update ledger + file map with results
         save_all(plan, None, gen_results, self.repo_root, self.output_dir)

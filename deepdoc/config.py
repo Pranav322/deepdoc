@@ -32,6 +32,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)
+    "manifest_checkpoint_pages": 10,
+    "manifest_checkpoint_seconds": 15.0,
     # ── Integration detection ────────────────────────────────────────────
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────

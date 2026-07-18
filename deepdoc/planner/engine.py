@@ -1,4 +1,5 @@
 from ..telemetry import RunTelemetry
+from ..manifest import file_hash
 from .common import *
 
 
@@ -384,6 +385,7 @@ def scan_repo(
     file_line_counts: dict[str, int] = {}
     parsed_files: dict[str, ParsedFile] = {}
     file_contents: dict[str, str] = {}
+    file_content_hashes: dict[str, str] = {}
     doc_contexts: dict[str, str] = {}
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
@@ -528,6 +530,7 @@ def scan_repo(
                 line_count = len(content.splitlines())
                 file_line_counts[rel] = line_count
                 file_contents[rel] = content
+                file_content_hashes[rel] = file_hash(content)
                 if telemetry is not None:
                     telemetry.counter("scan.source_files_read")
                     telemetry.counter(
@@ -683,6 +686,7 @@ def scan_repo(
         file_line_counts=file_line_counts,
         parsed_files=parsed_files,
         file_contents=file_contents,
+        file_content_hashes=file_content_hashes,
         doc_contexts=doc_contexts,
         research_contexts=research_contexts,
         scan_timings=scan_timings,

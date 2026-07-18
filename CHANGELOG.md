@@ -24,6 +24,10 @@ The automated release workflow reads the section that matches the version in
 - **Shared generation evidence indexes.** Module resolution, helper symbols,
   source lines, and symbol boundaries are indexed once per generation engine
   instead of being rebuilt and rescanned for every documentation bucket.
+- **Shared scan hashes and bounded manifest checkpoints.** Generation now reuses
+  hashes computed during scanning for staleness, manifest, and ledger updates;
+  manifests track every owning doc page, write atomically, and checkpoint every
+  10 pages or 15 seconds instead of rereading sources and rewriting per page.
 
 ## [0.4.2] - 2026-06-23
 

@@ -470,6 +470,13 @@ class BucketGenerationEngine:
 
         from ..manifest import Manifest
         _manifest = Manifest(self.output_dir)
+        checkpoint_pages = max(1, int(self.cfg.get("manifest_checkpoint_pages", 10)))
+        checkpoint_seconds = max(
+            1.0,
+            float(self.cfg.get("manifest_checkpoint_seconds", 15.0)),
+        )
+        pending_manifest_pages = 0
+        last_manifest_save = time.monotonic()
 
         with Progress(
             SpinnerColumn(),
@@ -545,6 +552,15 @@ class BucketGenerationEngine:
                                 # Save manifest incrementally so a cancelled run
                                 # can resume from completed pages on next generate.
                                 self._checkpoint_manifest(_manifest, result)
+                                pending_manifest_pages += 1
+                                if (
+                                    pending_manifest_pages >= checkpoint_pages
+                                    or time.monotonic() - last_manifest_save
+                                    >= checkpoint_seconds
+                                ):
+                                    _manifest.save()
+                                    pending_manifest_pages = 0
+                                    last_manifest_save = time.monotonic()
                         except Exception as e:
                             failed_count += 1
                             results.append(
@@ -559,6 +575,9 @@ class BucketGenerationEngine:
                 # Rate limit between batches
                 if batch_start + self.batch_size < total and self.rate_limit_pause > 0:
                     time.sleep(self.rate_limit_pause)
+
+        if pending_manifest_pages:
+            _manifest.save()
 
         if failed_count > 0:
             console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")
@@ -1498,48 +1517,59 @@ Re-run `deepdoc generate` to retry.
             manifest = Manifest(self.output_dir)
 
         for src_file in tracked_bucket_files(bucket):
-            src_path = self.repo_root / src_file
-            if not src_path.exists():
-                continue
             try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
-                if manifest.is_stale(src_file, content):
+                current_hash = self._source_hash(src_file)
+                if current_hash is None:
+                    continue
+                if manifest.is_hash_stale(src_file, current_hash):
                     return True
             except Exception:
                 return True
         return False
 
+    def _source_hash(self, src_file: str) -> str | None:
+        cached = self.scan.file_content_hashes.get(src_file)
+        if cached:
+            return cached
+        src_path = self.repo_root / src_file
+        if not src_path.exists():
+            return None
+        try:
+            from ..manifest import file_hash as compute_hash
+
+            content = src_path.read_text(encoding="utf-8", errors="replace")
+            return compute_hash(content)
+        except Exception:
+            return None
+
     def _checkpoint_manifest(self, manifest: Any, result: "GenerationResult") -> None:
         """Write the manifest for one completed page so a cancelled run can resume."""
-        from ..manifest import file_hash as compute_hash
         try:
             for src_file in tracked_bucket_files(result.bucket):
-                src_path = self.repo_root / src_file
-                if src_path.exists():
-                    content = src_path.read_text(encoding="utf-8", errors="replace")
-                    manifest.update(src_file, compute_hash(content), result.bucket.slug)
-            manifest.save()
+                content_hash = self._source_hash(src_file)
+                if content_hash:
+                    manifest.update(
+                        src_file,
+                        content_hash,
+                        bucket_output_path(result.bucket),
+                    )
         except Exception:
             pass
 
     def update_manifest(self, results: list[GenerationResult]):
         """Update the manifest with new file hashes for all successfully generated pages."""
-        from ..manifest import Manifest, file_hash as compute_hash
+        from ..manifest import Manifest
 
         manifest = Manifest(self.output_dir)
 
         for result in results:
             if result.content and not result.error:
                 for src_file in tracked_bucket_files(result.bucket):
-                    src_path = self.repo_root / src_file
-                    if src_path.exists():
-                        try:
-                            content = src_path.read_text(
-                                encoding="utf-8", errors="replace"
-                            )
-                            manifest.update(
-                                src_file, compute_hash(content), result.bucket.slug
-                            )
-                        except Exception:
-                            pass
+                    content_hash = self._source_hash(src_file)
+                    if content_hash:
+                        manifest.update(
+                            src_file,
+                            content_hash,
+                            bucket_output_path(result.bucket),
+                        )
         manifest.save()

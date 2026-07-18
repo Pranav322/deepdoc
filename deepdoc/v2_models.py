@@ -143,6 +143,7 @@ class RepoScan:
     file_line_counts: dict[str, int] = field(default_factory=dict)
     parsed_files: dict[str, ParsedFile] = field(default_factory=dict)
     file_contents: dict[str, str] = field(default_factory=dict)
+    file_content_hashes: dict[str, str] = field(default_factory=dict)
     giant_file_clusters: dict[str, Any] = field(default_factory=dict)
     endpoint_bundles: list[Any] = field(default_factory=list)
     integration_identities: list[Any] = field(default_factory=list)

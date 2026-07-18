@@ -161,16 +161,18 @@ pages from the next batch.
 window. Apply a provider-aware token/request limiter at submission time and
 pause only when quotas or throttling require it.
 
-### P1.5 — Manifest checkpointing repeatedly rereads source and rewrites state
+### P1.5 — Completed: shared hashes and bounded manifest checkpoints
 
 **Locations:** `generator/generation.py:527-529,1471-1504`;
 `manifest.py:32-34`
 
-Each completed page rereads and hashes its tracked sources and serializes the
-whole manifest. Final manifest updating then repeats the source work.
-
-**Action:** Compute hashes once during scanning, update the manifest in memory,
-and checkpoint periodically or after a batch. Avoid the redundant final pass.
+**Resolution:** `scan_repo` computes `RepoScan.file_content_hashes` while source
+content is already in memory. Generation staleness checks, manifest updates, and
+ledger persistence reuse those hashes with disk fallback only for files absent
+from the scan. The manifest tracks sorted `doc_paths` for every source (while
+reading legacy `doc_path` entries), checkpoints atomically every 10 completed
+pages or 15 seconds, and saves once at completion. Redundant post-generation
+manifest passes were removed from all pipeline/update callers.
 
 ### P1.6 — Completed: shared immutable evidence indexes
 

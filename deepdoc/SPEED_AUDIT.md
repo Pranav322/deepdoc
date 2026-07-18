@@ -108,7 +108,7 @@ complete zero-valued shape for empty repositories.
 
 ## Priority 1 — Highest-Impact Active Findings
 
-### P1.1 — Incremental updates can perform two complete scans
+### P1.1 — Completed: reuse semantic-classification scan
 
 **Locations:** `smart_update_v2.py:751,895-914,456-487,597-618`
 
@@ -117,9 +117,11 @@ targeted replan then performs another full scan. The first scan occurs when git
 changes exist and saved endpoint metadata is available, but that is a common
 update path.
 
-**Action:** Carry the classification `RepoScan` in `UpdateSyncPlan`/`ChangeSet`
-or memoize it for the duration of the update. Reuse it in both incremental and
-targeted execution.
+**Resolution:** Semantic impact detection now attaches its current `RepoScan`
+to the run-scoped `ChangeSet`. Incremental and targeted execution consume that
+exact object and record an `update.scan_reused` counter. If semantic detection
+did not scan or failed, execution performs one normal fallback scan. No scan is
+persisted or shared across update runs.
 
 ### P1.2 — Targeted replans still begin with a full-repository scan
 

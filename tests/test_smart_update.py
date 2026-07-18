@@ -13,6 +13,7 @@ from deepdoc.persistence_v2 import (
     save_sync_state,
 )
 from deepdoc.smart_update_v2 import (
+    ChangeSet,
     SemanticImpact,
     SmartUpdater,
     UpdateRunResult,
@@ -25,6 +26,69 @@ from .conftest import FakeBucket, FakeResult, _run_git
 def _make_updater(root):
     cfg = {"output_dir": "docs", "llm": {"provider": "anthropic", "model": "test"}}
     return SmartUpdater(root, cfg)
+
+
+def _minimal_scan(*, endpoints: list[dict] | None = None) -> RepoScan:
+    return RepoScan(
+        file_tree={},
+        file_summaries={},
+        api_endpoints=endpoints or [],
+        languages={},
+        has_openapi=False,
+        openapi_paths=[],
+        total_files=0,
+        frameworks_detected=[],
+        entry_points=[],
+        config_files=[],
+    )
+
+
+def test_semantic_impact_carries_current_scan(tmp_repo) -> None:
+    updater = _make_updater(tmp_repo)
+    previous = {
+        "method": "GET",
+        "path": "/orders",
+        "file": "routes.py",
+        "handler": "list_orders",
+    }
+    current_scan = _minimal_scan(endpoints=[dict(previous)])
+
+    with (
+        patch("deepdoc.smart_update_v2.load_scan_cache", return_value={"api_endpoints": [previous]}),
+        patch("deepdoc.planner.scan_repo", return_value=current_scan) as scan_repo,
+    ):
+        impact = updater._detect_semantic_impacts(["config.py"])
+
+    assert impact.repo_scan is current_scan
+    scan_repo.assert_called_once()
+
+
+def test_execution_scan_reuses_semantic_scan(tmp_repo) -> None:
+    updater = _make_updater(tmp_repo)
+    current_scan = _minimal_scan()
+    change_set = ChangeSet(repo_scan=current_scan)
+
+    with patch("deepdoc.planner.scan_repo") as scan_repo:
+        result = updater._execution_scan(change_set, "incremental update")
+
+    assert result is current_scan
+    scan_repo.assert_not_called()
+    assert updater.telemetry.snapshot("success")["counters"]["update.scan_reused"] == 1
+
+
+def test_execution_scan_falls_back_once_when_semantic_scan_missing(tmp_repo) -> None:
+    updater = _make_updater(tmp_repo)
+    current_scan = _minimal_scan()
+
+    with patch("deepdoc.planner.scan_repo", return_value=current_scan) as scan_repo:
+        result = updater._execution_scan(ChangeSet(), "incremental update")
+
+    assert result is current_scan
+    scan_repo.assert_called_once_with(
+        tmp_repo,
+        updater.cfg,
+        telemetry=updater.telemetry,
+    )
 
 
 def test_incremental_update_only_regenerates_stale(tmp_repo_with_plan):

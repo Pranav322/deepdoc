@@ -18,6 +18,9 @@ The automated release workflow reads the section that matches the version in
   walking, source/document reads, parsing, framework and endpoint detection,
   route resolution, scanner families, call graph, topology, and flow work, with
   source-file and byte counters.
+- **Single-scan smart updates.** Semantic endpoint classification now carries
+  its current repository scan into incremental generation or targeted planning,
+  avoiding a second complete scan in the common endpoint-aware update path.
 
 ## [0.4.2] - 2026-06-23
 

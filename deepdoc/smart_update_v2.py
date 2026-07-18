@@ -52,7 +52,7 @@ from .persistence_v2 import (
     save_sync_state,
 )
 from .telemetry import RunTelemetry
-from .v2_models import DocPlan, endpoint_owned_files, tracked_bucket_files
+from .v2_models import DocPlan, RepoScan, endpoint_owned_files, tracked_bucket_files
 
 console = Console()
 
@@ -85,6 +85,7 @@ class ChangeSet:
     semantic_changed_endpoint_keys: list[str] = field(default_factory=list)
     endpoint_structure_changed: bool = False
     total_plan_files: int = 0  # total files tracked in the plan (for threshold calc)
+    repo_scan: RepoScan | None = field(default=None, repr=False, compare=False)
 
     @property
     def strategy(self) -> str:
@@ -164,6 +165,7 @@ class SemanticImpact:
     changed_files: list[str] = field(default_factory=list)
     changed_endpoint_keys: list[str] = field(default_factory=list)
     endpoint_structure_changed: bool = False
+    repo_scan: RepoScan | None = field(default=None, repr=False, compare=False)
 
 
 class SmartUpdater:
@@ -409,6 +411,22 @@ class SmartUpdater:
 
     # ── Strategy implementations ─────────────────────────────────────────
 
+    def _execution_scan(self, change_set: ChangeSet, purpose: str) -> RepoScan:
+        """Reuse the current run's semantic scan or perform one fallback scan."""
+        if change_set.repo_scan is not None:
+            console.print("[dim]Reusing semantic-classification scan...[/dim]")
+            self.telemetry.counter("update.scan_reused")
+            return change_set.repo_scan
+
+        from .planner import scan_repo as bucket_scan_repo
+
+        console.print(f"[dim]Scanning repo for {purpose}...[/dim]")
+        return bucket_scan_repo(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
+
     def _full_replan_and_generate(self) -> UpdateRunResult:
         """Run the full pipeline from scratch."""
         from .pipeline_v2 import PipelineV2
@@ -488,9 +506,6 @@ class SmartUpdater:
             plan_docs as bucket_plan_docs,
         )
         from .planner import run_phase2_scans
-        from .planner import (
-            scan_repo as bucket_scan_repo,
-        )
 
         # Step 0: clean up deleted files and orphaned buckets before any LLM work
         plan = self._handle_deleted_files(plan, change_set)
@@ -509,12 +524,7 @@ class SmartUpdater:
             + change_set.semantic_changed_files,
         )
 
-        console.print("[dim]Re-scanning repo for targeted replan...[/dim]")
-        scan = bucket_scan_repo(
-            self.repo_root,
-            self.cfg,
-            telemetry=self.telemetry,
-        )
+        scan = self._execution_scan(change_set, "targeted replan")
         scan = run_phase2_scans(scan, self.cfg, self.llm)
 
         console.print("[dim]Running planner on new files only...[/dim]")
@@ -631,7 +641,6 @@ class SmartUpdater:
     ) -> UpdateRunResult:
         """Regenerate only the stale buckets identified in the change set."""
         from .generator import BucketGenerationEngine
-        from .planner import scan_repo as bucket_scan_repo
 
         stale_slugs = set(change_set.stale_bucket_slugs)
         chatbot_stats: dict[str, Any] | None = None
@@ -644,12 +653,7 @@ class SmartUpdater:
             + change_set.semantic_changed_files,
         )
 
-        console.print("[dim]Scanning repo...[/dim]")
-        scan = bucket_scan_repo(
-            self.repo_root,
-            self.cfg,
-            telemetry=self.telemetry,
-        )
+        scan = self._execution_scan(change_set, "incremental update")
         gen_results = []
         if stale_slugs:
             stale_buckets = [b for b in plan.buckets if b.slug in stale_slugs]
@@ -797,6 +801,7 @@ class SmartUpdater:
             cs.semantic_changed_files = semantic_impact.changed_files
             cs.semantic_changed_endpoint_keys = semantic_impact.changed_endpoint_keys
             cs.endpoint_structure_changed = semantic_impact.endpoint_structure_changed
+            cs.repo_scan = semantic_impact.repo_scan
             if cs.semantic_changed_files:
                 cs.stale_bucket_slugs = sorted(
                     set(cs.stale_bucket_slugs)
@@ -951,10 +956,12 @@ class SmartUpdater:
         except Exception:
             return SemanticImpact()
 
-        return self._compute_endpoint_semantic_impact(
+        impact = self._compute_endpoint_semantic_impact(
             previous_endpoints,
             current_scan.api_endpoints,
         )
+        impact.repo_scan = current_scan
+        return impact
 
     def _compute_endpoint_semantic_impact(
         self,

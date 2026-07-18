@@ -346,7 +346,11 @@ class PipelineV2:
         )
         phase_start = time.perf_counter()
         with self.telemetry.span("pipeline.scan"):
-            scan = bucket_scan_repo(self.repo_root, self.cfg)
+            scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+            )
         phase_timings["scan"] = time.perf_counter() - phase_start
         self._print_scan(scan)
         stats["files_scanned"] = scan.total_files

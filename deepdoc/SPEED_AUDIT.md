@@ -94,13 +94,17 @@ latest breakdown and previous-run duration comparison. Prompt/response text,
 source content, endpoint URLs, and secrets are never recorded. Scanner-family,
 file-read, and route/topology granularity remains tracked separately under P0.2.
 
-### P0.2 — No scan subphase visibility
+### P0.2 — Completed: scan subphase visibility
 
 **Locations:** `planner/engine.py:328-579,645-818`
 
-Only the outer scan and coarse planner phases are timed. File walking, parsing,
-route resolution, individual scanner families, call graph, topology, and flow
-construction need independent timings before CPU optimizations are ranked.
+**Resolution:** `RepoScan.scan_timings` and run telemetry now report service
+boundary detection, file walking, documentation and source reads, framework
+detection, parsing, endpoint detection, route resolution, giant-file clustering,
+endpoint bundles, integrations, artifact/runtime/config scans, call graph,
+topology, debug discovery, and flow-candidate work independently. Source file
+and byte counters are available through `deepdoc performance`, including a
+complete zero-valued shape for empty repositories.
 
 ## Priority 1 — Highest-Impact Active Findings
 

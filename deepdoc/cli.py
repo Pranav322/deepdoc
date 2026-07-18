@@ -1040,6 +1040,16 @@ def performance() -> None:
             )
         )
 
+    counters = latest.get("counters", {}) or {}
+    if counters:
+        table = Table(title="Counters", show_header=True, header_style="bold")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+        for name, value in sorted(counters.items()):
+            rendered = f"{value:,.2f}" if isinstance(value, float) else f"{value:,}"
+            table.add_row(name, rendered)
+        console.print(table)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # serve

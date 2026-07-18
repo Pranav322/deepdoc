@@ -14,6 +14,10 @@ The automated release workflow reads the section that matches the version in
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in
   a rotating `.deepdoc/performance/runs.jsonl` history. The new
   `deepdoc performance` command renders the latest phase and model breakdown.
+- **Scan subphase visibility.** Performance records now distinguish file
+  walking, source/document reads, parsing, framework and endpoint detection,
+  route resolution, scanner families, call graph, topology, and flow work, with
+  source-file and byte counters.
 
 ## [0.4.2] - 2026-06-23
 

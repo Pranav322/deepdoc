@@ -1,4 +1,17 @@
+from ..telemetry import RunTelemetry
 from .common import *
+
+
+def _record_scan_timing(
+    timings: dict[str, float],
+    telemetry: RunTelemetry | None,
+    name: str,
+    started_at: float,
+) -> None:
+    elapsed = time.perf_counter() - started_at
+    timings[name] = timings.get(name, 0.0) + elapsed
+    if telemetry is not None:
+        telemetry.record_duration(f"scan.{name}", elapsed)
 
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
@@ -290,7 +303,14 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         cfg=cfg,
     )
     plan = _ensure_database_runtime_and_interface_buckets(plan, scan, cfg)
+    step_start = time.perf_counter()
     plan = _attach_flow_hints_to_cluster_buckets(plan, scan, cfg)
+    _record_scan_timing(
+        scan.scan_timings,
+        getattr(llm, "telemetry", None),
+        "flow_candidates",
+        step_start,
+    )
 
     # ── Inject Start Here and Debug Runbook buckets ──────────────────────
     plan = _inject_start_here_and_debug_buckets(plan, scan, cfg)
@@ -326,7 +346,11 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     return plan
 
 
-def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
+def scan_repo(
+    repo_root: Path,
+    cfg: dict[str, Any],
+    telemetry: RunTelemetry | None = None,
+) -> RepoScan:
     """Scan the entire repo without making any LLM calls.
 
     Enhanced from v1: also records line counts and parsed files for
@@ -364,7 +388,15 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
     file_frameworks: dict[str, list[str]] = {}
+    scan_timings: dict[str, float] = {}
+    step_start = time.perf_counter()
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
+    _record_scan_timing(
+        scan_timings,
+        telemetry,
+        "service_boundaries",
+        step_start,
+    )
     file_services: dict[str, str] = {}
 
     ext_to_lang = {
@@ -381,6 +413,7 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     }
 
     # First pass: collect all files
+    step_start = time.perf_counter()
     all_files_to_scan: list[Path] = []
     for root, dirs, files in os.walk(repo_root):
         root_path = Path(root)
@@ -390,6 +423,9 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
             rel = str(fpath.relative_to(repo_root))
             if not _matches_any(rel, exclude) and not _matches_any(fname, exclude):
                 all_files_to_scan.append(fpath)
+    _record_scan_timing(scan_timings, telemetry, "file_walk", step_start)
+    if telemetry is not None:
+        telemetry.counter("scan.files_discovered", len(all_files_to_scan))
 
     with Progress(
         SpinnerColumn(),
@@ -437,8 +473,15 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
 
             # Only parse supported source files
             if _is_doc_context_candidate(rel, fname):
+                step_start = time.perf_counter()
                 try:
                     doc_content = fpath.read_text(encoding="utf-8", errors="replace")
+                    if telemetry is not None:
+                        telemetry.counter("scan.doc_files_read")
+                        telemetry.counter(
+                            "scan.doc_bytes_read",
+                            len(doc_content.encode("utf-8")),
+                        )
                     if fname.lower().endswith(".ipynb"):
                         summary, context = _summarize_notebook_context(rel, doc_content)
                     else:
@@ -449,6 +492,13 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                         research_contexts.append(context)
                 except Exception:
                     pass
+                finally:
+                    _record_scan_timing(
+                        scan_timings,
+                        telemetry,
+                        "documentation",
+                        step_start,
+                    )
 
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
@@ -472,16 +522,31 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                 entry_points.append(rel)
 
             # Parse file for summary
+            step_start = time.perf_counter()
             try:
                 content = fpath.read_text(encoding="utf-8", errors="replace")
                 line_count = len(content.splitlines())
                 file_line_counts[rel] = line_count
                 file_contents[rel] = content
+                if telemetry is not None:
+                    telemetry.counter("scan.source_files_read")
+                    telemetry.counter(
+                        "scan.source_bytes_read",
+                        len(content.encode("utf-8")),
+                    )
             except Exception:
                 progress.advance(task)
                 continue
+            finally:
+                _record_scan_timing(
+                    scan_timings,
+                    telemetry,
+                    "source_reads",
+                    step_start,
+                )
 
             # Detect frameworks
+            step_start = time.perf_counter()
             matched_frameworks: list[str] = []
             for fw, indicators in FRAMEWORK_INDICATORS.items():
                 if any(ind in content for ind in indicators):
@@ -495,8 +560,15 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                 matched_frameworks.append("vue")
             if matched_frameworks:
                 file_frameworks[rel] = sorted(set(matched_frameworks))
+            _record_scan_timing(
+                scan_timings,
+                telemetry,
+                "framework_detection",
+                step_start,
+            )
 
             # Parse symbols
+            step_start = time.perf_counter()
             parsed = parse_file(fpath, content=file_contents[rel])
             if parsed:
                 parsed_files[rel] = parsed
@@ -508,15 +580,29 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                     summary_parts.append(f"imports={len(parsed.imports)}")
                 summary_parts.append(f"lines={line_count}")
                 file_summaries[rel] = " | ".join(summary_parts)
+            _record_scan_timing(
+                scan_timings,
+                telemetry,
+                "parsing",
+                step_start,
+            )
 
             # Detect API endpoints
             if lang:
+                step_start = time.perf_counter()
                 eps = detect_endpoints(fpath, content, lang)
                 raw_api_endpoints.extend(eps)
+                _record_scan_timing(
+                    scan_timings,
+                    telemetry,
+                    "endpoint_detection",
+                    step_start,
+                )
 
             progress.advance(task)
 
     if raw_api_endpoints:
+        step_start = time.perf_counter()
         resolved_endpoints = resolve_repo_endpoints(
             repo_root, raw_api_endpoints, file_contents
         )
@@ -558,6 +644,30 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                     "publication_reason": reason,
                 }
             )
+        _record_scan_timing(
+            scan_timings,
+            telemetry,
+            "route_resolution",
+            step_start,
+        )
+
+    if telemetry is not None:
+        telemetry.counter("scan.source_files_parsed", len(parsed_files))
+        telemetry.counter("scan.endpoints_detected", len(api_endpoints))
+    for phase_name in (
+        "service_boundaries",
+        "file_walk",
+        "documentation",
+        "source_reads",
+        "framework_detection",
+        "parsing",
+        "endpoint_detection",
+        "route_resolution",
+    ):
+        if phase_name not in scan_timings:
+            scan_timings[phase_name] = 0.0
+            if telemetry is not None:
+                telemetry.record_duration(f"scan.{phase_name}", 0.0)
 
     return RepoScan(
         file_tree=dict(file_tree),
@@ -575,6 +685,7 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
         file_contents=file_contents,
         doc_contexts=doc_contexts,
         research_contexts=research_contexts,
+        scan_timings=scan_timings,
         source_kind_by_file=source_kind_by_file,
         file_frameworks=file_frameworks,
         service_boundaries=service_boundaries,
@@ -659,8 +770,10 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
 
     giant_threshold = cfg.get("giant_file_lines", 2000)
     integration_mode = cfg.get("integration_detection", "auto")
+    telemetry = getattr(llm, "telemetry", None)
 
     # 2.1 Giant-file clustering (parallelized)
+    step_start = time.perf_counter()
     giant_files = {
         path: lc
         for path, lc in scan.file_line_counts.items()
@@ -699,8 +812,15 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
                     f"    [green]✓[/green] {path}: {len(analysis.clusters)} clusters: "
                     f"{', '.join(cluster_names)}"
                 )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "giant_file_clustering",
+        step_start,
+    )
 
     # 2.2 Endpoint evidence bundles
+    step_start = time.perf_counter()
     published_api_endpoints = scan.published_api_endpoints
     if published_api_endpoints and cfg.get("include_endpoint_pages", True):
         console.print("  [bold]Building endpoint evidence bundles...[/bold]")
@@ -717,8 +837,15 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
             console.print(
                 f"    • {b.endpoint_family}: {len(b.evidence)} evidence files, {len(b.methods_paths)} routes"
             )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "endpoint_bundles",
+        step_start,
+    )
 
     # 2.3 Integration discovery
+    step_start = time.perf_counter()
     if integration_mode == "auto" and cfg.get("include_integration_pages", True):
         console.print("  [bold]Discovering integrations...[/bold]")
         scan.integration_identities = discover_integrations(
@@ -735,22 +862,49 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
             for i in scan.integration_identities:
                 marker = "📄" if i.is_substantial else "📎"
                 console.print(f"    {marker} {i.display_name} ({len(i.files)} files)")
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "integrations",
+        step_start,
+    )
 
     # 2.4 Artifact discovery
     console.print("  [bold]Scanning for setup/deploy/test artifacts...[/bold]")
+    step_start = time.perf_counter()
     scan.artifact_scan = discover_artifacts(
         repo_root,
         scan.file_tree,
         scan.parsed_files,
         scan.file_contents,
     )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "artifacts",
+        step_start,
+    )
+    step_start = time.perf_counter()
     scan.runtime_scan = discover_runtime_surfaces(
         scan.parsed_files,
         scan.file_contents,
         scan.api_endpoints,
     )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "runtime",
+        step_start,
+    )
+    step_start = time.perf_counter()
     scan.config_impacts = discover_config_impacts(
         scan.file_contents, scan.api_endpoints
+    )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "config_impacts",
+        step_start,
     )
     a = scan.artifact_scan
     if a and a.database_scan:
@@ -777,8 +931,15 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
 
     # 2.5 Call graph extraction
     console.print("  [bold]Building call graph...[/bold]")
+    step_start = time.perf_counter()
     scan.call_graph = build_call_graph(
         scan.parsed_files, scan.file_contents, scan.api_endpoints
+    )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "call_graph",
+        step_start,
     )
     stats = scan.call_graph.stats()
     console.print(
@@ -790,7 +951,14 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
     # 2.5b Topology analysis (derives nav structure from call graph)
     from .topology import build_topology_map
     console.print("  [bold]Analysing call graph topology...[/bold]")
+    step_start = time.perf_counter()
     scan.topology_map = build_topology_map(scan)
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "topology",
+        step_start,
+    )
     tmap = scan.topology_map
     if tmap.clusters:
         non_found = [c for c in tmap.clusters if not c.is_foundational]
@@ -803,10 +971,17 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
 
     # 2.6 Debug signal discovery
     console.print("  [bold]Discovering debug signals...[/bold]")
+    step_start = time.perf_counter()
     scan.debug_signals = discover_debug_signals(
         scan.parsed_files,
         scan.file_contents,
         scan.api_endpoints,
+    )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "debug_signals",
+        step_start,
     )
     if scan.debug_signals:
         console.print(f"  [green]✓[/green] {len(scan.debug_signals)} debug signal(s):")

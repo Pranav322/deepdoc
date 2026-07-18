@@ -510,7 +510,11 @@ class SmartUpdater:
         )
 
         console.print("[dim]Re-scanning repo for targeted replan...[/dim]")
-        scan = bucket_scan_repo(self.repo_root, self.cfg)
+        scan = bucket_scan_repo(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
         scan = run_phase2_scans(scan, self.cfg, self.llm)
 
         console.print("[dim]Running planner on new files only...[/dim]")
@@ -641,7 +645,11 @@ class SmartUpdater:
         )
 
         console.print("[dim]Scanning repo...[/dim]")
-        scan = bucket_scan_repo(self.repo_root, self.cfg)
+        scan = bucket_scan_repo(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
         gen_results = []
         if stale_slugs:
             stale_buckets = [b for b in plan.buckets if b.slug in stale_slugs]
@@ -935,7 +943,11 @@ class SmartUpdater:
         try:
             from .planner import scan_repo as bucket_scan_repo
 
-            current_scan = bucket_scan_repo(self.repo_root, self.cfg)
+            current_scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+            )
         except Exception:
             return SemanticImpact()
 

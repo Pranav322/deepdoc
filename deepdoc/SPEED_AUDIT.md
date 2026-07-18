@@ -172,20 +172,17 @@ whole manifest. Final manifest updating then repeats the source work.
 **Action:** Compute hashes once during scanning, update the manifest in memory,
 and checkpoint periodically or after a batch. Avoid the redundant final pass.
 
-### P1.6 — Helper/evidence indexes are rebuilt for every bucket
+### P1.6 — Completed: shared immutable evidence indexes
 
 **Locations:** `generator/evidence.py:247-259,367-416,544-656`
 
-Evidence assembly repeatedly builds module and symbol indexes, resolves imports
-through full-index scans, splits helper content, and searches symbol ranges.
-Helper source normally comes from `scan.file_contents`; disk reads occur only as
-a fallback when a file is absent from that cache. Overlapping bucket ownership
-still repeats index construction, content splitting, and symbol-range work.
-
-**Action:** Build immutable module, suffix, symbol, content, line-offset, and
-parsed-file indexes once in `EvidenceAssembler`. Cache tiered extracts by
-`(path, content_hash, tier, owned_symbols)` and render all selected symbols from
-one file in one pass.
+**Resolution:** `EvidenceAssembler` now builds module, symbol, file-line, and
+symbol-end indexes once during initialization and shares them across all bucket
+workers. Import resolution uses direct suffix keys rather than scanning the
+whole module index; helper rendering reuses pre-split lines and precomputed
+symbol boundaries. Disk remains a fallback only for files absent from the scan
+cache. The indexes are eager and immutable, avoiding concurrent lazy-cache
+mutation and unbounded cache growth.
 
 ### P1.7 — Chatbot incremental merges rewrite complete corpora
 

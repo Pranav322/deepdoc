@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
@@ -152,6 +153,64 @@ def _make_scan(repo_root: Path) -> RepoScan:
         ),
         flow_candidates=[],
     )
+
+
+def test_evidence_helper_indexes_are_built_once_per_assembler(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    bucket = make_bucket(
+        "Authentication",
+        "authentication",
+        ["src/routes.py"],
+        bucket_type="feature",
+        generation_hints={"prompt_style": "feature"},
+    )
+    plan = make_plan([bucket])
+
+    class CountingAssembler(EvidenceAssembler):
+        module_builds = 0
+        symbol_builds = 0
+
+        def _build_module_file_index(self):
+            self.module_builds += 1
+            return super()._build_module_file_index()
+
+        def _build_symbol_index(self):
+            self.symbol_builds += 1
+            return super()._build_symbol_index()
+
+    assembler = CountingAssembler(tmp_path, scan, plan, dict(DEFAULT_CONFIG))
+
+    assert assembler.module_builds == 1
+    assert assembler.symbol_builds == 1
+    assert assembler._resolve_repo_local_module("services.auth_service") == {
+        "src/services/auth_service.py"
+    }
+    assembler._resolve_repo_local_module("services.auth_service")
+    assert assembler.module_builds == 1
+    assert assembler.symbol_builds == 1
+
+
+def test_evidence_assembly_is_deterministic_across_threads(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    for rel_path, content in scan.file_contents.items():
+        path = tmp_path / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    bucket = make_bucket(
+        "Authentication",
+        "authentication",
+        ["src/routes.py"],
+        bucket_type="feature",
+        generation_hints={"prompt_style": "feature"},
+    )
+    plan = make_plan([bucket])
+    assembler = EvidenceAssembler(tmp_path, scan, plan, dict(DEFAULT_CONFIG))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        evidence = list(executor.map(lambda _: assembler.assemble(bucket), range(12)))
+
+    assert len({item.source_context for item in evidence}) == 1
+    assert len({item.helper_context for item in evidence}) == 1
 
 
 def test_flow_context_is_injected_and_validated(tmp_path: Path) -> None:

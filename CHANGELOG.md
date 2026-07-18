@@ -21,6 +21,9 @@ The automated release workflow reads the section that matches the version in
 - **Single-scan smart updates.** Semantic endpoint classification now carries
   its current repository scan into incremental generation or targeted planning,
   avoiding a second complete scan in the common endpoint-aware update path.
+- **Shared generation evidence indexes.** Module resolution, helper symbols,
+  source lines, and symbol boundaries are indexed once per generation engine
+  instead of being rebuilt and rescanned for every documentation bucket.
 
 ## [0.4.2] - 2026-06-23
 

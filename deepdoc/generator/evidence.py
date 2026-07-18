@@ -147,6 +147,22 @@ class EvidenceAssembler:
         for identity in scan.integration_identities or []:
             for file_path in identity.files:
                 self._file_to_integrations[file_path].append(identity.display_name)
+        # Immutable helper-resolution indexes shared by every bucket worker.
+        self._module_file_index = self._build_module_file_index()
+        self._symbol_index = self._build_symbol_index()
+        self._file_lines = {
+            file_path: content.splitlines()
+            for file_path, content in self.scan.file_contents.items()
+        }
+        self._symbol_end_lines: dict[tuple[str, int], int] = {}
+        for file_path, parsed in self.scan.parsed_files.items():
+            lines = self._file_lines.get(file_path, [])
+            symbols = parsed.symbols if parsed else []
+            for idx, symbol in enumerate(symbols):
+                end = len(lines)
+                if idx + 1 < len(symbols):
+                    end = symbols[idx + 1].start_line - 1
+                self._symbol_end_lines[(file_path, symbol.start_line)] = end
 
     def assemble(self, bucket: DocBucket) -> AssembledEvidence:
         """Build the complete evidence package for one bucket."""
@@ -365,9 +381,6 @@ class EvidenceAssembler:
         helper_budget = 60_000
         bucket_files = set(tracked_bucket_files(bucket))
         called_names = self._extract_called_symbol_names(source_ctx)
-        module_index = self._build_module_file_index()
-        symbol_index = self._build_symbol_index()
-
         helper_sections: list[str] = []
         helper_files: set[str] = set()
         emitted_symbols: set[tuple[str, str]] = set()
@@ -380,12 +393,12 @@ class EvidenceAssembler:
                 continue
 
             imported_symbols, imported_files = self._resolve_import_targets(
-                parsed.imports, source_content, module_index
+                parsed.imports, source_content
             )
             for imported_file in imported_files:
                 if imported_file in bucket_files:
                     continue
-                candidates = symbol_index.get(imported_file, [])
+                candidates = self._symbol_index.get(imported_file, [])
                 for symbol in candidates:
                     if symbol.name in self._builtin_helper_skip_names():
                         continue
@@ -576,26 +589,23 @@ class EvidenceAssembler:
         self,
         imports: list[str],
         content: str,
-        module_index: dict[str, set[str]],
     ) -> tuple[dict[str, set[str]], set[str]]:
         imported_symbols: dict[str, set[str]] = defaultdict(set)
         imported_files: set[str] = set()
 
         for module_name in imports or []:
-            module_files = self._resolve_repo_local_module(module_name, module_index)
+            module_files = self._resolve_repo_local_module(module_name)
             imported_files.update(module_files)
 
         for module_name, symbol_names in self._extract_explicit_import_symbols(content):
-            module_files = self._resolve_repo_local_module(module_name, module_index)
+            module_files = self._resolve_repo_local_module(module_name)
             for file_path in module_files:
                 imported_files.add(file_path)
                 imported_symbols[file_path].update(symbol_names)
 
         return imported_symbols, imported_files
 
-    def _resolve_repo_local_module(
-        self, module_name: str, module_index: dict[str, set[str]]
-    ) -> set[str]:
+    def _resolve_repo_local_module(self, module_name: str) -> set[str]:
         module_name = module_name.strip().strip(".")
         if not module_name:
             return set()
@@ -605,12 +615,7 @@ class EvidenceAssembler:
         ]
         resolved: set[str] = set()
         for candidate in candidates:
-            if candidate in module_index:
-                resolved.update(module_index[candidate])
-            else:
-                for known_module, files in module_index.items():
-                    if known_module.endswith(candidate):
-                        resolved.update(files)
+            resolved.update(self._module_file_index.get(candidate, set()))
         return resolved
 
     def _extract_explicit_import_symbols(
@@ -640,17 +645,14 @@ class EvidenceAssembler:
         except Exception:
             return ""
 
-        file_lines = file_content.splitlines()
+        file_lines = self._file_lines.get(file_path)
+        if file_lines is None:
+            file_lines = file_content.splitlines()
         start = max(0, symbol.start_line - 1)
-        parsed = self.scan.parsed_files.get(file_path)
-        end = len(file_lines)
-        if parsed and parsed.symbols:
-            for idx, candidate in enumerate(parsed.symbols):
-                if candidate.start_line == symbol.start_line and idx + 1 < len(
-                    parsed.symbols
-                ):
-                    end = parsed.symbols[idx + 1].start_line - 1
-                    break
+        end = self._symbol_end_lines.get(
+            (file_path, symbol.start_line),
+            len(file_lines),
+        )
 
         excerpt_end = min(end, start + 60)
         body = "\n".join(file_lines[start:excerpt_end])

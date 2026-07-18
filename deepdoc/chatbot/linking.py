@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import defaultdict
 from dataclasses import dataclass, field
 
+from ..plan_contract import bucket_output_path, bucket_site_path
 from ..v2_models import DocBucket, DocPlan, tracked_bucket_files
 
 
@@ -64,18 +65,14 @@ def build_plan_link_maps(plan: DocPlan, *, has_openapi: bool = False) -> PlanLin
 
 
 def bucket_doc_path(bucket: DocBucket) -> str:
-    hints = bucket.generation_hints or {}
-    page_type = hints.get("prompt_style", bucket.bucket_type)
-    if hints.get("is_introduction_page") or page_type == "overview":
-        return "index.md"
-    return f"{bucket.slug}.md"
+    return bucket_output_path(bucket)
 
 
 def bucket_doc_url(bucket: DocBucket, *, has_openapi: bool = False) -> str:
     hints = bucket.generation_hints or {}
     page_type = hints.get("prompt_style", bucket.bucket_type)
-    if hints.get("is_introduction_page") or page_type == "overview":
-        return "/"
+    if hints.get("is_introduction_page"):
+        return bucket_site_path(bucket)
     if has_openapi and (hints.get("is_endpoint_ref") or page_type == "endpoint_ref"):
         return f"/api/{bucket.slug}"
     return f"/{bucket.slug}"

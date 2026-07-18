@@ -28,8 +28,11 @@ def _make_plan(nav_structure: dict | None = None, pages: list | None = None):
     return plan
 
 
-def _make_page(slug: str, title: str):
-    return SimpleNamespace(slug=slug, title=title, _b=None)
+def _make_page(slug: str, title: str, *, introduction: bool = False):
+    bucket = SimpleNamespace(
+        generation_hints={"is_introduction_page": introduction}
+    )
+    return SimpleNamespace(slug=slug, title=title, _b=bucket)
 
 
 # ── _slug_to_title ─────────────────────────────────────────────────────────────
@@ -117,12 +120,30 @@ def test_build_nav_overview_slug_becomes_top_level_page():
     )
     nav = _build_nav(plan, has_openapi=False)
     top_pages = [e for e in nav if e.get("type") == "page"]
-    assert any(e["slug"] == "index" for e in top_pages)
+    assert any(e["slug"] == "/" for e in top_pages)
     # index should NOT appear inside the section too
     sections = [e for e in nav if e.get("type") == "section"]
     if sections:
         section_slugs = [i["slug"] for i in sections[0]["items"]]
         assert "index" not in section_slugs
+
+
+def test_build_nav_introduction_hint_always_links_root():
+    pages = [
+        _make_page("start-here", "Start Here", introduction=True),
+        _make_page("setup", "Setup"),
+    ]
+    plan = _make_plan(
+        nav_structure={"Guide": ["start-here", "setup"]},
+        pages=pages,
+    )
+
+    nav = _build_nav(plan, has_openapi=False)
+
+    top_pages = [entry for entry in nav if entry.get("type") == "page"]
+    assert any(entry["title"] == "Start Here" and entry["slug"] == "/" for entry in top_pages)
+    section = next(entry for entry in nav if entry.get("type") == "section")
+    assert [item["slug"] for item in section["items"]] == ["setup"]
 
 
 # ── _patch_brand_vars ─────────────────────────────────────────────────────────

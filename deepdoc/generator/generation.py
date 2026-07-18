@@ -38,6 +38,7 @@ from .. import __version__ as DEEPDOC_VERSION
 from ..llm import LLMClient, is_retryable_llm_error
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
+from ..plan_contract import bucket_output_path, validate_plan_contract
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
 from ..prompts import SYSTEM_V2, get_prompt_for_bucket
 from ..scanner import _build_import_lookup, _classify_file_role, _normalize_import
@@ -390,6 +391,7 @@ class BucketGenerationEngine:
         self.llm = llm
         self.scan = scan
         self.plan = plan
+        self.contract_plan = plan
         self.output_dir = output_dir
         self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
         self.generator = PageGenerator(llm, cfg, repo_root)
@@ -440,6 +442,7 @@ class BucketGenerationEngine:
         - Validate and post-process each result
         """
         results: list[GenerationResult] = []
+        validate_plan_contract(self.contract_plan)
         buckets = sorted(self.plan.buckets, key=lambda b: b.priority)
 
         # Pre-build sitemap context (shared across all pages)
@@ -737,13 +740,7 @@ class BucketGenerationEngine:
                 evidence,
             )
 
-            bucket_hints = bucket.generation_hints or {}
-            filename = (
-                "index.md"
-                if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.md"
-            )
-            doc_path = self.output_dir / filename
+            doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(content, encoding="utf-8")
 
@@ -771,13 +768,7 @@ class BucketGenerationEngine:
                 None,
                 status="stub",
             )
-            bucket_hints = bucket.generation_hints or {}
-            filename = (
-                "index.md"
-                if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.md"
-            )
-            doc_path = self.output_dir / filename
+            doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(stub, encoding="utf-8")
 

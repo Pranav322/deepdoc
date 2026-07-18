@@ -26,6 +26,7 @@ from typing import Any
 
 from dataclasses import dataclass as _dataclass, field as _field
 
+from .plan_contract import bucket_output_path
 from .v2_models import DocBucket, DocPlan, build_bucket_semantic_id, tracked_bucket_files
 
 
@@ -724,11 +725,7 @@ def save_generation_ledger(
             "publication_tier": getattr(bucket, "publication_tier", "core"),
             "source_kind_summary": getattr(bucket, "source_kind_summary", {}),
             "generation_hints": getattr(bucket, "generation_hints", {}),
-            "doc_path": "index.md"
-            if (getattr(bucket, "generation_hints", {}) or {}).get(
-                "is_introduction_page"
-            )
-            else f"{bucket.slug}.md",
+            "doc_path": bucket_output_path(bucket),
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),

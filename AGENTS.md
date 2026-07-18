@@ -68,6 +68,7 @@ Guidance for coding agents working in this repository.
 
 ### Other modules
 - `deepdoc/llm/retry.py` — `is_retryable_llm_error()`; single source of truth for transient-vs-fatal LLM error classification (used by both retry loops)
+- `deepdoc/plan_contract.py` — structural generation gate and canonical bucket output/site paths; rejects missing/multiple introductions, duplicate slugs/output writers, unresolved nav slugs, and duplicate nav references before workers start
 - `deepdoc/call_graph.py` — `CallGraph`; function-level call extraction; `CALL_KIND_LOCAL`, `CALL_KIND_CELERY`, `CALL_KIND_SIGNAL`, `CALL_KIND_EVENT`; current resolution is the baseline Python (Django/Falcon/DRF) and JS/TS (Express/Node) implementation. The import-evidence resolver, Go/PHP edges, and cross-file Python inheritance walk remain parked on `wip/audit-fixes-2026-07-10` and are not part of `main`.
 - `deepdoc/manifest.py` — `Manifest` class; tracks file → content-hash → doc-path; stored at `{output_dir}/.deepdoc_manifest.json`
 - `deepdoc/openapi.py` — `find_openapi_specs()`, OpenAPI/Swagger spec parser and importer
@@ -107,6 +108,7 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 5. `_shape_plan_nav()` (canonical version in `nav_shaping.py`) orders sections by topology cluster depth; `Start Here`/`Overview` pinned front, `Testing`/`CI/CD`/`Supporting Material` pinned tail.
 
 ### Key invariants
+- Every full `DocPlan` must pass `validate_plan_contract()` before generation: exactly one `is_introduction_page` bucket, one owner per slug/output path, and every non-system nav slug resolved exactly once. The introduction owns `index.md` and `/`. Incremental engines validate the preserved full constructor plan, not their stale-bucket mini-plan.
 - `ChangeSet.strategy` never returns `full_replan` for normal changes — all code/file/endpoint changes route to `incremental` or `targeted_replan`. Full replan only via `force_replan=True` or engine fingerprint mismatch.
 - `_handle_deleted_files` in `SmartUpdater` is the single place that cleans orphaned buckets (removes from plan, deletes MDX, prunes ledger, cleans `nav_structure`). After it runs, orphaned slugs are filtered from `change_set.stale_bucket_slugs` to prevent redundant regeneration.
 - `_append_changelog()` must be called before `_rebuild_nav()` in `smart_update_v2.py` so the `whats-changed` page appears in nav on first run.

@@ -161,6 +161,13 @@ pages from the next batch.
 window. Apply a provider-aware token/request limiter at submission time and
 pause only when quotas or throttling require it.
 
+**Progress:** Page generation now uses one persistent bounded executor for the
+entire run. Newly available workers immediately take queued pages, submissions
+retain the existing throttle cadence without a straggler join, and results are
+normalized back to stable plan order before persistence. This finding remains
+open until provider-specific RPM/TPM/concurrency limits and adaptive shared
+`429`/`Retry-After` cooldown replace the fixed pause mechanism.
+
 ### P1.5 — Completed: shared hashes and bounded manifest checkpoints
 
 **Locations:** `generator/generation.py:527-529,1471-1504`;

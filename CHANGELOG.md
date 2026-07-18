@@ -28,6 +28,9 @@ The automated release workflow reads the section that matches the version in
   hashes computed during scanning for staleness, manifest, and ledger updates;
   manifests track every owning doc page, write atomically, and checkpoint every
   10 pages or 15 seconds instead of rereading sources and rewriting per page.
+- **Rolling page generation.** A single bounded executor now serves the entire
+  page plan, allowing free workers to take the next page without waiting for a
+  fixed batch's slowest request; result order remains deterministic.
 
 ## [0.4.2] - 2026-06-23
 

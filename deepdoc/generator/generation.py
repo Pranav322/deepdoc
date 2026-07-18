@@ -456,7 +456,7 @@ class BucketGenerationEngine:
         - Apply rate limiting between batches
         - Validate and post-process each result
         """
-        results: list[GenerationResult] = []
+        results_by_slug: dict[str, GenerationResult] = {}
         validate_plan_contract(self.contract_plan)
         buckets = sorted(self.plan.buckets, key=lambda b: b.priority)
 
@@ -487,97 +487,98 @@ class BucketGenerationEngine:
         ) as progress:
             task = progress.add_task("Generating pages...", total=total)
 
-            # Process in batches for rate limiting
-            for batch_start in range(0, total, self.batch_size):
-                batch = buckets[batch_start : batch_start + self.batch_size]
+            futures = {}
+            submitted = 0
+            with ThreadPoolExecutor(max_workers=max(1, self.max_workers)) as executor:
+                for bucket_index, bucket in enumerate(buckets):
+                    progress.update(
+                        task, description=f"[dim]Queuing {bucket.title}...[/dim]"
+                    )
 
-                # Use thread pool for parallel LLM calls within batch
-                with ThreadPoolExecutor(
-                    max_workers=min(self.max_workers, len(batch))
-                ) as executor:
-                    futures = {}
-                    for bucket in batch:
-                        progress.update(
-                            task, description=f"[dim]Queuing {bucket.title}...[/dim]"
+                    if not force and not self._bucket_is_stale(bucket, _manifest):
+                        results_by_slug[bucket.slug] = GenerationResult(
+                            bucket=bucket,
+                            content=None,
                         )
-
-                        # Check staleness
-                        if not force and not self._bucket_is_stale(bucket, _manifest):
-                            results.append(
-                                GenerationResult(bucket=bucket, content=None)
-                            )
-                            progress.advance(task)
-                            continue
-
-                        future = executor.submit(
-                            self._generate_one,
-                            bucket,
-                            sitemap_by_slug.get(bucket.slug, ("", "")),
-                        )
-                        futures[future] = bucket
-
-                    # Collect results as they complete
-                    for future in as_completed(futures):
-                        bucket = futures[future]
-                        try:
-                            result = future.result()
-                            results.append(result)
-
-                            if result.error:
-                                failed_count += 1
-                                console.print(
-                                    f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {result.error}"
-                                )
-                                if "stub" in (result.error or "").lower():
-                                    stub_slugs.append(bucket.slug)
-                            elif result.content:
-                                generated_count += 1
-                                word_count = len(result.content.split())
-                                v = result.validation
-                                warnings = ""
-                                if v and v.warnings:
-                                    warnings = f" [yellow]⚠ {len(v.warnings)} warning(s)[/yellow]"
-                                if result.degraded:
-                                    warnings += " [yellow]degraded[/yellow]"
-                                if v and not v.is_valid:
-                                    warnings += " [red]invalid[/red]"
-                                diagrams = f" {v.mermaid_block_count}🔀" if v else ""
-                                console.print(
-                                    f"  [green]✓[/green] [bold]{bucket.title}[/bold] "
-                                    f"[dim]({bucket.bucket_type} · "
-                                    f"{len(bucket.owned_files)} files · "
-                                    f"~{word_count} words{diagrams} · "
-                                    f"{result.elapsed_seconds:.1f}s)[/dim]{warnings}"
-                                )
-                                # Save manifest incrementally so a cancelled run
-                                # can resume from completed pages on next generate.
-                                self._checkpoint_manifest(_manifest, result)
-                                pending_manifest_pages += 1
-                                if (
-                                    pending_manifest_pages >= checkpoint_pages
-                                    or time.monotonic() - last_manifest_save
-                                    >= checkpoint_seconds
-                                ):
-                                    _manifest.save()
-                                    pending_manifest_pages = 0
-                                    last_manifest_save = time.monotonic()
-                        except Exception as e:
-                            failed_count += 1
-                            results.append(
-                                GenerationResult(bucket=bucket, error=str(e))
-                            )
-                            console.print(
-                                f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}"
-                            )
-
                         progress.advance(task)
+                        continue
 
-                # Rate limit between batches
-                if batch_start + self.batch_size < total and self.rate_limit_pause > 0:
-                    time.sleep(self.rate_limit_pause)
+                    future = executor.submit(
+                        self._generate_one,
+                        bucket,
+                        sitemap_by_slug.get(bucket.slug, ("", "")),
+                    )
+                    futures[future] = bucket
+                    submitted += 1
+                    if (
+                        self.rate_limit_pause > 0
+                        and submitted % self.batch_size == 0
+                        and bucket_index < total - 1
+                    ):
+                        time.sleep(self.rate_limit_pause)
+
+                for future in as_completed(futures):
+                    bucket = futures[future]
+                    try:
+                        result = future.result()
+                        results_by_slug[bucket.slug] = result
+
+                        if result.error:
+                            failed_count += 1
+                            console.print(
+                                f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {result.error}"
+                            )
+                            if "stub" in (result.error or "").lower():
+                                stub_slugs.append(bucket.slug)
+                        elif result.content:
+                            generated_count += 1
+                            word_count = len(result.content.split())
+                            v = result.validation
+                            warnings = ""
+                            if v and v.warnings:
+                                warnings = f" [yellow]⚠ {len(v.warnings)} warning(s)[/yellow]"
+                            if result.degraded:
+                                warnings += " [yellow]degraded[/yellow]"
+                            if v and not v.is_valid:
+                                warnings += " [red]invalid[/red]"
+                            diagrams = f" {v.mermaid_block_count}🔀" if v else ""
+                            console.print(
+                                f"  [green]✓[/green] [bold]{bucket.title}[/bold] "
+                                f"[dim]({bucket.bucket_type} · "
+                                f"{len(bucket.owned_files)} files · "
+                                f"~{word_count} words{diagrams} · "
+                                f"{result.elapsed_seconds:.1f}s)[/dim]{warnings}"
+                            )
+                            self._checkpoint_manifest(_manifest, result)
+                            pending_manifest_pages += 1
+                            if (
+                                pending_manifest_pages >= checkpoint_pages
+                                or time.monotonic() - last_manifest_save
+                                >= checkpoint_seconds
+                            ):
+                                _manifest.save()
+                                pending_manifest_pages = 0
+                                last_manifest_save = time.monotonic()
+                    except Exception as e:
+                        failed_count += 1
+                        results_by_slug[bucket.slug] = GenerationResult(
+                            bucket=bucket,
+                            error=str(e),
+                        )
+                        console.print(
+                            f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}"
+                        )
+
+                    progress.advance(task)
 
         if pending_manifest_pages:
             _manifest.save()
+
+        results = [
+            results_by_slug[bucket.slug]
+            for bucket in buckets
+            if bucket.slug in results_by_slug
+        ]
 
         if failed_count > 0:
             console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")

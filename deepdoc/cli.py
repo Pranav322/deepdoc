@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -236,13 +237,15 @@ def init(
     )
     llm_rpm = _limit(llm_rpm, "Documentation LLM requests per minute", 60)
     llm_tpm = _limit(llm_tpm, "Documentation LLM tokens per minute", 250000)
-    context_window_tokens = _limit(
-        context_window_tokens,
-        "Model context window in tokens",
-        128000,
-    )
+    if context_window_tokens is None and interactive:
+        raw_context = click.prompt(
+            "Model context window in tokens (blank = auto-detect)",
+            default="",
+            show_default=False,
+        ).strip()
+        context_window_tokens = int(raw_context) if raw_context else None
 
-    cfg = dict(DEFAULT_CONFIG)
+    cfg = deepcopy(DEFAULT_CONFIG)
     cfg["project_name"] = name or cwd.name
     cfg["description"] = description
     cfg["output_dir"] = output_dir

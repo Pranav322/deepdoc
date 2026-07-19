@@ -32,6 +32,10 @@ The automated release workflow reads the section that matches the version in
   embeddings now resolve input capacity separately from completion models. Index
   records are fitted before persistence so vector text, lexical text, hashes, and
   IDs agree; capacity-policy changes trigger safe corpus rebuilds.
+- **Automatic capability defaults.** New configurations now resolve model context
+  and output reservation locally from LiteLLM by default. Existing integer
+  overrides remain supported, while unknown custom aliases require a base-model
+  or explicit capability declaration.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

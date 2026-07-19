@@ -132,9 +132,11 @@ class EvidenceAssembler:
         self.plan = plan
         self.cfg = cfg
         llm_cfg = cfg.get("llm", {}) or {}
-        context_tokens = max(4096, int(llm_cfg.get("context_window_tokens", 128000)))
+        raw_context = llm_cfg.get("context_window_tokens")
+        context_tokens = max(4096, int(raw_context) if raw_context is not None else 128000)
+        raw_output_reserve = llm_cfg.get("output_reserve_tokens")
         output_reserve = min(
-            max(1024, int(llm_cfg.get("output_reserve_tokens", 16000))),
+            max(1024, int(raw_output_reserve) if raw_output_reserve is not None else 16000),
             context_tokens // 2,
         )
         safety_tokens = max(1024, context_tokens // 20)
@@ -144,11 +146,11 @@ class EvidenceAssembler:
             context_tokens - output_reserve - safety_tokens - prompt_overhead_tokens,
         )
         self.evidence_budget_chars = evidence_tokens * 4
-        configured_source_budget = int(
-            cfg.get("source_context_budget", self.SOURCE_BUDGET)
-        )
+        configured_source_budget = cfg.get("source_context_budget")
         self.source_budget = min(
-            configured_source_budget,
+            int(configured_source_budget)
+            if configured_source_budget is not None
+            else self.evidence_budget_chars,
             int(self.evidence_budget_chars * 0.60),
         )
         self.large_file_lines = int(cfg.get("large_file_lines", 500))

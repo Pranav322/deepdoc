@@ -611,6 +611,9 @@ llm:
   api_key_env: ANTHROPIC_API_KEY
   base_url: null                    # Set for Ollama/custom endpoints
   max_tokens: null                  # null = provider default; set a number to request an explicit cap
+  base_model: null                  # Set only for a custom/Azure deployment alias
+  context_window_tokens: null       # null = resolve locally from LiteLLM model metadata
+  output_reserve_tokens: null       # null = derive from the resolved model output capability
   temperature: 0.2
 
 languages:
@@ -673,10 +676,11 @@ site:
 | `llm.model` | `claude-3-5-sonnet-20241022` | Model name (use provider prefix for non-Anthropic, e.g. `azure/gpt-4.1`) |
 | `llm.api_key_env` | `ANTHROPIC_API_KEY` | Environment variable that holds the API key |
 | `llm.base_url` | `null` | Custom endpoint URL (required for Ollama, optional for Azure) |
+| `llm.base_model` | `null` | Canonical LiteLLM model name for an otherwise unknown Azure/custom deployment alias |
 | `llm.max_tokens` | `null` | Requested provider output cap. `null` omits the parameter and uses the provider default; configured values are clamped to `output_reserve_tokens` |
 | `llm.temperature` | `0.2` | LLM sampling temperature |
-| `llm.context_window_tokens` | `128000` | Model context-window size used for evidence budgeting; `deepdoc init` lets interactive users accept or override it |
-| `llm.output_reserve_tokens` | `16000` | Context space reserved for generated output and the upper bound for an explicitly configured `max_tokens` |
+| `llm.context_window_tokens` | `null` | Model context window resolved locally from LiteLLM; set an integer for an unknown/private deployment alias |
+| `llm.output_reserve_tokens` | `null` | Output reservation derived from the resolved model; set an integer to override or cap explicit `max_tokens` |
 | `llm.rate_limits.max_concurrency` | `6` | Maximum simultaneous documentation-model requests |
 | `llm.rate_limits.requests_per_minute` | `60` | Rolling request limit for the documentation model |
 | `llm.rate_limits.tokens_per_minute` | `250000` | Rolling estimated input-token limit for the documentation model |

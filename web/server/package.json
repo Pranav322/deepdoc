@@ -1,0 +1,16 @@
+{
+  "name": "deepdoc-server",
+  "version": "1.0.0",
+  "type": "commonjs",
+  "private": true,
+  "description": "DeepDoc hosted doc generation server",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node --watch index.js"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2"
+  }
+}

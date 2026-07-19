@@ -10,6 +10,7 @@ from typing import Any
 from ..config import resolve_api_key
 from ..telemetry import RunTelemetry
 from .litellm_compat import prepare_litellm
+from .rate_limit import ProviderRateLimiter
 
 
 class LLMClient:
@@ -37,6 +38,14 @@ class LLMClient:
             "estimated_prompt_tokens": 0,
         }
         self._usage_lock = threading.Lock()
+        rate_limits = llm_cfg.get("rate_limits", {}) or {}
+        self.adaptive_backoff = bool(rate_limits.get("adaptive_backoff", True))
+        self.rate_limiter = ProviderRateLimiter(
+            max_concurrency=rate_limits.get("max_concurrency", 6),
+            requests_per_minute=rate_limits.get("requests_per_minute", 60),
+            tokens_per_minute=rate_limits.get("tokens_per_minute", 250000),
+            telemetry=telemetry,
+        )
 
         provider = (llm_cfg.get("provider") or "").strip()
         model = (self.model or "").strip()
@@ -162,7 +171,9 @@ class LLMClient:
             if self.api_key:
                 kwargs["api_key"] = self.api_key
 
-            response = litellm.completion(**kwargs)
+            estimated_tokens = max(1, (len(system or "") + len(user or "")) // 4)
+            with self.rate_limiter.slot(estimated_tokens):
+                response = litellm.completion(**kwargs)
             return response.choices[0].message.content or ""
 
         except ImportError:
@@ -172,6 +183,7 @@ class LLMClient:
             )
         except Exception as e:
             error_type = type(e).__name__
+            self._apply_provider_cooldown(e)
             raise RuntimeError(f"LLM request failed: {e}") from e
         finally:
             self._record_telemetry(
@@ -210,18 +222,21 @@ class LLMClient:
             if self.api_key:
                 kwargs["api_key"] = self.api_key
 
-            for chunk in litellm.completion(**kwargs):
-                final_chunk = chunk
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    response_chars += len(delta.content)
-                    yield delta.content
+            estimated_tokens = max(1, (len(system or "") + len(user or "")) // 4)
+            with self.rate_limiter.slot(estimated_tokens):
+                for chunk in litellm.completion(**kwargs):
+                    final_chunk = chunk
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        response_chars += len(delta.content)
+                        yield delta.content
 
         except ImportError:
             error_type = "ImportError"
             raise RuntimeError("litellm not installed. Run: pip install litellm")
         except Exception as exc:
             error_type = type(exc).__name__
+            self._apply_provider_cooldown(exc)
             raise
         finally:
             self._record_telemetry(
@@ -240,6 +255,23 @@ class LLMClient:
             self.usage["calls"] += 1
             self.usage["prompt_chars"] += prompt_chars
             self.usage["estimated_prompt_tokens"] += max(1, prompt_chars // 4)
+
+    def _apply_provider_cooldown(self, error: Exception) -> None:
+        if not self.adaptive_backoff:
+            return
+        text = f"{type(error).__name__}: {error}".lower()
+        if "ratelimit" not in text and "rate limit" not in text and "429" not in text:
+            return
+        retry_after = 3.0
+        response = getattr(error, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers:
+            raw = headers.get("Retry-After") or headers.get("retry-after")
+            try:
+                retry_after = max(retry_after, float(raw))
+            except (TypeError, ValueError):
+                pass
+        self.rate_limiter.penalize(retry_after)
 
     @staticmethod
     def _usage_value(usage: Any, key: str) -> int | None:

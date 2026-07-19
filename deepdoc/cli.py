@@ -158,7 +158,22 @@ def _autoload_repo_env(start: Path) -> Path | None:
     is_flag=True,
     help="Enable code-and-artifact chatbot scaffolding and indexing in generated repos.",
 )
-def init(name, description, provider, model, output_dir, with_chatbot):
+@click.option("--llm-max-concurrency", type=click.IntRange(1), default=None)
+@click.option("--llm-rpm", type=click.IntRange(1), default=None)
+@click.option("--llm-tpm", type=click.IntRange(1), default=None)
+@click.option("--context-window-tokens", type=click.IntRange(1024), default=None)
+def init(
+    name,
+    description,
+    provider,
+    model,
+    output_dir,
+    with_chatbot,
+    llm_max_concurrency,
+    llm_rpm,
+    llm_tpm,
+    context_window_tokens,
+):
     """Initialize DeepDoc in the current repository.
 
     This command creates `.deepdoc.yaml` and fills in sensible defaults for the chosen provider.
@@ -205,12 +220,41 @@ def init(name, description, provider, model, output_dir, with_chatbot):
     default_model, default_key_env = provider_defaults.get(provider, ("", "DEEPDOC_LLM_API_KEY"))
     resolved_model = model or default_model
 
+    interactive = bool(sys.stdin.isatty())
+
+    def _limit(value, prompt: str, default: int) -> int:
+        if value is not None:
+            return int(value)
+        if interactive:
+            return int(click.prompt(prompt, type=int, default=default, show_default=True))
+        return default
+
+    llm_max_concurrency = _limit(
+        llm_max_concurrency,
+        "Maximum concurrent documentation LLM requests",
+        6,
+    )
+    llm_rpm = _limit(llm_rpm, "Documentation LLM requests per minute", 60)
+    llm_tpm = _limit(llm_tpm, "Documentation LLM tokens per minute", 250000)
+    context_window_tokens = _limit(
+        context_window_tokens,
+        "Model context window in tokens",
+        128000,
+    )
+
     cfg = dict(DEFAULT_CONFIG)
     cfg["project_name"] = name or cwd.name
     cfg["description"] = description
     cfg["output_dir"] = output_dir
     cfg["llm"]["provider"] = provider
     cfg["llm"]["model"] = resolved_model
+    cfg["llm"]["context_window_tokens"] = context_window_tokens
+    cfg["llm"]["rate_limits"] = {
+        "max_concurrency": llm_max_concurrency,
+        "requests_per_minute": llm_rpm,
+        "tokens_per_minute": llm_tpm,
+        "adaptive_backoff": True,
+    }
     if default_key_env:
         cfg["llm"]["api_key_env"] = default_key_env
     if provider == "ollama":

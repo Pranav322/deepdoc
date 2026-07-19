@@ -31,6 +31,17 @@ The Next.js scaffold writer is not a primary bottleneck. Scanning, LLM prefill
 and response time, repeated hashing/serialization, and chatbot index rewriting
 are much stronger candidates.
 
+### Measured Baseline — backend-tss-api_v2
+
+An isolated run at source commit `a8469828` using Azure
+`DeepSeek-V4-Flash` completed in 820.82 seconds: planning 301.91s and page
+generation 505.08s. It planned 38 pages, generated 37, and wrote one stub after
+an Azure rate-limit failure. Telemetry recorded 61 LLM calls, 2,212,671 prompt
+tokens, 301,976 completion tokens, five failed calls, four retries, and 17.45s
+of retry backoff. This baseline directly motivated the shared provider limiter;
+future comparisons must use the same source/model/config or state differences
+explicitly.
+
 ## Status of Findings from the Previous Audit
 
 ### Completed or retired

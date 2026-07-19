@@ -667,6 +667,11 @@ site:
 | `llm.base_url` | `null` | Custom endpoint URL (required for Ollama, optional for Azure) |
 | `llm.max_tokens` | `null` | Max output tokens per LLM call. `null` = no cap (recommended). Set explicitly if your provider requires it (e.g. some Azure deployments). Typical values: `4096` for shorter pages, `8192`–`16384` for detailed docs |
 | `llm.temperature` | `0.2` | LLM sampling temperature |
+| `llm.context_window_tokens` | `128000` | Model context-window size used for evidence budgeting; `deepdoc init` lets interactive users accept or override it |
+| `llm.rate_limits.max_concurrency` | `6` | Maximum simultaneous documentation-model requests |
+| `llm.rate_limits.requests_per_minute` | `60` | Rolling request limit for the documentation model |
+| `llm.rate_limits.tokens_per_minute` | `250000` | Rolling estimated input-token limit for the documentation model |
+| `llm.rate_limits.adaptive_backoff` | `true` | Share provider `429`/`Retry-After` cooldown across workers |
 | **Generation** | | |
 | `generation_mode` | `feature_buckets` | Documentation generation mode |
 | `max_pages` | `0` | Max pages to generate. `0` = no cap |
@@ -676,8 +681,8 @@ site:
 | `include_endpoint_pages` | `true` | Generate endpoint documentation pages |
 | `include_integration_pages` | `true` | Generate integration documentation pages |
 | **Parallelism** | | |
-| `max_parallel_workers` | `6` | Concurrent LLM calls. Increase for Azure PTU or high-TPM deployments |
-| `batch_size` | `10` | Pages per batch before rate-limit pause |
+| `max_parallel_workers` | `6` | Generation executor size; actual hosted request concurrency is also bounded by `llm.rate_limits.max_concurrency` |
+| `batch_size` | `10` | Submission-throttle cadence retained for compatibility; generation uses one rolling executor, not batch barriers |
 | **File filters** | | |
 | `languages` | `[python, javascript, typescript, go, php, vue]` | Languages to parse |
 | `include` | `[]` | Glob patterns to include (empty = everything) |

@@ -31,6 +31,10 @@ The automated release workflow reads the section that matches the version in
 - **Rolling page generation.** A single bounded executor now serves the entire
   page plan, allowing free workers to take the next page without waiting for a
   fixed batch's slowest request; result order remains deterministic.
+- **Provider-neutral request limiting.** Documentation LLM calls now share
+  configurable concurrency, rolling RPM and estimated TPM limits plus adaptive
+  `429`/`Retry-After` cooldown. Interactive `deepdoc init` displays defaults;
+  non-interactive setup uses safe defaults or explicit flags without blocking.
 
 ## [0.4.2] - 2026-06-23
 

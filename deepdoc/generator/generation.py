@@ -879,6 +879,17 @@ class BucketGenerationEngine:
                     if telemetry is not None:
                         telemetry.counter("llm.retries")
                         telemetry.counter("llm.backoff_seconds", wait)
+                    rate_limiter = getattr(
+                        getattr(self, "llm", None),
+                        "rate_limiter",
+                        None,
+                    )
+                    if rate_limiter is not None and getattr(
+                        getattr(self, "llm", None),
+                        "adaptive_backoff",
+                        True,
+                    ):
+                        rate_limiter.penalize(wait)
                     console.print(
                         f"    [yellow]⏳ Transient error ({evidence.bucket.title}) — "
                         f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"

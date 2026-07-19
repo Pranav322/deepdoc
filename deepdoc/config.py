@@ -48,6 +48,13 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "base_url": None,
         "max_tokens": None,
         "temperature": 0.2,
+        "context_window_tokens": 128000,
+        "rate_limits": {
+            "max_concurrency": 6,
+            "requests_per_minute": 60,
+            "tokens_per_minute": 250000,
+            "adaptive_backoff": True,
+        },
     },
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
     "include": [],  # glob patterns — empty = everything
@@ -187,6 +194,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "max_tokens": 24000,
             "continuation_retries": 2,
             "continuation_context_chars": 12000,
+            "rate_limits": {
+                "max_concurrency": 4,
+                "requests_per_minute": 60,
+                "tokens_per_minute": 100000,
+                "adaptive_backoff": True,
+            },
         },
         "embeddings": {
             "backend": "fastembed",
@@ -200,6 +213,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "base_url": "",
             "api_version": "",
             "batch_size": 24,
+            "rate_limits": {
+                "mode": "auto",
+                "hosted_max_concurrency": 2,
+                "hosted_requests_per_minute": 60,
+                "hosted_tokens_per_minute": 1000000,
+            },
         },
         "vector_store": {
             "kind": "faiss",

@@ -447,6 +447,61 @@ class SmartUpdater:
             chatbot_failed=bool(result.get("chatbot_error")),
         )
 
+    def _sync_chatbot_incremental(
+        self,
+        *,
+        plan: DocPlan,
+        scan: RepoScan,
+        changed_files: list[str],
+        deleted_files: list[str],
+        changed_doc_slugs: list[str],
+    ) -> dict[str, Any]:
+        """Sync chatbot state without allowing a scoped scan to truncate recovery."""
+        from .chatbot.indexer import ChatbotIndexer
+
+        indexer = ChatbotIndexer(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
+        recovery_corpora = (
+            indexer.source_backed_corpora_needing_rebuild()
+            if scan.scan_scope
+            else []
+        )
+        chatbot_scan = scan
+        if recovery_corpora:
+            from .planner import scan_repo as bucket_scan_repo
+
+            console.print(
+                "[dim]Chatbot recovery requires a complete source scan: "
+                f"{', '.join(recovery_corpora)}[/dim]"
+            )
+            self.telemetry.counter("update.chatbot_full_scan_for_recovery")
+            chatbot_scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+            )
+            if "relationship" in recovery_corpora:
+                from .call_graph import build_call_graph
+
+                chatbot_scan.call_graph = build_call_graph(
+                    chatbot_scan.parsed_files,
+                    chatbot_scan.file_contents,
+                    chatbot_scan.api_endpoints,
+                )
+
+        return indexer.sync_incremental(
+            plan=plan,
+            scan=chatbot_scan,
+            output_dir=self.output_dir,
+            changed_files=changed_files,
+            deleted_files=deleted_files,
+            changed_doc_slugs=changed_doc_slugs,
+            has_openapi=chatbot_scan.has_openapi,
+        )
+
     def _handle_deleted_files(
         self, plan: DocPlan, change_set: ChangeSet
     ) -> DocPlan:
@@ -590,16 +645,9 @@ class SmartUpdater:
         refreshed_corpora: list[str] = []
         if chatbot_enabled(self.cfg):
             try:
-                from .chatbot.indexer import ChatbotIndexer
-
-                chatbot_stats = ChatbotIndexer(
-                    self.repo_root,
-                    self.cfg,
-                    telemetry=self.telemetry,
-                ).sync_incremental(
+                chatbot_stats = self._sync_chatbot_incremental(
                     plan=merged_plan,
                     scan=scan,
-                    output_dir=self.output_dir,
                     changed_files=(
                         change_set.changed_files
                         + change_set.new_files
@@ -611,7 +659,6 @@ class SmartUpdater:
                     + change_set.deleted_artifact_files
                     + change_set.deleted_doc_paths,
                     changed_doc_slugs=updated_slugs,
-                    has_openapi=scan.has_openapi,
                 )
                 refreshed_corpora = list(chatbot_stats.get("corpora_refreshed", []))
             except Exception as e:
@@ -689,16 +736,9 @@ class SmartUpdater:
         )
         if chatbot_enabled(self.cfg):
             try:
-                from .chatbot.indexer import ChatbotIndexer
-
-                chatbot_stats = ChatbotIndexer(
-                    self.repo_root,
-                    self.cfg,
-                    telemetry=self.telemetry,
-                ).sync_incremental(
+                chatbot_stats = self._sync_chatbot_incremental(
                     plan=plan,
                     scan=scan,
-                    output_dir=self.output_dir,
                     changed_files=(
                         change_set.changed_files
                         + change_set.new_files
@@ -710,7 +750,6 @@ class SmartUpdater:
                     + change_set.deleted_artifact_files
                     + change_set.deleted_doc_paths,
                     changed_doc_slugs=updated_slugs,
-                    has_openapi=scan.has_openapi,
                 )
             except Exception as e:
                 chatbot_ok = False

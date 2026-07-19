@@ -47,6 +47,13 @@ from .types import ChunkRecord
 
 console = Console()
 CHATBOT_CORPUS_SCHEMA_VERSION = 5
+SOURCE_BACKED_CORPORA = (
+    "code",
+    "symbol",
+    "artifact",
+    "repo_doc",
+    "relationship",
+)
 
 
 class ChatbotIndexer:
@@ -516,6 +523,14 @@ class ChatbotIndexer:
     def _corpus_needs_rebuild(self, corpus: str) -> bool:
         return self._load_corpus_state(corpus)[0]
 
+    def source_backed_corpora_needing_rebuild(self) -> list[str]:
+        """Return corpora that require a complete source scan to recover safely."""
+        return [
+            corpus
+            for corpus in SOURCE_BACKED_CORPORA
+            if self._corpus_needs_rebuild(corpus)
+        ]
+
     def _load_corpus_state(
         self, corpus: str
     ) -> tuple[bool, list[ChunkRecord], Any]:
@@ -557,14 +572,7 @@ class ChatbotIndexer:
         corpus: str,
         records: list[ChunkRecord],
     ) -> bool:
-        source_backed_corpora = {
-            "code",
-            "symbol",
-            "artifact",
-            "repo_doc",
-            "relationship",
-        }
-        if corpus not in source_backed_corpora:
+        if corpus not in SOURCE_BACKED_CORPORA:
             return False
 
         max_file_bytes = int(

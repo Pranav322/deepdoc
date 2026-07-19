@@ -268,6 +268,71 @@ def test_execution_scan_falls_back_once_when_semantic_scan_missing(tmp_repo) -> 
     )
 
 
+def test_scoped_chatbot_recovery_uses_complete_scan(tmp_repo) -> None:
+    updater = _make_updater(tmp_repo)
+    scoped_scan = _minimal_scan()
+    scoped_scan.scan_scope = ["src/auth.py"]
+    full_scan = _minimal_scan()
+    indexer = MagicMock()
+    indexer.source_backed_corpora_needing_rebuild.return_value = [
+        "code",
+        "relationship",
+    ]
+    indexer.sync_incremental.return_value = {"corpora_refreshed": ["code"]}
+
+    with (
+        patch("deepdoc.chatbot.indexer.ChatbotIndexer", return_value=indexer),
+        patch("deepdoc.planner.scan_repo", return_value=full_scan) as scan_repo,
+        patch("deepdoc.call_graph.build_call_graph", return_value=MagicMock()) as graph,
+    ):
+        result = updater._sync_chatbot_incremental(
+            plan=MagicMock(),
+            scan=scoped_scan,
+            changed_files=["src/auth.py"],
+            deleted_files=[],
+            changed_doc_slugs=[],
+        )
+
+    assert result == {"corpora_refreshed": ["code"]}
+    scan_repo.assert_called_once_with(
+        tmp_repo,
+        updater.cfg,
+        telemetry=updater.telemetry,
+    )
+    graph.assert_called_once_with(
+        full_scan.parsed_files,
+        full_scan.file_contents,
+        full_scan.api_endpoints,
+    )
+    assert indexer.sync_incremental.call_args.kwargs["scan"] is full_scan
+    counters = updater.telemetry.snapshot("success")["counters"]
+    assert counters["update.chatbot_full_scan_for_recovery"] == 1
+
+
+def test_healthy_scoped_chatbot_sync_keeps_scoped_scan(tmp_repo) -> None:
+    updater = _make_updater(tmp_repo)
+    scoped_scan = _minimal_scan()
+    scoped_scan.scan_scope = ["src/auth.py"]
+    indexer = MagicMock()
+    indexer.source_backed_corpora_needing_rebuild.return_value = []
+    indexer.sync_incremental.return_value = {"corpora_refreshed": []}
+
+    with (
+        patch("deepdoc.chatbot.indexer.ChatbotIndexer", return_value=indexer),
+        patch("deepdoc.planner.scan_repo") as scan_repo,
+    ):
+        updater._sync_chatbot_incremental(
+            plan=MagicMock(),
+            scan=scoped_scan,
+            changed_files=["src/auth.py"],
+            deleted_files=[],
+            changed_doc_slugs=[],
+        )
+
+    scan_repo.assert_not_called()
+    assert indexer.sync_incremental.call_args.kwargs["scan"] is scoped_scan
+
+
 def test_incremental_update_only_regenerates_stale(tmp_repo_with_plan):
     """Edit 1 file → only its bucket regenerated, not the other."""
     root, plan = tmp_repo_with_plan

@@ -132,11 +132,23 @@ class EvidenceAssembler:
         self.plan = plan
         self.cfg = cfg
         llm_cfg = cfg.get("llm", {}) or {}
-        raw_context = llm_cfg.get("context_window_tokens")
-        context_tokens = max(4096, int(raw_context) if raw_context is not None else 128000)
-        raw_output_reserve = llm_cfg.get("output_reserve_tokens")
+        def _token_value(value: Any, default: int) -> int:
+            if value is None or (
+                isinstance(value, str)
+                and value.strip().lower() in {"", "auto", "none", "null"}
+            ):
+                return default
+            return int(value)
+
+        context_tokens = max(
+            4096,
+            _token_value(llm_cfg.get("context_window_tokens"), 128000),
+        )
         output_reserve = min(
-            max(1024, int(raw_output_reserve) if raw_output_reserve is not None else 16000),
+            max(
+                1024,
+                _token_value(llm_cfg.get("output_reserve_tokens"), 16000),
+            ),
             context_tokens // 2,
         )
         safety_tokens = max(1024, context_tokens // 20)

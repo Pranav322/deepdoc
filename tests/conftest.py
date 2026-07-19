@@ -11,6 +11,7 @@ import json
 from pathlib import Path
 import subprocess
 from typing import Any
+from types import SimpleNamespace
 
 import pytest
 
@@ -21,6 +22,7 @@ from deepdoc.persistence_v2 import (
     save_sync_state,
 )
 from deepdoc.planner import DocBucket, DocPlan
+from deepdoc.llm import ModelCapabilities
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -40,6 +42,20 @@ def _run_git(cwd: Path, *args: str) -> str:
 def _sha256_short(content: str) -> str:
     """Match the 16-char truncated SHA256 used by the ledger."""
     return hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
+
+
+def make_planner_llm() -> SimpleNamespace:
+    """Return a capability-aware LLM double for planner-only tests."""
+    return SimpleNamespace(
+        capabilities=ModelCapabilities(
+            model="test",
+            capability_model="test",
+            context_window_tokens=128000,
+            max_output_tokens=16000,
+            source="test",
+        ),
+        output_reserve_tokens=16000,
+    )
 
 
 def make_bucket(

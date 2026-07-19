@@ -34,23 +34,6 @@ class LLMClient:
         self.telemetry = telemetry
         llm_cfg = cfg.get("llm", {})
         self.model = llm_cfg.get("model", "")
-        self.capabilities = resolve_completion_capabilities(self.model, llm_cfg)
-        self.prompt_budget = build_prompt_budget(
-            self.capabilities,
-            output_reserve_tokens=llm_cfg.get("output_reserve_tokens"),
-        )
-        self.context_window_tokens = self.capabilities.context_window_tokens
-        self.output_reserve_tokens = self.prompt_budget.output_reserve_tokens
-        configured_max_tokens = llm_cfg.get("max_tokens")
-        self.max_tokens = (
-            min(
-                max(1, int(configured_max_tokens)),
-                self.output_reserve_tokens,
-                self.capabilities.max_output_tokens or self.output_reserve_tokens,
-            )
-            if configured_max_tokens is not None
-            else None
-        )
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = str(llm_cfg.get("base_url") or "") or None
         # YAML parses bare dates like 2024-12-01 as datetime.date — coerce to str
@@ -106,6 +89,24 @@ class LLMClient:
                 "║    https://docs.litellm.ai/docs/providers                            ║\n"
                 "╚══════════════════════════════════════════════════════════════════════╝\n"
             )
+
+        self.capabilities = resolve_completion_capabilities(self.model, llm_cfg)
+        self.prompt_budget = build_prompt_budget(
+            self.capabilities,
+            output_reserve_tokens=llm_cfg.get("output_reserve_tokens"),
+        )
+        self.context_window_tokens = self.capabilities.context_window_tokens
+        self.output_reserve_tokens = self.prompt_budget.output_reserve_tokens
+        configured_max_tokens = llm_cfg.get("max_tokens")
+        self.max_tokens = (
+            min(
+                max(1, int(configured_max_tokens)),
+                self.output_reserve_tokens,
+                self.capabilities.max_output_tokens or self.output_reserve_tokens,
+            )
+            if configured_max_tokens is not None
+            else None
+        )
 
         is_azure = provider.lower() == "azure" or model.lower().startswith("azure/")
         if is_azure:

@@ -125,28 +125,34 @@ class PageGenerator:
 
         # Keep source proof mandatory; supplemental categories are fitted later.
         full_source = evidence.source_context
-        optional_contexts = [
+        optional_specs = [
             (
                 "compressed_cards",
                 "\n\n## Compressed File Coverage\n"
                 "These files were not dropped. They are represented by derived evidence "
-                "cards and still count as authoritative coverage inputs.\n\n"
-                + evidence.compressed_cards_context,
+                "cards and still count as authoritative coverage inputs.\n\n",
+                evidence.compressed_cards_context,
             ),
-            ("cluster", "\n\n## Giant File Clusters\n" + evidence.cluster_context),
-            ("integration", "\n\n## Integration Context\n" + evidence.integration_context),
-            ("database", "\n\n## Database Schema\n" + evidence.database_context),
-            ("runtime", "\n\n## Runtime & Background Jobs\n" + evidence.runtime_context),
-            ("artifact", "\n\n## Artifacts\n" + evidence.artifact_context),
-            ("graph", "\n\n## Dependency Graph\n" + evidence.graph_context),
-            ("cross_reference", "\n\n" + evidence.cross_ref_context),
-            ("plan_summary", "\n\n## Repository Map\n" + evidence.plan_summary_context),
-            ("repo_docs", "\n\n" + evidence.repo_docs_context),
-            ("helpers", "\n\n" + evidence.helper_context),
+            ("cluster", "\n\n## Giant File Clusters\n", evidence.cluster_context),
+            ("integration", "\n\n## Integration Context\n", evidence.integration_context),
+            ("database", "\n\n## Database Schema\n", evidence.database_context),
+            ("runtime", "\n\n## Runtime & Background Jobs\n", evidence.runtime_context),
+            ("artifact", "\n\n## Artifacts\n", evidence.artifact_context),
+            ("graph", "\n\n## Dependency Graph\n", evidence.graph_context),
+            ("cross_reference", "\n\n", evidence.cross_ref_context),
+            ("plan_summary", "\n\n## Repository Map\n", evidence.plan_summary_context),
+            ("repo_docs", "\n\n", evidence.repo_docs_context),
+            ("helpers", "\n\n", evidence.helper_context),
             (
                 "config_environment",
-                "\n\n## Config & Environment Evidence\n" + evidence.config_env_context,
+                "\n\n## Config & Environment Evidence\n",
+                evidence.config_env_context,
             ),
+        ]
+        optional_contexts = [
+            (name, header + body)
+            for name, header, body in optional_specs
+            if body
         ]
         page_contract = (bucket.generation_hints or {}).get("page_contract", {})
         if page_contract:

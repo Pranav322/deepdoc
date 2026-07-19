@@ -9,23 +9,10 @@ from unittest.mock import MagicMock, patch
 
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.generator import BucketGenerationEngine, GenerationResult
-from deepdoc.llm import ModelCapabilities
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import DocBucket, DocPlan, RepoScan, run_phase2_scans
 from deepdoc.planner.bucket_refinement import _decompose_buckets
-
-
-def _planner_llm() -> MagicMock:
-    llm = MagicMock()
-    llm.capabilities = ModelCapabilities(
-        model="test",
-        capability_model="test",
-        context_window_tokens=128000,
-        max_output_tokens=16000,
-        source="test",
-    )
-    llm.output_reserve_tokens = 16000
-    return llm
+from .conftest import make_planner_llm
 
 
 def _make_scan(
@@ -268,7 +255,7 @@ def test_decompose_parallelizes_llm_calls():
     cfg = {"decompose_threshold": 7, "max_parallel_workers": 3}
 
     with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
-        _decompose_buckets(plan, scan, cfg, _planner_llm(), {})
+        _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     # Should have called LLM 3 times (one per bucket)
     assert len(call_times) == 3
@@ -302,7 +289,7 @@ def test_decompose_no_candidates_returns_plan_unchanged():
 
     # Should not call LLM at all
     with patch("deepdoc.planner.heuristics._llm_step") as mock_llm:
-        result = _decompose_buckets(plan, scan, cfg, _planner_llm(), {})
+        result = _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     mock_llm.assert_not_called()
     assert len(result.buckets) == 1
@@ -396,7 +383,7 @@ def test_decompose_second_pass_fires_for_oversized_sub_buckets():
     cfg = {"decompose_threshold": 7, "max_files_per_bucket": 25, "max_parallel_workers": 2}
 
     with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
-        result = _decompose_buckets(plan, scan, cfg, _planner_llm(), {})
+        result = _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     # LLM called twice: once for first pass, once for second pass on oversized bucket
     assert call_count["n"] == 2
@@ -460,7 +447,7 @@ def test_decompose_second_pass_accepts_oversized_if_llm_returns_none():
     cfg = {"decompose_threshold": 7, "max_files_per_bucket": 25}
 
     with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
-        result = _decompose_buckets(plan, scan, cfg, _planner_llm(), {})
+        result = _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     # Should not crash; the oversized bucket is accepted with a warning
     assert result is not None

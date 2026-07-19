@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 from deepdoc.benchmark_v2 import score_plan
 from deepdoc.generator import PageValidator
-from deepdoc.llm import ModelCapabilities
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.persistence_v2 import load_plan, save_plan
 from deepdoc.planner import DocBucket, DocPlan, RepoScan, scan_repo
@@ -27,19 +26,7 @@ from deepdoc.planner.nav_shaping import _shape_plan_nav
 from deepdoc.planner.specializations import _ensure_database_runtime_and_interface_buckets
 from deepdoc.planner.topology import TopologyCluster, TopologyMap
 from deepdoc.prompts import PROMPT_STYLE_TEMPLATES
-
-
-def _planner_llm():
-    return SimpleNamespace(
-        capabilities=ModelCapabilities(
-            model="test",
-            capability_model="test",
-            context_window_tokens=128000,
-            max_output_tokens=16000,
-            source="test",
-        ),
-        output_reserve_tokens=16000,
-    )
+from .conftest import make_planner_llm
 
 
 def _make_scan(
@@ -201,7 +188,7 @@ def test_decompose_buckets_preserves_parent_overview_and_dedupes_slugs(
         plan,
         scan,
         {"decompose_threshold": 2},
-        llm=_planner_llm(),
+        llm=make_planner_llm(),
         repo_profile={"primary_type": "research_training"},
     )
 
@@ -1643,7 +1630,7 @@ def test_decompose_respects_max_files_per_bucket_config(monkeypatch) -> None:
         plan,
         scan,
         {"decompose_threshold": 7, "max_files_per_bucket": 25},
-        llm=_planner_llm(),
+        llm=make_planner_llm(),
         repo_profile={},
     )
 

@@ -86,21 +86,21 @@ def resolve_repo_endpoints(
     has_django = False
     for endpoint in endpoints:
         framework = (endpoint.framework or "").lower()
-        if framework == "express" and js_index:
+        if framework == "express" and js_index is not None:
             resolved.extend(_resolve_express_endpoint(repo_root, endpoint, js_index))
-        elif framework == "fastify" and js_index:
+        elif framework == "fastify" and js_index is not None:
             resolved.extend(_resolve_fastify_endpoint(repo_root, endpoint, js_index))
-        elif framework == "falcon" and py_index:
+        elif framework == "falcon" and py_index is not None:
             resolved.extend(
                 _resolve_falcon_endpoint(repo_root, endpoint, file_contents, py_index)
             )
-        elif framework == "go" and go_index:
+        elif framework == "go" and go_index is not None:
             resolved.extend(_resolve_go_endpoint(repo_root, endpoint, go_index))
         elif framework == "django":
             has_django = True
         else:
             resolved.append(_normalize_endpoint(repo_root, endpoint))
-    if has_django and py_index:
+    if has_django and py_index is not None:
         resolved.extend(
             _resolve_django_repo_endpoints(repo_root, file_contents, py_index)
         )

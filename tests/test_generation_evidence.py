@@ -318,6 +318,7 @@ def test_page_generator_omits_optional_context_before_required_evidence(tmp_path
     assert "integration" in evidence.prompt_omitted_contexts
     prompt = llm.complete.call_args.args[1]
     assert "def checkout" in prompt
+    assert "## Database Schema" not in prompt
 
 
 def test_flow_context_is_injected_and_validated(tmp_path: Path) -> None:

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 import hashlib
 import json
+import math
 from typing import Any
 
 from ..llm.litellm_compat import prepare_litellm
@@ -130,7 +131,8 @@ def _count_tokens(text: str, capabilities: EmbeddingCapabilities) -> int:
             ),
         )
     except Exception:
-        return len(text.encode("utf-8"))
+        # Conservative fallback when no model tokenizer is available.
+        return max(1, math.ceil(len(text) / 3))
 
 
 def fit_embedding_text(text: str, capabilities: EmbeddingCapabilities) -> str:
@@ -151,9 +153,8 @@ def fit_embedding_text(text: str, capabilities: EmbeddingCapabilities) -> str:
         else:
             high = middle - 1
     if not best:
-        raise EmbeddingCapabilityError(
-            "Embedding model input capacity is too small to fit the chunk header."
-        )
+        char_budget = max(1, capabilities.max_input_tokens * 3 - len(marker))
+        return text[:char_budget].rstrip() + marker
     return best
 
 
@@ -173,7 +174,9 @@ def fit_embedding_records(
                 record,
                 text=text,
                 chunk_hash=chunk_hash,
-                chunk_id=record.chunk_id.replace(record.chunk_hash, chunk_hash),
+                chunk_id=record.chunk_id.replace(
+                    record.chunk_hash[:8], chunk_hash[:8]
+                ),
             )
         )
     return fitted

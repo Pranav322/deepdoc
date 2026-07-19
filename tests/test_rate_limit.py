@@ -88,8 +88,12 @@ def test_large_single_prompt_does_not_deadlock_tpm_limit() -> None:
         window_seconds=1,
     )
 
-    with limiter.slot(1000):
-        pass
+    def acquire() -> None:
+        with limiter.slot(1000):
+            pass
+
+    with ThreadPoolExecutor(max_workers=1) as executor:
+        executor.submit(acquire).result(timeout=2)
 
 
 def test_init_persists_explicit_provider_limits(tmp_path: Path, monkeypatch) -> None:
@@ -126,12 +130,8 @@ def test_init_noninteractive_uses_safe_limit_defaults(tmp_path: Path, monkeypatc
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["init", "--provider", "ollama"])
 
-    assert result.exit_code == 0
-    cfg = yaml.safe_load((tmp_path / ".deepdoc.yaml").read_text(encoding="utf-8"))
-    assert cfg["llm"]["context_window_tokens"] is None
-    assert cfg["llm"]["rate_limits"]["max_concurrency"] == 6
-    assert cfg["llm"]["rate_limits"]["requests_per_minute"] == 60
-    assert cfg["llm"]["rate_limits"]["tokens_per_minute"] == 250000
+    assert result.exit_code != 0
+    assert "--context-window-tokens" in result.output
 
 
 def test_llm_output_cap_is_clamped_to_context_reserve() -> None:
@@ -148,6 +148,11 @@ def test_llm_output_cap_is_clamped_to_context_reserve() -> None:
     )
 
     assert client.max_tokens == 8000
+
+
+def test_unconfigured_llm_preserves_friendly_setup_error() -> None:
+    with pytest.raises(ValueError, match="LLM NOT CONFIGURED"):
+        LLMClient({"llm": {}})
 
 
 def test_llm_null_output_cap_uses_provider_default(monkeypatch) -> None:

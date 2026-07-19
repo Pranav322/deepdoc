@@ -22,6 +22,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import CONFIG_FILE, DEFAULT_CONFIG, find_config, load_config, save_config
+from .llm import ModelCapabilityError, resolve_completion_capabilities
 
 console = Console()
 CONTEXT_SETTINGS = {
@@ -211,12 +212,12 @@ def init(
 
     # Provider defaults
     provider_defaults = {
-        "anthropic": ("claude-3-5-sonnet-20241022", "ANTHROPIC_API_KEY"),
+        "anthropic": ("claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
         "openai": ("gpt-4o", "OPENAI_API_KEY"),
         "ollama": ("ollama/llama3.2", None),
         "azure": ("azure/gpt-4o", "AZURE_API_KEY"),
-        "google": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
-        "gemini": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
+        "google": ("gemini/gemini-2.0-flash", "GEMINI_API_KEY"),
+        "gemini": ("gemini/gemini-2.0-flash", "GEMINI_API_KEY"),
     }
     default_model, default_key_env = provider_defaults.get(provider, ("", "DEEPDOC_LLM_API_KEY"))
     resolved_model = model or default_model
@@ -244,6 +245,21 @@ def init(
             show_default=False,
         ).strip()
         context_window_tokens = int(raw_context) if raw_context else None
+
+    if context_window_tokens is None:
+        try:
+            resolve_completion_capabilities(resolved_model, {})
+        except ModelCapabilityError as exc:
+            if interactive:
+                context_window_tokens = click.prompt(
+                    "LiteLLM could not resolve this model. Context window in tokens",
+                    type=click.IntRange(1024),
+                )
+            else:
+                raise click.UsageError(
+                    f"{exc}\n\nPass --context-window-tokens for this model, for example:\n"
+                    f"  deepdoc init --provider {provider} --context-window-tokens 32768"
+                ) from exc
 
     cfg = deepcopy(DEFAULT_CONFIG)
     cfg["project_name"] = name or cwd.name

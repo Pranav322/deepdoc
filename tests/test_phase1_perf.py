@@ -27,9 +27,9 @@ def test_parse_file_uses_provided_content_and_skips_disk_read(tmp_path: Path) ->
     src = tmp_path / "lib.py"
     src.write_text("def hello():\n    return 'world'\n", encoding="utf-8")
 
-    # Delete the file so any disk read would fail
-    parsed = parse_file(src, content="def hello():\n    return 'world'\n")
+    # Delete the file first so any disk read would fail
     src.unlink()
+    parsed = parse_file(src, content="def hello():\n    return 'world'\n")
 
     assert parsed is not None
     assert parsed.language == "python"
@@ -119,7 +119,7 @@ def test_evidence_reads_from_file_contents_cache(tmp_path: Path) -> None:
         owned_files=["app.py"],
     )
     plan = DocPlan(buckets=[bucket], nav_structure={}, skipped_files=[])
-    cfg = {"source_budget": 60_000}
+    cfg = {"source_context_budget": 60_000}
 
     assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
 
@@ -163,7 +163,7 @@ def test_evidence_falls_back_to_disk_when_cache_miss(tmp_path: Path) -> None:
         owned_files=["fallback.py"],
     )
     plan = DocPlan(buckets=[bucket], nav_structure={}, skipped_files=[])
-    cfg = {"source_budget": 60_000}
+    cfg = {"source_context_budget": 60_000}
 
     assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
 
@@ -366,7 +366,7 @@ def test_generation_backoff_is_capped() -> None:
     with patch.object(generation_mod, "MAX_RETRIES", 8), patch(
         "time.sleep", side_effect=sleeps.append
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             engine._call_with_retry(fake_evidence, "", "", "")
 
     assert sleeps, "retry loop never slept — test isn't exercising the backoff path"
@@ -389,7 +389,7 @@ def test_pipeline_backoff_is_capped() -> None:
     with patch.object(pipeline_mod, "MAX_RETRIES", 8), patch(
         "time.sleep", side_effect=sleeps.append
     ):
-        with pytest.raises(Exception):
+        with pytest.raises(RuntimeError):
             pipeline._call_llm_with_retry("some prompt")
 
     assert sleeps, "retry loop never slept — test isn't exercising the backoff path"

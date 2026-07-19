@@ -49,7 +49,15 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **OpenAPI-aware API docs** — auto-detects OpenAPI/Swagger specs and renders an interactive Swagger UI page in the generated site.
 - **Local-first Next.js + Fumadocs site** — generates a `site/` shell (Fumadocs UI, Mermaid, syntax highlighting, built-in search); `deepdoc deploy` runs `next build` and exports a static site to any host. Requires Node.js ≥18.
 
-Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider. Parses Python, JavaScript/TypeScript, Go, PHP, and Vue.
+Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider.
+
+> **Use DeepDoc for its supported stacks.** DeepDoc is built and tested for
+> Python backends using **Django, Django REST Framework, or Falcon**;
+> JavaScript/TypeScript backends using **Express, Fastify, or NestJS**;
+> **Laravel** PHP applications; and conventional **Go** services. It also
+> extracts symbols from Vue SFCs. It is deliberately **not** a generic
+> framework-agnostic documentation generator: do not rely on it for FastAPI,
+> Flask, Nuxt, or unsupported frameworks just because their files can be parsed.
 
 ---
 
@@ -1226,7 +1234,26 @@ deepdoc clean --yes    # Skip confirmation prompt
 
 ## Supported Languages & Frameworks
 
-**Parsing (tree-sitter AST + regex fallback):**
+> ## Supported Stacks Only
+>
+> **Use DeepDoc when your repository is primarily one of these targets:**
+>
+> - **Python:** Django, Django REST Framework, Falcon
+> - **JavaScript / TypeScript:** Express, Fastify, NestJS
+> - **PHP:** Laravel
+> - **Go:** conventional HTTP services and supported route helpers
+> - **Vue:** component and symbol extraction, not a standalone backend route target
+>
+> DeepDoc can parse a number of source formats, but parsing is not the same as
+> full framework support. Endpoint resolution, runtime discovery, call-graph
+> enrichment, and generated API documentation are only guaranteed for the
+> supported stacks above. **Do not adopt DeepDoc for FastAPI, Flask, Nuxt, or an
+> unlisted framework unless you are prepared to extend scanner coverage first.**
+
+### Supported Source Parsing
+
+These file types receive AST/symbol extraction. This alone does not imply
+framework-level route or runtime coverage.
 
 | Language | Extensions | Extracts |
 |----------|-----------|----------|
@@ -1237,7 +1264,7 @@ deepdoc clean --yes    # Skip confirmation prompt
 | PHP | `.php` | Functions, classes, methods, namespaces |
 | Vue | `.vue` | SFC script symbols, props/emits/slots, router/store usage |
 
-**High-confidence framework support (fixture-backed):**
+### Supported Framework Targets
 
 | Framework | Language | Proven patterns |
 |-----------|----------|-----------------|
@@ -1245,14 +1272,28 @@ deepdoc clean --yes    # Skip confirmation prompt
 | Django / DRF | Python | `path()`, `re_path()`, `@api_view`, `as_view()`, DRF routers, `@action` |
 | Express | JS/TS | Mounted routers via `app.use()`, nested prefixes, chained `route()` calls |
 | Fastify | JS/TS | Plugin `register(..., { prefix })`, shorthand methods, `route({ ... })`, schema hints |
+| NestJS | JS/TS | Decorator controllers and method routes |
 | Falcon | Python | `app.add_route()`, responder classes, imported resources, app middleware |
-| Vue | Vue SFC | Component detection, `defineProps`, `defineEmits`, `defineModel`, `defineSlots`, router/store signals |
+| Go services | Go | Conventional HTTP handlers and common route helpers |
 
-**Supported but not headline-high-confidence yet:**
+### Parser Coverage, Not A Supported Backend Target
 
 | Framework | Language | Current coverage |
 |-----------|----------|------------------|
-| Gin / Echo / Fiber | Go | Common route helpers (`GET`, `POST`, `HandleFunc`) |
+| Vue SFC | Vue | Component detection, `defineProps`, `defineEmits`, `defineModel`, `defineSlots`, router/store signals |
+| Gin / Echo / Fiber | Go | Common route helpers (`GET`, `POST`, `HandleFunc`); validate against your codebase before adoption |
+
+### Explicitly Unsupported Scan Targets
+
+| Framework | Why this matters |
+|-----------|------------------|
+| FastAPI | No supported route-resolution or scanner contract |
+| Flask | No supported route-resolution or scanner contract |
+| Nuxt | No supported route-resolution or scanner contract |
+
+If your framework is not listed under **Supported Framework Targets**, treat it
+as unsupported. Extend `deepdoc/scanner/` and route fixtures before using
+DeepDoc as the source of truth for that stack.
 
 **Runtime/background surface extraction:**
 

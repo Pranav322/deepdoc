@@ -65,7 +65,11 @@ class Manifest:
         return [str(legacy_path)] if legacy_path else []
 
     def update(self, file_path: str, content_hash: str, doc_path: str) -> None:
-        doc_paths = set(self.get_doc_paths(file_path))
+        doc_paths = (
+            set(self.get_doc_paths(file_path))
+            if self.get_hash(file_path) == content_hash
+            else set()
+        )
         if doc_path:
             doc_paths.add(doc_path)
         self._data[file_path] = {
@@ -75,6 +79,16 @@ class Manifest:
 
     def is_hash_stale(self, file_path: str, current_hash: str) -> bool:
         return self.get_hash(file_path) != current_hash
+
+    def is_doc_stale(
+        self,
+        file_path: str,
+        current_hash: str,
+        doc_path: str,
+    ) -> bool:
+        return self.is_hash_stale(file_path, current_hash) or doc_path not in set(
+            self.get_doc_paths(file_path)
+        )
 
     def is_stale(self, file_path: str, current_content: str) -> bool:
         """Returns True if the file has changed since last documentation."""

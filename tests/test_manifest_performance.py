@@ -39,7 +39,9 @@ def _scan(buckets: list[DocBucket]) -> RepoScan:
     )
 
 
-def test_manifest_reads_legacy_doc_path_and_migrates_to_all_paths(tmp_path: Path) -> None:
+def test_manifest_reads_legacy_doc_path_and_resets_ownership_on_new_hash(
+    tmp_path: Path,
+) -> None:
     output_dir = tmp_path / "docs"
     output_dir.mkdir()
     (output_dir / ".deepdoc_manifest.json").write_text(
@@ -55,7 +57,7 @@ def test_manifest_reads_legacy_doc_path_and_migrates_to_all_paths(tmp_path: Path
     stored = json.loads((output_dir / ".deepdoc_manifest.json").read_text())
     assert stored["src/auth.py"] == {
         "hash": "new",
-        "doc_paths": ["auth.md", "security.md"],
+        "doc_paths": ["security.md"],
     }
     assert not list(output_dir.glob("*.tmp"))
 
@@ -68,6 +70,136 @@ def test_manifest_doc_paths_are_deterministic(tmp_path: Path) -> None:
 
     assert manifest.get_doc_paths("src/auth.py") == ["overview.md", "security.md"]
     assert manifest.get_doc_path("src/auth.py") == "overview.md"
+
+
+def test_same_hash_migrates_legacy_path_and_accumulates_ownership(tmp_path: Path) -> None:
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+    (output_dir / ".deepdoc_manifest.json").write_text(
+        json.dumps({"src/auth.py": {"hash": "same", "doc_path": "auth.md"}}),
+        encoding="utf-8",
+    )
+    manifest = Manifest(output_dir)
+
+    manifest.update("src/auth.py", "same", "security.md")
+
+    assert manifest.get_doc_paths("src/auth.py") == ["auth.md", "security.md"]
+
+
+def test_interrupted_shared_source_keeps_unfinished_page_stale(tmp_path: Path) -> None:
+    output_dir = tmp_path / "docs"
+    output_dir.mkdir()
+    shared = "src/shared.py"
+    (output_dir / "overview.md").write_text("old overview", encoding="utf-8")
+    (output_dir / "auth.md").write_text("old auth", encoding="utf-8")
+    manifest = Manifest(output_dir)
+    manifest.update(shared, "H0", "overview.md")
+    manifest.update(shared, "H0", "auth.md")
+
+    manifest.update(shared, "H1", "overview.md")
+
+    assert manifest.is_doc_stale(shared, "H1", "overview.md") is False
+    assert manifest.is_doc_stale(shared, "H1", "auth.md") is True
+    manifest.update(shared, "H1", "auth.md")
+    assert manifest.is_doc_stale(shared, "H1", "auth.md") is False
+
+
+def test_bucket_is_stale_when_output_file_is_missing(tmp_path: Path) -> None:
+    intro = _bucket("start-here", introduction=True)
+    bucket = _bucket("auth")
+    plan = DocPlan(
+        buckets=[intro, bucket],
+        nav_structure={"Guide": ["start-here", "auth"]},
+        skipped_files=[],
+    )
+    scan = _scan(plan.buckets)
+    engine = BucketGenerationEngine(
+        repo_root=tmp_path,
+        cfg={},
+        llm=MagicMock(),
+        scan=scan,
+        plan=plan,
+        output_dir=tmp_path / "docs",
+    )
+    manifest = Manifest(engine.output_dir)
+    manifest.update("src/auth.py", scan.file_content_hashes["src/auth.py"], "auth.md")
+
+    assert engine._bucket_is_stale(bucket, manifest) is True
+
+
+def test_bucket_staleness_is_page_aware_for_shared_source(tmp_path: Path) -> None:
+    intro = _bucket("start-here", introduction=True)
+    auth = _bucket("auth")
+    security = _bucket("security")
+    auth.owned_files = ["src/shared.py"]
+    security.owned_files = ["src/shared.py"]
+    plan = DocPlan(
+        buckets=[intro, auth, security],
+        nav_structure={"Guide": ["start-here", "auth", "security"]},
+        skipped_files=[],
+    )
+    scan = _scan(plan.buckets)
+    scan.file_content_hashes["src/shared.py"] = "H1"
+    engine = BucketGenerationEngine(
+        repo_root=tmp_path,
+        cfg={},
+        llm=MagicMock(),
+        scan=scan,
+        plan=plan,
+        output_dir=tmp_path / "docs",
+    )
+    engine.output_dir.mkdir()
+    (engine.output_dir / "auth.md").write_text("new auth", encoding="utf-8")
+    (engine.output_dir / "security.md").write_text("old security", encoding="utf-8")
+    manifest = Manifest(engine.output_dir)
+    manifest.update("src/shared.py", "H1", "auth.md")
+
+    assert engine._bucket_is_stale(auth, manifest) is False
+    assert engine._bucket_is_stale(security, manifest) is True
+
+
+def test_restart_generates_only_unfinished_shared_source_page(tmp_path: Path) -> None:
+    intro = _bucket("start-here", introduction=True)
+    auth = _bucket("auth")
+    security = _bucket("security")
+    auth.owned_files = ["src/shared.py"]
+    security.owned_files = ["src/shared.py"]
+    plan = DocPlan(
+        buckets=[intro, auth, security],
+        nav_structure={"Guide": ["start-here", "auth", "security"]},
+        skipped_files=[],
+    )
+    scan = _scan(plan.buckets)
+    scan.file_content_hashes["src/shared.py"] = "H1"
+    engine = BucketGenerationEngine(
+        repo_root=tmp_path,
+        cfg={"rate_limit_pause": 0},
+        llm=MagicMock(),
+        scan=scan,
+        plan=plan,
+        output_dir=tmp_path / "docs",
+    )
+    engine.output_dir.mkdir()
+    for path in ("index.md", "auth.md", "security.md"):
+        (engine.output_dir / path).write_text("existing", encoding="utf-8")
+    manifest = Manifest(engine.output_dir)
+    manifest.update(
+        "src/start-here.py",
+        scan.file_content_hashes["src/start-here.py"],
+        "index.md",
+    )
+    manifest.update("src/shared.py", "H1", "auth.md")
+    manifest.save()
+    generated: list[str] = []
+
+    def generate(bucket, _):
+        generated.append(bucket.slug)
+        return GenerationResult(bucket=bucket, content=f"# {bucket.title}\n")
+
+    engine._generate_one = generate
+    engine.generate_all(force=False)
+
+    assert generated == ["security"]
 
 
 def test_ledger_uses_cached_hash_when_source_is_absent(tmp_path: Path) -> None:

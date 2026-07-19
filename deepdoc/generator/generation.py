@@ -1528,12 +1528,16 @@ Re-run `deepdoc generate` to retry.
         if manifest is None:
             manifest = Manifest(self.output_dir)
 
+        output_path = bucket_output_path(bucket)
+        if not (self.output_dir / output_path).exists():
+            return True
+
         for src_file in tracked_bucket_files(bucket):
             try:
                 current_hash = self._source_hash(src_file)
                 if current_hash is None:
                     continue
-                if manifest.is_hash_stale(src_file, current_hash):
+                if manifest.is_doc_stale(src_file, current_hash, output_path):
                     return True
             except Exception:
                 return True

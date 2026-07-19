@@ -190,7 +190,10 @@ ledger persistence reuse those hashes with disk fallback only for files absent
 from the scan. The manifest tracks sorted `doc_paths` for every source (while
 reading legacy `doc_path` entries), checkpoints atomically every 10 completed
 pages or 15 seconds, and saves once at completion. Redundant post-generation
-manifest passes were removed from all pipeline/update callers.
+manifest passes were removed from all pipeline/update callers. On a hash
+transition, ownership resets to pages completed at the new hash; resume checks
+also require the bucket's exact output path in the manifest and on disk, which
+prevents a checkpointed sibling from hiding an unfinished shared-source page.
 
 ### P1.6 — Completed: shared immutable evidence indexes
 

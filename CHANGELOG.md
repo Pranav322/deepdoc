@@ -36,6 +36,13 @@ The automated release workflow reads the section that matches the version in
   `429`/`Retry-After` cooldown. Interactive `deepdoc init` displays defaults;
   non-interactive setup uses safe defaults or explicit flags without blocking.
 
+### Fixed
+
+- **Interrupted generation with shared source files now resumes safely.** A new
+  source hash resets manifest ownership to pages actually completed at that
+  hash; staleness checks require the current page ownership and output file, so
+  unfinished pages cannot be skipped after a checkpointed sibling finishes.
+
 ## [0.4.2] - 2026-06-23
 
 ### Fixed

@@ -42,5 +42,5 @@ export function buildPageTree(): PageTree.Root {
     }
   }
 
-  return { $ref: {}, name: cfg.project_name ?? 'Docs', children };
+  return { name: cfg.project_name ?? 'Docs', children };
 }

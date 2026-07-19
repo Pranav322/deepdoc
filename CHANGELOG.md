@@ -59,6 +59,14 @@ The automated release workflow reads the section that matches the version in
 
 ### Fixed
 
+- **Generated Next.js sites compile with current Mermaid types.** The Mermaid
+  runner now selects `HTMLElement` nodes explicitly before passing them to
+  `mermaid.run()`, and table-of-contents extraction no longer requires an
+  ES2018-only regular-expression flag. The Fumadocs root page tree also omits
+  the obsolete `$ref` property rejected by current types.
+- **Never-grounded artifact hints no longer cause permanent stale loops.** A
+  missing tracked path now invalidates a page only when the generation ledger
+  proves that path existed previously.
 - **Interrupted generation with shared source files now resumes safely.** A new
   source hash resets manifest ownership to pages actually completed at that
   hash; staleness checks require the current page ownership and output file, so

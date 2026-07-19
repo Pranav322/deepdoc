@@ -144,3 +144,35 @@ def test_modified_artifact_marks_bucket_stale(tmp_repo):
 
     stale = find_stale_buckets(plan, root, output_dir=output_dir)
     assert "setup" in stale
+
+
+def test_never_existing_artifact_hint_does_not_loop_stale(tmp_repo):
+    root = tmp_repo
+    output_dir = root / "docs"
+    output_dir.mkdir(exist_ok=True)
+    (output_dir / "setup.mdx").write_text("# Setup\n", encoding="utf-8")
+    plan = make_plan(
+        [
+            make_bucket(
+                "Setup",
+                "setup",
+                ["auth.py"],
+                artifact_refs=["missing-compose.yml"],
+            )
+        ]
+    )
+    write_ledger(
+        root,
+        {
+            "setup": {
+                "slug": "setup",
+                "success": True,
+                "doc_path": "setup.mdx",
+                "file_hashes": {
+                    "auth.py": _sha256_short((root / "auth.py").read_text()),
+                },
+            }
+        },
+    )
+
+    assert find_stale_buckets(plan, root, output_dir=output_dir) == []

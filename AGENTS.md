@@ -62,6 +62,7 @@ Guidance for coding agents working in this repository.
 ### Site builder (Next.js + Fumadocs)
 - `deepdoc/site/builder/next_builder.py` — **canonical site builder**: `build_next_from_plan()` copies the Next.js + Fumadocs shell template from `next_template/` into `site/`, writes `site/deepdoc.config.json` (nav tree, brand colors, chatbot URL, project name) and `site/app/globals.css` (brand CSS vars). `mkdocs_builder.py` is kept for compatibility but no longer called by the pipeline.
 - `deepdoc/site/builder/next_template/` — shipped as package-data; contains the full Next.js + Fumadocs shell (`package.json`, `app/layout.tsx`, `app/[[...slug]]/page.tsx`, `lib/docs.ts`, `lib/nav.ts`, `components/chatbot.tsx`, etc.). Content (`docs/*.md`) is read at build time by `lib/docs.ts` via a **remark/rehype pipeline only** — no MDX JSX compiler ever runs on LLM-generated content, so `{`, `<Tag>` etc. in code blocks cannot crash a build.
+- `MermaidRunner` must select `HTMLElement` nodes (`querySelectorAll<HTMLElement>`) because current Mermaid types reject a generic `NodeListOf<Element>`.
 - `deepdoc/site/builder/mdx_utils.py` — frontmatter helpers (operate on generated `*.md`)
 - Generated pages are plain CommonMark `.md`. The LLM emits GitHub Alert callouts (`> [!NOTE]`, `> [!WARNING]`) and native HTML `<details>` for accordions — no MkDocs pymdownx blocks, no JSX.
 - **Chatbot UX** — React `ChatbotWidget` component (`components/chatbot.tsx`): FAB + dock popup using `usePathname()` for SPA-aware navigation (replaces vanilla JS `window.document$` dependency). The `/ask` page (`app/ask/page.tsx`) is a React client component. Brand colors flow via `--brand` / `--brand-light` / `--brand-dark` CSS vars set from `deepdoc.config.json` at generate time. Chatbot backend URL is read client-side from `window.__DD_CONFIG__` (injected by the layout from `deepdoc.config.json`).
@@ -179,6 +180,7 @@ Supported scan targets: Python (Django, Falcon, DRF), Go, PHP (Laravel), JS/TS (
 - Put repo-aware route fixes in `deepdoc/parser/routes/repo_resolver.py`, not planner code.
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - If a change touches persisted state or freshness semantics, audit plan, ledger, sync state, manifest, and stale detection together.
+- Freshness treats a missing tracked path as a deletion only when that path had a recorded generation hash. Never-existing LLM artifact hints are not allowed to make a freshly generated bucket immediately stale.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 - CLI-facing failures should raise `click.ClickException` or print a clear Rich message.
 - If CLI behavior changes, update `README.md` and root `CHANGELOG.md` in the same task.

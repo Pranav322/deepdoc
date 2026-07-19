@@ -929,9 +929,12 @@ def find_stale_buckets(
         for src_file in tracked_bucket_files(bucket):
             src_path = repo_root / src_file
             if not src_path.exists():
-                # File was deleted — bucket is stale
-                changed = True
-                break
+                # A path that existed when generated is now deleted. Ignore
+                # never-grounded artifact hints that could not be hashed.
+                if src_file in recorded_hashes:
+                    changed = True
+                    break
+                continue
             try:
                 content = src_path.read_text(encoding="utf-8", errors="replace")
                 current_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]

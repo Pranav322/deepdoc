@@ -948,6 +948,7 @@ The defaults work for almost every project. Expand below only when you need to t
 | **General** | | |
 | `chatbot.enabled` | `false` | Enable chatbot indexing and backend (set automatically by `deepdoc init --with-chatbot`) |
 | `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for the transactional SQLite source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
+| `scan.max_workers` | `8` | Bounded local workers for source reads, parsing, and per-file endpoint detection (`1` forces serial scanning) |
 | **Indexing** | | |
 | `chatbot.indexing.include_repo_docs` | `true` | Index selected repo-authored docs such as README/design notes in a separate corpus |
 | `chatbot.indexing.include_tests` | `false` | Allow test/example/fixture docs into the repo-doc corpus |

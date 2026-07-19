@@ -38,6 +38,10 @@ The automated release workflow reads the section that matches the version in
   an exact topology-cluster match are assigned deterministically before the
   serial ASSIGN request. Ambiguous and special files remain model-owned, and the
   existing full deterministic fallback remains unchanged.
+- **Deterministic parallel source scanning.** Source reads, hashing, framework
+  detection, parsing, and endpoint detection now use bounded workers with stable
+  path-order merges. Repository-level route resolution remains serial after the
+  complete content map is available.
 - **Shared generation evidence indexes.** Module resolution, helper symbols,
   source lines, and symbol boundaries are indexed once per generation engine
   instead of being rebuilt and rescanned for every documentation bucket.

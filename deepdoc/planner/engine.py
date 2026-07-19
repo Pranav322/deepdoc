@@ -1,3 +1,6 @@
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
 from ..telemetry import RunTelemetry
 from ..manifest import file_hash
 from .common import *
@@ -379,6 +382,93 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     return plan
 
 
+@dataclass(frozen=True)
+class _SourceScanResult:
+    rel_path: str
+    content: str | None
+    content_hash: str
+    line_count: int
+    language: str
+    frameworks: tuple[str, ...]
+    parsed: ParsedFile | None
+    summary: str
+    endpoints: tuple[APIEndpoint, ...]
+    source_bytes: int
+    timings: dict[str, float]
+
+
+def _scan_one_source_file(
+    fpath: Path, rel_path: str, language: str
+) -> _SourceScanResult:
+    """Read, parse, and inspect one source without mutating shared scan state."""
+    timings: dict[str, float] = {}
+    started = time.perf_counter()
+    try:
+        content = fpath.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        timings["source_reads"] = time.perf_counter() - started
+        return _SourceScanResult(
+            rel_path=rel_path,
+            content=None,
+            content_hash="",
+            line_count=0,
+            language=language,
+            frameworks=(),
+            parsed=None,
+            summary="",
+            endpoints=(),
+            source_bytes=0,
+            timings=timings,
+        )
+    timings["source_reads"] = time.perf_counter() - started
+    line_count = len(content.splitlines())
+
+    started = time.perf_counter()
+    matched_frameworks = [
+        framework
+        for framework, indicators in FRAMEWORK_INDICATORS.items()
+        if any(indicator in content for indicator in indicators)
+    ]
+    if language == "go":
+        matched_frameworks.append("go")
+    if fpath.suffix.lower() == ".vue":
+        matched_frameworks.append("vue")
+    timings["framework_detection"] = time.perf_counter() - started
+
+    started = time.perf_counter()
+    parsed = parse_file(fpath, content=content)
+    summary = ""
+    if parsed:
+        summary_parts = []
+        if parsed.symbols:
+            symbol_names = [
+                f"{symbol.kind}:{symbol.name}" for symbol in parsed.symbols[:15]
+            ]
+            summary_parts.append(f"symbols=[{', '.join(symbol_names)}]")
+        if parsed.imports:
+            summary_parts.append(f"imports={len(parsed.imports)}")
+        summary_parts.append(f"lines={line_count}")
+        summary = " | ".join(summary_parts)
+    timings["parsing"] = time.perf_counter() - started
+
+    started = time.perf_counter()
+    endpoints = tuple(detect_endpoints(fpath, content, language)) if language else ()
+    timings["endpoint_detection"] = time.perf_counter() - started
+    return _SourceScanResult(
+        rel_path=rel_path,
+        content=content,
+        content_hash=file_hash(content),
+        line_count=line_count,
+        language=language,
+        frameworks=tuple(sorted(set(matched_frameworks))),
+        parsed=parsed,
+        summary=summary,
+        endpoints=endpoints,
+        source_bytes=len(content.encode("utf-8")),
+        timings=timings,
+    )
+
+
 def scan_repo(
     repo_root: Path,
     cfg: dict[str, Any],
@@ -458,7 +548,7 @@ def scan_repo(
     all_files_to_scan: list[Path] = []
     for root, dirs, files in os.walk(repo_root):
         root_path = Path(root)
-        dirs[:] = [d for d in dirs if not _matches_any(d, exclude)]
+        dirs[:] = sorted(d for d in dirs if not _matches_any(d, exclude))
         if normalized_scan_paths:
             rel_root = (
                 root_path.relative_to(repo_root).as_posix()
@@ -483,10 +573,12 @@ def scan_repo(
                 continue
             if not _matches_any(rel, exclude) and not _matches_any(fname, exclude):
                 all_files_to_scan.append(fpath)
+    all_files_to_scan.sort(key=lambda path: path.relative_to(repo_root).as_posix())
     _record_scan_timing(scan_timings, telemetry, "file_walk", step_start)
     if telemetry is not None:
         telemetry.counter("scan.files_discovered", len(all_files_to_scan))
 
+    source_work: list[tuple[Path, str, str]] = []
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -501,9 +593,9 @@ def scan_repo(
 
         for fpath in all_files_to_scan:
             fname = fpath.name
-            rel = str(fpath.relative_to(repo_root))
+            rel = fpath.relative_to(repo_root).as_posix()
             rel_dir = (
-                str(fpath.parent.relative_to(repo_root))
+                fpath.parent.relative_to(repo_root).as_posix()
                 if fpath.parent != repo_root
                 else "."
             )
@@ -581,86 +673,68 @@ def scan_repo(
             ) in {"main", "app", "server", "index"}:
                 entry_points.append(rel)
 
-            # Parse file for summary
-            step_start = time.perf_counter()
-            try:
-                content = fpath.read_text(encoding="utf-8", errors="replace")
-                line_count = len(content.splitlines())
-                file_line_counts[rel] = line_count
-                file_contents[rel] = content
-                file_content_hashes[rel] = file_hash(content)
-                if telemetry is not None:
-                    telemetry.counter("scan.source_files_read")
-                    telemetry.counter(
-                        "scan.source_bytes_read",
-                        len(content.encode("utf-8")),
+            source_work.append((fpath, rel, lang))
+
+        scan_cfg = cfg.get("scan", {}) or {}
+        configured_workers = max(1, min(32, int(scan_cfg.get("max_workers", 8))))
+        effective_workers = (
+            min(configured_workers, len(source_work)) if source_work else 0
+        )
+        stage_started = time.perf_counter()
+        if effective_workers > 1 and len(source_work) >= 8:
+
+            def _parallel_results():
+                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                    yield from executor.map(
+                        lambda item: _scan_one_source_file(*item), source_work
                     )
-            except Exception:
+
+            source_results = _parallel_results()
+        else:
+            source_results = (
+                _scan_one_source_file(*item) for item in source_work
+            )
+
+        for result in source_results:
+            progress.update(
+                task, description=f"[dim]Scanning {result.rel_path}[/dim]"
+            )
+            for phase_name, duration in result.timings.items():
+                scan_timings[phase_name] = scan_timings.get(phase_name, 0.0) + duration
+                if telemetry is not None:
+                    telemetry.counter(f"scan.{phase_name}_work_seconds", duration)
+            if result.content is None:
                 progress.advance(task)
                 continue
-            finally:
-                _record_scan_timing(
-                    scan_timings,
-                    telemetry,
-                    "source_reads",
-                    step_start,
-                )
-
-            # Detect frameworks
-            step_start = time.perf_counter()
-            matched_frameworks: list[str] = []
-            for fw, indicators in FRAMEWORK_INDICATORS.items():
-                if any(ind in content for ind in indicators):
-                    frameworks.add(fw)
-                    matched_frameworks.append(fw)
-            if lang == "go":
-                frameworks.add("go")
-                matched_frameworks.append("go")
-            if fpath.suffix.lower() == ".vue":
-                frameworks.add("vue")
-                matched_frameworks.append("vue")
-            if matched_frameworks:
-                file_frameworks[rel] = sorted(set(matched_frameworks))
-            _record_scan_timing(
-                scan_timings,
-                telemetry,
-                "framework_detection",
-                step_start,
-            )
-
-            # Parse symbols
-            step_start = time.perf_counter()
-            parsed = parse_file(fpath, content=file_contents[rel])
-            if parsed:
-                parsed_files[rel] = parsed
-                summary_parts = []
-                if parsed.symbols:
-                    sym_names = [f"{s.kind}:{s.name}" for s in parsed.symbols[:15]]
-                    summary_parts.append(f"symbols=[{', '.join(sym_names)}]")
-                if parsed.imports:
-                    summary_parts.append(f"imports={len(parsed.imports)}")
-                summary_parts.append(f"lines={line_count}")
-                file_summaries[rel] = " | ".join(summary_parts)
-            _record_scan_timing(
-                scan_timings,
-                telemetry,
-                "parsing",
-                step_start,
-            )
-
-            # Detect API endpoints
-            if lang:
-                step_start = time.perf_counter()
-                eps = detect_endpoints(fpath, content, lang)
-                raw_api_endpoints.extend(eps)
-                _record_scan_timing(
-                    scan_timings,
-                    telemetry,
-                    "endpoint_detection",
-                    step_start,
-                )
-
+            file_line_counts[result.rel_path] = result.line_count
+            file_contents[result.rel_path] = result.content
+            file_content_hashes[result.rel_path] = result.content_hash
+            if telemetry is not None:
+                telemetry.counter("scan.source_files_read")
+                telemetry.counter("scan.source_bytes_read", result.source_bytes)
+            if result.frameworks:
+                file_frameworks[result.rel_path] = list(result.frameworks)
+                frameworks.update(result.frameworks)
+            if result.parsed:
+                parsed_files[result.rel_path] = result.parsed
+                file_summaries[result.rel_path] = result.summary
+            raw_api_endpoints.extend(result.endpoints)
             progress.advance(task)
+
+        stage_elapsed = time.perf_counter() - stage_started
+        scan_timings["parallel_file_stage"] = stage_elapsed
+        if telemetry is not None:
+            telemetry.record_duration("scan.parallel_file_stage", stage_elapsed)
+            telemetry.counter("scan.worker_limit", effective_workers)
+            for phase_name in (
+                "source_reads",
+                "framework_detection",
+                "parsing",
+                "endpoint_detection",
+            ):
+                telemetry.record_duration(
+                    f"scan.{phase_name}", scan_timings.get(phase_name, 0.0)
+                )
 
     if raw_api_endpoints:
         step_start = time.perf_counter()

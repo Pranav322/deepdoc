@@ -29,6 +29,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "quality": {
         "strict": False,
     },
+    "scan": {
+        "max_workers": 8,
+    },
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)

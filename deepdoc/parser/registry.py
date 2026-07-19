@@ -36,14 +36,18 @@ def parse_file(path: Path, content: str | None = None) -> ParsedFile | None:
     if ext not in _REGISTRY:
         return None
     language, parser_fn = _REGISTRY[ext]
+    cached_content = content
     try:
-        if content is None:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        return parser_fn(path, content, language)
+        if cached_content is None:
+            cached_content = path.read_text(encoding="utf-8", errors="replace")
+        return parser_fn(path, cached_content, language)
     except Exception:
         # Graceful degradation — return minimal parsed file
-        try:
-            content = path.read_text(encoding="utf-8", errors="replace")
-        except Exception:
-            content = ""
-        return ParsedFile(path=path, language=language, raw_content=content[:12000])
+        if cached_content is None:
+            try:
+                cached_content = path.read_text(encoding="utf-8", errors="replace")
+            except Exception:
+                cached_content = ""
+        return ParsedFile(
+            path=path, language=language, raw_content=cached_content[:12000]
+        )

@@ -281,16 +281,25 @@ files, and 18 vs 20 orphans. ASSIGN fell from 95.8s to 73.3s. A more aggressive
 compact bucket prompt reached 46.5s but expanded decomposition to 84 pages; it
 was rejected and reverted rather than trading documentation quality for speed.
 
-### P1.10 — Scanner parsing is fully sequential
+### P1.10 — Completed: deterministic bounded source scanning
 
 **Location:** `planner/engine.py:406-517`
 
-File reads, framework detection, parsing, and endpoint detection execute one
-file at a time even though files are independent.
+**Resolution:** File collection is now canonically sorted. Independent source
+reads, hashing, framework detection, parsing, and endpoint detection run through
+an invocation-local bounded thread pool controlled by `scan.max_workers`
+(default 8, clamped to 1–32). Workers return immutable results; all shared-state
+mutation, telemetry aggregation, and progress rendering occurs on the
+coordinator in path order. Repository-wide route resolution remains serial only
+after the complete content map is available. Parser degradation also reuses
+supplied content instead of rereading disk.
 
-**Action:** Extract a deterministic `_scan_one_file` operation and run it in a
-bounded pool. Benchmark processes versus threads because parser behavior and
-the GIL determine which is faster. Merge results in stable path order.
+On `backend-tss-api_v2`, repeated 1/2/4/8-worker scans produced identical,
+stable output digests. Median total scan was 1.472s serial versus 1.445s at two
+workers; the file stage was 0.564s serial versus 0.533s at eight workers. The
+gain is intentionally reported as small: approximately 0.9s of repo-aware route
+resolution now dominates this Falcon scan, so larger route-index work remains a
+separate P3 optimization.
 
 ## Priority 2 — Strong Secondary Findings
 

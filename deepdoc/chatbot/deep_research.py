@@ -24,6 +24,7 @@ import re
 from time import time
 from typing import Any, Callable
 
+from ..llm import ModelCapabilityError
 logger = logging.getLogger(__name__)
 
 
@@ -108,6 +109,42 @@ class DeepResearcher:
             callback(payload)
         except Exception:
             logger.debug("[deep_research] Trace callback failed", exc_info=True)
+
+    def _fit_prompt(
+        self,
+        system: str,
+        required: str,
+        optional_records: list[tuple[str, str]],
+        *,
+        step_name: str,
+    ) -> str:
+        """Fit research prompt state through the answer-model envelope."""
+        chat_client = getattr(self.service, "chat_client", None)
+        fit_prompt = getattr(chat_client, "fit_prompt_sections", None)
+        if not callable(fit_prompt):
+            return "\n\n".join([required, *(text for _, text in optional_records)])
+
+        def _render(sections: dict[str, str]) -> str:
+            return "\n\n".join(
+                [
+                    sections["required"],
+                    *(
+                        sections.get(f"optional_{index}", "")
+                        for index, _ in enumerate(optional_records)
+                    ),
+                ]
+            ).strip()
+
+        return fit_prompt(
+            system=system,
+            render_prompt=_render,
+            required_sections={"required": required},
+            optional_sections=[
+                (f"optional_{index}", [text])
+                for index, (_, text) in enumerate(optional_records)
+            ],
+            step_name=step_name,
+        ).prompt
 
     # ── Out-of-domain detection ────────────────────────────────────────────────
 
@@ -390,14 +427,15 @@ class DeepResearcher:
         )
         try:
             history_context = _history_context(history)
-            response = self.llm.complete(
+            prompt = self._fit_prompt(
                 system,
-                (
-                    f"Recent conversation:\n{history_context}\n\nQuestion: {question}"
-                    if history_context
-                    else f"Question: {question}"
-                ),
+                f"Question: {question}",
+                [("history", f"Recent conversation:\n{history_context}")]
+                if history_context
+                else [],
+                step_name="deep research decomposition",
             )
+            response = self._complete_sub_question(system, prompt)
             sub_qs = _extract_json_array(response.strip())
             if isinstance(sub_qs, list) and sub_qs:
                 ordered = [question] + [
@@ -412,6 +450,8 @@ class DeepResearcher:
                     seen.add(key)
                     deduped.append(item)
                 return deduped[:4]
+        except ModelCapabilityError:
+            raise
         except Exception as e:
             logger.warning(f"[deep_research] Decomposition failed: {e}")
         # Fallback: use original question as only sub-question
@@ -445,13 +485,6 @@ class DeepResearcher:
         max_chunk_score = max((getattr(c, "score", 0.0) for c in chunks), default=0.0)
         mean_chunk_score = _mean_score(getattr(c, "score", 0.0) for c in chunks)
 
-        chunk_chars = 3200
-        chat_cfg = getattr(self.service, "chat_cfg", {})
-        if isinstance(chat_cfg, dict):
-            retrieval_cfg = chat_cfg.get("retrieval", {})
-            if isinstance(retrieval_cfg, dict):
-                chunk_chars = int(retrieval_cfg.get("deep_research_chunk_chars", 3200))
-
         evidence_parts = []
         for i, c in enumerate(chunks[: self.top_k], 1):
             record = getattr(c, "record", c)
@@ -460,7 +493,7 @@ class DeepResearcher:
                 or getattr(record, "doc_path", None)
                 or "unknown"
             )
-            text = getattr(record, "text", "")[:chunk_chars]
+            text = getattr(record, "text", "")
             evidence_parts.append(f"[{i}] From `{source}`:\n{text}")
 
         system = (
@@ -483,12 +516,16 @@ class DeepResearcher:
         )
 
         history_context = _history_context(history)
-        user_msg = (
+        required_user_msg = (
             f"Recent conversation:\n{history_context}\n\n"
             f"Original Goal: {original_question}\n"
-            f"Current Sub-question: {question}\n\n"
-            f"Initial Evidence:\n{chr(10).join(evidence_parts)}\n\n"
-            "What is your answer or next action?"
+            f"Current Sub-question: {question}\n\nWhat is your answer or next action?"
+        )
+        user_msg = self._fit_prompt(
+            system,
+            required_user_msg,
+            [(f"evidence_{index}", evidence) for index, evidence in enumerate(evidence_parts)],
+            step_name="deep research initial evidence",
         )
 
         turn_history: list[dict[str, str]] = [{"role": "user", "content": user_msg}]
@@ -496,10 +533,17 @@ class DeepResearcher:
         for iteration in range(max_iterations):
             try:
                 # Provide the full turn history to the LLM
-                prompt = "\n\n".join(
-                    [f"{msg['role'].upper()}: {msg['content']}" for msg in turn_history]
+                prompt = self._fit_prompt(
+                    system,
+                    "\n\n".join(
+                        [f"{msg['role'].upper()}: {msg['content']}" for msg in turn_history]
+                    ),
+                    [],
+                    step_name="deep research turn",
                 )
                 response = self._complete_sub_question(system, prompt).strip()
+            except ModelCapabilityError:
+                raise
             except Exception as e:
                 logger.warning(f"[deep_research] Agent iteration failed: {e}")
                 return ResearchStep(
@@ -557,14 +601,18 @@ class DeepResearcher:
 
         # Fallback if iterations exhaust
         try:
-            prompt = "\n\n".join(
-                [f"{msg['role'].upper()}: {msg['content']}" for msg in turn_history]
-            )
-            prompt += (
-                "\n\nSYSTEM: Max iterations reached. Please summarize your findings "
-                "into a final answer now."
+            prompt = self._fit_prompt(
+                system,
+                "\n\n".join(
+                    [f"{msg['role'].upper()}: {msg['content']}" for msg in turn_history]
+                )
+                + "\n\nSYSTEM: Max iterations reached. Please summarize your findings now.",
+                [],
+                step_name="deep research final turn",
             )
             final_ans = self._complete_sub_question(system, prompt).strip()
+        except ModelCapabilityError:
+            raise
         except Exception:
             final_ans = "Exhausted agent iterations. Partial results only."
 
@@ -701,18 +749,27 @@ class DeepResearcher:
             "- If the question is entirely outside the scope of the codebase, say so clearly "
             "without attempting to relate it to the codebase."
         )
-        user_msg = (
-            f"Recent conversation:\n{_history_context(history)}\n\n"
+        required_user_msg = (
             f"Original question: {original_question}\n\n"
-            f"Research findings:\n{sub_answers}"
-            f"{sources_note}\n\n"
+            f"Research findings:\n{sub_answers}\n\n"
             "Write a highly detailed, comprehensive answer that directly addresses the "
             "original question. Ground every claim in the research findings above — only "
             "quote code that appears verbatim in those findings. Cover the main implementation "
             "path, important related files, configuration, and any notable gaps in evidence."
         )
         try:
+            user_msg = self._fit_prompt(
+                system,
+                required_user_msg,
+                [
+                    ("history", f"Recent conversation:\n{_history_context(history)}"),
+                    ("sources", sources_note),
+                ],
+                step_name="deep research synthesis",
+            )
             return self._complete_sub_question(system, user_msg, token_callback=self.synthesis_token_callback)
+        except ModelCapabilityError:
+            raise
         except Exception as e:
             logger.warning(f"[deep_research] Synthesis failed: {e}")
             # Fallback: concatenate step answers

@@ -25,6 +25,9 @@ The automated release workflow reads the section that matches the version in
   correction requests now use the selected answer model's local LiteLLM
   capability envelope. Retrieval fan-out remains bounded separately, and local
   capacity failures are reported clearly before a provider request.
+- **Deep-research prompt fitting.** Research decomposition, initial evidence,
+  ReAct turns, and synthesis now use the answer-model token envelope. Required
+  transcript and research findings cannot be silently dropped on context limits.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

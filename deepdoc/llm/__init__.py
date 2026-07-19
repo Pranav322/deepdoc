@@ -6,9 +6,11 @@ from .token_budget import (
     ModelCapabilities,
     ModelCapabilityError,
     PromptBudget,
+    PromptFitResult,
     build_prompt_budget,
     count_message_tokens,
     count_text_tokens,
+    fit_prompt_sections,
     resolve_completion_capabilities,
 )
 
@@ -18,9 +20,11 @@ __all__ = [
     "ModelCapabilities",
     "ModelCapabilityError",
     "PromptBudget",
+    "PromptFitResult",
     "build_prompt_budget",
     "count_message_tokens",
     "count_text_tokens",
+    "fit_prompt_sections",
     "is_retryable_llm_error",
     "resolve_completion_capabilities",
 ]

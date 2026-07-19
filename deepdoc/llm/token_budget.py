@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 import math
+from collections.abc import Callable
 from typing import Any
 
 from .litellm_compat import prepare_litellm
@@ -34,6 +35,17 @@ class PromptBudget:
     safety_tokens: int
     fixed_prompt_tokens: int
     variable_input_tokens: int
+
+
+@dataclass(frozen=True)
+class PromptFitResult:
+    """A complete prompt fitted from required and optional whole records."""
+
+    prompt: str
+    sections: dict[str, str]
+    input_tokens: int
+    tokens_estimated: bool
+    omitted_records: dict[str, int]
 
 
 def _configured_token_value(value: Any, name: str) -> int | None:
@@ -190,4 +202,63 @@ def build_prompt_budget(
         safety_tokens=safety,
         fixed_prompt_tokens=max(0, int(fixed_prompt_tokens)),
         variable_input_tokens=variable,
+    )
+
+
+def fit_prompt_sections(
+    capabilities: ModelCapabilities,
+    *,
+    system: str,
+    render_prompt: Callable[[dict[str, str]], str],
+    required_sections: dict[str, str],
+    optional_sections: list[tuple[str, list[str]]],
+    output_reserve_tokens: Any = None,
+    step_name: str,
+) -> PromptFitResult:
+    """Fit whole optional records while preserving every required prompt section."""
+    budget = build_prompt_budget(
+        capabilities,
+        output_reserve_tokens=output_reserve_tokens,
+    )
+    maximum_input = (
+        budget.context_window_tokens
+        - budget.output_reserve_tokens
+        - budget.safety_tokens
+    )
+    sections = dict(required_sections)
+    prompt = render_prompt(sections)
+    input_tokens, estimated = count_message_tokens(system, prompt, capabilities)
+    if input_tokens > maximum_input:
+        raise ModelCapabilityError(
+            f"{step_name} required inventory exceeds the resolved model budget "
+            f"({input_tokens:,} input tokens > {maximum_input:,} available). "
+            "Increase llm.context_window_tokens, reduce llm.output_reserve_tokens, "
+            "or choose a model with a larger context window."
+        )
+
+    omitted: dict[str, int] = {}
+    for name, records in optional_sections:
+        accepted: list[str] = []
+        for record in records:
+            candidate = dict(sections)
+            candidate[name] = "\n".join([*accepted, record])
+            candidate_prompt = render_prompt(candidate)
+            candidate_tokens, candidate_estimated = count_message_tokens(
+                system, candidate_prompt, capabilities
+            )
+            if candidate_tokens <= maximum_input:
+                sections = candidate
+                prompt = candidate_prompt
+                input_tokens = candidate_tokens
+                estimated = estimated or candidate_estimated
+                accepted.append(record)
+            else:
+                omitted[name] = omitted.get(name, 0) + 1
+        sections.setdefault(name, "")
+    return PromptFitResult(
+        prompt=prompt,
+        sections=sections,
+        input_tokens=input_tokens,
+        tokens_estimated=estimated,
+        omitted_records=omitted,
     )

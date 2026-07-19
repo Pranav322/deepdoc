@@ -13,6 +13,10 @@ The automated release workflow reads the section that matches the version in
   provider-neutral capability and token-budget layer. Explicit model limits win;
   known models resolve from LiteLLM metadata; custom aliases require a known
   `base_model` or explicit context instead of receiving a guessed limit.
+- **Planner token fitting.** Classify, propose, assign, and decomposition prompts
+  now preserve complete required inventories and fit optional records into the
+  resolved model token envelope, replacing raw planner character slices and the
+  previous 50-endpoint formatter cap.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

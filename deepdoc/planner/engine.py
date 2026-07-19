@@ -1,6 +1,7 @@
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+from ..llm import fit_prompt_sections
 from ..telemetry import RunTelemetry
 from ..manifest import file_hash
 from .common import *
@@ -65,18 +66,38 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         and scan.topology_map.clusters
     )
 
-    classify_prompt = CLASSIFY_PROMPT.format(
-        languages=lang_str,
-        frameworks=fw_str,
-        total_files=scan.total_files,
-        endpoint_count=len(published_endpoints),
-        entry_points=", ".join(scan.entry_points[:10]) or "none",
-        config_files=", ".join(scan.config_files[:15]) or "none",
-        topology_clusters=topology_clusters_str[:18000],
-        file_summaries=file_summaries_str[:8000],
-        endpoints=endpoints_str[:5000],
-        giant_file_threshold=giant_file_threshold,
+    def _render_classify(sections: dict[str, str]) -> str:
+        return CLASSIFY_PROMPT.format(
+            languages=lang_str,
+            frameworks=fw_str,
+            total_files=scan.total_files,
+            endpoint_count=len(published_endpoints),
+            entry_points=sections.get("entry_points") or "none",
+            config_files=sections.get("config_files") or "none",
+            topology_clusters=sections["topology_clusters"],
+            file_summaries=sections.get("file_summaries") or "(none)",
+            endpoints=sections.get("endpoints") or "(none)",
+            giant_file_threshold=giant_file_threshold,
+        )
+
+    classify_fit = fit_prompt_sections(
+        llm.capabilities,
+        system=CLASSIFY_SYSTEM,
+        render_prompt=_render_classify,
+        required_sections={"topology_clusters": topology_clusters_str},
+        optional_sections=[
+            ("entry_points", [f"- {path}" for path in scan.entry_points]),
+            ("config_files", [f"- {path}" for path in scan.config_files]),
+            ("file_summaries", file_summaries_str.splitlines()),
+            ("endpoints", endpoints_str.splitlines()),
+        ],
+        output_reserve_tokens=llm.output_reserve_tokens,
+        step_name="planner classify",
     )
+    classify_prompt = classify_fit.prompt
+    if getattr(llm, "telemetry", None) is not None:
+        for name, count in classify_fit.omitted_records.items():
+            llm.telemetry.counter(f"planner.classify.omitted_{name}", count)
 
     step_start = time.perf_counter()
     classification = _llm_step(llm, CLASSIFY_SYSTEM, classify_prompt, "classify")
@@ -206,28 +227,49 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             "Never merge unrelated topics just to reduce page count."
         )
 
-    # Measurement run: the historical [:18000] cap silently dropped tail
-    # clusters on big repos. Send the full cluster list and report its size
-    # so we can see how large this actually grows before deciding on a fix.
-    console.print(
-        f"  [dim]propose input sizes: named_clusters={len(named_clusters_str):,} chars "
-        f"(old cap 18,000{' — WOULD HAVE TRUNCATED' if len(named_clusters_str) > 18000 else ''}), "
-        f"endpoints={len(endpoints_str):,} chars (old cap 12,000)[/dim]"
+    integration_records = (
+        [
+            f"- {identity.display_name} ({identity.name}) | files: "
+            f"{', '.join(identity.files)} | evidence: {', '.join(identity.evidence)}"
+            for identity in scan.integration_identities
+        ]
+        if scan.integration_identities
+        else [integration_signals]
     )
-    propose_prompt = PROPOSE_PROMPT.format(
-        named_clusters=named_clusters_str,
-        endpoint_count=len(published_endpoints),
-        endpoints=endpoints_str[:12000],
-        integration_signals=integration_signals,
-        cross_cutting=cross_cutting,
-        giant_files=giant_files_str,
-        database_info=database_info,
-        debug_signals=debug_signals_str,
-        artifacts=artifacts_str,
-        research_context=research_context_str,
-        repo_profile=repo_profile_str,
-        max_pages_instruction=max_pages_instruction,
+
+    def _render_propose(sections: dict[str, str]) -> str:
+        return PROPOSE_PROMPT.format(
+            named_clusters=sections["named_clusters"],
+            endpoint_count=len(published_endpoints),
+            endpoints=sections.get("endpoints") or "(none)",
+            integration_signals=sections.get("integration_signals") or "(none)",
+            cross_cutting=cross_cutting,
+            giant_files=giant_files_str,
+            database_info=database_info,
+            debug_signals=debug_signals_str,
+            artifacts=artifacts_str,
+            research_context=sections.get("research_context") or "(none)",
+            repo_profile=repo_profile_str,
+            max_pages_instruction=max_pages_instruction,
+        )
+
+    propose_fit = fit_prompt_sections(
+        llm.capabilities,
+        system=PROPOSE_SYSTEM,
+        render_prompt=_render_propose,
+        required_sections={"named_clusters": named_clusters_str},
+        optional_sections=[
+            ("endpoints", endpoints_str.splitlines()),
+            ("integration_signals", integration_records),
+            ("research_context", research_context_str.splitlines()),
+        ],
+        output_reserve_tokens=llm.output_reserve_tokens,
+        step_name="planner propose",
     )
+    propose_prompt = propose_fit.prompt
+    if getattr(llm, "telemetry", None) is not None:
+        for name, count in propose_fit.omitted_records.items():
+            llm.telemetry.counter(f"planner.propose.omitted_{name}", count)
 
     step_start = time.perf_counter()
     proposal = _llm_step(llm, PROPOSE_SYSTEM, propose_prompt, "propose")
@@ -252,7 +294,19 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     deterministic_assignment, unresolved_files = _partition_topology_assignment(
         proposal, scan
     )
-    proposed_buckets_str = json.dumps(proposal.get("buckets", []), indent=2)
+    assignment_buckets = [
+        {
+            "slug": bucket.get("slug", ""),
+            "title": bucket.get("title", ""),
+            "bucket_type": bucket.get("bucket_type", ""),
+            "section": bucket.get("section", ""),
+            "cluster_id": bucket.get("cluster_id", ""),
+            "candidate_files": bucket.get("candidate_files", []),
+            "generation_hints": bucket.get("generation_hints", {}),
+        }
+        for bucket in proposal.get("buckets", [])
+    ]
+    proposed_buckets_str = json.dumps(assignment_buckets, separators=(",", ":"))
     all_files_str = "\n".join(f"- {f}" for f in unresolved_files)
     setup_artifacts_str = "\n".join(f"- {f}" for f in scan.config_files) or "(none)"
 
@@ -266,20 +320,33 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         telemetry.counter("planner.assign.files_deterministic", deterministic_count)
         telemetry.counter("planner.assign.files_ambiguous", len(unresolved_files))
 
-    console.print(
-        f"  [dim]assign input sizes: all_files={len(all_files_str):,} chars "
-        f"(old cap 12,000{' — WOULD HAVE TRUNCATED' if len(all_files_str) > 12000 else ''}), "
-        f"proposed_buckets={len(proposed_buckets_str):,} chars (cap 15,000 kept)[/dim]"
-    )
     step_start = time.perf_counter()
     if unresolved_files:
-        assign_prompt = ASSIGN_PROMPT.format(
-            proposed_buckets=proposed_buckets_str[:15000],
-            all_files=all_files_str,
-            endpoints=endpoints_str[:3000],
-            giant_files=giant_files_str,
-            setup_artifacts=setup_artifacts_str,
+        def _render_assign(sections: dict[str, str]) -> str:
+            return ASSIGN_PROMPT.format(
+                proposed_buckets=sections["proposed_buckets"],
+                all_files=sections["all_files"],
+                endpoints=sections.get("endpoints") or "(none)",
+                giant_files=giant_files_str,
+                setup_artifacts=setup_artifacts_str,
+            )
+
+        assign_fit = fit_prompt_sections(
+            llm.capabilities,
+            system=ASSIGN_SYSTEM,
+            render_prompt=_render_assign,
+            required_sections={
+                "proposed_buckets": proposed_buckets_str,
+                "all_files": all_files_str,
+            },
+            optional_sections=[("endpoints", endpoints_str.splitlines())],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="planner assign",
         )
+        assign_prompt = assign_fit.prompt
+        if getattr(llm, "telemetry", None) is not None:
+            for name, count in assign_fit.omitted_records.items():
+                llm.telemetry.counter(f"planner.assign.omitted_{name}", count)
         llm_assignment = _llm_step(llm, ASSIGN_SYSTEM, assign_prompt, "assign")
         assignment = (
             _merge_partial_assignment(

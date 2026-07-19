@@ -11,6 +11,11 @@ from ..config import resolve_api_key
 from ..telemetry import RunTelemetry
 from .litellm_compat import prepare_litellm
 from .rate_limit import ProviderRateLimiter
+from .token_budget import (
+    build_prompt_budget,
+    count_message_tokens,
+    resolve_completion_capabilities,
+)
 
 
 class LLMOutputTruncatedError(RuntimeError):
@@ -29,17 +34,20 @@ class LLMClient:
         self.telemetry = telemetry
         llm_cfg = cfg.get("llm", {})
         self.model = llm_cfg.get("model", "")
-        self.context_window_tokens = max(
-            4096,
-            int(llm_cfg.get("context_window_tokens", 128000)),
+        self.capabilities = resolve_completion_capabilities(self.model, llm_cfg)
+        self.prompt_budget = build_prompt_budget(
+            self.capabilities,
+            output_reserve_tokens=llm_cfg.get("output_reserve_tokens"),
         )
-        self.output_reserve_tokens = min(
-            max(1024, int(llm_cfg.get("output_reserve_tokens", 16000))),
-            self.context_window_tokens // 2,
-        )
+        self.context_window_tokens = self.capabilities.context_window_tokens
+        self.output_reserve_tokens = self.prompt_budget.output_reserve_tokens
         configured_max_tokens = llm_cfg.get("max_tokens")
         self.max_tokens = (
-            min(max(1, int(configured_max_tokens)), self.output_reserve_tokens)
+            min(
+                max(1, int(configured_max_tokens)),
+                self.output_reserve_tokens,
+                self.capabilities.max_output_tokens or self.output_reserve_tokens,
+            )
             if configured_max_tokens is not None
             else None
         )
@@ -166,7 +174,7 @@ class LLMClient:
         response = None
         error_type = ""
         try:
-            self._record_usage(system, user)
+            input_tokens = self._record_usage(system, user)
             self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
@@ -188,8 +196,7 @@ class LLMClient:
             if self.api_key:
                 kwargs["api_key"] = self.api_key
 
-            estimated_tokens = max(1, (len(system or "") + len(user or "")) // 4)
-            with self.rate_limiter.slot(estimated_tokens):
+            with self.rate_limiter.slot(input_tokens):
                 response = litellm.completion(**kwargs)
             self._raise_if_truncated(response)
             return response.choices[0].message.content or ""
@@ -222,7 +229,7 @@ class LLMClient:
         final_chunk = None
         error_type = ""
         try:
-            self._record_usage(system, user)
+            input_tokens = self._record_usage(system, user)
             self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
@@ -244,8 +251,7 @@ class LLMClient:
             if self.api_key:
                 kwargs["api_key"] = self.api_key
 
-            estimated_tokens = max(1, (len(system or "") + len(user or "")) // 4)
-            with self.rate_limiter.slot(estimated_tokens):
+            with self.rate_limiter.slot(input_tokens):
                 for chunk in litellm.completion(**kwargs):
                     final_chunk = chunk
                     delta = chunk.choices[0].delta
@@ -275,16 +281,24 @@ class LLMClient:
                 streamed=True,
             )
 
-    def _record_usage(self, system: str, user: str) -> None:
+    def _record_usage(self, system: str, user: str) -> int:
         prompt_chars = len(system or "") + len(user or "")
+        prompt_tokens, _ = count_message_tokens(system, user, self.capabilities)
         with self._usage_lock:
             self.usage["calls"] += 1
             self.usage["prompt_chars"] += prompt_chars
-            self.usage["estimated_prompt_tokens"] += max(1, prompt_chars // 4)
+            self.usage["estimated_prompt_tokens"] += prompt_tokens
+        return prompt_tokens
 
     def _validate_prompt_size(self, system: str, user: str) -> None:
-        estimated_input_tokens = max(1, (len(system or "") + len(user or "")) // 4)
-        max_input_tokens = self.context_window_tokens - self.output_reserve_tokens
+        estimated_input_tokens, _ = count_message_tokens(
+            system, user, self.capabilities
+        )
+        max_input_tokens = (
+            self.context_window_tokens
+            - self.output_reserve_tokens
+            - self.prompt_budget.safety_tokens
+        )
         if estimated_input_tokens > max_input_tokens:
             raise ValueError(
                 "LLM prompt exceeds configured context window "
@@ -377,6 +391,10 @@ class LLMClient:
             {
                 **operation,
                 "model": self.model,
+                "capability_model": self.capabilities.capability_model,
+                "capability_source": self.capabilities.source,
+                "context_window_tokens": self.context_window_tokens,
+                "output_reserve_tokens": self.output_reserve_tokens,
                 "duration_seconds": round(elapsed, 6),
                 "prompt_chars": prompt_chars,
                 "response_chars": response_chars,

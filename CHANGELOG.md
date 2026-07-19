@@ -9,6 +9,10 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **LiteLLM-first model capability resolution.** DeepDoc now has one local,
+  provider-neutral capability and token-budget layer. Explicit model limits win;
+  known models resolve from LiteLLM metadata; custom aliases require a known
+  `base_model` or explicit context instead of receiving a guessed limit.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

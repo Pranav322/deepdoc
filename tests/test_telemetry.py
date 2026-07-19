@@ -114,7 +114,14 @@ def test_llm_client_records_provider_tokens(monkeypatch, tmp_path: Path) -> None
     fake_litellm = SimpleNamespace(completion=lambda **kwargs: response)
     monkeypatch.setattr("deepdoc.llm.client.prepare_litellm", lambda: fake_litellm)
     client = LLMClient(
-        {"llm": {"provider": "ollama", "model": "ollama/test"}},
+        {
+            "llm": {
+                "provider": "ollama",
+                "model": "ollama/test",
+                "context_window_tokens": 128000,
+                "output_reserve_tokens": 16000,
+            }
+        },
         telemetry=telemetry,
     )
 
@@ -131,7 +138,16 @@ def test_llm_client_records_provider_tokens(monkeypatch, tmp_path: Path) -> None
 
 
 def test_llm_usage_updates_are_thread_safe(tmp_path: Path) -> None:
-    client = LLMClient({"llm": {"provider": "ollama", "model": "ollama/test"}})
+    client = LLMClient(
+        {
+            "llm": {
+                "provider": "ollama",
+                "model": "ollama/test",
+                "context_window_tokens": 128000,
+                "output_reserve_tokens": 16000,
+            }
+        }
+    )
 
     with ThreadPoolExecutor(max_workers=8) as executor:
         list(executor.map(lambda _: client._record_usage("a", "b"), range(200)))

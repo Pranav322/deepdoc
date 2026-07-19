@@ -164,7 +164,15 @@ def test_llm_null_output_cap_uses_provider_default(monkeypatch) -> None:
         lambda: SimpleNamespace(completion=completion),
     )
     client = LLMClient(
-        {"llm": {"provider": "ollama", "model": "ollama/test", "max_tokens": None}}
+        {
+            "llm": {
+                "provider": "ollama",
+                "model": "ollama/test",
+                "max_tokens": None,
+                "context_window_tokens": 128000,
+                "output_reserve_tokens": 16000,
+            }
+        }
     )
 
     assert client.max_tokens is None
@@ -186,7 +194,15 @@ def test_llm_length_finish_reason_raises_actionable_error(monkeypatch) -> None:
         lambda: SimpleNamespace(completion=completion),
     )
     client = LLMClient(
-        {"llm": {"provider": "ollama", "model": "ollama/test", "max_tokens": 2048}}
+        {
+            "llm": {
+                "provider": "ollama",
+                "model": "ollama/test",
+                "max_tokens": 2048,
+                "context_window_tokens": 128000,
+                "output_reserve_tokens": 16000,
+            }
+        }
     )
 
     with pytest.raises(LLMOutputTruncatedError, match="output was truncated"):
@@ -211,6 +227,6 @@ def test_llm_client_rejects_oversized_prompt_before_provider(monkeypatch) -> Non
     )
 
     with pytest.raises(RuntimeError, match="exceeds configured context window"):
-        client.complete("system", "x" * 20000)
+        client.complete("system", "x" * 40000)
 
     completion.assert_not_called()

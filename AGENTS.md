@@ -28,7 +28,7 @@ Guidance for coding agents working in this repository.
 
 ### Planner
 - `deepdoc/planner/engine.py` — repo-scan entrypoint and bucket-planning orchestration
-- `deepdoc/planner/heuristics.py` — public planning API: `_merge_plan`, `_build_heuristic_assignment`, `_llm_step` (tests mock at this path); no longer contains `_shape_plan_nav` or `_decompose_buckets` — both removed as duplicates
+- `deepdoc/planner/heuristics.py` — public planning API: `_merge_plan`, `_build_heuristic_assignment`, `_partition_topology_assignment`, `_merge_partial_assignment`, `_llm_step` (tests mock at this path); no longer contains `_shape_plan_nav` or `_decompose_buckets` — both removed as duplicates
 - `deepdoc/planner/topology.py` — `build_topology_map()` derives `TopologyMap` from the call graph without LLM involvement; BFS + Jaccard-based clustering (threshold 0.40); feeds the classify step instead of a compressed file tree
 - `deepdoc/planner/flow_candidates.py` — `FlowCandidate`, `EntryPoint`; `build_flow_candidates()` traces endpoint families, runtime tasks, and schedulers through the call graph
 - `deepdoc/planner/specializations.py` — `_ensure_database_runtime_and_interface_buckets`, `_attach_flow_hints_to_cluster_buckets` (replaces the removed `_ensure_flow_buckets`), `_build_database_buckets`, `_build_runtime_buckets`, `_build_graphql_buckets`
@@ -122,6 +122,7 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 - `_decompose_buckets` is canonical in `bucket_refinement.py` only — the duplicate was removed from `heuristics.py`.
 - `_normalize_nav_section` is canonical in `nav_shaping.py` only — the duplicate was removed from `heuristics.py`.
 - `_llm_step` labels planner calls through the shared telemetry operation context; `LLMClient` records model wait, character counts, actual provider tokens when available, labelled estimates otherwise, finish reason, and failure type without storing prompt/response text. A prior `Rich.Live()` wrapper was removed because concurrent planner workers corrupted terminal output.
+- ASSIGN preassigns a file only when it is a normal product source with exactly one proposal candidate and a matching topology cluster. Foundational, giant, endpoint-owned, config, supporting-kind, overlapping, and topology-mismatched files remain in the LLM inventory. LLM ownership is filtered to that unresolved inventory before merging; on failure the existing full heuristic assignment remains authoritative.
 - Phase 1 performance fixes on `main`: `parse_file()` accepts cached content from `scan_repo`; primary generation evidence reads prefer `scan.file_contents`; route resolution builds only framework-required JS/Python/Go indexes; both generation retry loops use at most 3 attempts with exponential waits capped at 20 seconds. Preserve disk fallbacks for files absent from the scan cache.
 - `RepoScan.scan_timings` carries run-scoped base-scan and enrichment timings; when telemetry is active, the same phases plus file/byte counters are available through `deepdoc performance`. Do not persist timing observations in `scan_cache.json`.
 - `EvidenceAssembler` eagerly builds immutable module, symbol, file-line, and symbol-boundary indexes once per engine. Bucket workers must reuse those indexes; do not reintroduce per-bucket whole-repository index construction or mutable unbounded helper caches.

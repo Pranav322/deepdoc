@@ -34,6 +34,10 @@ The automated release workflow reads the section that matches the version in
   transactional SQLite store with independently compressed SHA-256 blobs, so a
   one-file update no longer decompresses and recompresses every source. Existing
   gzip archives migrate automatically on the first update.
+- **Topology-safe planner assignment.** Files with one proposal candidate and
+  an exact topology-cluster match are assigned deterministically before the
+  serial ASSIGN request. Ambiguous and special files remain model-owned, and the
+  existing full deterministic fallback remains unchanged.
 - **Shared generation evidence indexes.** Module resolution, helper symbols,
   source lines, and symbol boundaries are indexed once per generation engine
   instead of being rebuilt and rescanned for every documentation bucket.

@@ -343,12 +343,13 @@ Repo profile: {repo_profile}
 """
 
 ASSIGN_SYSTEM = """\
-You are a documentation planner finalizing file assignments. Given proposed \
-documentation buckets and a full file inventory, assign every source file to at \
+You are a documentation planner finalizing unresolved file assignments. Given proposed \
+documentation buckets and an unresolved file inventory, assign every listed file to at \
 least one bucket. Respond with valid JSON only.
 
 Rules:
 - EVERY source file must be assigned to at least one bucket or explicitly skipped.
+- Files omitted from the unresolved inventory are already assigned. Do not invent or reassign them.
 - A file CAN belong to multiple buckets if it serves multiple purposes.
 - Only skip: pure test files, auto-generated files, type-only files with no logic.
 - For giant files, assign to the bucket that covers its PRIMARY feature cluster. \
@@ -367,7 +368,7 @@ Finalize file assignments for these documentation buckets.
 ## Proposed Buckets
 {proposed_buckets}
 
-## All Source Files (must all be assigned or skipped)
+## Unresolved Source Files (must all be assigned or skipped)
 {all_files}
 
 ## API Endpoints
@@ -399,7 +400,7 @@ Return JSON:
 }}
 
 Important:
-- Every file in the source file list MUST appear either in a bucket's owned_files \
+- Every file in the unresolved source file list MUST appear either in a bucket's owned_files \
   or in skipped_files.
 - owned_symbols is optional but encouraged for large shared files — it tells the \
   generator which parts of a file are relevant to this specific bucket.

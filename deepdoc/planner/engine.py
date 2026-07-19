@@ -246,25 +246,57 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         )
     )
 
+    deterministic_assignment, unresolved_files = _partition_topology_assignment(
+        proposal, scan
+    )
     proposed_buckets_str = json.dumps(proposal.get("buckets", []), indent=2)
-    all_files_str = "\n".join(f"- {f}" for f in sorted(scan.file_summaries.keys()))
+    all_files_str = "\n".join(f"- {f}" for f in unresolved_files)
     setup_artifacts_str = "\n".join(f"- {f}" for f in scan.config_files) or "(none)"
+
+    telemetry = getattr(llm, "telemetry", None)
+    deterministic_count = sum(
+        len(bucket.get("owned_files", []))
+        for bucket in deterministic_assignment.get("buckets", [])
+    )
+    if telemetry is not None:
+        telemetry.counter("planner.assign.files_total", len(scan.file_summaries))
+        telemetry.counter("planner.assign.files_deterministic", deterministic_count)
+        telemetry.counter("planner.assign.files_ambiguous", len(unresolved_files))
 
     console.print(
         f"  [dim]assign input sizes: all_files={len(all_files_str):,} chars "
         f"(old cap 12,000{' — WOULD HAVE TRUNCATED' if len(all_files_str) > 12000 else ''}), "
         f"proposed_buckets={len(proposed_buckets_str):,} chars (cap 15,000 kept)[/dim]"
     )
-    assign_prompt = ASSIGN_PROMPT.format(
-        proposed_buckets=proposed_buckets_str[:15000],
-        all_files=all_files_str,
-        endpoints=endpoints_str[:3000],
-        giant_files=giant_files_str,
-        setup_artifacts=setup_artifacts_str,
-    )
-
     step_start = time.perf_counter()
-    assignment = _llm_step(llm, ASSIGN_SYSTEM, assign_prompt, "assign")
+    if unresolved_files:
+        assign_prompt = ASSIGN_PROMPT.format(
+            proposed_buckets=proposed_buckets_str[:15000],
+            all_files=all_files_str,
+            endpoints=endpoints_str[:3000],
+            giant_files=giant_files_str,
+            setup_artifacts=setup_artifacts_str,
+        )
+        llm_assignment = _llm_step(llm, ASSIGN_SYSTEM, assign_prompt, "assign")
+        assignment = (
+            _merge_partial_assignment(
+                proposal,
+                deterministic_assignment,
+                llm_assignment,
+                unresolved_files,
+            )
+            if llm_assignment
+            else None
+        )
+    else:
+        assignment = _merge_partial_assignment(
+            proposal,
+            deterministic_assignment,
+            None,
+            [],
+        )
+        if telemetry is not None:
+            telemetry.counter("planner.assign.llm_skipped")
     scan.planner_timings["assign"] = time.perf_counter() - step_start
     if not assignment:
         console.print(
@@ -1035,6 +1067,6 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return False
 
 
-from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
+from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_partial_assignment, _merge_plan, _normalize_repo_profile, _partition_topology_assignment, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
 from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets

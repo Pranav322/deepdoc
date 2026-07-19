@@ -261,18 +261,25 @@ On `backend-tss-api_v2`, migration produced 246 paths backed by 245 deduplicated
 blobs; the next one-file update performed one source read and completed its
 archive transaction in 1.35 ms.
 
-### P1.9 — Planner latency contains a serial LLM dependency chain
+### P1.9 — Completed: deterministic ownership before serial ASSIGN
 
 **Locations:** `planner/engine.py:51-66,192-217,235-254`;
 `planner/heuristics.py:74-79`
 
-Classify, propose, and assign block on each other. Propose includes the named
-cluster set and assign includes the repository file set, so prompt latency grows
-with repository size.
+**Resolution:** Classify and propose remain global serial calls because proposal
+batching previously broke plan coherence. Before ASSIGN, files are now
+preassigned only when proposal candidate ownership is unique and its cluster ID
+exactly matches the topology map. Foundational, giant, endpoint-owned, config,
+supporting-kind, overlapping, and mismatched files remain in the model input.
+The model response is filtered to that unresolved inventory before deterministic
+and LLM ownership are merged. Existing full heuristic fallback behavior is
+unchanged.
 
-**Action:** Cache each step by scan/topology fingerprint. Use deterministic
-topology ownership for straightforward file assignment, bound or partition
-cluster context, and invoke an LLM only for ambiguous decisions.
+On `backend-tss-api_v2`, the accepted run preserved the plan contract and stayed
+within baseline quality variance: 54 vs 57 pages, 228 vs 235 unique covered
+files, and 18 vs 20 orphans. ASSIGN fell from 95.8s to 73.3s. A more aggressive
+compact bucket prompt reached 46.5s but expanded decomposition to 84 pages; it
+was rejected and reverted rather than trading documentation quality for speed.
 
 ### P1.10 — Scanner parsing is fully sequential
 

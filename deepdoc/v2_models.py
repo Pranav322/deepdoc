@@ -165,6 +165,7 @@ class RepoScan:
     flow_candidates: list[Any] = field(default_factory=list)
     service_boundaries: list[dict[str, Any]] = field(default_factory=list)
     file_services: dict[str, str] = field(default_factory=dict)
+    scan_scope: list[str] = field(default_factory=list)
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:

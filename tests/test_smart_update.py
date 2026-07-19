@@ -7,8 +7,10 @@ from unittest.mock import MagicMock, patch
 from deepdoc.persistence_v2 import (
     ENGINE_FINGERPRINT,
     load_changelog,
+    load_scan_cache,
     load_sync_receipt,
     load_sync_state,
+    save_scan_cache,
     save_generation_ledger,
     save_sync_state,
 )
@@ -48,19 +50,194 @@ def test_semantic_impact_carries_current_scan(tmp_repo) -> None:
     previous = {
         "method": "GET",
         "path": "/orders",
-        "file": "routes.py",
+        "file": "auth.py",
+        "route_file": "routes.py",
+        "handler_file": "auth.py",
         "handler": "list_orders",
     }
     current_scan = _minimal_scan(endpoints=[dict(previous)])
+    from .conftest import make_bucket, make_plan
+
+    plan = make_plan([make_bucket("Orders", "orders", ["routes.py", "auth.py"])])
+    previous_scan = {
+        "version": "v2",
+        "scan_complete": True,
+        "total_files": 20,
+        "api_endpoints": [previous],
+        "entry_points": [],
+        "config_files": [],
+        "openapi_paths": [],
+    }
 
     with (
-        patch("deepdoc.smart_update_v2.load_scan_cache", return_value={"api_endpoints": [previous]}),
+        patch("deepdoc.smart_update_v2.load_scan_cache", return_value=previous_scan),
         patch("deepdoc.planner.scan_repo", return_value=current_scan) as scan_repo,
     ):
-        impact = updater._detect_semantic_impacts(["config.py"])
+        impact = updater._detect_semantic_impacts(
+            plan, ChangeSet(changed_files=["routes.py"])
+        )
 
     assert impact.repo_scan is current_scan
-    scan_repo.assert_called_once()
+    scan_repo.assert_called_once_with(
+        tmp_repo,
+        updater.cfg,
+        telemetry=updater.telemetry,
+        scan_paths={"routes.py", "auth.py"},
+    )
+    assert updater.telemetry.snapshot("success")["counters"]["update.scan_scoped"] == 1
+
+
+def test_semantic_scan_scope_closes_over_buckets_and_endpoint_owners(tmp_repo) -> None:
+    from .conftest import make_bucket, make_plan
+
+    updater = _make_updater(tmp_repo)
+    plan = make_plan(
+        [
+            make_bucket("Routes", "routes", ["routes.py", "utils.py"]),
+            make_bucket("Auth", "auth", ["auth.py", "models.py"]),
+        ]
+    )
+    previous_scan = {
+        "scan_complete": True,
+        "total_files": 20,
+        "api_endpoints": [
+            {
+                "method": "GET",
+                "path": "/orders",
+                "route_file": "routes.py",
+                "handler_file": "auth.py",
+                "file": "auth.py",
+                "framework": "falcon",
+            }
+        ],
+        "entry_points": ["config.py"],
+        "config_files": [],
+        "openapi_paths": [],
+    }
+
+    scope, routes, reason = updater._semantic_scan_scope(
+        plan,
+        ChangeSet(changed_files=["utils.py"]),
+        previous_scan,
+    )
+
+    assert reason == ""
+    assert scope == {"routes.py", "utils.py", "auth.py", "models.py", "config.py"}
+    assert routes == {"utils.py", "routes.py"}
+
+
+def test_merge_scoped_endpoints_preserves_unaffected_routes(tmp_repo) -> None:
+    updater = _make_updater(tmp_repo)
+    previous = [
+        {
+            "method": "GET",
+            "path": "/v1/orders",
+            "route_file": "routes.py",
+            "handler_file": "auth.py",
+        },
+        {
+            "method": "GET",
+            "path": "/health",
+            "route_file": "health.py",
+            "handler_file": "health.py",
+        },
+    ]
+    current = [
+        {
+            "method": "GET",
+            "path": "/v2/orders",
+            "route_file": "routes.py",
+            "handler_file": "auth.py",
+        }
+    ]
+
+    merged = updater._merge_scoped_endpoints(previous, current, {"routes.py"})
+
+    assert {(endpoint["method"], endpoint["path"]) for endpoint in merged} == {
+        ("GET", "/v2/orders"),
+        ("GET", "/health"),
+    }
+
+
+def test_semantic_scan_uses_full_fallback_for_config_change(tmp_repo) -> None:
+    from .conftest import make_bucket, make_plan
+
+    updater = _make_updater(tmp_repo)
+    plan = make_plan([make_bucket("Core", "core", ["config.py"])])
+    current_scan = _minimal_scan()
+    previous_scan = {
+        "scan_complete": True,
+        "total_files": 20,
+        "api_endpoints": [],
+        "entry_points": [],
+        "config_files": ["config.py"],
+        "openapi_paths": [],
+    }
+
+    with (
+        patch("deepdoc.smart_update_v2.load_scan_cache", return_value=previous_scan),
+        patch("deepdoc.planner.scan_repo", return_value=current_scan) as scan_repo,
+    ):
+        impact = updater._detect_semantic_impacts(
+            plan, ChangeSet(changed_files=["config.py"])
+        )
+
+    assert impact.repo_scan is current_scan
+    scan_repo.assert_called_once_with(
+        tmp_repo,
+        updater.cfg,
+        telemetry=updater.telemetry,
+        scan_paths=None,
+    )
+    counters = updater.telemetry.snapshot("success")["counters"]
+    assert counters["update.scan_full_fallback"] == 1
+
+
+def test_scoped_scan_cache_preserves_unaffected_metadata(tmp_repo) -> None:
+    full_scan = _minimal_scan(
+        endpoints=[
+            {
+                "method": "GET",
+                "path": "/health",
+                "route_file": "health.py",
+                "handler_file": "health.py",
+            }
+        ]
+    )
+    full_scan.total_files = 6
+    full_scan.file_line_counts = {"auth.py": 1, "health.py": 2}
+    full_scan.source_kind_by_file = {"auth.py": "product", "health.py": "product"}
+    save_scan_cache(full_scan, tmp_repo)
+
+    scoped_scan = _minimal_scan(
+        endpoints=[
+            {
+                "method": "GET",
+                "path": "/health",
+                "route_file": "health.py",
+                "handler_file": "health.py",
+            },
+            {
+                "method": "POST",
+                "path": "/login",
+                "route_file": "auth.py",
+                "handler_file": "auth.py",
+            },
+        ]
+    )
+    scoped_scan.scan_scope = ["auth.py"]
+    scoped_scan.file_line_counts = {"auth.py": 8}
+    scoped_scan.source_kind_by_file = {"auth.py": "product"}
+    save_scan_cache(scoped_scan, tmp_repo)
+
+    cached = load_scan_cache(tmp_repo)
+    assert cached is not None
+    assert cached["total_files"] == 6
+    assert cached["file_line_counts"] == {"auth.py": 8, "health.py": 2}
+    assert {endpoint["path"] for endpoint in cached["api_endpoints"]} == {
+        "/health",
+        "/login",
+    }
 
 
 def test_execution_scan_reuses_semantic_scan(tmp_repo) -> None:

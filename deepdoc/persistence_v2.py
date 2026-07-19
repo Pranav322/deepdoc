@@ -531,6 +531,7 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
 
     data = {
         "version": "v2",
+        "scan_complete": True,
         "generated_at": _now_iso(),
         "total_files": scan.total_files,
         "languages": scan.languages,
@@ -648,6 +649,35 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
             for k in (getattr(scan, "knex_artifacts", None) or [])[:100]
         ],
     }
+    scan_scope = set(getattr(scan, "scan_scope", []) or [])
+    if scan_scope:
+        previous = load_scan_cache(repo_root)
+        if not previous:
+            return
+        merged = dict(previous)
+        merged.update(
+            {
+                "version": "v2",
+                "scan_complete": True,
+                "generated_at": data["generated_at"],
+                "api_endpoints": data["api_endpoints"],
+            }
+        )
+        for field_name in (
+            "file_line_counts",
+            "source_kind_by_file",
+            "file_frameworks",
+            "file_services",
+        ):
+            values = dict(previous.get(field_name) or {})
+            current = data.get(field_name) or {}
+            for path in scan_scope:
+                if path in current:
+                    values[path] = current[path]
+                else:
+                    values.pop(path, None)
+            merged[field_name] = values
+        data = merged
     atomic_write_json(_state_dir(repo_root) / SCAN_CACHE_FILE, data)
 
 

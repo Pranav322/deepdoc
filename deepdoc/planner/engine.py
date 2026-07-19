@@ -351,6 +351,8 @@ def scan_repo(
     repo_root: Path,
     cfg: dict[str, Any],
     telemetry: RunTelemetry | None = None,
+    *,
+    scan_paths: set[str] | None = None,
 ) -> RepoScan:
     """Scan the entire repo without making any LLM calls.
 
@@ -360,6 +362,11 @@ def scan_repo(
     exclude = list(cfg.get("exclude", []))
     include = cfg.get("include", [])
     extensions = supported_extensions()
+    normalized_scan_paths = {
+        Path(path).as_posix().removeprefix("./")
+        for path in (scan_paths or set())
+        if path
+    }
 
     # Always exclude DeepDoc's own generated/state directories regardless of
     # user config — scanning these produces noise and giant-file false positives.
@@ -420,9 +427,28 @@ def scan_repo(
     for root, dirs, files in os.walk(repo_root):
         root_path = Path(root)
         dirs[:] = [d for d in dirs if not _matches_any(d, exclude)]
+        if normalized_scan_paths:
+            rel_root = (
+                root_path.relative_to(repo_root).as_posix()
+                if root_path != repo_root
+                else ""
+            )
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if any(
+                    path == "/".join(filter(None, (rel_root, directory)))
+                    or path.startswith(
+                        "/".join(filter(None, (rel_root, directory))) + "/"
+                    )
+                    for path in normalized_scan_paths
+                )
+            ]
         for fname in sorted(files):
             fpath = root_path / fname
-            rel = str(fpath.relative_to(repo_root))
+            rel = fpath.relative_to(repo_root).as_posix()
+            if normalized_scan_paths and rel not in normalized_scan_paths:
+                continue
             if not _matches_any(rel, exclude) and not _matches_any(fname, exclude):
                 all_files_to_scan.append(fpath)
     _record_scan_timing(scan_timings, telemetry, "file_walk", step_start)
@@ -694,6 +720,7 @@ def scan_repo(
         file_frameworks=file_frameworks,
         service_boundaries=service_boundaries,
         file_services=file_services,
+        scan_scope=sorted(normalized_scan_paths),
     )
 
 

@@ -60,6 +60,33 @@ def test_empty_scan_keeps_complete_metric_shape(tmp_path: Path) -> None:
     assert {f"scan.{name}" for name in BASE_SCAN_PHASES} <= set(payload["spans"])
 
 
+def test_scan_repo_scope_filters_before_file_reads(tmp_path: Path) -> None:
+    selected = "def selected():\n    return 1\n"
+    (tmp_path / "selected.py").write_text(selected, encoding="utf-8")
+    (tmp_path / "unrelated.py").write_text(
+        "def unrelated():\n    return 2\n", encoding="utf-8"
+    )
+    (tmp_path / "README.md").write_text("# Unrelated\n", encoding="utf-8")
+    telemetry = RunTelemetry(tmp_path, "update")
+
+    scan = scan_repo(
+        tmp_path,
+        {},
+        telemetry=telemetry,
+        scan_paths={"selected.py"},
+    )
+    payload = telemetry.finish("success")
+
+    assert set(scan.file_contents) == {"selected.py"}
+    assert scan.scan_scope == ["selected.py"]
+    assert payload["counters"]["scan.files_discovered"] == 1
+    assert payload["counters"]["scan.source_files_read"] == 1
+    assert payload["counters"]["scan.source_bytes_read"] == len(
+        selected.encode("utf-8")
+    )
+    assert payload["counters"].get("scan.doc_files_read", 0) == 0
+
+
 def test_phase_two_scans_record_each_family(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
     telemetry = RunTelemetry(tmp_path, "generate")

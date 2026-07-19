@@ -505,7 +505,6 @@ class SmartUpdater:
         from .planner import (
             plan_docs as bucket_plan_docs,
         )
-        from .planner import run_phase2_scans
 
         # Step 0: clean up deleted files and orphaned buckets before any LLM work
         plan = self._handle_deleted_files(plan, change_set)
@@ -525,7 +524,6 @@ class SmartUpdater:
         )
 
         scan = self._execution_scan(change_set, "targeted replan")
-        scan = run_phase2_scans(scan, self.cfg, self.llm)
 
         console.print("[dim]Running planner on new files only...[/dim]")
         # Build a mini-config scoped to new + changed files
@@ -788,14 +786,7 @@ class SmartUpdater:
                     + cs.deleted_artifact_files
                 ),
             )
-            semantic_impact = self._detect_semantic_impacts(
-                cs.changed_files
-                + cs.new_files
-                + cs.deleted_files
-                + cs.changed_artifact_files
-                + cs.new_artifact_files
-                + cs.deleted_artifact_files
-            )
+            semantic_impact = self._detect_semantic_impacts(plan, cs)
             cs.semantic_changed_files = semantic_impact.changed_files
             cs.semantic_changed_endpoint_keys = semantic_impact.changed_endpoint_keys
             cs.endpoint_structure_changed = semantic_impact.endpoint_structure_changed
@@ -933,26 +924,73 @@ class SmartUpdater:
         )
         return sorted(stale)
 
-    def _detect_semantic_impacts(self, changed_paths: list[str]) -> SemanticImpact:
+    def _detect_semantic_impacts(
+        self, plan: DocPlan, change_set: ChangeSet
+    ) -> SemanticImpact:
         """Detect endpoint semantic changes from the saved scan cache to the current repo."""
+        changed_paths = sorted(
+            set(
+                change_set.changed_files
+                + change_set.new_files
+                + change_set.deleted_files
+                + change_set.changed_artifact_files
+                + change_set.new_artifact_files
+                + change_set.deleted_artifact_files
+            )
+        )
         if not changed_paths:
             return SemanticImpact()
 
         previous_scan = load_scan_cache(self.repo_root) or {}
-        previous_endpoints = previous_scan.get("api_endpoints") or []
-        if not previous_endpoints:
-            return SemanticImpact()
+        cached_endpoints = previous_scan.get("api_endpoints")
+        previous_endpoints = (
+            cached_endpoints if isinstance(cached_endpoints, list) else []
+        )
+        scan_scope, replacement_routes, fallback_reason = self._semantic_scan_scope(
+            plan,
+            change_set,
+            previous_scan,
+        )
 
         try:
             from .planner import scan_repo as bucket_scan_repo
 
+            if fallback_reason:
+                console.print(
+                    f"[dim]Semantic scan using full-repository fallback: {fallback_reason}[/dim]"
+                )
+                self.telemetry.counter("update.scan_full_fallback")
+            else:
+                console.print(
+                    f"[dim]Semantic scan scoped to {len(scan_scope)} dependency file(s)...[/dim]"
+                )
+                self.telemetry.counter("update.scan_scoped")
+            current_scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+                scan_paths=None if fallback_reason else scan_scope,
+            )
+        except Exception:
+            if fallback_reason:
+                return SemanticImpact()
+            console.print(
+                "[dim]Scoped semantic scan failed; retrying once with the full repository...[/dim]"
+            )
+            self.telemetry.counter("update.scan_full_fallback")
             current_scan = bucket_scan_repo(
                 self.repo_root,
                 self.cfg,
                 telemetry=self.telemetry,
             )
-        except Exception:
-            return SemanticImpact()
+            fallback_reason = "scoped scan failed"
+
+        if not fallback_reason:
+            current_scan.api_endpoints = self._merge_scoped_endpoints(
+                previous_endpoints,
+                current_scan.api_endpoints,
+                replacement_routes,
+            )
 
         impact = self._compute_endpoint_semantic_impact(
             previous_endpoints,
@@ -960,6 +998,105 @@ class SmartUpdater:
         )
         impact.repo_scan = current_scan
         return impact
+
+    def _semantic_scan_scope(
+        self,
+        plan: DocPlan,
+        change_set: ChangeSet,
+        previous_scan: dict[str, Any],
+    ) -> tuple[set[str], set[str], str]:
+        """Return a safe source closure or a reason to use the full repository."""
+        previous_endpoints = previous_scan.get("api_endpoints")
+        if not isinstance(previous_endpoints, list):
+            return set(), set(), "scan cache is missing endpoint metadata"
+        if previous_scan.get("scan_complete") is False:
+            return set(), set(), "scan cache is not a complete repository snapshot"
+        if (
+            change_set.new_files
+            or change_set.deleted_files
+            or change_set.changed_artifact_files
+            or change_set.new_artifact_files
+            or change_set.deleted_artifact_files
+        ):
+            return set(), set(), "structural or artifact files changed"
+
+        changed = set(change_set.changed_files)
+        config_paths = set(previous_scan.get("config_files") or [])
+        openapi_paths = set(previous_scan.get("openapi_paths") or [])
+        if changed & (config_paths | openapi_paths):
+            return set(), set(), "configuration or OpenAPI inputs changed"
+
+        tracked_files = {
+            file_path
+            for bucket in plan.buckets
+            for file_path in tracked_bucket_files(bucket)
+        }
+        if not changed or not changed <= tracked_files:
+            return set(), set(), "changed files are outside the saved plan"
+
+        scope = set(changed)
+        replacement_routes = set(changed)
+        changed_scope = True
+        while changed_scope:
+            before = len(scope)
+            for bucket in plan.buckets:
+                bucket_files = set(tracked_bucket_files(bucket))
+                if scope & bucket_files:
+                    scope.update(bucket_files)
+            for endpoint in previous_endpoints:
+                owned_files = set(endpoint_owned_files(endpoint))
+                if not scope & owned_files:
+                    continue
+                route_file = str(endpoint.get("route_file") or "")
+                if not route_file:
+                    return set(), set(), "cached endpoint route ownership is incomplete"
+                if str(endpoint.get("framework") or "").lower() == "django":
+                    return set(), set(), "Django URL resolution requires a full scan"
+                scope.update(owned_files)
+                replacement_routes.add(route_file)
+            changed_scope = len(scope) != before
+
+        scope.update(previous_scan.get("entry_points") or [])
+        scope.update(config_paths)
+        scope = {
+            path
+            for path in scope
+            if path and (self.repo_root / path).is_file()
+        }
+        total_files = int(previous_scan.get("total_files") or 0)
+        if total_files and len(scope) * 2 >= total_files:
+            return set(), set(), "dependency scope covers at least half the repository"
+        return scope, replacement_routes, ""
+
+    def _merge_scoped_endpoints(
+        self,
+        previous_endpoints: list[dict[str, Any]],
+        current_endpoints: list[dict[str, Any]],
+        replacement_routes: set[str],
+    ) -> list[dict[str, Any]]:
+        """Replace authoritative route slices while retaining unaffected endpoints."""
+
+        def route_file(endpoint: dict[str, Any]) -> str:
+            return str(endpoint.get("route_file") or endpoint.get("file") or "")
+
+        merged = [
+            endpoint
+            for endpoint in previous_endpoints
+            if route_file(endpoint) not in replacement_routes
+        ]
+        merged.extend(
+            endpoint
+            for endpoint in current_endpoints
+            if route_file(endpoint) in replacement_routes
+        )
+        return sorted(
+            merged,
+            key=lambda endpoint: (
+                self._endpoint_identity_key(endpoint),
+                route_file(endpoint),
+                str(endpoint.get("handler_file") or endpoint.get("file") or ""),
+            ),
+        )
 
     def _compute_endpoint_semantic_impact(
         self,

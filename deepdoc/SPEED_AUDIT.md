@@ -132,17 +132,29 @@ update path.
 to the run-scoped `ChangeSet`. Incremental and targeted execution consume that
 exact object and record an `update.scan_reused` counter. If semantic detection
 did not scan or failed, execution performs one normal fallback scan. No scan is
-persisted or shared across update runs.
+shared as a live `RepoScan` object across update runs; only the lightweight scan
+cache snapshot is persisted.
 
-### P1.2 — Targeted replans still begin with a full-repository scan
+### P1.2 — Completed: dependency-scoped update scans
 
 **Location:** `smart_update_v2.py:456-493`
 
-The include-scoped configuration is prepared after the full scan. A targeted
-replan therefore does not receive a targeted scan.
+**Resolution:** Modified existing source files now build an exact dependency
+scope before repository collection, reads, parsing, and endpoint detection. The
+scope closes over affected bucket files and cached route/handler ownership, then
+adds entry points and required configuration context. Current endpoint rows
+replace only authoritative cached route slices, preserving unaffected endpoint
+identities. Scoped cache persistence patches path-level metadata into the prior
+complete snapshot rather than truncating it.
 
-**Action:** Apply include roots during collection, or incrementally patch the
-saved scan, route index, and call graph for changed files.
+New/deleted source, artifact, config, or OpenAPI changes; Django URL trees;
+missing route ownership; and scopes covering at least half the repository emit
+an explicit reason and perform one full-repository fallback. Targeted planning
+also no longer runs Phase 2 enrichment twice.
+
+On the 270-file `backend-tss-api_v2` benchmark, a one-file serializer update
+collected 11 dependency/config files, read 2 Python files and 35,530 bytes,
+retained all 322 cached endpoints, and required no fallback.
 
 ### P1.3 — Completed: shared context-window evidence ceiling
 

@@ -21,6 +21,11 @@ The automated release workflow reads the section that matches the version in
 - **Single-scan smart updates.** Semantic endpoint classification now carries
   its current repository scan into incremental generation or targeted planning,
   avoiding a second complete scan in the common endpoint-aware update path.
+- **Dependency-scoped update scans.** Safe modifications to existing source
+  files now restrict collection, reads, parsing, and endpoint detection to
+  affected bucket and route dependencies. Unaffected cached endpoints and scan
+  metadata are retained, while structural, configuration, artifact, Django, or
+  otherwise uncertain changes visibly fall back to one complete scan.
 - **Shared generation evidence indexes.** Module resolution, helper symbols,
   source lines, and symbol boundaries are indexed once per generation engine
   instead of being rebuilt and rescanned for every documentation bucket.

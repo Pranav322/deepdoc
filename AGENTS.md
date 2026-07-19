@@ -7,7 +7,7 @@ Guidance for coding agents working in this repository.
 - **IMPORTANT**: Whenever you need more knowledge about the exact execution flows, functions, classes, invariants, and cross-file relationships, take reference from [`deepdoc/CONCEPTS.md`](deepdoc/CONCEPTS.md). It is the exhaustive semantic and architectural map of the codebase.
 
 ## Repo Summary
-- Project name: `deepdoc` (v3.1.0)
+- Project name: `deepdoc` (v0.5.0)
 - Language/runtime: Python `>=3.10`
 - Packaging: setuptools via `pyproject.toml`
 - CLI entrypoint: `deepdoc = deepdoc.cli:main`

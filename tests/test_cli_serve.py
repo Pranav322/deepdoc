@@ -197,6 +197,7 @@ def test_update_deploy_refuses_partial_doc_update(
 def test_deprecated_generated_version_warning_is_configurable(
     tmp_path: Path,
     capsys,
+    monkeypatch,
 ) -> None:
     repo_root = tmp_path
     docs_dir = repo_root / "docs"
@@ -206,6 +207,7 @@ def test_deprecated_generated_version_warning_is_configurable(
         encoding="utf-8",
     )
     cli._DEPRECATED_VERSION_WARNING_REPOS.clear()
+    monkeypatch.setattr(cli, "__version__", "1.0.0")
 
     cli._warn_if_deprecated_generated_version(
         {

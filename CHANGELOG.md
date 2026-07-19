@@ -7,6 +7,8 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.5.0] - 2026-07-19
+
 ### Added
 
 - **LiteLLM-first model capability resolution.** DeepDoc now has one local,

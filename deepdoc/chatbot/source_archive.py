@@ -4,16 +4,21 @@ from __future__ import annotations
 
 import fnmatch
 import hashlib
+import json
 import os
 from pathlib import Path
 from typing import Any
 
 from ..source_metadata import classify_source_kind
 from .persistence import (
+    LEGACY_SOURCE_ARCHIVE_FILE,
+    SOURCE_ARCHIVE_DB_FILE,
+    SOURCE_ARCHIVE_SCHEMA_VERSION,
+    apply_source_archive_changes,
     load_source_archive,
     load_source_catalog,
     save_source_archive,
-    save_source_catalog,
+    source_archive_metadata,
 )
 from .types import SourceCatalogEntry
 
@@ -76,8 +81,12 @@ def build_source_archive(
                 continue
             archive_data[rel_path] = content
 
-    save_source_archive(index_dir, archive_data)
-    save_source_catalog(index_dir, _source_catalog_entries(archive_data))
+    save_source_archive(
+        index_dir,
+        archive_data,
+        entries=_source_catalog_entries(archive_data),
+        policy_fingerprint=_source_archive_policy_fingerprint(cfg),
+    )
 
 
 def update_source_archive(
@@ -88,36 +97,39 @@ def update_source_archive(
     deleted_files: list[str],
 ) -> None:
     """Incrementally updates the source archive with changed file contents."""
-    archive_path = index_dir / "source_archive.json.gz"
-    if not archive_path.exists():
-        build_source_archive(repo_root, index_dir, cfg)
-        return
-
     indexing_cfg = cfg.get("chatbot", {}).get("indexing", {})
     max_file_bytes = int(indexing_cfg.get("max_file_bytes", 250000))
     exclude_patterns = _source_archive_exclude_patterns(cfg)
+    policy_fingerprint = _source_archive_policy_fingerprint(cfg)
+    archive_path = index_dir / SOURCE_ARCHIVE_DB_FILE
 
-    archive_data = load_source_archive(index_dir)
-    if not archive_data and _repo_has_archiveable_files(
-        repo_root,
-        max_file_bytes=max_file_bytes,
-        exclude_patterns=exclude_patterns,
+    if not archive_path.exists():
+        legacy_path = index_dir / LEGACY_SOURCE_ARCHIVE_FILE
+        legacy_archive = load_source_archive(index_dir) if legacy_path.exists() else {}
+        if legacy_archive:
+            save_source_archive(
+                index_dir,
+                legacy_archive,
+                entries=_source_catalog_entries(legacy_archive),
+                policy_fingerprint=policy_fingerprint,
+            )
+            legacy_path.unlink(missing_ok=True)
+            (index_dir / "source_catalog.json").unlink(missing_ok=True)
+        else:
+            build_source_archive(repo_root, index_dir, cfg)
+            return
+
+    metadata = source_archive_metadata(index_dir)
+    if (
+        metadata.get("schema_version") != str(SOURCE_ARCHIVE_SCHEMA_VERSION)
+        or metadata.get("policy_fingerprint") != policy_fingerprint
     ):
         build_source_archive(repo_root, index_dir, cfg)
         return
 
-    for rel_path in list(archive_data):
-        if not source_path_is_archiveable(
-            repo_root,
-            rel_path,
-            cfg,
-        ):
-            archive_data.pop(rel_path, None)
-
-    for rel_path in deleted_files:
-        archive_data.pop(rel_path, None)
-
-    for rel_path in changed_files:
+    deleted_paths = set(deleted_files)
+    upserts: dict[str, tuple[str, SourceCatalogEntry]] = {}
+    for rel_path in sorted(set(changed_files)):
         content = _read_archiveable_text(
             repo_root,
             rel_path,
@@ -125,12 +137,20 @@ def update_source_archive(
             exclude_patterns=exclude_patterns,
         )
         if content is None:
-            archive_data.pop(rel_path, None)
+            deleted_paths.add(rel_path)
             continue
-        archive_data[rel_path] = content
+        entry = _source_catalog_entries({rel_path: content})[0]
+        upserts[rel_path] = (content, entry)
 
-    save_source_archive(index_dir, archive_data)
-    save_source_catalog(index_dir, _source_catalog_entries(archive_data))
+    if not upserts and not deleted_paths:
+        return
+
+    apply_source_archive_changes(
+        index_dir,
+        upserts=upserts,
+        deleted_paths=deleted_paths,
+        policy_fingerprint=policy_fingerprint,
+    )
 
 
 def source_archive_needs_rebuild(
@@ -139,36 +159,59 @@ def source_archive_needs_rebuild(
     cfg: dict[str, Any],
 ) -> bool:
     """Return whether the source archive or catalog is missing/stale."""
-    archive_path = index_dir / "source_archive.json.gz"
-    catalog_path = index_dir / "source_catalog.json"
-    if not archive_path.exists():
-        return True
-
-    indexing_cfg = cfg.get("chatbot", {}).get("indexing", {})
-    max_file_bytes = int(indexing_cfg.get("max_file_bytes", 250000))
-    exclude_patterns = _source_archive_exclude_patterns(cfg)
-
-    archive_data = load_source_archive(index_dir)
-    if not archive_data:
-        return _repo_has_archiveable_files(
-            repo_root,
-            max_file_bytes=max_file_bytes,
-            exclude_patterns=exclude_patterns,
-        )
-
-    if not catalog_path.exists():
-        return True
-
-    catalog_entries = load_source_catalog(index_dir)
-    catalog_paths = {entry.file_path for entry in catalog_entries}
-    if catalog_paths != set(archive_data):
-        return True
-
-    for rel_path in archive_data:
-        if not source_path_is_archiveable(repo_root, rel_path, cfg):
+    archive_path = index_dir / SOURCE_ARCHIVE_DB_FILE
+    if archive_path.exists():
+        metadata = source_archive_metadata(index_dir)
+        if metadata.get("schema_version") != str(SOURCE_ARCHIVE_SCHEMA_VERSION):
             return True
+        if metadata.get(
+            "policy_fingerprint"
+        ) != _source_archive_policy_fingerprint(cfg):
+            return True
+        try:
+            import sqlite3
 
-    return False
+            conn = sqlite3.connect(archive_path)
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()
+            missing_blobs = conn.execute(
+                """
+                SELECT COUNT(*) FROM files
+                LEFT JOIN blobs USING (content_hash)
+                WHERE blobs.content_hash IS NULL
+                """
+            ).fetchone()
+            return (
+                not integrity
+                or integrity[0] != "ok"
+                or not missing_blobs
+                or int(missing_blobs[0]) != 0
+            )
+        except Exception:
+            return True
+        finally:
+            if "conn" in locals():
+                conn.close()
+
+    legacy_path = index_dir / LEGACY_SOURCE_ARCHIVE_FILE
+    if not legacy_path.exists():
+        return True
+    archive_data = load_source_archive(index_dir)
+    catalog_entries = load_source_catalog(index_dir)
+    return not archive_data or {
+        entry.file_path for entry in catalog_entries
+    } != set(archive_data)
+
+
+def _source_archive_policy_fingerprint(cfg: dict[str, Any]) -> str:
+    indexing_cfg = cfg.get("chatbot", {}).get("indexing", {})
+    payload = {
+        "schema_version": SOURCE_ARCHIVE_SCHEMA_VERSION,
+        "max_file_bytes": int(indexing_cfg.get("max_file_bytes", 250000)),
+        "exclude": sorted(_source_archive_exclude_patterns(cfg)),
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
 
 
 def source_path_is_archiveable(

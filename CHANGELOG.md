@@ -30,6 +30,10 @@ The automated release workflow reads the section that matches the version in
   and skip healthy corpora without effective mutations. Touched corpora retain
   complete JSONL/vector/FAISS/FTS replacement, while stronger FAISS and FTS
   health checks preserve interrupted-write recovery.
+- **Content-addressed source archive.** Chatbot source evidence now uses one
+  transactional SQLite store with independently compressed SHA-256 blobs, so a
+  one-file update no longer decompresses and recompresses every source. Existing
+  gzip archives migrate automatically on the first update.
 - **Shared generation evidence indexes.** Module resolution, helper symbols,
   source lines, and symbol boundaries are indexed once per generation engine
   instead of being rebuilt and rescanned for every documentation bucket.

@@ -729,7 +729,7 @@ All chatbot endpoints now share one response contract:
 - `evidence[]` is the canonical source of right-pane code/config snippets. Each item has an ID like `E1`, `file_path`, `start_line`, `end_line`, and `snippet`.
 - `references[]` contains generated docs or repo-authored docs. These are read-next links, not implementation proof.
 - Legacy fields such as `code_citations`, `doc_links`, `code_workspace_citations`, and `file_inventory` are derived for compatibility.
-- SQLite FTS, FAISS vectors, symbol chunks, and relationship chunks are candidate retrieval artifacts only. A candidate becomes evidence only after it is hydrated from the source archive/catalog.
+- SQLite FTS, FAISS vectors, symbol chunks, and relationship chunks are candidate retrieval artifacts only. A candidate becomes evidence only after it is hydrated from the content-addressed SQLite source archive/catalog. Existing gzip source archives migrate automatically on the next update.
 - Generated/internal paths such as `.deepdoc*`, `docs/`, `site/`, and `chatbot_backend/` are excluded from source evidence.
 - The answer validator rejects invented source paths, `line unknown`, unknown evidence IDs, and docs used as implementation proof. If a retry still fails, the backend returns a conservative answer with diagnostics.
 
@@ -947,7 +947,7 @@ The defaults work for almost every project. Expand below only when you need to t
 |-----|---------|-------------|
 | **General** | | |
 | `chatbot.enabled` | `false` | Enable chatbot indexing and backend (set automatically by `deepdoc init --with-chatbot`) |
-| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
+| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for the transactional SQLite source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
 | **Indexing** | | |
 | `chatbot.indexing.include_repo_docs` | `true` | Index selected repo-authored docs such as README/design notes in a separate corpus |
 | `chatbot.indexing.include_tests` | `false` | Allow test/example/fixture docs into the repo-doc corpus |

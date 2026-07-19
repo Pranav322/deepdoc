@@ -54,8 +54,8 @@ Guidance for coding agents working in this repository.
 - `deepdoc/chatbot/routes.py` — FastAPI app factory; two endpoints: `POST /query` (fast), `POST /deep` (agentic); SSE variants `/query/stream` and `/deep/stream`; all SSE endpoints use `timeout=30` + `ping` keepalive
 - `deepdoc/chatbot/providers.py` — `LiteLLMChatClient` (including `complete_stream()`), embedding clients; Azure `api_version` propagated from `llm.*` config
 - `deepdoc/chatbot/indexer.py` — `ChatbotIndexer`; FAISS invalid-embedding filter (score ≤ -0.5)
-- `deepdoc/chatbot/source_archive.py` — `build_source_archive`, `update_source_archive`; archived source is the proof for evidence hydration
-- `deepdoc/chatbot/persistence.py` — FAISS index save/load; invalid-embedding filter on load
+- `deepdoc/chatbot/source_archive.py` — `build_source_archive`, `update_source_archive`; archived source is the proof for evidence hydration; updates read only changed paths under a stable archive policy
+- `deepdoc/chatbot/persistence.py` — FAISS index save/load plus the canonical `source_archive.sqlite3` content-addressed store; legacy gzip archives migrate on first write
 - `deepdoc/chatbot/settings.py` — chatbot config schema
 - `deepdoc/chatbot/scaffold.py` — chatbot `chatbot_backend/` scaffolding generator
 
@@ -141,6 +141,8 @@ Three independent model surfaces: `llm.*` (doc generation), `chatbot.answer.*` (
 Retrieval is hybrid: FAISS vector search (invalid-embedding filter: score ≤ -0.5) + SQLite FTS + symbol chunks + relationship chunks → candidate set → optional rerank → prompt assembly. Evidence-first responses: `evidence[]` is canonical source proof (file path + line range); `references[]` is for generated/repo docs only. Legacy fields (`code_citations`, `doc_links`, `file_inventory`) are derived from those canonical fields.
 
 Incremental chatbot sync inspects each corpus once, skips healthy corpora without effective changed/deleted keys, and fully replaces JSONL/vector/FAISS/FTS state only for touched or unhealthy corpora. Corpus health includes embedding/schema identity, vector count, FAISS presence, and exact FTS row count. Intentionally oversized source files must not create a permanent rebuild loop.
+
+The canonical source archive is `source_archive.sqlite3`: path rows reference independently gzip-compressed SHA-256 blobs and carry catalog metadata in the same transaction. A stable policy fingerprint covers archive limits/excludes; policy changes trigger an atomic full rebuild, while normal updates read and transact only changed/deleted paths. `source_archive.json.gz` remains read-compatible and migrates on first write.
 
 Query modes:
 - `POST /query` — fast, single-pass, index-first

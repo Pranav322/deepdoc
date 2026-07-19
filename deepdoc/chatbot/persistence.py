@@ -5,12 +5,14 @@ from __future__ import annotations
 import gzip
 import hashlib
 import json
+import os
 from pathlib import Path
 import sqlite3
 import tempfile
 from typing import Any
 
 from ..persistence_v2 import atomic_write_json, atomic_write_text
+from ..source_metadata import classify_source_kind
 from .types import ChunkRecord, RetrievedChunk, SourceCatalogEntry
 
 CORPUS_FILES = {
@@ -28,6 +30,9 @@ CORPUS_FILES = {
 }
 LEXICAL_DB_FILE = "lexical_index.sqlite3"
 SOURCE_CATALOG_FILE = "source_catalog.json"
+SOURCE_ARCHIVE_DB_FILE = "source_archive.sqlite3"
+LEGACY_SOURCE_ARCHIVE_FILE = "source_archive.json.gz"
+SOURCE_ARCHIVE_SCHEMA_VERSION = 1
 INDEX_MANIFEST_FILE = "index_manifest.json"
 
 
@@ -248,35 +253,85 @@ def _lexical_metadata_blob(record: ChunkRecord) -> str:
     return " ".join(bit for bit in metadata_bits if bit)
 
 
-def save_source_archive(index_dir: Path, archive_data: dict[str, str]) -> None:
+def source_archive_path(index_dir: Path) -> Path:
+    return index_dir / SOURCE_ARCHIVE_DB_FILE
+
+
+def save_source_archive(
+    index_dir: Path,
+    archive_data: dict[str, str],
+    *,
+    entries: list[SourceCatalogEntry] | None = None,
+    policy_fingerprint: str = "",
+) -> None:
+    """Atomically replace the content-addressed source archive."""
     ensure_index_dir(index_dir)
-    archive_path = index_dir / "source_archive.json.gz"
-    payload = json.dumps(archive_data, sort_keys=True).encode("utf-8")
+    archive_path = source_archive_path(index_dir)
     fd, tmp_name = tempfile.mkstemp(
         prefix=f".{archive_path.name}.", suffix=".tmp", dir=str(archive_path.parent)
     )
+    os.close(fd)
+    Path(tmp_name).unlink(missing_ok=True)
     tmp_path = Path(tmp_name)
+    entry_by_path = {
+        entry.file_path: entry for entry in (entries or _catalog_for_archive(archive_data))
+    }
     try:
-        with open(fd, "wb", closefd=True) as raw:
-            with gzip.GzipFile(fileobj=raw, mode="wb", mtime=0) as gz:
-                gz.write(payload)
-            raw.flush()
+        conn = sqlite3.connect(tmp_path)
+        try:
+            _ensure_source_archive_schema(conn)
+            _replace_source_archive_rows(
+                conn,
+                archive_data,
+                entry_by_path,
+                policy_fingerprint=policy_fingerprint,
+            )
+            integrity = conn.execute("PRAGMA integrity_check").fetchone()
+            if not integrity or integrity[0] != "ok":
+                raise RuntimeError("Source archive integrity check failed")
+            conn.commit()
+        finally:
+            conn.close()
         tmp_path.replace(archive_path)
     except Exception:
-        try:
-            tmp_path.unlink()
-        except FileNotFoundError:
-            pass
+        tmp_path.unlink(missing_ok=True)
         raise
 
 
 def load_source_archive(index_dir: Path) -> dict[str, str]:
-    archive_path = index_dir / "source_archive.json.gz"
-    if not archive_path.exists():
+    archive_path = source_archive_path(index_dir)
+    if archive_path.exists():
+        try:
+            conn = sqlite3.connect(archive_path)
+            rows = conn.execute(
+                """
+                SELECT files.file_path, blobs.compressed_content
+                FROM files JOIN blobs USING (content_hash)
+                ORDER BY files.file_path
+                """
+            ).fetchall()
+            return {
+                str(path): gzip.decompress(payload).decode("utf-8")
+                for path, payload in rows
+            }
+        except Exception:
+            return {}
+        finally:
+            if "conn" in locals():
+                conn.close()
+
+    legacy_path = index_dir / LEGACY_SOURCE_ARCHIVE_FILE
+    if not legacy_path.exists():
         return {}
     try:
-        with gzip.open(archive_path, "rt", encoding="utf-8") as f:
-            return json.load(f)
+        with gzip.open(legacy_path, "rt", encoding="utf-8") as handle:
+            raw = json.load(handle)
+        if not isinstance(raw, dict) or not all(
+            isinstance(path, str) and isinstance(content, str)
+            for path, content in raw.items()
+        ):
+            return {}
+        return raw
     except Exception:
         return {}
 
@@ -285,6 +340,30 @@ def save_source_catalog(
     index_dir: Path,
     entries: list[SourceCatalogEntry],
 ) -> None:
+    archive_path = source_archive_path(index_dir)
+    if archive_path.exists():
+        conn = sqlite3.connect(archive_path)
+        try:
+            with conn:
+                for entry in entries:
+                    conn.execute(
+                        """
+                        UPDATE files
+                        SET source_kind = ?, language = ?, total_lines = ?, size_bytes = ?
+                        WHERE file_path = ? AND content_hash = ?
+                        """,
+                        (
+                            entry.source_kind,
+                            entry.language,
+                            entry.total_lines,
+                            entry.size_bytes,
+                            entry.file_path,
+                            entry.content_hash,
+                        ),
+                    )
+        finally:
+            conn.close()
+        return
     ensure_index_dir(index_dir)
     atomic_write_json(
         index_dir / SOURCE_CATALOG_FILE,
@@ -293,6 +372,33 @@ def save_source_catalog(
 
 
 def load_source_catalog(index_dir: Path) -> list[SourceCatalogEntry]:
+    archive_path = source_archive_path(index_dir)
+    if archive_path.exists():
+        try:
+            conn = sqlite3.connect(archive_path)
+            rows = conn.execute(
+                """
+                SELECT file_path, content_hash, source_kind, language,
+                       total_lines, size_bytes
+                FROM files ORDER BY file_path
+                """
+            ).fetchall()
+            return [
+                SourceCatalogEntry(
+                    file_path=str(row[0]),
+                    content_hash=str(row[1]),
+                    source_kind=str(row[2]),
+                    language=str(row[3]),
+                    total_lines=int(row[4]),
+                    size_bytes=int(row[5]),
+                )
+                for row in rows
+            ]
+        except Exception:
+            return []
+        finally:
+            if "conn" in locals():
+                conn.close()
     catalog_path = index_dir / SOURCE_CATALOG_FILE
     if not catalog_path.exists():
         return []
@@ -310,6 +416,166 @@ def load_source_catalog(index_dir: Path) -> list[SourceCatalogEntry]:
             entries.append(SourceCatalogEntry.from_dict(item))
         except TypeError:
             continue
+    return entries
+
+
+def source_archive_metadata(index_dir: Path) -> dict[str, str]:
+    archive_path = source_archive_path(index_dir)
+    if not archive_path.exists():
+        return {}
+    try:
+        conn = sqlite3.connect(archive_path)
+        return {
+            str(key): str(value)
+            for key, value in conn.execute("SELECT key, value FROM metadata")
+        }
+    except sqlite3.Error:
+        return {}
+    finally:
+        if "conn" in locals():
+            conn.close()
+
+
+def apply_source_archive_changes(
+    index_dir: Path,
+    *,
+    upserts: dict[str, tuple[str, SourceCatalogEntry]],
+    deleted_paths: set[str],
+    policy_fingerprint: str,
+) -> dict[str, int]:
+    """Apply changed archive entries without rewriting unaffected blobs."""
+    archive_path = source_archive_path(index_dir)
+    if not archive_path.exists():
+        raise FileNotFoundError(archive_path)
+    conn = sqlite3.connect(archive_path)
+    try:
+        with conn:
+            _ensure_source_archive_schema(conn)
+            if deleted_paths:
+                conn.executemany(
+                    "DELETE FROM files WHERE file_path = ?",
+                    [(path,) for path in sorted(deleted_paths)],
+                )
+            for path, (content, entry) in sorted(upserts.items()):
+                encoded = content.encode("utf-8")
+                content_hash = hashlib.sha256(encoded).hexdigest()
+                conn.execute(
+                    "INSERT OR IGNORE INTO blobs VALUES (?, ?)",
+                    (content_hash, gzip.compress(encoded, mtime=0)),
+                )
+                conn.execute(
+                    """
+                    INSERT INTO files VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(file_path) DO UPDATE SET
+                        content_hash = excluded.content_hash,
+                        source_kind = excluded.source_kind,
+                        language = excluded.language,
+                        total_lines = excluded.total_lines,
+                        size_bytes = excluded.size_bytes
+                    """,
+                    (
+                        path,
+                        content_hash,
+                        entry.source_kind,
+                        entry.language,
+                        entry.total_lines,
+                        entry.size_bytes,
+                    ),
+                )
+            conn.execute(
+                "DELETE FROM blobs WHERE content_hash NOT IN (SELECT content_hash FROM files)"
+            )
+            _set_source_archive_metadata(conn, policy_fingerprint)
+        return {
+            "upserted": len(upserts),
+            "deleted": len(deleted_paths),
+        }
+    finally:
+        conn.close()
+
+
+def _ensure_source_archive_schema(conn: sqlite3.Connection) -> None:
+    conn.executescript(
+        """
+        CREATE TABLE IF NOT EXISTS metadata (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS blobs (
+            content_hash TEXT PRIMARY KEY,
+            compressed_content BLOB NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS files (
+            file_path TEXT PRIMARY KEY,
+            content_hash TEXT NOT NULL REFERENCES blobs(content_hash),
+            source_kind TEXT NOT NULL,
+            language TEXT NOT NULL,
+            total_lines INTEGER NOT NULL,
+            size_bytes INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS files_content_hash_idx ON files(content_hash);
+        """
+    )
+
+
+def _replace_source_archive_rows(
+    conn: sqlite3.Connection,
+    archive_data: dict[str, str],
+    entry_by_path: dict[str, SourceCatalogEntry],
+    *,
+    policy_fingerprint: str,
+) -> None:
+    for content in archive_data.values():
+        encoded = content.encode("utf-8")
+        content_hash = hashlib.sha256(encoded).hexdigest()
+        conn.execute(
+            "INSERT OR IGNORE INTO blobs VALUES (?, ?)",
+            (content_hash, gzip.compress(encoded, mtime=0)),
+        )
+    for path, content in sorted(archive_data.items()):
+        entry = entry_by_path[path]
+        conn.execute(
+            "INSERT INTO files VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                path,
+                entry.content_hash,
+                entry.source_kind,
+                entry.language,
+                entry.total_lines,
+                entry.size_bytes,
+            ),
+        )
+    _set_source_archive_metadata(conn, policy_fingerprint)
+
+
+def _set_source_archive_metadata(
+    conn: sqlite3.Connection, policy_fingerprint: str
+) -> None:
+    conn.executemany(
+        "INSERT OR REPLACE INTO metadata VALUES (?, ?)",
+        [
+            ("schema_version", str(SOURCE_ARCHIVE_SCHEMA_VERSION)),
+            ("policy_fingerprint", policy_fingerprint),
+        ],
+    )
+
+
+def _catalog_for_archive(
+    archive_data: dict[str, str],
+) -> list[SourceCatalogEntry]:
+    entries: list[SourceCatalogEntry] = []
+    for path, content in sorted(archive_data.items()):
+        encoded = content.encode("utf-8")
+        entries.append(
+            SourceCatalogEntry(
+                file_path=path,
+                content_hash=hashlib.sha256(encoded).hexdigest(),
+                source_kind=classify_source_kind(path),
+                language=Path(path).suffix.lower().lstrip("."),
+                total_lines=len(content.splitlines()),
+                size_bytes=len(encoded),
+            )
+        )
     return entries
 
 
@@ -352,20 +618,28 @@ def build_index_manifest(index_dir: Path) -> dict[str, Any]:
         }
 
     catalog_entries = load_source_catalog(index_dir)
+    catalog_payload = [entry.to_dict() for entry in catalog_entries]
     artifacts["source_catalog"] = {
         "kind": "source_catalog",
-        "file": SOURCE_CATALOG_FILE,
+        "file": SOURCE_ARCHIVE_DB_FILE,
         "record_count": len(catalog_entries),
-        "content_hash": _sha256_text(
-            json.dumps([entry.to_dict() for entry in catalog_entries], sort_keys=True)
-        ),
+        "content_hash": _sha256_text(json.dumps(catalog_payload, sort_keys=True)),
     }
-    archive = load_source_archive(index_dir)
     artifacts["source_archive"] = {
         "kind": "source_archive",
-        "file": "source_archive.json.gz",
-        "record_count": len(archive),
-        "content_hash": _sha256_text(json.dumps(archive, sort_keys=True)),
+        "file": SOURCE_ARCHIVE_DB_FILE,
+        "format": "sqlite-content-addressed-gzip",
+        "schema_version": SOURCE_ARCHIVE_SCHEMA_VERSION,
+        "record_count": len(catalog_entries),
+        "content_hash": _sha256_text(
+            json.dumps(
+                [
+                    [entry.file_path, entry.content_hash]
+                    for entry in catalog_entries
+                ],
+                sort_keys=True,
+            )
+        ),
     }
     artifacts["lexical_index"] = {
         "kind": "lexical_index",
@@ -379,7 +653,7 @@ def build_index_manifest(index_dir: Path) -> dict[str, Any]:
         "content_hash": _sha256_text(_read_text(call_graph_path)),
         "exists": call_graph_path.exists(),
     }
-    return {"version": 1, "artifacts": artifacts}
+    return {"version": 2, "artifacts": artifacts}
 
 
 def _read_text(path: Path) -> str:

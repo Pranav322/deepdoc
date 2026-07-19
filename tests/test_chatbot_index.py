@@ -456,6 +456,7 @@ def test_incremental_sync_writes_symbol_corpus_and_manifest(
     assert len(symbol_vectors) == 1
     assert manifest["artifacts"]["symbol"]["record_count"] == 1
     assert manifest["artifacts"]["source_archive"]["record_count"] == 1
+    assert manifest["artifacts"]["source_archive"]["file"] == "source_archive.sqlite3"
 
 
 def test_incremental_sync_skips_healthy_untouched_corpora(
@@ -616,6 +617,7 @@ def test_index_manifest_describes_artifacts_without_timestamps(tmp_path: Path) -
 
     assert first == second
     assert "generated_at" not in first
+    assert first["version"] == 2
     assert first["artifacts"]["code"]["record_count"] == 1
     assert first["artifacts"]["lexical_index"]["record_count_by_corpus"]["code"] == 1
 

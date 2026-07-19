@@ -242,16 +242,24 @@ index followed by a one-file Python refresh rewrote only code, symbol, and
 relationship corpora; artifact, doc-summary, doc-full, and repo-doc JSONL files
 remained byte-identical.
 
-### P1.8 — Incremental source archive updates are whole-archive rewrites
+### P1.8 — Completed: transactional content-addressed source archive
 
 **Location:** `chatbot/source_archive.py:100-133`
 
-An update loads/decompresses the complete archive, validates and rereads
-unchanged sources, applies changed/deleted paths, recomputes the complete
-catalog, and recompresses everything.
+**Resolution:** The canonical source store is now `source_archive.sqlite3`.
+Path rows reference independently gzip-compressed SHA-256 blobs, and catalog
+metadata commits in the same transaction. Full builds create and integrity-check
+a temporary database before atomic replacement. Incremental updates read only
+changed paths, upsert/delete their rows, and reclaim unreferenced blobs without
+decompressing or rewriting unaffected entries.
 
-**Action:** Store sources as individually compressed content-addressed blobs or
-entries plus a small manifest. Preserve catalog metadata for unchanged files.
+Archive limits and excludes are covered by a stable policy fingerprint; policy
+changes deliberately perform a complete rebuild. Existing
+`source_archive.json.gz` state remains readable and migrates automatically on
+the first write. Query callers retain the same in-memory `dict[str, str]` API.
+On `backend-tss-api_v2`, migration produced 246 paths backed by 245 deduplicated
+blobs; the next one-file update performed one source read and completed its
+archive transaction in 1.35 ms.
 
 ### P1.9 — Planner latency contains a serial LLM dependency chain
 

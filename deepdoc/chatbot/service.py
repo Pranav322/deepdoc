@@ -27,6 +27,7 @@ from .persistence import (
     load_vector_index,
     query_lexical_index,
     similarity_search,
+    source_archive_path,
 )
 from .providers import build_chat_client, build_embedding_client
 from .settings import chatbot_allowed_origins, get_chatbot_cfg
@@ -108,7 +109,7 @@ class ChatbotQueryService(RetrievalMixin, AnswerMixin, LiveFallbackMixin):
                 "Source archive empty or unreadable at %s while indexed corpora "
                 "exist. Live-fallback, evidence verification, and deep mode file "
                 "inventory will be degraded. Run `deepdoc update` to rebuild.",
-                self.index_dir / "source_archive.json.gz",
+                source_archive_path(self.index_dir),
             )
         self.source_catalog = load_source_catalog(self.index_dir)
         self._source_catalog_by_path: dict[str, SourceCatalogEntry] = {

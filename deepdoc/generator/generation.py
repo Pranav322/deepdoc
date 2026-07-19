@@ -13,6 +13,7 @@ Phase 3 of the bucket-based doc pipeline:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from contextlib import nullcontext
 import hashlib
 import json
 import re
@@ -35,9 +36,10 @@ from rich.progress import (
 )
 
 from .. import __version__ as DEEPDOC_VERSION
-from ..llm import LLMClient, is_retryable_llm_error
+from ..llm import LLMClient, fit_prompt_sections, is_retryable_llm_error
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
+from ..plan_contract import bucket_output_path, validate_plan_contract
 from ..planner import DocBucket, DocPlan, RepoScan, tracked_bucket_files
 from ..prompts import SYSTEM_V2, get_prompt_for_bucket
 from ..scanner import _build_import_lookup, _classify_file_role, _normalize_import
@@ -121,42 +123,37 @@ class PageGenerator:
         # Select prompt template via generation_hints.prompt_style
         prompt_template = get_prompt_for_bucket(bucket)
 
-        # Compose the enriched source context
+        # Keep source proof mandatory; supplemental categories are fitted later.
         full_source = evidence.source_context
-        if evidence.compressed_cards_context:
-            full_source += (
+        optional_specs = [
+            (
+                "compressed_cards",
                 "\n\n## Compressed File Coverage\n"
                 "These files were not dropped. They are represented by derived evidence "
-                "cards and still count as authoritative coverage inputs.\n\n"
-                f"{evidence.compressed_cards_context}"
-            )
-        if evidence.cluster_context:
-            full_source += f"\n\n## Giant File Clusters\n{evidence.cluster_context}"
-        if evidence.integration_context:
-            full_source += f"\n\n## Integration Context\n{evidence.integration_context}"
-        if evidence.database_context:
-            full_source += f"\n\n## Database Schema\n{evidence.database_context}"
-        if evidence.runtime_context:
-            full_source += (
-                f"\n\n## Runtime & Background Jobs\n{evidence.runtime_context}"
-            )
-        # flow_context is injected via dedicated template placeholder
-        if evidence.artifact_context:
-            full_source += f"\n\n## Artifacts\n{evidence.artifact_context}"
-        if evidence.graph_context:
-            full_source += f"\n\n## Dependency Graph\n{evidence.graph_context}"
-        if evidence.cross_ref_context:
-            full_source += f"\n\n{evidence.cross_ref_context}"
-        if evidence.plan_summary_context:
-            full_source += f"\n\n## Repository Map\n{evidence.plan_summary_context}"
-        if evidence.repo_docs_context:
-            full_source += f"\n\n{evidence.repo_docs_context}"
-        if evidence.helper_context:
-            full_source += f"\n\n{evidence.helper_context}"
-        if evidence.config_env_context:
-            full_source += (
-                f"\n\n## Config & Environment Evidence\n{evidence.config_env_context}"
-            )
+                "cards and still count as authoritative coverage inputs.\n\n",
+                evidence.compressed_cards_context,
+            ),
+            ("cluster", "\n\n## Giant File Clusters\n", evidence.cluster_context),
+            ("integration", "\n\n## Integration Context\n", evidence.integration_context),
+            ("database", "\n\n## Database Schema\n", evidence.database_context),
+            ("runtime", "\n\n## Runtime & Background Jobs\n", evidence.runtime_context),
+            ("artifact", "\n\n## Artifacts\n", evidence.artifact_context),
+            ("graph", "\n\n## Dependency Graph\n", evidence.graph_context),
+            ("cross_reference", "\n\n", evidence.cross_ref_context),
+            ("plan_summary", "\n\n## Repository Map\n", evidence.plan_summary_context),
+            ("repo_docs", "\n\n", evidence.repo_docs_context),
+            ("helpers", "\n\n", evidence.helper_context),
+            (
+                "config_environment",
+                "\n\n## Config & Environment Evidence\n",
+                evidence.config_env_context,
+            ),
+        ]
+        optional_contexts = [
+            (name, header + body)
+            for name, header, body in optional_specs
+            if body
+        ]
         page_contract = (bucket.generation_hints or {}).get("page_contract", {})
         if page_contract:
             contract_lines = [
@@ -215,38 +212,84 @@ class PageGenerator:
         # Resource group for endpoint pages
         resource_group = bucket.slug.replace("-api", "").replace("-", " ").title()
 
-        user_prompt = prompt_template.format(
-            title=bucket.title,
-            project_name=self.cfg.get("project_name", self.repo_root.name),
-            description=self.cfg.get("description", ""),
-            page_description=bucket.description,
-            languages=", ".join(
-                k for k in (self.cfg.get("languages") or ["python", "javascript"])
-            ),
-            frameworks=", ".join(self.cfg.get("frameworks") or []),
-            source_context=full_source,
-            flow_context=evidence.flow_context or "",
-            endpoints_detail=evidence.endpoints_detail,
-            openapi_context=openapi_context,
-            resource_group=resource_group,
-            required_sections=required_sections,
-            required_diagrams=required_diagrams,
-            coverage_targets=coverage_targets,
-            sitemap_context=sitemap_context,
-            dependency_links=dependency_links,
-        )
-
-        if failure_prefix:
-            user_prompt = failure_prefix + "\n\n" + user_prompt
-
-        if quality_feedback:
-            user_prompt += (
-                "\n\n## Quality Feedback From Previous Draft\n"
-                "Revise the page to address these issues while staying grounded in the same evidence:\n"
-                f"{quality_feedback}\n"
+        def _render(sections: dict[str, str]) -> str:
+            source_context = sections["source_context"]
+            for name, _ in optional_contexts:
+                source_context += sections.get(name, "")
+            user_prompt = prompt_template.format(
+                title=bucket.title,
+                project_name=self.cfg.get("project_name", self.repo_root.name),
+                description=self.cfg.get("description", ""),
+                page_description=bucket.description,
+                languages=", ".join(
+                    k for k in (self.cfg.get("languages") or ["python", "javascript"])
+                ),
+                frameworks=", ".join(self.cfg.get("frameworks") or []),
+                source_context=source_context,
+                flow_context=sections["flow_context"],
+                endpoints_detail=sections["endpoints_detail"],
+                openapi_context=sections["openapi_context"],
+                resource_group=resource_group,
+                required_sections=required_sections,
+                required_diagrams=required_diagrams,
+                coverage_targets=coverage_targets,
+                sitemap_context=sections["sitemap_context"],
+                dependency_links=sections["dependency_links"],
             )
+            if sections["failure_prefix"]:
+                user_prompt = sections["failure_prefix"] + "\n\n" + user_prompt
+            if sections["quality_feedback"]:
+                user_prompt += (
+                    "\n\n## Quality Feedback From Previous Draft\n"
+                    "Revise the page to address these issues while staying grounded in the same evidence:\n"
+                    f"{sections['quality_feedback']}\n"
+                )
+            return user_prompt
 
-        return self.llm.complete(SYSTEM_V2, user_prompt)
+        fitted = fit_prompt_sections(
+            self.llm.capabilities,
+            system=SYSTEM_V2,
+            render_prompt=_render,
+            required_sections={
+                "source_context": full_source,
+                "flow_context": evidence.flow_context or "",
+                "endpoints_detail": evidence.endpoints_detail or "",
+                "openapi_context": openapi_context or "",
+                "sitemap_context": sitemap_context or "",
+                "dependency_links": dependency_links or "",
+                "failure_prefix": failure_prefix or "",
+                "quality_feedback": quality_feedback or "",
+            },
+            optional_sections=[
+                (name, [value] if value else []) for name, value in optional_contexts
+            ],
+            output_reserve_tokens=self.llm.output_reserve_tokens,
+            step_name=f"page generation for {bucket.slug}",
+        )
+        user_prompt = fitted.prompt
+        evidence.prompt_input_tokens = fitted.input_tokens
+        evidence.prompt_tokens_estimated = fitted.tokens_estimated
+        evidence.prompt_omitted_contexts = sorted(fitted.omitted_records)
+
+        telemetry = getattr(self.llm, "telemetry", None)
+        if telemetry is not None:
+            telemetry.counter("generation.prompt_input_tokens", fitted.input_tokens)
+            for name, count in fitted.omitted_records.items():
+                telemetry.counter(f"generation.prompt_omitted_{name}", count)
+        stage = "full_rewrite" if failure_prefix else (
+            "quality_retry" if quality_feedback else "draft"
+        )
+        operation = (
+            telemetry.operation(
+                f"generation.{bucket.slug}",
+                stage=stage,
+                bucket_type=bucket.bucket_type,
+            )
+            if telemetry is not None
+            else nullcontext()
+        )
+        with operation:
+            return self.llm.complete(SYSTEM_V2, user_prompt)
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -258,7 +301,7 @@ class PageGenerator:
 BATCH_SIZE = 10
 RATE_LIMIT_PAUSE = 0.5  # seconds between batches (Azure rarely 429s within quota)
 RATE_LIMIT_BACKOFF = 3.0  # initial backoff on 429; doubles each retry
-MAX_RETRIES = 5
+MAX_RETRIES = 3
 MAX_PARALLEL_WORKERS = 6  # LLM concurrency — safe for most Azure/OpenAI deployments
 
 
@@ -390,6 +433,7 @@ class BucketGenerationEngine:
         self.llm = llm
         self.scan = scan
         self.plan = plan
+        self.contract_plan = plan
         self.output_dir = output_dir
         self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
         self.generator = PageGenerator(llm, cfg, repo_root)
@@ -439,7 +483,8 @@ class BucketGenerationEngine:
         - Apply rate limiting between batches
         - Validate and post-process each result
         """
-        results: list[GenerationResult] = []
+        results_by_slug: dict[str, GenerationResult] = {}
+        validate_plan_contract(self.contract_plan)
         buckets = sorted(self.plan.buckets, key=lambda b: b.priority)
 
         # Pre-build sitemap context (shared across all pages)
@@ -452,6 +497,13 @@ class BucketGenerationEngine:
 
         from ..manifest import Manifest
         _manifest = Manifest(self.output_dir)
+        checkpoint_pages = max(1, int(self.cfg.get("manifest_checkpoint_pages", 10)))
+        checkpoint_seconds = max(
+            1.0,
+            float(self.cfg.get("manifest_checkpoint_seconds", 15.0)),
+        )
+        pending_manifest_pages = 0
+        last_manifest_save = time.monotonic()
 
         with Progress(
             SpinnerColumn(),
@@ -462,85 +514,98 @@ class BucketGenerationEngine:
         ) as progress:
             task = progress.add_task("Generating pages...", total=total)
 
-            # Process in batches for rate limiting
-            for batch_start in range(0, total, self.batch_size):
-                batch = buckets[batch_start : batch_start + self.batch_size]
+            futures = {}
+            submitted = 0
+            with ThreadPoolExecutor(max_workers=max(1, self.max_workers)) as executor:
+                for bucket_index, bucket in enumerate(buckets):
+                    progress.update(
+                        task, description=f"[dim]Queuing {bucket.title}...[/dim]"
+                    )
 
-                # Use thread pool for parallel LLM calls within batch
-                with ThreadPoolExecutor(
-                    max_workers=min(self.max_workers, len(batch))
-                ) as executor:
-                    futures = {}
-                    for bucket in batch:
-                        progress.update(
-                            task, description=f"[dim]Queuing {bucket.title}...[/dim]"
+                    if not force and not self._bucket_is_stale(bucket, _manifest):
+                        results_by_slug[bucket.slug] = GenerationResult(
+                            bucket=bucket,
+                            content=None,
                         )
-
-                        # Check staleness
-                        if not force and not self._bucket_is_stale(bucket, _manifest):
-                            results.append(
-                                GenerationResult(bucket=bucket, content=None)
-                            )
-                            progress.advance(task)
-                            continue
-
-                        future = executor.submit(
-                            self._generate_one,
-                            bucket,
-                            sitemap_by_slug.get(bucket.slug, ("", "")),
-                        )
-                        futures[future] = bucket
-
-                    # Collect results as they complete
-                    for future in as_completed(futures):
-                        bucket = futures[future]
-                        try:
-                            result = future.result()
-                            results.append(result)
-
-                            if result.error:
-                                failed_count += 1
-                                console.print(
-                                    f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {result.error}"
-                                )
-                                if "stub" in (result.error or "").lower():
-                                    stub_slugs.append(bucket.slug)
-                            elif result.content:
-                                generated_count += 1
-                                word_count = len(result.content.split())
-                                v = result.validation
-                                warnings = ""
-                                if v and v.warnings:
-                                    warnings = f" [yellow]⚠ {len(v.warnings)} warning(s)[/yellow]"
-                                if result.degraded:
-                                    warnings += " [yellow]degraded[/yellow]"
-                                if v and not v.is_valid:
-                                    warnings += " [red]invalid[/red]"
-                                diagrams = f" {v.mermaid_block_count}🔀" if v else ""
-                                console.print(
-                                    f"  [green]✓[/green] [bold]{bucket.title}[/bold] "
-                                    f"[dim]({bucket.bucket_type} · "
-                                    f"{len(bucket.owned_files)} files · "
-                                    f"~{word_count} words{diagrams} · "
-                                    f"{result.elapsed_seconds:.1f}s)[/dim]{warnings}"
-                                )
-                                # Save manifest incrementally so a cancelled run
-                                # can resume from completed pages on next generate.
-                                self._checkpoint_manifest(_manifest, result)
-                        except Exception as e:
-                            failed_count += 1
-                            results.append(
-                                GenerationResult(bucket=bucket, error=str(e))
-                            )
-                            console.print(
-                                f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}"
-                            )
-
                         progress.advance(task)
+                        continue
 
-                # Rate limit between batches
-                if batch_start + self.batch_size < total and self.rate_limit_pause > 0:
-                    time.sleep(self.rate_limit_pause)
+                    future = executor.submit(
+                        self._generate_one,
+                        bucket,
+                        sitemap_by_slug.get(bucket.slug, ("", "")),
+                    )
+                    futures[future] = bucket
+                    submitted += 1
+                    if (
+                        self.rate_limit_pause > 0
+                        and submitted % self.batch_size == 0
+                        and bucket_index < total - 1
+                    ):
+                        time.sleep(self.rate_limit_pause)
+
+                for future in as_completed(futures):
+                    bucket = futures[future]
+                    try:
+                        result = future.result()
+                        results_by_slug[bucket.slug] = result
+
+                        if result.error:
+                            failed_count += 1
+                            console.print(
+                                f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {result.error}"
+                            )
+                            if "stub" in (result.error or "").lower():
+                                stub_slugs.append(bucket.slug)
+                        elif result.content:
+                            generated_count += 1
+                            word_count = len(result.content.split())
+                            v = result.validation
+                            warnings = ""
+                            if v and v.warnings:
+                                warnings = f" [yellow]⚠ {len(v.warnings)} warning(s)[/yellow]"
+                            if result.degraded:
+                                warnings += " [yellow]degraded[/yellow]"
+                            if v and not v.is_valid:
+                                warnings += " [red]invalid[/red]"
+                            diagrams = f" {v.mermaid_block_count}🔀" if v else ""
+                            console.print(
+                                f"  [green]✓[/green] [bold]{bucket.title}[/bold] "
+                                f"[dim]({bucket.bucket_type} · "
+                                f"{len(bucket.owned_files)} files · "
+                                f"~{word_count} words{diagrams} · "
+                                f"{result.elapsed_seconds:.1f}s)[/dim]{warnings}"
+                            )
+                            self._checkpoint_manifest(_manifest, result)
+                            pending_manifest_pages += 1
+                            if (
+                                pending_manifest_pages >= checkpoint_pages
+                                or time.monotonic() - last_manifest_save
+                                >= checkpoint_seconds
+                            ):
+                                _manifest.save()
+                                pending_manifest_pages = 0
+                                last_manifest_save = time.monotonic()
+                    except Exception as e:
+                        failed_count += 1
+                        results_by_slug[bucket.slug] = GenerationResult(
+                            bucket=bucket,
+                            error=str(e),
+                        )
+                        console.print(
+                            f"  [red]✗[/red] [bold]{bucket.title}[/bold]: {e}"
+                        )
+
+                    progress.advance(task)
+
+        if pending_manifest_pages:
+            _manifest.save()
+
+        results = [
+            results_by_slug[bucket.slug]
+            for bucket in buckets
+            if bucket.slug in results_by_slug
+        ]
 
         if failed_count > 0:
             console.print(f"[yellow]⚠ {failed_count} page(s) failed[/yellow]")
@@ -589,7 +654,19 @@ class BucketGenerationEngine:
 
         try:
             # Step 1: Assemble evidence
-            evidence = self.assembler.assemble(bucket)
+            telemetry = getattr(self.llm, "telemetry", None)
+            evidence_span = (
+                telemetry.span("generation.evidence")
+                if telemetry is not None
+                else nullcontext()
+            )
+            with evidence_span:
+                evidence = self.assembler.assemble(bucket)
+            if telemetry is not None:
+                telemetry.counter("evidence.characters", evidence.total_evidence_chars)
+                telemetry.counter("evidence.files_raw", evidence.files_included_raw)
+                telemetry.counter("evidence.files_compressed", evidence.files_compressed)
+                telemetry.counter("evidence.trimmed_contexts", len(evidence.trimmed_contexts))
             degraded = False
 
             if evidence.files_compressed > 0:
@@ -634,7 +711,13 @@ class BucketGenerationEngine:
             )
 
             # Step 5: Validate
-            validation = self.validator.validate(content, bucket, evidence)
+            validation_span = (
+                telemetry.span("generation.validation")
+                if telemetry is not None
+                else nullcontext()
+            )
+            with validation_span:
+                validation = self.validator.validate(content, bucket, evidence)
 
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
@@ -670,7 +753,13 @@ class BucketGenerationEngine:
                         self._doc_title_to_url,
                         self._doc_alias_map,
                     )
-                    validation = self.validator.validate(content, bucket, evidence)
+                    validation_span = (
+                        telemetry.span("generation.validation")
+                        if telemetry is not None
+                        else nullcontext()
+                    )
+                    with validation_span:
+                        validation = self.validator.validate(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -711,7 +800,13 @@ class BucketGenerationEngine:
                         self._doc_title_to_url,
                         self._doc_alias_map,
                     )
-                    validation = self.validator.validate(content, bucket, evidence)
+                    validation_span = (
+                        telemetry.span("generation.validation")
+                        if telemetry is not None
+                        else nullcontext()
+                    )
+                    with validation_span:
+                        validation = self.validator.validate(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -737,15 +832,11 @@ class BucketGenerationEngine:
                 evidence,
             )
 
-            bucket_hints = bucket.generation_hints or {}
-            filename = (
-                "index.md"
-                if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.md"
-            )
-            doc_path = self.output_dir / filename
+            doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(content, encoding="utf-8")
+            if telemetry is not None:
+                telemetry.counter("generation.page_bytes_written", len(content.encode("utf-8")))
 
             if validation is not None and not validation.is_valid:
                 console.print(
@@ -771,13 +862,7 @@ class BucketGenerationEngine:
                 None,
                 status="stub",
             )
-            bucket_hints = bucket.generation_hints or {}
-            filename = (
-                "index.md"
-                if bucket_hints.get("is_introduction_page")
-                else f"{bucket.slug}.md"
-            )
-            doc_path = self.output_dir / filename
+            doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
             doc_path.write_text(stub, encoding="utf-8")
 
@@ -817,7 +902,22 @@ class BucketGenerationEngine:
                     if is_last:
                         raise
                     # Exponential backoff with jitter to avoid thundering herd
-                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
+                    wait = min(RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5), 20.0)
+                    telemetry = getattr(getattr(self, "llm", None), "telemetry", None)
+                    if telemetry is not None:
+                        telemetry.counter("llm.retries")
+                        telemetry.counter("llm.backoff_seconds", wait)
+                    rate_limiter = getattr(
+                        getattr(self, "llm", None),
+                        "rate_limiter",
+                        None,
+                    )
+                    if rate_limiter is not None and getattr(
+                        getattr(self, "llm", None),
+                        "adaptive_backoff",
+                        True,
+                    ):
+                        rate_limiter.penalize(wait)
                     console.print(
                         f"    [yellow]⏳ Transient error ({evidence.bucket.title}) — "
                         f"waiting {wait:.1f}s (attempt {attempt + 1}/{MAX_RETRIES})...[/yellow]"
@@ -1115,6 +1215,17 @@ Re-run `deepdoc generate` to retry.
             "deepdoc_evidence_records": evidence_records,
             "deepdoc_prereqs": bucket.depends_on,
         }
+        if evidence is not None:
+            fields.update(
+                {
+                    "deepdoc_evidence_budget_chars": evidence.evidence_budget_chars,
+                    "deepdoc_evidence_chars_used": evidence.evidence_chars_used,
+                    "deepdoc_evidence_trimmed": evidence.trimmed_contexts,
+                    "deepdoc_prompt_input_tokens": evidence.prompt_input_tokens,
+                    "deepdoc_prompt_tokens_estimated": evidence.prompt_tokens_estimated,
+                    "deepdoc_prompt_omitted_contexts": evidence.prompt_omitted_contexts,
+                }
+            )
         return _merge_frontmatter_fields(content, fields)
 
     def _build_page_evidence_records(self, evidence_files: list[str]) -> list[dict[str, Any]]:
@@ -1123,7 +1234,7 @@ Re-run `deepdoc generate` to retry.
         for idx, rel_path in enumerate(evidence_files[:50], start=1):
             path = self.repo_root / rel_path
             try:
-                content = path.read_text(encoding="utf-8", errors="replace")
+                content = self.scan.file_contents.get(rel_path) or path.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 continue
             lines = content.splitlines()
@@ -1456,49 +1567,64 @@ Re-run `deepdoc generate` to retry.
         if manifest is None:
             manifest = Manifest(self.output_dir)
 
+        output_path = bucket_output_path(bucket)
+        if not (self.output_dir / output_path).exists():
+            return True
+
         for src_file in tracked_bucket_files(bucket):
-            src_path = self.repo_root / src_file
-            if not src_path.exists():
-                continue
             try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
-                if manifest.is_stale(src_file, content):
+                current_hash = self._source_hash(src_file)
+                if current_hash is None:
+                    continue
+                if manifest.is_doc_stale(src_file, current_hash, output_path):
                     return True
             except Exception:
                 return True
         return False
 
+    def _source_hash(self, src_file: str) -> str | None:
+        cached = self.scan.file_content_hashes.get(src_file)
+        if cached:
+            return cached
+        src_path = self.repo_root / src_file
+        if not src_path.exists():
+            return None
+        try:
+            from ..manifest import file_hash as compute_hash
+
+            content = src_path.read_text(encoding="utf-8", errors="replace")
+            return compute_hash(content)
+        except Exception:
+            return None
+
     def _checkpoint_manifest(self, manifest: Any, result: "GenerationResult") -> None:
         """Write the manifest for one completed page so a cancelled run can resume."""
-        from ..manifest import file_hash as compute_hash
         try:
             for src_file in tracked_bucket_files(result.bucket):
-                src_path = self.repo_root / src_file
-                if src_path.exists():
-                    content = src_path.read_text(encoding="utf-8", errors="replace")
-                    manifest.update(src_file, compute_hash(content), result.bucket.slug)
-            manifest.save()
+                content_hash = self._source_hash(src_file)
+                if content_hash:
+                    manifest.update(
+                        src_file,
+                        content_hash,
+                        bucket_output_path(result.bucket),
+                    )
         except Exception:
             pass
 
     def update_manifest(self, results: list[GenerationResult]):
         """Update the manifest with new file hashes for all successfully generated pages."""
-        from ..manifest import Manifest, file_hash as compute_hash
+        from ..manifest import Manifest
 
         manifest = Manifest(self.output_dir)
 
         for result in results:
             if result.content and not result.error:
                 for src_file in tracked_bucket_files(result.bucket):
-                    src_path = self.repo_root / src_file
-                    if src_path.exists():
-                        try:
-                            content = src_path.read_text(
-                                encoding="utf-8", errors="replace"
-                            )
-                            manifest.update(
-                                src_file, compute_hash(content), result.bucket.slug
-                            )
-                        except Exception:
-                            pass
+                    content_hash = self._source_hash(src_file)
+                    if content_hash:
+                        manifest.update(
+                            src_file,
+                            content_hash,
+                            bucket_output_path(result.bucket),
+                        )
         manifest.save()

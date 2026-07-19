@@ -207,12 +207,18 @@ def _format_endpoints(endpoints: list[dict]) -> str:
     if not endpoints:
         return "(none)"
     lines = []
-    for ep in endpoints[:50]:
+    for ep in sorted(
+        endpoints,
+        key=lambda endpoint: (
+            endpoint.get("method", ""),
+            endpoint.get("path", ""),
+            endpoint.get("file", ""),
+            endpoint.get("line", 0),
+        ),
+    ):
         lines.append(
             f"- {ep['method']} {ep['path']} → {ep.get('handler', '?')} ({ep.get('file', '')}:{ep.get('line', 0)})"
         )
-    if len(endpoints) > 50:
-        lines.append(f"... +{len(endpoints) - 50} more endpoints")
     return "\n".join(lines)
 
 

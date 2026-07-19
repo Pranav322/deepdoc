@@ -11,6 +11,7 @@ import git as _git
 
 from deepdoc.persistence_v2 import atomic_write_json, load_sync_state, save_sync_state
 from deepdoc.pipeline_v2 import PipelineV2
+from deepdoc.telemetry import load_latest_performance_run
 
 from .conftest import FakeResult, _run_git, make_bucket, make_plan
 
@@ -194,3 +195,8 @@ def test_partial_generate_does_not_advance_baseline(tmp_repo):
     assert state["last_synced_commit"] == original_sha
     assert state["last_attempted_commit"] == head_sha
     assert state["status"] == "partial"
+    telemetry = load_latest_performance_run(root)
+    assert telemetry is not None
+    assert telemetry["command"] == "generate"
+    assert telemetry["status"] == "partial"
+    assert telemetry["spans"]["pipeline.scan"]["count"] == 1

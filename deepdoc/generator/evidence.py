@@ -78,6 +78,12 @@ class AssembledEvidence:
     flow_context: str = ""  # call graph + flow evidence (entrypoints, chains, side effects)
     evidence_file_paths: set[str] = field(default_factory=set)
     config_env_context: str = ""  # extracted env var names and config keys
+    evidence_budget_chars: int = 0
+    evidence_chars_used: int = 0
+    trimmed_contexts: list[str] = field(default_factory=list)
+    prompt_input_tokens: int = 0
+    prompt_tokens_estimated: bool = False
+    prompt_omitted_contexts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -125,7 +131,40 @@ class EvidenceAssembler:
         self.scan = scan
         self.plan = plan
         self.cfg = cfg
-        self.source_budget = int(cfg.get("source_context_budget", self.SOURCE_BUDGET))
+        llm_cfg = cfg.get("llm", {}) or {}
+        def _token_value(value: Any, default: int) -> int:
+            if value is None or (
+                isinstance(value, str)
+                and value.strip().lower() in {"", "auto", "none", "null"}
+            ):
+                return default
+            return int(value)
+
+        context_tokens = max(
+            4096,
+            _token_value(llm_cfg.get("context_window_tokens"), 128000),
+        )
+        output_reserve = min(
+            max(
+                1024,
+                _token_value(llm_cfg.get("output_reserve_tokens"), 16000),
+            ),
+            context_tokens // 2,
+        )
+        safety_tokens = max(1024, context_tokens // 20)
+        prompt_overhead_tokens = max(2048, int(context_tokens * 0.15))
+        evidence_tokens = max(
+            1024,
+            context_tokens - output_reserve - safety_tokens - prompt_overhead_tokens,
+        )
+        self.evidence_budget_chars = evidence_tokens * 4
+        configured_source_budget = cfg.get("source_context_budget")
+        self.source_budget = min(
+            int(configured_source_budget)
+            if configured_source_budget is not None
+            else self.evidence_budget_chars,
+            int(self.evidence_budget_chars * 0.60),
+        )
         self.large_file_lines = int(cfg.get("large_file_lines", 500))
         self.giant_file_lines = int(cfg.get("giant_file_lines", 2000))
         # Pre-index: file → bucket slugs for cross-referencing
@@ -147,6 +186,22 @@ class EvidenceAssembler:
         for identity in scan.integration_identities or []:
             for file_path in identity.files:
                 self._file_to_integrations[file_path].append(identity.display_name)
+        # Immutable helper-resolution indexes shared by every bucket worker.
+        self._module_file_index = self._build_module_file_index()
+        self._symbol_index = self._build_symbol_index()
+        self._file_lines = {
+            file_path: content.splitlines()
+            for file_path, content in self.scan.file_contents.items()
+        }
+        self._symbol_end_lines: dict[tuple[str, int], int] = {}
+        for file_path, parsed in self.scan.parsed_files.items():
+            lines = self._file_lines.get(file_path, [])
+            symbols = parsed.symbols if parsed else []
+            for idx, symbol in enumerate(symbols):
+                end = len(lines)
+                if idx + 1 < len(symbols):
+                    end = symbols[idx + 1].start_line - 1
+                self._symbol_end_lines[(file_path, symbol.start_line)] = end
 
     def assemble(self, bucket: DocBucket) -> AssembledEvidence:
         """Build the complete evidence package for one bucket."""
@@ -177,52 +232,87 @@ class EvidenceAssembler:
             evidence_files.update(self.scan.config_files)
         evidence_files.update(repo_doc_files)
 
-        total = sum(
-            len(s)
-            for s in [
-                source_ctx,
-                compressed_cards_ctx,
-                endpoints_detail,
-                integration_ctx,
-                cluster_ctx,
-                artifact_ctx,
-                graph_ctx,
-                flow_ctx,
-                cross_ref_ctx,
-                database_ctx,
-                runtime_ctx,
-                plan_summary_ctx,
-                repo_docs_ctx,
-                helper_ctx,
-            ]
-        )
-
         config_env_ctx = self._build_config_env_context(bucket)
+
+        fitted, trimmed = self._fit_evidence_contexts(
+            {
+                "source_context": source_ctx,
+                "endpoints_detail": endpoints_detail,
+                "integration_context": integration_ctx,
+                "database_context": database_ctx,
+                "runtime_context": runtime_ctx,
+                "flow_context": flow_ctx,
+                "graph_context": graph_ctx,
+                "config_env_context": config_env_ctx,
+                "helper_context": helper_ctx,
+                "artifact_context": artifact_ctx,
+                "repo_docs_context": repo_docs_ctx,
+                "plan_summary_context": plan_summary_ctx,
+                "cross_ref_context": cross_ref_ctx,
+                "cluster_context": cluster_ctx,
+                "compressed_cards_context": compressed_cards_ctx,
+            }
+        )
+        total = sum(len(value) for value in fitted.values())
 
         return AssembledEvidence(
             bucket=bucket,
-            source_context=source_ctx,
-            compressed_cards_context=compressed_cards_ctx,
-            endpoints_detail=endpoints_detail,
-            integration_context=integration_ctx,
-            cluster_context=cluster_ctx,
-            artifact_context=artifact_ctx,
-            graph_context=graph_ctx,
-            cross_ref_context=cross_ref_ctx,
-            database_context=database_ctx,
-            runtime_context=runtime_ctx,
-            plan_summary_context=plan_summary_ctx,
-            repo_docs_context=repo_docs_ctx,
-            helper_context=helper_ctx,
-            flow_context=flow_ctx,
+            source_context=fitted["source_context"],
+            compressed_cards_context=fitted["compressed_cards_context"],
+            endpoints_detail=fitted["endpoints_detail"],
+            integration_context=fitted["integration_context"],
+            cluster_context=fitted["cluster_context"],
+            artifact_context=fitted["artifact_context"],
+            graph_context=fitted["graph_context"],
+            cross_ref_context=fitted["cross_ref_context"],
+            database_context=fitted["database_context"],
+            runtime_context=fitted["runtime_context"],
+            plan_summary_context=fitted["plan_summary_context"],
+            repo_docs_context=fitted["repo_docs_context"],
+            helper_context=fitted["helper_context"],
+            flow_context=fitted["flow_context"],
             total_evidence_chars=total,
             files_included_raw=files_included_raw,
             files_compressed=len(compressed_file_paths),
             compressed_file_paths=compressed_file_paths,
             coverage_files_total=coverage_total,
             evidence_file_paths=evidence_files,
-            config_env_context=config_env_ctx,
+            config_env_context=fitted["config_env_context"],
+            evidence_budget_chars=self.evidence_budget_chars,
+            evidence_chars_used=total,
+            trimmed_contexts=trimmed,
         )
+
+    def _fit_evidence_contexts(
+        self,
+        contexts: dict[str, str],
+    ) -> tuple[dict[str, str], list[str]]:
+        """Fit all evidence categories into one deterministic character budget."""
+        fitted: dict[str, str] = {}
+        trimmed: list[str] = []
+        remaining = self.evidence_budget_chars
+        for name, value in contexts.items():
+            if not value:
+                fitted[name] = ""
+                continue
+            if len(value) <= remaining:
+                fitted[name] = value
+                remaining -= len(value)
+                continue
+            fitted[name] = self._truncate_at_line(value, remaining)
+            trimmed.append(name)
+            remaining = max(0, remaining - len(fitted[name]))
+        return fitted, trimmed
+
+    @staticmethod
+    def _truncate_at_line(value: str, max_chars: int) -> str:
+        marker = "\n... [trimmed to model context budget]"
+        if max_chars <= len(marker):
+            return ""
+        prefix = value[: max_chars - len(marker)]
+        if "\n" in prefix:
+            prefix = prefix.rsplit("\n", 1)[0]
+        return prefix.rstrip() + marker
 
     # ── Source context (tiered + compressed coverage) ───────────────────
 
@@ -251,11 +341,11 @@ class EvidenceAssembler:
             if not src_path.exists():
                 continue
             try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
+                content = self.scan.file_contents.get(src_file) or src_path.read_text(encoding="utf-8", errors="replace")
                 line_count = len(content.splitlines())
                 parsed = self.scan.parsed_files.get(src_file)
-                if not parsed:
-                    parsed = parse_file(src_path)
+                if not parsed and content:
+                    parsed = parse_file(src_path, content=content)
                 files_data.append((src_file, content, line_count, parsed))
             except Exception:
                 continue
@@ -365,9 +455,6 @@ class EvidenceAssembler:
         helper_budget = 60_000
         bucket_files = set(tracked_bucket_files(bucket))
         called_names = self._extract_called_symbol_names(source_ctx)
-        module_index = self._build_module_file_index()
-        symbol_index = self._build_symbol_index()
-
         helper_sections: list[str] = []
         helper_files: set[str] = set()
         emitted_symbols: set[tuple[str, str]] = set()
@@ -380,12 +467,12 @@ class EvidenceAssembler:
                 continue
 
             imported_symbols, imported_files = self._resolve_import_targets(
-                parsed.imports, source_content, module_index
+                parsed.imports, source_content
             )
             for imported_file in imported_files:
                 if imported_file in bucket_files:
                     continue
-                candidates = symbol_index.get(imported_file, [])
+                candidates = self._symbol_index.get(imported_file, [])
                 for symbol in candidates:
                     if symbol.name in self._builtin_helper_skip_names():
                         continue
@@ -576,26 +663,23 @@ class EvidenceAssembler:
         self,
         imports: list[str],
         content: str,
-        module_index: dict[str, set[str]],
     ) -> tuple[dict[str, set[str]], set[str]]:
         imported_symbols: dict[str, set[str]] = defaultdict(set)
         imported_files: set[str] = set()
 
         for module_name in imports or []:
-            module_files = self._resolve_repo_local_module(module_name, module_index)
+            module_files = self._resolve_repo_local_module(module_name)
             imported_files.update(module_files)
 
         for module_name, symbol_names in self._extract_explicit_import_symbols(content):
-            module_files = self._resolve_repo_local_module(module_name, module_index)
+            module_files = self._resolve_repo_local_module(module_name)
             for file_path in module_files:
                 imported_files.add(file_path)
                 imported_symbols[file_path].update(symbol_names)
 
         return imported_symbols, imported_files
 
-    def _resolve_repo_local_module(
-        self, module_name: str, module_index: dict[str, set[str]]
-    ) -> set[str]:
+    def _resolve_repo_local_module(self, module_name: str) -> set[str]:
         module_name = module_name.strip().strip(".")
         if not module_name:
             return set()
@@ -605,12 +689,7 @@ class EvidenceAssembler:
         ]
         resolved: set[str] = set()
         for candidate in candidates:
-            if candidate in module_index:
-                resolved.update(module_index[candidate])
-            else:
-                for known_module, files in module_index.items():
-                    if known_module.endswith(candidate):
-                        resolved.update(files)
+            resolved.update(self._module_file_index.get(candidate, set()))
         return resolved
 
     def _extract_explicit_import_symbols(
@@ -636,21 +715,18 @@ class EvidenceAssembler:
         if not src_path.exists():
             return ""
         try:
-            file_content = src_path.read_text(encoding="utf-8", errors="replace")
+            file_content = self.scan.file_contents.get(file_path) or src_path.read_text(encoding="utf-8", errors="replace")
         except Exception:
             return ""
 
-        file_lines = file_content.splitlines()
+        file_lines = self._file_lines.get(file_path)
+        if file_lines is None:
+            file_lines = file_content.splitlines()
         start = max(0, symbol.start_line - 1)
-        parsed = self.scan.parsed_files.get(file_path)
-        end = len(file_lines)
-        if parsed and parsed.symbols:
-            for idx, candidate in enumerate(parsed.symbols):
-                if candidate.start_line == symbol.start_line and idx + 1 < len(
-                    parsed.symbols
-                ):
-                    end = parsed.symbols[idx + 1].start_line - 1
-                    break
+        end = self._symbol_end_lines.get(
+            (file_path, symbol.start_line),
+            len(file_lines),
+        )
 
         excerpt_end = min(end, start + 60)
         body = "\n".join(file_lines[start:excerpt_end])
@@ -810,7 +886,7 @@ class EvidenceAssembler:
             if not src_path.exists():
                 continue
             try:
-                content = src_path.read_text(encoding="utf-8", errors="replace")
+                content = self.scan.file_contents.get(src_file) or src_path.read_text(encoding="utf-8", errors="replace")
             except Exception:
                 continue
             for pattern in self._ENV_VAR_PATTERNS:

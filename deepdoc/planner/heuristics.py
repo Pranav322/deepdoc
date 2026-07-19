@@ -1,3 +1,5 @@
+from contextlib import nullcontext
+
 from .common import *
 from .bucket_refinement import (
     _proposal_bucket_tokens, _is_low_value_utility_bucket, _is_incidental_http_bucket,
@@ -75,7 +77,16 @@ def _llm_step(llm: LLMClient, system: str, prompt: str, step_name: str) -> dict 
     """Execute a single LLM planning step with error handling."""
     response = None
     try:
-        response = llm.complete(system, prompt)
+        telemetry = getattr(llm, "telemetry", None)
+        operation = (
+            telemetry.operation(f"planner.{step_name}")
+            if telemetry is not None
+            else nullcontext()
+        )
+        with operation:
+            response = llm.complete(system, prompt)
+    except LLMOutputTruncatedError:
+        raise
     except Exception as e:
         console.print(f"[red]✗ LLM call failed for {step_name}: {e}[/red]")
         return None
@@ -240,6 +251,141 @@ def _build_heuristic_assignment(proposal: dict[str, Any], scan: RepoScan) -> dic
     }
 
 
+
+
+def _partition_topology_assignment(
+    proposal: dict[str, Any], scan: RepoScan
+) -> tuple[dict[str, Any], list[str]]:
+    """Preassign files only when proposal and topology ownership uniquely agree."""
+    source_files = set(scan.file_summaries)
+    topology = scan.topology_map
+    if not topology or not topology.file_cluster_id:
+        return {"buckets": [], "skipped_files": [], "file_to_buckets": {}}, sorted(
+            source_files
+        )
+
+    candidates_by_file: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    for bucket in proposal.get("buckets", []):
+        for file_path in dict.fromkeys(bucket.get("candidate_files", [])):
+            if file_path in source_files:
+                candidates_by_file[file_path].append(bucket)
+
+    endpoint_files = {
+        file_path
+        for endpoint in scan.api_endpoints
+        for file_path in endpoint_owned_files(endpoint)
+    }
+    excluded_files = (
+        set(topology.foundational_files)
+        | set(scan.giant_file_clusters)
+        | set(scan.config_files)
+        | endpoint_files
+    )
+    deterministic_by_slug: dict[str, list[str]] = defaultdict(list)
+    unresolved: list[str] = []
+    for file_path in sorted(source_files):
+        candidates = candidates_by_file.get(file_path, [])
+        source_kind = scan.source_kind_by_file.get(
+            file_path, classify_source_kind(file_path)
+        )
+        if (
+            file_path in excluded_files
+            or source_kind != "product"
+            or len(candidates) != 1
+        ):
+            unresolved.append(file_path)
+            continue
+        bucket = candidates[0]
+        cluster_id = str(bucket.get("cluster_id") or "")
+        if not cluster_id or topology.file_cluster_id.get(file_path) != cluster_id:
+            unresolved.append(file_path)
+            continue
+        deterministic_by_slug[str(bucket.get("slug") or "")].append(file_path)
+
+    buckets = [
+        {
+            "slug": slug,
+            "owned_files": files,
+            "owned_symbols": [],
+            "artifact_refs": [],
+            "priority": 0,
+        }
+        for slug, files in deterministic_by_slug.items()
+        if slug
+    ]
+    return (
+        {
+            "buckets": buckets,
+            "skipped_files": [],
+            "file_to_buckets": {
+                file_path: [slug]
+                for slug, files in deterministic_by_slug.items()
+                for file_path in files
+                if slug
+            },
+        },
+        unresolved,
+    )
+
+
+def _merge_partial_assignment(
+    proposal: dict[str, Any],
+    deterministic: dict[str, Any],
+    llm_assignment: dict[str, Any] | None,
+    unresolved_files: list[str],
+) -> dict[str, Any]:
+    """Merge an ambiguous-file LLM delta with deterministic ownership."""
+    unresolved = set(unresolved_files)
+    deterministic_by_slug = {
+        item.get("slug", ""): item for item in deterministic.get("buckets", [])
+    }
+    llm_by_slug = {
+        item.get("slug", ""): item
+        for item in (llm_assignment or {}).get("buckets", [])
+    }
+    buckets: list[dict[str, Any]] = []
+    file_to_buckets: dict[str, list[str]] = defaultdict(list)
+
+    for proposal_bucket in proposal.get("buckets", []):
+        slug = str(proposal_bucket.get("slug") or "")
+        deterministic_item = deterministic_by_slug.get(slug, {})
+        llm_item = llm_by_slug.get(slug, {})
+        owned_files = list(
+            dict.fromkeys(
+                list(deterministic_item.get("owned_files", []))
+                + [
+                    path
+                    for path in llm_item.get("owned_files", [])
+                    if path in unresolved
+                ]
+            )
+        )
+        for file_path in owned_files:
+            file_to_buckets[file_path].append(slug)
+        buckets.append(
+            {
+                "slug": slug,
+                "owned_files": owned_files,
+                "owned_symbols": list(
+                    dict.fromkeys(llm_item.get("owned_symbols", []))
+                ),
+                "artifact_refs": list(
+                    dict.fromkeys(llm_item.get("artifact_refs", []))
+                ),
+                "priority": int(llm_item.get("priority", 0) or 0),
+            }
+        )
+
+    skipped_files = [
+        path
+        for path in (llm_assignment or {}).get("skipped_files", [])
+        if path in unresolved
+    ]
+    return {
+        "buckets": buckets,
+        "skipped_files": list(dict.fromkeys(skipped_files)),
+        "file_to_buckets": dict(file_to_buckets),
+    }
 
 
 def _merge_duplicate_setup_bucket(buckets: list[DocBucket]) -> list[DocBucket]:

@@ -3,21 +3,37 @@
 from __future__ import annotations
 
 import os
+import threading
+import time
 from typing import Any
 
 from ..config import resolve_api_key
+from ..telemetry import RunTelemetry
 from .litellm_compat import prepare_litellm
+from .rate_limit import ProviderRateLimiter
+from .token_budget import (
+    build_prompt_budget,
+    count_message_tokens,
+    resolve_completion_capabilities,
+)
+
+
+class LLMOutputTruncatedError(RuntimeError):
+    """A provider stopped output before the requested response completed."""
 
 
 class LLMClient:
     """Thin wrapper around LiteLLM completion for deepdoc."""
 
-    def __init__(self, cfg: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        cfg: dict[str, Any],
+        telemetry: RunTelemetry | None = None,
+    ) -> None:
         self.cfg = cfg
+        self.telemetry = telemetry
         llm_cfg = cfg.get("llm", {})
         self.model = llm_cfg.get("model", "")
-        # max_tokens=None means don't cap — let the model use its full output capacity
-        self.max_tokens = llm_cfg.get("max_tokens", None)
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = str(llm_cfg.get("base_url") or "") or None
         # YAML parses bare dates like 2024-12-01 as datetime.date — coerce to str
@@ -28,6 +44,15 @@ class LLMClient:
             "prompt_chars": 0,
             "estimated_prompt_tokens": 0,
         }
+        self._usage_lock = threading.Lock()
+        rate_limits = llm_cfg.get("rate_limits", {}) or {}
+        self.adaptive_backoff = bool(rate_limits.get("adaptive_backoff", True))
+        self.rate_limiter = ProviderRateLimiter(
+            max_concurrency=rate_limits.get("max_concurrency", 6),
+            requests_per_minute=rate_limits.get("requests_per_minute", 60),
+            tokens_per_minute=rate_limits.get("tokens_per_minute", 250000),
+            telemetry=telemetry,
+        )
 
         provider = (llm_cfg.get("provider") or "").strip()
         model = (self.model or "").strip()
@@ -64,6 +89,24 @@ class LLMClient:
                 "║    https://docs.litellm.ai/docs/providers                            ║\n"
                 "╚══════════════════════════════════════════════════════════════════════╝\n"
             )
+
+        self.capabilities = resolve_completion_capabilities(self.model, llm_cfg)
+        self.prompt_budget = build_prompt_budget(
+            self.capabilities,
+            output_reserve_tokens=llm_cfg.get("output_reserve_tokens"),
+        )
+        self.context_window_tokens = self.capabilities.context_window_tokens
+        self.output_reserve_tokens = self.prompt_budget.output_reserve_tokens
+        configured_max_tokens = llm_cfg.get("max_tokens")
+        self.max_tokens = (
+            min(
+                max(1, int(configured_max_tokens)),
+                self.output_reserve_tokens,
+                self.capabilities.max_output_tokens or self.output_reserve_tokens,
+            )
+            if configured_max_tokens is not None
+            else None
+        )
 
         is_azure = provider.lower() == "azure" or model.lower().startswith("azure/")
         if is_azure:
@@ -128,8 +171,12 @@ class LLMClient:
 
     def complete(self, system: str, user: str) -> str:
         """Send a chat completion request and return the response text."""
+        start = time.perf_counter()
+        response = None
+        error_type = ""
         try:
-            self._record_usage(system, user)
+            input_tokens = self._record_usage(system, user)
+            self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
@@ -140,8 +187,8 @@ class LLMClient:
                 ],
                 "temperature": self.temperature,
             }
-            # Only pass max_tokens if explicitly set — otherwise let the model decide
-            if self.max_tokens:
+            # Preserve provider output defaults unless the user explicitly caps output.
+            if self.max_tokens is not None:
                 kwargs["max_tokens"] = self.max_tokens
             if self.base_url:
                 kwargs["base_url"] = self.base_url
@@ -150,20 +197,41 @@ class LLMClient:
             if self.api_key:
                 kwargs["api_key"] = self.api_key
 
-            response = litellm.completion(**kwargs)
+            with self.rate_limiter.slot(input_tokens):
+                response = litellm.completion(**kwargs)
+            self._raise_if_truncated(response)
             return response.choices[0].message.content or ""
 
         except ImportError:
+            error_type = "ImportError"
             raise RuntimeError(
                 "litellm not installed. Run: pip install litellm"
             )
+        except LLMOutputTruncatedError:
+            error_type = "LLMOutputTruncatedError"
+            raise
         except Exception as e:
+            error_type = type(e).__name__
+            self._apply_provider_cooldown(e)
             raise RuntimeError(f"LLM request failed: {e}") from e
+        finally:
+            self._record_telemetry(
+                system,
+                user,
+                response,
+                elapsed=time.perf_counter() - start,
+                error_type=error_type,
+            )
 
     def complete_stream(self, system: str, user: str):
         """Stream a completion response, yielding text chunks."""
+        start = time.perf_counter()
+        response_chars = 0
+        final_chunk = None
+        error_type = ""
         try:
-            self._record_usage(system, user)
+            input_tokens = self._record_usage(system, user)
+            self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
@@ -175,7 +243,7 @@ class LLMClient:
                 "temperature": self.temperature,
                 "stream": True,
             }
-            if self.max_tokens:
+            if self.max_tokens is not None:
                 kwargs["max_tokens"] = self.max_tokens
             if self.base_url:
                 kwargs["base_url"] = self.base_url
@@ -184,16 +252,160 @@ class LLMClient:
             if self.api_key:
                 kwargs["api_key"] = self.api_key
 
-            for chunk in litellm.completion(**kwargs):
-                delta = chunk.choices[0].delta
-                if delta and delta.content:
-                    yield delta.content
+            with self.rate_limiter.slot(input_tokens):
+                for chunk in litellm.completion(**kwargs):
+                    final_chunk = chunk
+                    delta = chunk.choices[0].delta
+                    if delta and delta.content:
+                        response_chars += len(delta.content)
+                        yield delta.content
+            self._raise_if_truncated(final_chunk)
 
         except ImportError:
+            error_type = "ImportError"
             raise RuntimeError("litellm not installed. Run: pip install litellm")
+        except LLMOutputTruncatedError:
+            error_type = "LLMOutputTruncatedError"
+            raise
+        except Exception as exc:
+            error_type = type(exc).__name__
+            self._apply_provider_cooldown(exc)
+            raise
+        finally:
+            self._record_telemetry(
+                system,
+                user,
+                final_chunk,
+                elapsed=time.perf_counter() - start,
+                error_type=error_type,
+                response_chars=response_chars,
+                streamed=True,
+            )
 
-    def _record_usage(self, system: str, user: str) -> None:
+    def _record_usage(self, system: str, user: str) -> int:
         prompt_chars = len(system or "") + len(user or "")
-        self.usage["calls"] += 1
-        self.usage["prompt_chars"] += prompt_chars
-        self.usage["estimated_prompt_tokens"] += max(1, prompt_chars // 4)
+        prompt_tokens, _ = count_message_tokens(system, user, self.capabilities)
+        with self._usage_lock:
+            self.usage["calls"] += 1
+            self.usage["prompt_chars"] += prompt_chars
+            self.usage["estimated_prompt_tokens"] += prompt_tokens
+        return prompt_tokens
+
+    def _validate_prompt_size(self, system: str, user: str) -> None:
+        estimated_input_tokens, _ = count_message_tokens(
+            system, user, self.capabilities
+        )
+        max_input_tokens = (
+            self.context_window_tokens
+            - self.output_reserve_tokens
+            - self.prompt_budget.safety_tokens
+        )
+        if estimated_input_tokens > max_input_tokens:
+            raise ValueError(
+                "LLM prompt exceeds configured context window "
+                f"({estimated_input_tokens:,} input + {self.output_reserve_tokens:,} "
+                f"reserved output > {self.context_window_tokens:,} total tokens)."
+            )
+
+    def _raise_if_truncated(self, response: Any) -> None:
+        try:
+            finish_reason = str(response.choices[0].finish_reason or "").lower()
+        except (AttributeError, IndexError, TypeError):
+            return
+        if finish_reason != "length":
+            return
+        cap = (
+            f"the configured max_tokens={self.max_tokens}"
+            if self.max_tokens is not None
+            else "the provider's output limit"
+        )
+        raise LLMOutputTruncatedError(
+            "LLM output was truncated by "
+            f"{cap}. Increase llm.output_reserve_tokens and, when set, "
+            "llm.max_tokens before retrying."
+        )
+
+    def _apply_provider_cooldown(self, error: Exception) -> None:
+        if not self.adaptive_backoff:
+            return
+        text = f"{type(error).__name__}: {error}".lower()
+        if "ratelimit" not in text and "rate limit" not in text and "429" not in text:
+            return
+        retry_after = 3.0
+        response = getattr(error, "response", None)
+        headers = getattr(response, "headers", None)
+        if headers:
+            raw = headers.get("Retry-After") or headers.get("retry-after")
+            try:
+                retry_after = max(retry_after, float(raw))
+            except (TypeError, ValueError):
+                pass
+        self.rate_limiter.penalize(retry_after)
+
+    @staticmethod
+    def _usage_value(usage: Any, key: str) -> int | None:
+        if usage is None:
+            return None
+        value = usage.get(key) if isinstance(usage, dict) else getattr(usage, key, None)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    def _record_telemetry(
+        self,
+        system: str,
+        user: str,
+        response: Any,
+        *,
+        elapsed: float,
+        error_type: str,
+        response_chars: int | None = None,
+        streamed: bool = False,
+    ) -> None:
+        if self.telemetry is None:
+            return
+        prompt_chars = len(system or "") + len(user or "")
+        if response_chars is None:
+            try:
+                response_chars = len(response.choices[0].message.content or "")
+            except (AttributeError, IndexError, TypeError):
+                response_chars = 0
+        usage = getattr(response, "usage", None)
+        prompt_tokens = self._usage_value(usage, "prompt_tokens")
+        completion_tokens = self._usage_value(usage, "completion_tokens")
+        total_tokens = self._usage_value(usage, "total_tokens")
+        estimated = prompt_tokens is None
+        if prompt_tokens is None:
+            prompt_tokens = max(1, prompt_chars // 4)
+        if completion_tokens is None:
+            completion_tokens = max(0, response_chars // 4)
+        if total_tokens is None:
+            total_tokens = prompt_tokens + completion_tokens
+        finish_reason = ""
+        try:
+            finish_reason = str(response.choices[0].finish_reason or "")
+        except (AttributeError, IndexError, TypeError):
+            pass
+        operation = self.telemetry.current_operation()
+        self.telemetry.record_llm_call(
+            {
+                **operation,
+                "model": self.model,
+                "capability_model": self.capabilities.capability_model,
+                "capability_source": self.capabilities.source,
+                "context_window_tokens": self.context_window_tokens,
+                "output_reserve_tokens": self.output_reserve_tokens,
+                "duration_seconds": round(elapsed, 6),
+                "prompt_chars": prompt_chars,
+                "response_chars": response_chars,
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": total_tokens,
+                "tokens_estimated": estimated,
+                "finish_reason": finish_reason,
+                "streamed": streamed,
+                "status": "failed" if error_type else "success",
+                "error_type": error_type,
+            }
+        )

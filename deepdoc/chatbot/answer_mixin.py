@@ -57,13 +57,17 @@ class AnswerMixin:
         current = answer
         retries = 0
         while retries < max_retries and self._answer_looks_incomplete(current):
-            continuation_prompt = (
+            instruction = (
                 "The previous answer appears incomplete and ended abruptly. "
                 "Continue from the exact point where it stopped. "
                 "Do not repeat earlier sections. Complete any unfinished bullets, "
-                "headings, or sentences, and end with `## Summary`.\n\n"
-                "Previous answer tail:\n"
-                f"{current[-context_chars:]}"
+                "headings, or sentences, and end with `## Summary`."
+            )
+            fit_continuation = getattr(self.chat_client, "fit_continuation_prompt", None)
+            continuation_prompt = (
+                fit_continuation(system, instruction, current, context_chars)
+                if callable(fit_continuation)
+                else instruction + "\n\nPrevious answer tail:\n" + current[-context_chars:]
             )
             continuation = self.chat_client.complete(system, continuation_prompt)
             if not continuation or not continuation.strip():
@@ -182,11 +186,11 @@ class AnswerMixin:
             if content:
                 history_lines.append(f"{role.title()}: {content}")
 
-        sections = [f"Question: {question}"]
+        required_sections = [f"Question: {question}"]
         if history_lines:
-            sections.append("Conversation:\n" + "\n".join(history_lines))
+            required_sections.append("Conversation:\n" + "\n".join(history_lines))
 
-        used = sum(len(s) for s in sections)
+        used = sum(len(section) for section in required_sections)
         evidence, _ = self._evidence_from_workspace_rows(
             self._code_workspace_citations(
                 {
@@ -220,7 +224,7 @@ class AnswerMixin:
                 "do not cite docs as source proof:\n"
                 + "\n\n".join(evidence_blocks)
             )
-            sections.append(evidence_text)
+            required_sections.append(evidence_text)
             used += len(evidence_text)
 
         sections_by_mode = {
@@ -249,6 +253,7 @@ class AnswerMixin:
                 ("Docs context", doc_hits),
             ],
         }
+        optional_sections: list[tuple[str, str]] = []
         for label, hits in sections_by_mode.get(
             profile.get("query_mode", "general"),
             [
@@ -268,9 +273,37 @@ class AnswerMixin:
                 parts.append(chunk_text)
                 used += len(chunk_text) + 2  # account for join separator
             if len(parts) > 1:
-                sections.append("\n\n".join(parts))
+                optional_sections.append((label, "\n\n".join(parts)))
 
-        return "\n\n".join(sections)
+        required_text = "\n\n".join(required_sections)
+        fit_prompt = getattr(self.chat_client, "fit_prompt_sections", None)
+        if not callable(fit_prompt):
+            return "\n\n".join(
+                [required_text, *(text for _, text in optional_sections)]
+            )
+
+        def _render(sections: dict[str, str]) -> str:
+            return "\n\n".join(
+                [
+                    sections["required"],
+                    *(
+                        sections.get(f"optional_{index}", "")
+                        for index, _ in enumerate(optional_sections)
+                    ),
+                ]
+            ).strip()
+
+        fitted = fit_prompt(
+            system=self._system_prompt(),
+            render_prompt=_render,
+            required_sections={"required": required_text},
+            optional_sections=[
+                (f"optional_{index}", [text])
+                for index, (_, text) in enumerate(optional_sections)
+            ],
+            step_name="chatbot answer",
+        )
+        return fitted.prompt
 
     def _system_prompt(self) -> str:
         return (
@@ -334,6 +367,7 @@ class AnswerMixin:
                 original_prompt,
                 response,
                 errors,
+                system_prompt=system_prompt,
             )
             corrected = self.chat_client.complete(system_prompt, correction_prompt)
             if corrected and corrected.strip():
@@ -911,6 +945,8 @@ class AnswerMixin:
         original_prompt: str,
         response: dict[str, Any],
         errors: list[str],
+        *,
+        system_prompt: str = "",
     ) -> str:
         evidence_blocks = []
         for item in response.get("evidence", []) or []:
@@ -927,7 +963,7 @@ class AnswerMixin:
             f"- {item.get('kind')}: {item.get('path')} ({item.get('title') or item.get('url') or ''})"
             for item in response.get("references", []) or []
         ]
-        return (
+        required_prompt = (
             "Your previous answer failed evidence validation.\n\n"
             f"Question: {question}\n\n"
             "Validation errors:\n"
@@ -942,10 +978,31 @@ class AnswerMixin:
             + ("\n\n".join(evidence_blocks) if evidence_blocks else "(none)")
             + "\n\nReference-only docs:\n"
             + ("\n".join(references) if references else "(none)")
-            + "\n\nOriginal retrieval prompt:\n"
-            + original_prompt
-            + "\n\nReturn only the corrected answer."
         )
+        fit_prompt = getattr(self.chat_client, "fit_prompt_sections", None)
+        if not callable(fit_prompt):
+            return (
+                required_prompt
+                + "\n\nOriginal retrieval prompt:\n"
+                + original_prompt
+                + "\n\nReturn only the corrected answer."
+            )
+
+        def _render(sections: dict[str, str]) -> str:
+            return (
+                sections["required"]
+                + "\n\nOriginal retrieval prompt:\n"
+                + sections.get("original", "")
+                + "\n\nReturn only the corrected answer."
+            )
+
+        return fit_prompt(
+            system=system_prompt or self._system_prompt(),
+            render_prompt=_render,
+            required_sections={"required": required_prompt},
+            optional_sections=[("original", [original_prompt])],
+            step_name="chatbot evidence correction",
+        ).prompt
 
     def _conservative_grounded_answer(
         self,

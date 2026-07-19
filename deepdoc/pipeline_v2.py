@@ -69,13 +69,14 @@ from .planner import (
     scan_repo as bucket_scan_repo,
 )
 from .prompts import SYSTEM_V2, get_prompt_for_page_type
+from .telemetry import RunTelemetry
 
 console = Console()
 
 BATCH_SIZE = 10
 RATE_LIMIT_PAUSE = 0.5
 RATE_LIMIT_BACKOFF = 3.0
-MAX_RETRIES = 5
+MAX_RETRIES = 3
 
 
 def _page_is_overview(page: Any) -> bool:
@@ -296,17 +297,42 @@ def _staged_spec_name(spec_rel_path: str, index: int) -> str:
 
 
 class PipelineV2:
-    def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        cfg: dict[str, Any],
+        telemetry: RunTelemetry | None = None,
+    ) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
         self.output_dir = repo_root / cfg.get("output_dir", "docs")
-        self.llm = LLMClient(cfg)
+        self.telemetry = telemetry or RunTelemetry(repo_root, "generate")
+        self._owns_telemetry = telemetry is None
+        self.llm = LLMClient(cfg, telemetry=self.telemetry)
         self.manifest = Manifest(self.output_dir)
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
 
     def run(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
-        with deepdoc_state_lock(self.repo_root):
-            return self._run_locked(force=force, reconcile=True if force else reconcile)
+        try:
+            with deepdoc_state_lock(self.repo_root):
+                stats = self._run_locked(
+                    force=force,
+                    reconcile=True if force else reconcile,
+                )
+            if self._owns_telemetry:
+                self.telemetry.finish(
+                    stats.get("status", "success"),
+                    files_scanned=stats.get("files_scanned", 0),
+                    pages_planned=stats.get("pages_planned", 0),
+                    pages_generated=stats.get("pages_generated", 0),
+                    pages_failed=stats.get("pages_failed", 0),
+                    pages_skipped=stats.get("pages_skipped", 0),
+                )
+            return stats
+        except BaseException as exc:
+            if self._owns_telemetry:
+                self.telemetry.finish("failed", error_type=type(exc).__name__)
+            raise
 
     def _run_locked(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
         stats: dict[str, Any] = {}
@@ -319,7 +345,12 @@ class PipelineV2:
             Panel("[bold]Phase 1/5: Scanning repository[/bold]", border_style="blue")
         )
         phase_start = time.perf_counter()
-        scan = bucket_scan_repo(self.repo_root, self.cfg)
+        with self.telemetry.span("pipeline.scan"):
+            scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+            )
         phase_timings["scan"] = time.perf_counter() - phase_start
         self._print_scan(scan)
         stats["files_scanned"] = scan.total_files
@@ -353,7 +384,13 @@ class PipelineV2:
                 )
             )
             phase_start = time.perf_counter()
-            plan = bucket_plan_docs(scan, self.cfg, self.llm, repo_root=self.repo_root)
+            with self.telemetry.span("pipeline.plan"):
+                plan = bucket_plan_docs(
+                    scan,
+                    self.cfg,
+                    self.llm,
+                    repo_root=self.repo_root,
+                )
             phase_timings["plan"] = time.perf_counter() - phase_start
 
         stats["pages_planned"] = len(plan.pages)
@@ -374,12 +411,16 @@ class PipelineV2:
             output_dir=self.output_dir,
         )
         phase_start = time.perf_counter()
-        gen_results = engine.generate_all(force=force)
+        with self.telemetry.span("pipeline.generate_pages"):
+            gen_results = engine.generate_all(force=force)
         phase_timings["generate"] = time.perf_counter() - phase_start
-        engine.update_manifest(gen_results)
-
         from .generator.consistency import CrossBucketConsistencyPass
-        injected = CrossBucketConsistencyPass(self.llm, self.output_dir, self.cfg).run(gen_results)
+        with self.telemetry.span("pipeline.consistency"):
+            injected = CrossBucketConsistencyPass(
+                self.llm,
+                self.output_dir,
+                self.cfg,
+            ).run(gen_results)
         if injected:
             console.print(f"[dim]  ↳ consistency pass: {injected} cross-link(s) injected[/dim]")
 
@@ -398,7 +439,8 @@ class PipelineV2:
 
         # ── Glossary auto-link pass ───────────────────────────────────
         try:
-            self._apply_glossary_links(plan)
+            with self.telemetry.span("pipeline.glossary"):
+                self._apply_glossary_links(plan)
         except Exception as exc:
             console.print(f"[dim]Glossary auto-link skipped: {exc}[/dim]")
 
@@ -412,7 +454,8 @@ class PipelineV2:
                 )
             )
             phase_start = time.perf_counter()
-            openapi_ready = self._setup_playground(scan, plan)
+            with self.telemetry.span("pipeline.openapi"):
+                openapi_ready = self._setup_playground(scan, plan)
             phase_timings["openapi"] = time.perf_counter() - phase_start
             stats["playground"] = 1 if openapi_ready else 0
         else:
@@ -427,7 +470,8 @@ class PipelineV2:
 
         # ── Persist state ──────────────────────────────────────────────
         phase_start = time.perf_counter()
-        save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
+        with self.telemetry.span("pipeline.persist_state"):
+            save_all(plan, scan, gen_results, self.repo_root, self.output_dir)
         stats["llm_usage"] = dict(getattr(self.llm, "usage", {}) or {})
         self._save_quality_report(stats)
         phase_timings["persist"] = time.perf_counter() - phase_start
@@ -439,17 +483,18 @@ class PipelineV2:
             _repo_cl = _git.Repo(self.repo_root)
             _head_cl = _repo_cl.head.commit
             _changelog_exists = bool(load_changelog(self.repo_root))
-            _record_changelog(
-                self.repo_root,
-                self.output_dir,
-                commit=_head_cl.hexsha,
-                commit_message=_head_cl.message.strip().splitlines()[0],
-                commit_date=_head_cl.committed_datetime.strftime("%Y-%m-%d"),
-                strategy="full_generate",
-                pages_updated=[b.slug for b in plan.buckets],
-                files_changed=[],
-                is_initial=not _changelog_exists,
-            )
+            with self.telemetry.span("pipeline.changelog"):
+                _record_changelog(
+                    self.repo_root,
+                    self.output_dir,
+                    commit=_head_cl.hexsha,
+                    commit_message=_head_cl.message.strip().splitlines()[0],
+                    commit_date=_head_cl.committed_datetime.strftime("%Y-%m-%d"),
+                    strategy="full_generate",
+                    pages_updated=[b.slug for b in plan.buckets],
+                    files_changed=[],
+                    is_initial=not _changelog_exists,
+                )
         except Exception:
             pass  # Not a git repo or detached HEAD — skip silently
 
@@ -463,7 +508,8 @@ class PipelineV2:
         _wc_section = plan.nav_structure.setdefault("Start Here", [])
         if "whats-changed" not in _wc_section:
             _wc_section.append("whats-changed")
-        self._build_site(plan, has_openapi=openapi_ready)
+        with self.telemetry.span("pipeline.site_scaffold"):
+            self._build_site(plan, has_openapi=openapi_ready)
         phase_timings["build_site"] = time.perf_counter() - phase_start
         stats["site"] = 1
 
@@ -472,12 +518,17 @@ class PipelineV2:
                 from .chatbot.indexer import ChatbotIndexer
 
                 console.print("[dim]Starting chatbot index sync...[/dim]")
-                chatbot_stats = ChatbotIndexer(self.repo_root, self.cfg).sync_full(
-                    plan=plan,
-                    scan=scan,
-                    output_dir=self.output_dir,
-                    has_openapi=openapi_ready,
-                )
+                with self.telemetry.span("pipeline.chatbot_sync"):
+                    chatbot_stats = ChatbotIndexer(
+                        self.repo_root,
+                        self.cfg,
+                        telemetry=self.telemetry,
+                    ).sync_full(
+                        plan=plan,
+                        scan=scan,
+                        output_dir=self.output_dir,
+                        has_openapi=openapi_ready,
+                    )
                 stats["chatbot"] = chatbot_stats
                 total = sum(
                     chatbot_stats.get(k, 0)
@@ -504,6 +555,7 @@ class PipelineV2:
                 console.print(f"[yellow]⚠ Chatbot sync failed: {e}[/yellow]")
 
         # ── Persist commit baseline for future updates ────────────────
+        final_sync_start = time.perf_counter()
         try:
             import git as _git
 
@@ -564,16 +616,22 @@ class PipelineV2:
             )
         except Exception:
             pass  # Not a git repo or detached HEAD — skip silently
+        finally:
+            self.telemetry.record_duration(
+                "pipeline.final_sync",
+                time.perf_counter() - final_sync_start,
+            )
 
         if reconcile:
-            keep_slugs = {bucket.slug for bucket in plan.buckets}
-            deleted = cleanup_stale_generated_files(
-                self.repo_root,
-                self.output_dir,
-                keep_slugs,
-                previous_ledger=previous_ledger,
-            )
-            prune_generation_ledger(self.repo_root, keep_slugs)
+            with self.telemetry.span("pipeline.stale_cleanup"):
+                keep_slugs = {bucket.slug for bucket in plan.buckets}
+                deleted = cleanup_stale_generated_files(
+                    self.repo_root,
+                    self.output_dir,
+                    keep_slugs,
+                    previous_ledger=previous_ledger,
+                )
+                prune_generation_ledger(self.repo_root, keep_slugs)
             stats["stale_pages_removed"] = len(deleted)
             if deleted:
                 console.print(
@@ -1511,7 +1569,7 @@ class PipelineV2:
                             f"    [red]✗ LLM call failed after {MAX_RETRIES} attempts: {e}[/red]"
                         )
                         raise
-                    wait = RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5)
+                    wait = min(RATE_LIMIT_BACKOFF * (2**attempt) + random.uniform(0, 1.5), 20.0)
                     console.print(
                         f"    [yellow]⏳ Transient error — waiting {wait:.1f}s before retry {attempt + 1}/{MAX_RETRIES}...[/yellow]"
                     )

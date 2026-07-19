@@ -14,7 +14,15 @@ from .conftest import _run_git
 
 
 def _make_updater(root):
-    cfg = {"output_dir": "docs", "llm": {"provider": "anthropic", "model": "test"}}
+    cfg = {
+        "output_dir": "docs",
+        "llm": {
+            "provider": "anthropic",
+            "model": "test",
+            "context_window_tokens": 128000,
+            "output_reserve_tokens": 16000,
+        },
+    }
     return SmartUpdater(root, cfg)
 
 
@@ -201,7 +209,12 @@ def test_update_recovers_chatbot_index_even_when_repo_changes_are_noop(
         root,
         {
             "output_dir": "docs",
-            "llm": {"provider": "anthropic", "model": "test"},
+            "llm": {
+                "provider": "anthropic",
+                "model": "test",
+                "context_window_tokens": 128000,
+                "output_reserve_tokens": 16000,
+            },
             "chatbot": {"enabled": True},
         },
     )

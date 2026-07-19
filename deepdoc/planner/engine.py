@@ -1,4 +1,22 @@
+from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
+
+from ..llm import fit_prompt_sections
+from ..telemetry import RunTelemetry
+from ..manifest import file_hash
 from .common import *
+
+
+def _record_scan_timing(
+    timings: dict[str, float],
+    telemetry: RunTelemetry | None,
+    name: str,
+    started_at: float,
+) -> None:
+    elapsed = time.perf_counter() - started_at
+    timings[name] = timings.get(name, 0.0) + elapsed
+    if telemetry is not None:
+        telemetry.record_duration(f"scan.{name}", elapsed)
 
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
@@ -48,18 +66,38 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         and scan.topology_map.clusters
     )
 
-    classify_prompt = CLASSIFY_PROMPT.format(
-        languages=lang_str,
-        frameworks=fw_str,
-        total_files=scan.total_files,
-        endpoint_count=len(published_endpoints),
-        entry_points=", ".join(scan.entry_points[:10]) or "none",
-        config_files=", ".join(scan.config_files[:15]) or "none",
-        topology_clusters=topology_clusters_str[:18000],
-        file_summaries=file_summaries_str[:8000],
-        endpoints=endpoints_str[:5000],
-        giant_file_threshold=giant_file_threshold,
+    def _render_classify(sections: dict[str, str]) -> str:
+        return CLASSIFY_PROMPT.format(
+            languages=lang_str,
+            frameworks=fw_str,
+            total_files=scan.total_files,
+            endpoint_count=len(published_endpoints),
+            entry_points=sections.get("entry_points") or "none",
+            config_files=sections.get("config_files") or "none",
+            topology_clusters=sections["topology_clusters"],
+            file_summaries=sections.get("file_summaries") or "(none)",
+            endpoints=sections.get("endpoints") or "(none)",
+            giant_file_threshold=giant_file_threshold,
+        )
+
+    classify_fit = fit_prompt_sections(
+        llm.capabilities,
+        system=CLASSIFY_SYSTEM,
+        render_prompt=_render_classify,
+        required_sections={"topology_clusters": topology_clusters_str},
+        optional_sections=[
+            ("entry_points", [f"- {path}" for path in scan.entry_points]),
+            ("config_files", [f"- {path}" for path in scan.config_files]),
+            ("file_summaries", file_summaries_str.splitlines()),
+            ("endpoints", endpoints_str.splitlines()),
+        ],
+        output_reserve_tokens=llm.output_reserve_tokens,
+        step_name="planner classify",
     )
+    classify_prompt = classify_fit.prompt
+    if getattr(llm, "telemetry", None) is not None:
+        for name, count in classify_fit.omitted_records.items():
+            llm.telemetry.counter(f"planner.classify.omitted_{name}", count)
 
     step_start = time.perf_counter()
     classification = _llm_step(llm, CLASSIFY_SYSTEM, classify_prompt, "classify")
@@ -189,20 +227,49 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             "Never merge unrelated topics just to reduce page count."
         )
 
-    propose_prompt = PROPOSE_PROMPT.format(
-        named_clusters=named_clusters_str[:18000],
-        endpoint_count=len(published_endpoints),
-        endpoints=endpoints_str[:12000],
-        integration_signals=integration_signals,
-        cross_cutting=cross_cutting,
-        giant_files=giant_files_str,
-        database_info=database_info,
-        debug_signals=debug_signals_str,
-        artifacts=artifacts_str,
-        research_context=research_context_str,
-        repo_profile=repo_profile_str,
-        max_pages_instruction=max_pages_instruction,
+    integration_records = (
+        [
+            f"- {identity.display_name} ({identity.name}) | files: "
+            f"{', '.join(identity.files)} | evidence: {', '.join(identity.evidence)}"
+            for identity in scan.integration_identities
+        ]
+        if scan.integration_identities
+        else [integration_signals]
     )
+
+    def _render_propose(sections: dict[str, str]) -> str:
+        return PROPOSE_PROMPT.format(
+            named_clusters=sections["named_clusters"],
+            endpoint_count=len(published_endpoints),
+            endpoints=sections.get("endpoints") or "(none)",
+            integration_signals=sections.get("integration_signals") or "(none)",
+            cross_cutting=cross_cutting,
+            giant_files=giant_files_str,
+            database_info=database_info,
+            debug_signals=debug_signals_str,
+            artifacts=artifacts_str,
+            research_context=sections.get("research_context") or "(none)",
+            repo_profile=repo_profile_str,
+            max_pages_instruction=max_pages_instruction,
+        )
+
+    propose_fit = fit_prompt_sections(
+        llm.capabilities,
+        system=PROPOSE_SYSTEM,
+        render_prompt=_render_propose,
+        required_sections={"named_clusters": named_clusters_str},
+        optional_sections=[
+            ("endpoints", endpoints_str.splitlines()),
+            ("integration_signals", integration_records),
+            ("research_context", research_context_str.splitlines()),
+        ],
+        output_reserve_tokens=llm.output_reserve_tokens,
+        step_name="planner propose",
+    )
+    propose_prompt = propose_fit.prompt
+    if getattr(llm, "telemetry", None) is not None:
+        for name, count in propose_fit.omitted_records.items():
+            llm.telemetry.counter(f"planner.propose.omitted_{name}", count)
 
     step_start = time.perf_counter()
     proposal = _llm_step(llm, PROPOSE_SYSTEM, propose_prompt, "propose")
@@ -224,20 +291,82 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         )
     )
 
-    proposed_buckets_str = json.dumps(proposal.get("buckets", []), indent=2)
-    all_files_str = "\n".join(f"- {f}" for f in sorted(scan.file_summaries.keys()))
+    deterministic_assignment, unresolved_files = _partition_topology_assignment(
+        proposal, scan
+    )
+    assignment_buckets = [
+        {
+            "slug": bucket.get("slug", ""),
+            "title": bucket.get("title", ""),
+            "bucket_type": bucket.get("bucket_type", ""),
+            "section": bucket.get("section", ""),
+            "cluster_id": bucket.get("cluster_id", ""),
+            "candidate_files": bucket.get("candidate_files", []),
+            "generation_hints": bucket.get("generation_hints", {}),
+        }
+        for bucket in proposal.get("buckets", [])
+    ]
+    proposed_buckets_str = json.dumps(assignment_buckets, separators=(",", ":"))
+    all_files_str = "\n".join(f"- {f}" for f in unresolved_files)
     setup_artifacts_str = "\n".join(f"- {f}" for f in scan.config_files) or "(none)"
 
-    assign_prompt = ASSIGN_PROMPT.format(
-        proposed_buckets=proposed_buckets_str[:15000],
-        all_files=all_files_str[:12000],
-        endpoints=endpoints_str[:3000],
-        giant_files=giant_files_str,
-        setup_artifacts=setup_artifacts_str,
+    telemetry = getattr(llm, "telemetry", None)
+    deterministic_count = sum(
+        len(bucket.get("owned_files", []))
+        for bucket in deterministic_assignment.get("buckets", [])
     )
+    if telemetry is not None:
+        telemetry.counter("planner.assign.files_total", len(scan.file_summaries))
+        telemetry.counter("planner.assign.files_deterministic", deterministic_count)
+        telemetry.counter("planner.assign.files_ambiguous", len(unresolved_files))
 
     step_start = time.perf_counter()
-    assignment = _llm_step(llm, ASSIGN_SYSTEM, assign_prompt, "assign")
+    if unresolved_files:
+        def _render_assign(sections: dict[str, str]) -> str:
+            return ASSIGN_PROMPT.format(
+                proposed_buckets=sections["proposed_buckets"],
+                all_files=sections["all_files"],
+                endpoints=sections.get("endpoints") or "(none)",
+                giant_files=giant_files_str,
+                setup_artifacts=setup_artifacts_str,
+            )
+
+        assign_fit = fit_prompt_sections(
+            llm.capabilities,
+            system=ASSIGN_SYSTEM,
+            render_prompt=_render_assign,
+            required_sections={
+                "proposed_buckets": proposed_buckets_str,
+                "all_files": all_files_str,
+            },
+            optional_sections=[("endpoints", endpoints_str.splitlines())],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="planner assign",
+        )
+        assign_prompt = assign_fit.prompt
+        if getattr(llm, "telemetry", None) is not None:
+            for name, count in assign_fit.omitted_records.items():
+                llm.telemetry.counter(f"planner.assign.omitted_{name}", count)
+        llm_assignment = _llm_step(llm, ASSIGN_SYSTEM, assign_prompt, "assign")
+        assignment = (
+            _merge_partial_assignment(
+                proposal,
+                deterministic_assignment,
+                llm_assignment,
+                unresolved_files,
+            )
+            if llm_assignment
+            else None
+        )
+    else:
+        assignment = _merge_partial_assignment(
+            proposal,
+            deterministic_assignment,
+            None,
+            [],
+        )
+        if telemetry is not None:
+            telemetry.counter("planner.assign.llm_skipped")
     scan.planner_timings["assign"] = time.perf_counter() - step_start
     if not assignment:
         console.print(
@@ -277,7 +406,14 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         cfg=cfg,
     )
     plan = _ensure_database_runtime_and_interface_buckets(plan, scan, cfg)
+    step_start = time.perf_counter()
     plan = _attach_flow_hints_to_cluster_buckets(plan, scan, cfg)
+    _record_scan_timing(
+        scan.scan_timings,
+        getattr(llm, "telemetry", None),
+        "flow_candidates",
+        step_start,
+    )
 
     # ── Inject Start Here and Debug Runbook buckets ──────────────────────
     plan = _inject_start_here_and_debug_buckets(plan, scan, cfg)
@@ -313,7 +449,100 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     return plan
 
 
-def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
+@dataclass(frozen=True)
+class _SourceScanResult:
+    rel_path: str
+    content: str | None
+    content_hash: str
+    line_count: int
+    language: str
+    frameworks: tuple[str, ...]
+    parsed: ParsedFile | None
+    summary: str
+    endpoints: tuple[APIEndpoint, ...]
+    source_bytes: int
+    timings: dict[str, float]
+
+
+def _scan_one_source_file(
+    fpath: Path, rel_path: str, language: str
+) -> _SourceScanResult:
+    """Read, parse, and inspect one source without mutating shared scan state."""
+    timings: dict[str, float] = {}
+    started = time.perf_counter()
+    try:
+        content = fpath.read_text(encoding="utf-8", errors="replace")
+    except Exception:
+        timings["source_reads"] = time.perf_counter() - started
+        return _SourceScanResult(
+            rel_path=rel_path,
+            content=None,
+            content_hash="",
+            line_count=0,
+            language=language,
+            frameworks=(),
+            parsed=None,
+            summary="",
+            endpoints=(),
+            source_bytes=0,
+            timings=timings,
+        )
+    timings["source_reads"] = time.perf_counter() - started
+    line_count = len(content.splitlines())
+
+    started = time.perf_counter()
+    matched_frameworks = [
+        framework
+        for framework, indicators in FRAMEWORK_INDICATORS.items()
+        if any(indicator in content for indicator in indicators)
+    ]
+    if language == "go":
+        matched_frameworks.append("go")
+    if fpath.suffix.lower() == ".vue":
+        matched_frameworks.append("vue")
+    timings["framework_detection"] = time.perf_counter() - started
+
+    started = time.perf_counter()
+    parsed = parse_file(fpath, content=content)
+    summary = ""
+    if parsed:
+        summary_parts = []
+        if parsed.symbols:
+            symbol_names = [
+                f"{symbol.kind}:{symbol.name}" for symbol in parsed.symbols[:15]
+            ]
+            summary_parts.append(f"symbols=[{', '.join(symbol_names)}]")
+        if parsed.imports:
+            summary_parts.append(f"imports={len(parsed.imports)}")
+        summary_parts.append(f"lines={line_count}")
+        summary = " | ".join(summary_parts)
+    timings["parsing"] = time.perf_counter() - started
+
+    started = time.perf_counter()
+    endpoints = tuple(detect_endpoints(fpath, content, language)) if language else ()
+    timings["endpoint_detection"] = time.perf_counter() - started
+    return _SourceScanResult(
+        rel_path=rel_path,
+        content=content,
+        content_hash=file_hash(content),
+        line_count=line_count,
+        language=language,
+        frameworks=tuple(sorted(set(matched_frameworks))),
+        parsed=parsed,
+        summary=summary,
+        endpoints=endpoints,
+        source_bytes=len(content.encode("utf-8")),
+        timings=timings,
+    )
+
+
+def scan_repo(
+    repo_root: Path,
+    cfg: dict[str, Any],
+    telemetry: RunTelemetry | None = None,
+    *,
+    scan_paths: set[str] | None = None,
+) -> RepoScan:
     """Scan the entire repo without making any LLM calls.
 
     Enhanced from v1: also records line counts and parsed files for
@@ -322,6 +551,11 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     exclude = list(cfg.get("exclude", []))
     include = cfg.get("include", [])
     extensions = supported_extensions()
+    normalized_scan_paths = {
+        Path(path).as_posix().removeprefix("./")
+        for path in (scan_paths or set())
+        if path
+    }
 
     # Always exclude DeepDoc's own generated/state directories regardless of
     # user config — scanning these produces noise and giant-file false positives.
@@ -347,11 +581,20 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     file_line_counts: dict[str, int] = {}
     parsed_files: dict[str, ParsedFile] = {}
     file_contents: dict[str, str] = {}
+    file_content_hashes: dict[str, str] = {}
     doc_contexts: dict[str, str] = {}
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
     file_frameworks: dict[str, list[str]] = {}
+    scan_timings: dict[str, float] = {}
+    step_start = time.perf_counter()
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
+    _record_scan_timing(
+        scan_timings,
+        telemetry,
+        "service_boundaries",
+        step_start,
+    )
     file_services: dict[str, str] = {}
 
     ext_to_lang = {
@@ -368,16 +611,41 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
     }
 
     # First pass: collect all files
+    step_start = time.perf_counter()
     all_files_to_scan: list[Path] = []
     for root, dirs, files in os.walk(repo_root):
         root_path = Path(root)
-        dirs[:] = [d for d in dirs if not _matches_any(d, exclude)]
+        dirs[:] = sorted(d for d in dirs if not _matches_any(d, exclude))
+        if normalized_scan_paths:
+            rel_root = (
+                root_path.relative_to(repo_root).as_posix()
+                if root_path != repo_root
+                else ""
+            )
+            dirs[:] = [
+                directory
+                for directory in dirs
+                if any(
+                    path == "/".join(filter(None, (rel_root, directory)))
+                    or path.startswith(
+                        "/".join(filter(None, (rel_root, directory))) + "/"
+                    )
+                    for path in normalized_scan_paths
+                )
+            ]
         for fname in sorted(files):
             fpath = root_path / fname
-            rel = str(fpath.relative_to(repo_root))
+            rel = fpath.relative_to(repo_root).as_posix()
+            if normalized_scan_paths and rel not in normalized_scan_paths:
+                continue
             if not _matches_any(rel, exclude) and not _matches_any(fname, exclude):
                 all_files_to_scan.append(fpath)
+    all_files_to_scan.sort(key=lambda path: path.relative_to(repo_root).as_posix())
+    _record_scan_timing(scan_timings, telemetry, "file_walk", step_start)
+    if telemetry is not None:
+        telemetry.counter("scan.files_discovered", len(all_files_to_scan))
 
+    source_work: list[tuple[Path, str, str]] = []
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -392,9 +660,9 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
 
         for fpath in all_files_to_scan:
             fname = fpath.name
-            rel = str(fpath.relative_to(repo_root))
+            rel = fpath.relative_to(repo_root).as_posix()
             rel_dir = (
-                str(fpath.parent.relative_to(repo_root))
+                fpath.parent.relative_to(repo_root).as_posix()
                 if fpath.parent != repo_root
                 else "."
             )
@@ -424,8 +692,15 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
 
             # Only parse supported source files
             if _is_doc_context_candidate(rel, fname):
+                step_start = time.perf_counter()
                 try:
                     doc_content = fpath.read_text(encoding="utf-8", errors="replace")
+                    if telemetry is not None:
+                        telemetry.counter("scan.doc_files_read")
+                        telemetry.counter(
+                            "scan.doc_bytes_read",
+                            len(doc_content.encode("utf-8")),
+                        )
                     if fname.lower().endswith(".ipynb"):
                         summary, context = _summarize_notebook_context(rel, doc_content)
                     else:
@@ -436,6 +711,13 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                         research_contexts.append(context)
                 except Exception:
                     pass
+                finally:
+                    _record_scan_timing(
+                        scan_timings,
+                        telemetry,
+                        "documentation",
+                        step_start,
+                    )
 
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
@@ -458,52 +740,71 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
             ) in {"main", "app", "server", "index"}:
                 entry_points.append(rel)
 
-            # Parse file for summary
-            try:
-                content = fpath.read_text(encoding="utf-8", errors="replace")
-                line_count = len(content.splitlines())
-                file_line_counts[rel] = line_count
-                file_contents[rel] = content
-            except Exception:
+            source_work.append((fpath, rel, lang))
+
+        scan_cfg = cfg.get("scan", {}) or {}
+        configured_workers = max(1, min(32, int(scan_cfg.get("max_workers", 8))))
+        effective_workers = (
+            min(configured_workers, len(source_work)) if source_work else 0
+        )
+        stage_started = time.perf_counter()
+        if effective_workers > 1 and len(source_work) >= 8:
+
+            def _parallel_results():
+                with ThreadPoolExecutor(max_workers=effective_workers) as executor:
+                    yield from executor.map(
+                        lambda item: _scan_one_source_file(*item), source_work
+                    )
+
+            source_results = _parallel_results()
+        else:
+            source_results = (
+                _scan_one_source_file(*item) for item in source_work
+            )
+
+        for result in source_results:
+            progress.update(
+                task, description=f"[dim]Scanning {result.rel_path}[/dim]"
+            )
+            for phase_name, duration in result.timings.items():
+                scan_timings[phase_name] = scan_timings.get(phase_name, 0.0) + duration
+                if telemetry is not None:
+                    telemetry.counter(f"scan.{phase_name}_work_seconds", duration)
+            if result.content is None:
                 progress.advance(task)
                 continue
-
-            # Detect frameworks
-            matched_frameworks: list[str] = []
-            for fw, indicators in FRAMEWORK_INDICATORS.items():
-                if any(ind in content for ind in indicators):
-                    frameworks.add(fw)
-                    matched_frameworks.append(fw)
-            if lang == "go":
-                frameworks.add("go")
-                matched_frameworks.append("go")
-            if fpath.suffix.lower() == ".vue":
-                frameworks.add("vue")
-                matched_frameworks.append("vue")
-            if matched_frameworks:
-                file_frameworks[rel] = sorted(set(matched_frameworks))
-
-            # Parse symbols
-            parsed = parse_file(fpath)
-            if parsed:
-                parsed_files[rel] = parsed
-                summary_parts = []
-                if parsed.symbols:
-                    sym_names = [f"{s.kind}:{s.name}" for s in parsed.symbols[:15]]
-                    summary_parts.append(f"symbols=[{', '.join(sym_names)}]")
-                if parsed.imports:
-                    summary_parts.append(f"imports={len(parsed.imports)}")
-                summary_parts.append(f"lines={line_count}")
-                file_summaries[rel] = " | ".join(summary_parts)
-
-            # Detect API endpoints
-            if lang:
-                eps = detect_endpoints(fpath, content, lang)
-                raw_api_endpoints.extend(eps)
-
+            file_line_counts[result.rel_path] = result.line_count
+            file_contents[result.rel_path] = result.content
+            file_content_hashes[result.rel_path] = result.content_hash
+            if telemetry is not None:
+                telemetry.counter("scan.source_files_read")
+                telemetry.counter("scan.source_bytes_read", result.source_bytes)
+            if result.frameworks:
+                file_frameworks[result.rel_path] = list(result.frameworks)
+                frameworks.update(result.frameworks)
+            if result.parsed:
+                parsed_files[result.rel_path] = result.parsed
+                file_summaries[result.rel_path] = result.summary
+            raw_api_endpoints.extend(result.endpoints)
             progress.advance(task)
 
+        stage_elapsed = time.perf_counter() - stage_started
+        scan_timings["parallel_file_stage"] = stage_elapsed
+        if telemetry is not None:
+            telemetry.record_duration("scan.parallel_file_stage", stage_elapsed)
+            telemetry.counter("scan.worker_limit", effective_workers)
+            for phase_name in (
+                "source_reads",
+                "framework_detection",
+                "parsing",
+                "endpoint_detection",
+            ):
+                telemetry.record_duration(
+                    f"scan.{phase_name}", scan_timings.get(phase_name, 0.0)
+                )
+
     if raw_api_endpoints:
+        step_start = time.perf_counter()
         resolved_endpoints = resolve_repo_endpoints(
             repo_root, raw_api_endpoints, file_contents
         )
@@ -545,6 +846,30 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
                     "publication_reason": reason,
                 }
             )
+        _record_scan_timing(
+            scan_timings,
+            telemetry,
+            "route_resolution",
+            step_start,
+        )
+
+    if telemetry is not None:
+        telemetry.counter("scan.source_files_parsed", len(parsed_files))
+        telemetry.counter("scan.endpoints_detected", len(api_endpoints))
+    for phase_name in (
+        "service_boundaries",
+        "file_walk",
+        "documentation",
+        "source_reads",
+        "framework_detection",
+        "parsing",
+        "endpoint_detection",
+        "route_resolution",
+    ):
+        if phase_name not in scan_timings:
+            scan_timings[phase_name] = 0.0
+            if telemetry is not None:
+                telemetry.record_duration(f"scan.{phase_name}", 0.0)
 
     return RepoScan(
         file_tree=dict(file_tree),
@@ -560,12 +885,15 @@ def scan_repo(repo_root: Path, cfg: dict[str, Any]) -> RepoScan:
         file_line_counts=file_line_counts,
         parsed_files=parsed_files,
         file_contents=file_contents,
+        file_content_hashes=file_content_hashes,
         doc_contexts=doc_contexts,
         research_contexts=research_contexts,
+        scan_timings=scan_timings,
         source_kind_by_file=source_kind_by_file,
         file_frameworks=file_frameworks,
         service_boundaries=service_boundaries,
         file_services=file_services,
+        scan_scope=sorted(normalized_scan_paths),
     )
 
 
@@ -646,8 +974,10 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
 
     giant_threshold = cfg.get("giant_file_lines", 2000)
     integration_mode = cfg.get("integration_detection", "auto")
+    telemetry = getattr(llm, "telemetry", None)
 
     # 2.1 Giant-file clustering (parallelized)
+    step_start = time.perf_counter()
     giant_files = {
         path: lc
         for path, lc in scan.file_line_counts.items()
@@ -686,8 +1016,15 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
                     f"    [green]✓[/green] {path}: {len(analysis.clusters)} clusters: "
                     f"{', '.join(cluster_names)}"
                 )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "giant_file_clustering",
+        step_start,
+    )
 
     # 2.2 Endpoint evidence bundles
+    step_start = time.perf_counter()
     published_api_endpoints = scan.published_api_endpoints
     if published_api_endpoints and cfg.get("include_endpoint_pages", True):
         console.print("  [bold]Building endpoint evidence bundles...[/bold]")
@@ -704,8 +1041,15 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
             console.print(
                 f"    • {b.endpoint_family}: {len(b.evidence)} evidence files, {len(b.methods_paths)} routes"
             )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "endpoint_bundles",
+        step_start,
+    )
 
     # 2.3 Integration discovery
+    step_start = time.perf_counter()
     if integration_mode == "auto" and cfg.get("include_integration_pages", True):
         console.print("  [bold]Discovering integrations...[/bold]")
         scan.integration_identities = discover_integrations(
@@ -722,22 +1066,49 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
             for i in scan.integration_identities:
                 marker = "📄" if i.is_substantial else "📎"
                 console.print(f"    {marker} {i.display_name} ({len(i.files)} files)")
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "integrations",
+        step_start,
+    )
 
     # 2.4 Artifact discovery
     console.print("  [bold]Scanning for setup/deploy/test artifacts...[/bold]")
+    step_start = time.perf_counter()
     scan.artifact_scan = discover_artifacts(
         repo_root,
         scan.file_tree,
         scan.parsed_files,
         scan.file_contents,
     )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "artifacts",
+        step_start,
+    )
+    step_start = time.perf_counter()
     scan.runtime_scan = discover_runtime_surfaces(
         scan.parsed_files,
         scan.file_contents,
         scan.api_endpoints,
     )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "runtime",
+        step_start,
+    )
+    step_start = time.perf_counter()
     scan.config_impacts = discover_config_impacts(
         scan.file_contents, scan.api_endpoints
+    )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "config_impacts",
+        step_start,
     )
     a = scan.artifact_scan
     if a and a.database_scan:
@@ -764,8 +1135,15 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
 
     # 2.5 Call graph extraction
     console.print("  [bold]Building call graph...[/bold]")
+    step_start = time.perf_counter()
     scan.call_graph = build_call_graph(
         scan.parsed_files, scan.file_contents, scan.api_endpoints
+    )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "call_graph",
+        step_start,
     )
     stats = scan.call_graph.stats()
     console.print(
@@ -777,7 +1155,14 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
     # 2.5b Topology analysis (derives nav structure from call graph)
     from .topology import build_topology_map
     console.print("  [bold]Analysing call graph topology...[/bold]")
+    step_start = time.perf_counter()
     scan.topology_map = build_topology_map(scan)
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "topology",
+        step_start,
+    )
     tmap = scan.topology_map
     if tmap.clusters:
         non_found = [c for c in tmap.clusters if not c.is_foundational]
@@ -790,10 +1175,17 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
 
     # 2.6 Debug signal discovery
     console.print("  [bold]Discovering debug signals...[/bold]")
+    step_start = time.perf_counter()
     scan.debug_signals = discover_debug_signals(
         scan.parsed_files,
         scan.file_contents,
         scan.api_endpoints,
+    )
+    _record_scan_timing(
+        scan.scan_timings,
+        telemetry,
+        "debug_signals",
+        step_start,
     )
     if scan.debug_signals:
         console.print(f"  [green]✓[/green] {len(scan.debug_signals)} debug signal(s):")
@@ -816,6 +1208,6 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return False
 
 
-from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_plan, _normalize_repo_profile, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
+from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_partial_assignment, _merge_plan, _normalize_repo_profile, _partition_topology_assignment, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
 from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets

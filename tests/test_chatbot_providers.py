@@ -2,11 +2,55 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from deepdoc.chatbot.providers import LiteLLMEmbeddingClient
+import pytest
+
+from deepdoc.llm import ModelCapabilityError
+from deepdoc.chatbot.embedding_capabilities import EmbeddingCapabilityError
+from deepdoc.chatbot.providers import LiteLLMChatClient, LiteLLMEmbeddingClient
 
 
 class _FakeContextWindowError(Exception):
     pass
+
+
+def test_chat_client_clamps_output_and_rejects_oversized_prompt(monkeypatch) -> None:
+    completion_calls = []
+
+    class _FakeLiteLLM:
+        def get_model_info(self, model):
+            return {"max_input_tokens": 4096, "max_output_tokens": 1024}
+
+        def token_counter(self, **kwargs):
+            text = " ".join(message["content"] for message in kwargs["messages"])
+            return len(text.split())
+
+        def completion(self, **kwargs):
+            completion_calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+            )
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.providers.prepare_litellm", lambda: _FakeLiteLLM()
+    )
+    monkeypatch.setattr(
+        "deepdoc.llm.token_budget.prepare_litellm", lambda: _FakeLiteLLM()
+    )
+    client = LiteLLMChatClient(
+        {
+            "provider": "openai",
+            "model": "chat-test",
+            "context_window_tokens": 4096,
+            "output_reserve_tokens": 1024,
+            "max_tokens": 5000,
+        }
+    )
+
+    assert client.max_tokens == 1024
+    with pytest.raises(ModelCapabilityError, match="resolved answer-model context window"):
+        client.complete("system", "word " * 4000)
+
+    assert completion_calls == []
 
 
 def test_embedding_client_splits_batches_on_context_window_error(monkeypatch) -> None:
@@ -24,7 +68,7 @@ def test_embedding_client_splits_batches_on_context_window_error(monkeypatch) ->
 
     monkeypatch.setattr("deepdoc.chatbot.providers.prepare_litellm", lambda: _FakeLiteLLM())
 
-    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 24})
+    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 24, "max_input_tokens": 8191})
     vectors = client.embed(["alpha", "beta", "gamma"])
 
     assert vectors == [[5.0], [4.0], [5.0]]
@@ -32,7 +76,7 @@ def test_embedding_client_splits_batches_on_context_window_error(monkeypatch) ->
     assert calls[1:] == [["alpha"], ["beta", "gamma"], ["beta"], ["gamma"]]
 
 
-def test_embedding_client_trims_single_oversized_text_on_retry(monkeypatch) -> None:
+def test_embedding_client_rejects_fitted_singleton_context_error(monkeypatch) -> None:
     calls: list[str] = []
 
     class _FakeLiteLLM:
@@ -47,13 +91,11 @@ def test_embedding_client_trims_single_oversized_text_on_retry(monkeypatch) -> N
 
     monkeypatch.setattr("deepdoc.chatbot.providers.prepare_litellm", lambda: _FakeLiteLLM())
 
-    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 1})
-    vectors = client.embed(["x" * 5000])
+    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 1, "max_input_tokens": 8191})
+    with pytest.raises(EmbeddingCapabilityError, match="token-fitted"):
+        client.embed(["x" * 5000])
 
-    assert vectors == [[1.0, 2.0]]
-    assert len(calls) >= 2
-    assert len(calls[-1]) < len(calls[0])
-    assert calls[-1].endswith("... [truncated for embedding]")
+    assert calls == ["x" * 5000]
 
 
 def test_embedding_client_handles_azure_maximum_input_length_error(monkeypatch) -> None:
@@ -74,7 +116,7 @@ def test_embedding_client_handles_azure_maximum_input_length_error(monkeypatch) 
     monkeypatch.setattr("deepdoc.chatbot.providers.prepare_litellm", lambda: _FakeLiteLLM())
 
     client = LiteLLMEmbeddingClient(
-        {"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 24}
+        {"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 24, "max_input_tokens": 8191}
     )
     vectors = client.embed(["alpha", "beta", "gamma"])
 
@@ -95,10 +137,7 @@ def test_embedding_client_defaults_to_single_item_batches_for_azure_model() -> N
     assert client.batch_size == 1
 
 
-def test_embedding_client_uses_more_aggressive_trim_budget_for_azure() -> None:
-    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "batch_size": 1})
+def test_embedding_client_defaults_to_single_item_batches_for_azure_with_profile() -> None:
+    client = LiteLLMEmbeddingClient({"provider": "azure", "model": "azure/text-embedding-3-small", "max_input_tokens": 8191})
 
-    trimmed = client._trim_text_for_retry("x" * 5000)
-
-    assert len(trimmed) < 3200
-    assert trimmed.endswith("... [truncated for embedding]")
+    assert client.batch_size == 1

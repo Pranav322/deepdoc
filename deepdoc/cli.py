@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import json
 import os
 from pathlib import Path
@@ -21,6 +22,7 @@ from rich.table import Table
 
 from . import __version__
 from .config import CONFIG_FILE, DEFAULT_CONFIG, find_config, load_config, save_config
+from .llm import ModelCapabilityError, resolve_completion_capabilities
 
 console = Console()
 CONTEXT_SETTINGS = {
@@ -158,7 +160,22 @@ def _autoload_repo_env(start: Path) -> Path | None:
     is_flag=True,
     help="Enable code-and-artifact chatbot scaffolding and indexing in generated repos.",
 )
-def init(name, description, provider, model, output_dir, with_chatbot):
+@click.option("--llm-max-concurrency", type=click.IntRange(1), default=None)
+@click.option("--llm-rpm", type=click.IntRange(1), default=None)
+@click.option("--llm-tpm", type=click.IntRange(1), default=None)
+@click.option("--context-window-tokens", type=click.IntRange(1024), default=None)
+def init(
+    name,
+    description,
+    provider,
+    model,
+    output_dir,
+    with_chatbot,
+    llm_max_concurrency,
+    llm_rpm,
+    llm_tpm,
+    context_window_tokens,
+):
     """Initialize DeepDoc in the current repository.
 
     This command creates `.deepdoc.yaml` and fills in sensible defaults for the chosen provider.
@@ -195,22 +212,68 @@ def init(name, description, provider, model, output_dir, with_chatbot):
 
     # Provider defaults
     provider_defaults = {
-        "anthropic": ("claude-3-5-sonnet-20241022", "ANTHROPIC_API_KEY"),
+        "anthropic": ("claude-sonnet-4-20250514", "ANTHROPIC_API_KEY"),
         "openai": ("gpt-4o", "OPENAI_API_KEY"),
         "ollama": ("ollama/llama3.2", None),
         "azure": ("azure/gpt-4o", "AZURE_API_KEY"),
-        "google": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
-        "gemini": ("gemini/gemini-1.5-pro", "GEMINI_API_KEY"),
+        "google": ("gemini/gemini-2.0-flash", "GEMINI_API_KEY"),
+        "gemini": ("gemini/gemini-2.0-flash", "GEMINI_API_KEY"),
     }
     default_model, default_key_env = provider_defaults.get(provider, ("", "DEEPDOC_LLM_API_KEY"))
     resolved_model = model or default_model
 
-    cfg = dict(DEFAULT_CONFIG)
+    interactive = bool(sys.stdin.isatty())
+
+    def _limit(value, prompt: str, default: int) -> int:
+        if value is not None:
+            return int(value)
+        if interactive:
+            return int(click.prompt(prompt, type=int, default=default, show_default=True))
+        return default
+
+    llm_max_concurrency = _limit(
+        llm_max_concurrency,
+        "Maximum concurrent documentation LLM requests",
+        6,
+    )
+    llm_rpm = _limit(llm_rpm, "Documentation LLM requests per minute", 60)
+    llm_tpm = _limit(llm_tpm, "Documentation LLM tokens per minute", 250000)
+    if context_window_tokens is None and interactive:
+        raw_context = click.prompt(
+            "Model context window in tokens (blank = auto-detect)",
+            default="",
+            show_default=False,
+        ).strip()
+        context_window_tokens = int(raw_context) if raw_context else None
+
+    if context_window_tokens is None:
+        try:
+            resolve_completion_capabilities(resolved_model, {})
+        except ModelCapabilityError as exc:
+            if interactive:
+                context_window_tokens = click.prompt(
+                    "LiteLLM could not resolve this model. Context window in tokens",
+                    type=click.IntRange(1024),
+                )
+            else:
+                raise click.UsageError(
+                    f"{exc}\n\nPass --context-window-tokens for this model, for example:\n"
+                    f"  deepdoc init --provider {provider} --context-window-tokens 32768"
+                ) from exc
+
+    cfg = deepcopy(DEFAULT_CONFIG)
     cfg["project_name"] = name or cwd.name
     cfg["description"] = description
     cfg["output_dir"] = output_dir
     cfg["llm"]["provider"] = provider
     cfg["llm"]["model"] = resolved_model
+    cfg["llm"]["context_window_tokens"] = context_window_tokens
+    cfg["llm"]["rate_limits"] = {
+        "max_concurrency": llm_max_concurrency,
+        "requests_per_minute": llm_rpm,
+        "tokens_per_minute": llm_tpm,
+        "adaptive_backoff": True,
+    }
     if default_key_env:
         cfg["llm"]["api_key_env"] = default_key_env
     if provider == "ollama":
@@ -955,6 +1018,100 @@ def benchmark(
         raise click.ClickException(
             "Quality scorecard gates failed. Re-run after improving docs/chatbot metrics."
         )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# performance
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+@main.command(short_help="Show timing, token, retry, and I/O metrics for recent runs.")
+def performance() -> None:
+    """Show the latest local DeepDoc performance record."""
+    from .telemetry import load_performance_runs
+
+    repo_root = _find_repo_root()
+    runs = load_performance_runs(repo_root)
+    if not runs:
+        console.print(
+            "[dim]No performance history found. Run [bold]deepdoc generate[/bold] "
+            "or [bold]deepdoc update[/bold] first.[/dim]"
+        )
+        return
+
+    latest = runs[-1]
+    previous = runs[-2] if len(runs) > 1 else None
+    total_seconds = float(latest.get("total_seconds", 0.0) or 0.0)
+    comparison = ""
+    if previous:
+        previous_seconds = float(previous.get("total_seconds", 0.0) or 0.0)
+        if previous_seconds > 0:
+            delta = ((total_seconds - previous_seconds) / previous_seconds) * 100.0
+            comparison = f" ({delta:+.1f}% vs previous)"
+
+    console.print(
+        Panel.fit(
+            "[bold]DeepDoc Performance[/bold]\n\n"
+            f"  Command:  [cyan]{latest.get('command', 'unknown')}[/cyan]\n"
+            f"  Status:   [cyan]{latest.get('status', 'unknown')}[/cyan]\n"
+            f"  Started:  [cyan]{latest.get('started_at', 'unknown')}[/cyan]\n"
+            f"  Duration: [cyan]{total_seconds:.2f}s{comparison}[/cyan]",
+            border_style="blue",
+        )
+    )
+
+    spans = latest.get("spans", {}) or {}
+    if spans:
+        table = Table(title="Phase Timings", show_header=True, header_style="bold")
+        table.add_column("Phase", style="cyan")
+        table.add_column("Seconds", justify="right")
+        table.add_column("Share", justify="right")
+        table.add_column("Calls", justify="right")
+        for name, payload in sorted(
+            spans.items(),
+            key=lambda item: -float(item[1].get("duration_seconds", 0.0)),
+        ):
+            duration = float(payload.get("duration_seconds", 0.0) or 0.0)
+            share = (duration / total_seconds * 100.0) if total_seconds else 0.0
+            table.add_row(
+                name,
+                f"{duration:.2f}",
+                f"{share:.1f}%",
+                str(payload.get("count", 0)),
+            )
+        console.print(table)
+
+    llm_calls = latest.get("llm_calls", []) or []
+    if llm_calls:
+        prompt_tokens = sum(int(call.get("prompt_tokens", 0) or 0) for call in llm_calls)
+        completion_tokens = sum(
+            int(call.get("completion_tokens", 0) or 0) for call in llm_calls
+        )
+        model_seconds = sum(
+            float(call.get("duration_seconds", 0.0) or 0.0) for call in llm_calls
+        )
+        failed = sum(call.get("status") == "failed" for call in llm_calls)
+        console.print(
+            Panel.fit(
+                "[bold]LLM Usage[/bold]\n\n"
+                f"  Calls:             [cyan]{len(llm_calls)}[/cyan]\n"
+                f"  Model wait:        [cyan]{model_seconds:.2f}s[/cyan]\n"
+                f"  Prompt tokens:     [cyan]{prompt_tokens:,}[/cyan]\n"
+                f"  Completion tokens: [cyan]{completion_tokens:,}[/cyan]\n"
+                f"  Failed calls:      [cyan]{failed}[/cyan]",
+                border_style="magenta",
+            )
+        )
+
+    counters = latest.get("counters", {}) or {}
+    if counters:
+        table = Table(title="Counters", show_header=True, header_style="bold")
+        table.add_column("Metric", style="cyan")
+        table.add_column("Value", justify="right")
+        for name, value in sorted(counters.items()):
+            rendered = f"{value:,.2f}" if isinstance(value, float) else f"{value:,}"
+            table.add_row(name, rendered)
+        console.print(table)
 
 
 # ─────────────────────────────────────────────────────────────────────────────

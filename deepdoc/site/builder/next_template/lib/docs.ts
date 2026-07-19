@@ -115,7 +115,7 @@ async function getProcessor() {
 
 function extractToc(html: string): TocItem[] {
   const toc: TocItem[] = [];
-  const re = /<h([2-3])\s[^>]*id="([^"]+)"[^>]*>(.*?)<\/h[2-3]>/gs;
+  const re = /<h([2-3])\s[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/h[2-3]>/g;
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const depth = parseInt(m[1], 10);
@@ -149,7 +149,7 @@ export async function getPage(slug: string[]): Promise<DocPage | null> {
   const html = String(result);
 
   // First h1 or frontmatter title
-  const h1Match = /<h1[^>]*>(.*?)<\/h1>/s.exec(html);
+  const h1Match = /<h1[^>]*>([\s\S]*?)<\/h1>/.exec(html);
   const title =
     (fm.title as string | undefined) ||
     h1Match?.[1].replace(/<[^>]+>/g, '').trim() ||

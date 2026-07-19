@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import gzip
+import json
 from pathlib import Path
+import sqlite3
 
-from deepdoc.chatbot.persistence import load_source_archive, save_source_archive
+from deepdoc.chatbot.persistence import (
+    LEGACY_SOURCE_ARCHIVE_FILE,
+    SOURCE_ARCHIVE_DB_FILE,
+    load_source_archive,
+    save_source_archive,
+)
 from deepdoc.chatbot.source_archive import (
     build_source_archive,
     source_archive_needs_rebuild,
@@ -207,3 +215,135 @@ def test_source_archive_needs_rebuild_when_existing_entry_is_now_excluded(
     cfg = {"chatbot": {"indexing": {"exclude_globs": ["src/secret.py"]}}}
 
     assert source_archive_needs_rebuild(repo_root, index_dir, cfg)
+
+
+def test_build_source_archive_uses_content_addressed_sqlite(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "a.py").write_text("same = True\n", encoding="utf-8")
+    (repo_root / "b.py").write_text("same = True\n", encoding="utf-8")
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+
+    build_source_archive(repo_root, index_dir, {"chatbot": {}})
+
+    assert (index_dir / SOURCE_ARCHIVE_DB_FILE).exists()
+    assert not (index_dir / LEGACY_SOURCE_ARCHIVE_FILE).exists()
+    conn = sqlite3.connect(index_dir / SOURCE_ARCHIVE_DB_FILE)
+    try:
+        assert conn.execute("SELECT COUNT(*) FROM files").fetchone()[0] == 2
+        assert conn.execute("SELECT COUNT(*) FROM blobs").fetchone()[0] == 1
+    finally:
+        conn.close()
+
+
+def test_incremental_archive_reads_only_changed_source(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (repo_root / "b.py").write_text("b = 1\n", encoding="utf-8")
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    cfg = {"chatbot": {}}
+    build_source_archive(repo_root, index_dir, cfg)
+    (repo_root / "a.py").write_text("a = 2\n", encoding="utf-8")
+
+    from deepdoc.chatbot import source_archive as source_archive_module
+
+    original_read = source_archive_module._read_archiveable_text
+    reads: list[str] = []
+
+    def tracked_read(repo_root, rel_path, **kwargs):
+        reads.append(rel_path)
+        return original_read(repo_root, rel_path, **kwargs)
+
+    monkeypatch.setattr(source_archive_module, "_read_archiveable_text", tracked_read)
+    update_source_archive(
+        repo_root,
+        index_dir,
+        cfg,
+        changed_files=["a.py"],
+        deleted_files=[],
+    )
+
+    assert reads == ["a.py"]
+    assert load_source_archive(index_dir) == {"a.py": "a = 2\n", "b.py": "b = 1\n"}
+
+
+def test_incremental_archive_preserves_unchanged_blob_bytes(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "a.py").write_text("a = 1\n", encoding="utf-8")
+    (repo_root / "b.py").write_text("b = 1\n", encoding="utf-8")
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    cfg = {"chatbot": {}}
+    build_source_archive(repo_root, index_dir, cfg)
+
+    def blob_for(path: str) -> bytes:
+        conn = sqlite3.connect(index_dir / SOURCE_ARCHIVE_DB_FILE)
+        try:
+            return conn.execute(
+                """
+                SELECT compressed_content FROM blobs
+                JOIN files USING (content_hash) WHERE file_path = ?
+                """,
+                (path,),
+            ).fetchone()[0]
+        finally:
+            conn.close()
+
+    before = blob_for("b.py")
+    (repo_root / "a.py").write_text("a = 2\n", encoding="utf-8")
+    update_source_archive(
+        repo_root,
+        index_dir,
+        cfg,
+        changed_files=["a.py"],
+        deleted_files=[],
+    )
+
+    assert blob_for("b.py") == before
+
+
+def test_incremental_archive_migrates_legacy_gzip(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "legacy.py").write_text("value = 1\n", encoding="utf-8")
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    index_dir.mkdir(parents=True)
+    legacy_path = index_dir / LEGACY_SOURCE_ARCHIVE_FILE
+    with gzip.open(legacy_path, "wt", encoding="utf-8") as handle:
+        json.dump({"legacy.py": "value = 1\n"}, handle)
+
+    update_source_archive(
+        repo_root,
+        index_dir,
+        {"chatbot": {}},
+        changed_files=[],
+        deleted_files=[],
+    )
+
+    assert (index_dir / SOURCE_ARCHIVE_DB_FILE).exists()
+    assert not legacy_path.exists()
+    assert load_source_archive(index_dir) == {"legacy.py": "value = 1\n"}
+
+
+def test_noop_archive_update_does_not_rewrite_database(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "a.py").write_text("a = 1\n", encoding="utf-8")
+    index_dir = repo_root / ".deepdoc" / "chatbot"
+    cfg = {"chatbot": {}}
+    build_source_archive(repo_root, index_dir, cfg)
+    archive_path = index_dir / SOURCE_ARCHIVE_DB_FILE
+    before = archive_path.read_bytes()
+
+    update_source_archive(
+        repo_root,
+        index_dir,
+        cfg,
+        changed_files=[],
+        deleted_files=[],
+    )
+
+    assert archive_path.read_bytes() == before

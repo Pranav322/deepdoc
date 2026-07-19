@@ -5,6 +5,112 @@ All notable changes to this project will be documented in this file.
 The automated release workflow reads the section that matches the version in
 `pyproject.toml` and uses it as the GitHub Release notes.
 
+## Unreleased
+
+### Added
+
+- **LiteLLM-first model capability resolution.** DeepDoc now has one local,
+  provider-neutral capability and token-budget layer. Explicit model limits win;
+  known models resolve from LiteLLM metadata; custom aliases require a known
+  `base_model` or explicit context instead of receiving a guessed limit.
+- **Planner token fitting.** Classify, propose, assign, and decomposition prompts
+  now preserve complete required inventories and fit optional records into the
+  resolved model token envelope, replacing raw planner character slices and the
+  previous 50-endpoint formatter cap.
+- **Complete page prompt fitting.** Active V2 page generation now token-fits the
+  final request, including templates, required evidence, OpenAPI, sitemap links,
+  and retry instructions. Omitted supplemental contexts are exposed in page
+  provenance instead of causing a late approximate context failure.
+- **Chatbot answer prompt fitting.** Answer, continuation, reranker, and
+  correction requests now use the selected answer model's local LiteLLM
+  capability envelope. Retrieval fan-out remains bounded separately, and local
+  capacity failures are reported clearly before a provider request.
+- **Deep-research prompt fitting.** Research decomposition, initial evidence,
+  ReAct turns, and synthesis now use the answer-model token envelope. Required
+  transcript and research findings cannot be silently dropped on context limits.
+- **Embedding capability profiles.** Local FastEmbed and hosted LiteLLM
+  embeddings now resolve input capacity separately from completion models. Index
+  records are fitted before persistence so vector text, lexical text, hashes, and
+  IDs agree; capacity-policy changes trigger safe corpus rebuilds.
+- **Automatic capability defaults.** New configurations now resolve model context
+  and output reservation locally from LiteLLM by default. Existing integer
+  overrides remain supported, while unknown custom aliases require a base-model
+  or explicit capability declaration.
+- **Local pipeline performance telemetry.** `deepdoc generate` and
+  `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
+  retry backoff, evidence size, page-write bytes, and chatbot indexing stages in
+  a rotating `.deepdoc/performance/runs.jsonl` history. The new
+  `deepdoc performance` command renders the latest phase and model breakdown.
+- **Scan subphase visibility.** Performance records now distinguish file
+  walking, source/document reads, parsing, framework and endpoint detection,
+  route resolution, scanner families, call graph, topology, and flow work, with
+  source-file and byte counters.
+- **Single-scan smart updates.** Semantic endpoint classification now carries
+  its current repository scan into incremental generation or targeted planning,
+  avoiding a second complete scan in the common endpoint-aware update path.
+- **Dependency-scoped update scans.** Safe modifications to existing source
+  files now restrict collection, reads, parsing, and endpoint detection to
+  affected bucket and route dependencies. Unaffected cached endpoints and scan
+  metadata are retained, while structural, configuration, artifact, Django, or
+  otherwise uncertain changes visibly fall back to one complete scan.
+- **Incremental chatbot corpus writes.** Update runs now load each corpus once
+  and skip healthy corpora without effective mutations. Touched corpora retain
+  complete JSONL/vector/FAISS/FTS replacement, while stronger FAISS and FTS
+  health checks preserve interrupted-write recovery.
+- **Content-addressed source archive.** Chatbot source evidence now uses one
+  transactional SQLite store with independently compressed SHA-256 blobs, so a
+  one-file update no longer decompresses and recompresses every source. Existing
+  gzip archives migrate automatically on the first update.
+- **Topology-safe planner assignment.** Files with one proposal candidate and
+  an exact topology-cluster match are assigned deterministically before the
+  serial ASSIGN request. Ambiguous and special files remain model-owned, and the
+  existing full deterministic fallback remains unchanged.
+- **Deterministic parallel source scanning.** Source reads, hashing, framework
+  detection, parsing, and endpoint detection now use bounded workers with stable
+  path-order merges. Repository-level route resolution remains serial after the
+  complete content map is available.
+- **Shared generation evidence indexes.** Module resolution, helper symbols,
+  source lines, and symbol boundaries are indexed once per generation engine
+  instead of being rebuilt and rescanned for every documentation bucket.
+- **Shared scan hashes and bounded manifest checkpoints.** Generation now reuses
+  hashes computed during scanning for staleness, manifest, and ledger updates;
+  manifests track every owning doc page, write atomically, and checkpoint every
+  10 pages or 15 seconds instead of rereading sources and rewriting per page.
+- **Rolling page generation.** A single bounded executor now serves the entire
+  page plan, allowing free workers to take the next page without waiting for a
+  fixed batch's slowest request; result order remains deterministic.
+- **Provider-neutral request limiting.** Documentation LLM calls now share
+  configurable concurrency, rolling RPM and estimated TPM limits plus adaptive
+  `429`/`Retry-After` cooldown. Interactive `deepdoc init` displays defaults;
+  non-interactive setup uses safe defaults or explicit flags without blocking.
+
+### Fixed
+
+- **Scoped chatbot recovery preserves complete corpora.** A scoped smart update
+  now performs one complete scan before replacing an unhealthy source-backed
+  corpus, preventing unaffected indexed records from being dropped.
+- **LLM output truncation is explicit.** `llm.max_tokens: null` now omits the
+  provider cap instead of imposing the 16K context reserve, and provider
+  `finish_reason="length"` responses raise a clear configuration error rather
+  than silently falling back to a degraded planner result.
+- **Generated Next.js sites compile with current Mermaid types.** The Mermaid
+  runner now selects `HTMLElement` nodes explicitly before passing them to
+  `mermaid.run()`, and table-of-contents extraction no longer requires an
+  ES2018-only regular-expression flag. The Fumadocs root page tree also omits
+  the obsolete `$ref` property rejected by current types.
+- **Never-grounded artifact hints no longer cause permanent stale loops.** A
+  missing tracked path now invalidates a page only when the generation ledger
+  proves that path existed previously.
+- **Interrupted generation with shared source files now resumes safely.** A new
+  source hash resets manifest ownership to pages actually completed at that
+  hash; staleness checks require the current page ownership and output file, so
+  unfinished pages cannot be skipped after a checkpointed sibling finishes.
+- **Context-window configuration now controls generation.** All evidence
+  categories share one context-derived budget, raw source is bounded within it,
+  output space is reserved, final draft/retry prompts receive a local preflight,
+  and generated frontmatter identifies trimmed categories instead of silently
+  overflowing a smaller provider context.
+
 ## [0.4.2] - 2026-06-23
 
 ### Fixed

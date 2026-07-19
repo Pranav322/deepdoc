@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
+import threading
 import time
 from unittest.mock import MagicMock, patch
 
 from deepdoc.config import DEFAULT_CONFIG
+from deepdoc.generator import BucketGenerationEngine, GenerationResult
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import DocBucket, DocPlan, RepoScan, run_phase2_scans
 from deepdoc.planner.bucket_refinement import _decompose_buckets
+from .conftest import make_planner_llm
 
 
 def _make_scan(
@@ -53,6 +56,32 @@ def _make_bucket(
         section=section,
         description=description or f"Docs for {title}",
         owned_files=owned_files,
+    )
+
+
+def _generation_engine(tmp_path: Path, buckets: list[DocBucket]) -> BucketGenerationEngine:
+    plan = DocPlan(
+        buckets=buckets,
+        nav_structure={"Guide": [bucket.slug for bucket in buckets]},
+        skipped_files=[],
+    )
+    scan = _make_scan(
+        file_summaries={bucket.owned_files[0]: "summary" for bucket in buckets},
+    )
+    scan.file_content_hashes = {
+        bucket.owned_files[0]: f"hash-{idx}" for idx, bucket in enumerate(buckets)
+    }
+    return BucketGenerationEngine(
+        repo_root=tmp_path,
+        cfg={
+            "batch_size": 2,
+            "max_parallel_workers": 2,
+            "rate_limit_pause": 0,
+        },
+        llm=MagicMock(),
+        scan=scan,
+        plan=plan,
+        output_dir=tmp_path / "docs",
     )
 
 
@@ -226,7 +255,7 @@ def test_decompose_parallelizes_llm_calls():
     cfg = {"decompose_threshold": 7, "max_parallel_workers": 3}
 
     with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
-        _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+        _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     # Should have called LLM 3 times (one per bucket)
     assert len(call_times) == 3
@@ -260,7 +289,7 @@ def test_decompose_no_candidates_returns_plan_unchanged():
 
     # Should not call LLM at all
     with patch("deepdoc.planner.heuristics._llm_step") as mock_llm:
-        result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+        result = _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     mock_llm.assert_not_called()
     assert len(result.buckets) == 1
@@ -354,7 +383,7 @@ def test_decompose_second_pass_fires_for_oversized_sub_buckets():
     cfg = {"decompose_threshold": 7, "max_files_per_bucket": 25, "max_parallel_workers": 2}
 
     with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
-        result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+        result = _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     # LLM called twice: once for first pass, once for second pass on oversized bucket
     assert call_count["n"] == 2
@@ -418,7 +447,7 @@ def test_decompose_second_pass_accepts_oversized_if_llm_returns_none():
     cfg = {"decompose_threshold": 7, "max_files_per_bucket": 25}
 
     with patch("deepdoc.planner.heuristics._llm_step", side_effect=fake_llm_step):
-        result = _decompose_buckets(plan, scan, cfg, MagicMock(), {})
+        result = _decompose_buckets(plan, scan, cfg, make_planner_llm(), {})
 
     # Should not crash; the oversized bucket is accepted with a warning
     assert result is not None
@@ -480,3 +509,63 @@ def test_generator_uses_default_rate_limit_pause():
     )
 
     assert engine.rate_limit_pause == RATE_LIMIT_PAUSE
+
+
+def test_generation_rolling_pool_starts_next_page_before_straggler_finishes(
+    tmp_path: Path,
+) -> None:
+    buckets = [
+        _make_bucket(f"page-{idx}", f"Page {idx}", [f"src/page-{idx}.py"])
+        for idx in range(4)
+    ]
+    buckets[0].generation_hints = {"is_introduction_page": True}
+    engine = _generation_engine(tmp_path, buckets)
+    third_started = threading.Event()
+    straggler_saw_third = []
+
+    def generate(bucket, _):
+        if bucket.slug == "page-0":
+            straggler_saw_third.append(third_started.wait(timeout=1.0))
+        elif bucket.slug == "page-2":
+            third_started.set()
+        else:
+            time.sleep(0.01)
+        return GenerationResult(bucket=bucket, content=f"# {bucket.title}\n")
+
+    engine._generate_one = generate
+    results = engine.generate_all(force=True)
+
+    assert straggler_saw_third == [True]
+    assert [result.bucket.slug for result in results] == [
+        "page-0",
+        "page-1",
+        "page-2",
+        "page-3",
+    ]
+
+
+def test_generation_results_stay_in_plan_order_when_completion_order_varies(
+    tmp_path: Path,
+) -> None:
+    buckets = [
+        _make_bucket(
+            f"ordered-{idx}",
+            f"Ordered {idx}",
+            [f"src/ordered-{idx}.py"],
+        )
+        for idx in range(5)
+    ]
+    buckets[0].generation_hints = {"is_introduction_page": True}
+    engine = _generation_engine(tmp_path, buckets)
+
+    def generate(bucket, _):
+        index = int(bucket.slug.rsplit("-", 1)[1])
+        time.sleep((5 - index) * 0.005)
+        return GenerationResult(bucket=bucket, content=f"# {bucket.title}\n")
+
+    engine._generate_one = generate
+    results = engine.generate_all(force=True)
+
+    assert [result.bucket.slug for result in results] == [
+        bucket.slug for bucket in buckets
+    ]

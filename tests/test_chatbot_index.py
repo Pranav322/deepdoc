@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.chatbot.chunker import build_artifact_chunks, build_code_chunks
+from deepdoc.chatbot.embedding_capabilities import (
+    embedding_policy_fingerprint,
+    resolve_embedding_capabilities,
+)
 from deepdoc.chatbot.docs_summary import (
     build_doc_full_chunks,
     build_doc_summary_chunks,
@@ -14,6 +18,8 @@ from deepdoc.chatbot.indexer import (
     chatbot_index_needs_refresh,
 )
 from deepdoc.chatbot.persistence import (
+    CORPUS_FILES,
+    corpus_paths,
     load_corpus,
     load_index_manifest,
     query_lexical_index,
@@ -21,6 +27,7 @@ from deepdoc.chatbot.persistence import (
     save_index_manifest,
 )
 from deepdoc.chatbot.symbol_index import build_symbol_chunks
+from deepdoc.chatbot.settings import service_model_identity
 from deepdoc.chatbot.types import ChunkRecord
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import RepoScan
@@ -62,6 +69,16 @@ def _scan_for(tmp_path: Path) -> RepoScan:
             "src/auth.py": "def login(user):\n    token = issue(user)\n    return token\n",
         },
     )
+
+
+def _seed_healthy_corpora(indexer: ChatbotIndexer) -> None:
+    meta = {
+        "embedding_model": service_model_identity(indexer.chatbot_cfg["embeddings"]),
+        "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+        "embedding_policy_fingerprint": indexer.embedding_policy_fingerprint,
+    }
+    for corpus in CORPUS_FILES:
+        save_corpus(indexer.index_dir, corpus, [], [], meta=meta)
 
 
 def test_code_chunks_use_symbol_line_ranges(tmp_path: Path) -> None:
@@ -444,6 +461,117 @@ def test_incremental_sync_writes_symbol_corpus_and_manifest(
     assert len(symbol_vectors) == 1
     assert manifest["artifacts"]["symbol"]["record_count"] == 1
     assert manifest["artifacts"]["source_archive"]["record_count"] == 1
+    assert manifest["artifacts"]["source_archive"]["file"] == "source_archive.sqlite3"
+
+
+def test_incremental_sync_skips_healthy_untouched_corpora(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return [[float(len(text))] for text in texts]
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+    indexer = ChatbotIndexer(repo_root, {"chatbot": {"enabled": True}})
+    _seed_healthy_corpora(indexer)
+    before = {
+        corpus: corpus_paths(indexer.index_dir, corpus)["chunks"].read_bytes()
+        for corpus in CORPUS_FILES
+    }
+    load_calls: list[str] = []
+    original_load = load_corpus
+
+    def tracked_load(index_dir, corpus):
+        load_calls.append(corpus)
+        return original_load(index_dir, corpus)
+
+    monkeypatch.setattr("deepdoc.chatbot.indexer.load_corpus", tracked_load)
+
+    stats = indexer.sync_incremental(
+        plan=make_plan([]),
+        scan=_scan_for(tmp_path),
+        output_dir=output_dir,
+    )
+
+    assert stats["corpora_refreshed"] == []
+    assert sorted(load_calls) == sorted(CORPUS_FILES)
+    assert all(load_calls.count(corpus) == 1 for corpus in CORPUS_FILES)
+    assert before == {
+        corpus: corpus_paths(indexer.index_dir, corpus)["chunks"].read_bytes()
+        for corpus in CORPUS_FILES
+    }
+
+
+def test_incremental_code_change_skips_unrelated_corpora(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "src").mkdir()
+    (repo_root / "src" / "auth.py").write_text(
+        "def login(user):\n    return issue(user)\n", encoding="utf-8"
+    )
+    output_dir = repo_root / "docs"
+    output_dir.mkdir()
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return [[float(len(text))] for text in texts]
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+    indexer = ChatbotIndexer(repo_root, {"chatbot": {"enabled": True}})
+    _seed_healthy_corpora(indexer)
+    scan = _scan_for(tmp_path)
+    plan = make_plan([make_bucket("Auth", "auth", ["src/auth.py"])])
+
+    stats = indexer.sync_incremental(
+        plan=plan,
+        scan=scan,
+        output_dir=output_dir,
+        changed_files=["src/auth.py"],
+    )
+
+    assert stats["corpora_refreshed"] == ["code", "symbol", "relationship"]
+
+
+def test_corpus_health_requires_vector_and_lexical_indexes(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return []
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+    indexer = ChatbotIndexer(repo_root, {"chatbot": {"enabled": True}})
+    _seed_healthy_corpora(indexer)
+
+    corpus_paths(indexer.index_dir, "code")["index"].unlink()
+    assert indexer._corpus_needs_rebuild("code") is True
+
+    _seed_healthy_corpora(indexer)
+    import sqlite3
+
+    conn = sqlite3.connect(indexer.index_dir / "lexical_index.sqlite3")
+    try:
+        conn.execute("INSERT INTO lexical_chunks (corpus, chunk_id) VALUES (?, ?)", ("code", "orphan"))
+        conn.commit()
+    finally:
+        conn.close()
+    assert indexer._corpus_needs_rebuild("code") is True
 
 
 def test_save_corpus_updates_sqlite_lexical_index(tmp_path: Path) -> None:
@@ -494,6 +622,7 @@ def test_index_manifest_describes_artifacts_without_timestamps(tmp_path: Path) -
 
     assert first == second
     assert "generated_at" not in first
+    assert first["version"] == 2
     assert first["artifacts"]["code"]["record_count"] == 1
     assert first["artifacts"]["lexical_index"]["record_count_by_corpus"]["code"] == 1
 
@@ -698,6 +827,11 @@ def test_corpus_does_not_rebuild_when_schema_version_matches(
         meta={
             "embedding_model": "fastembed||nomic-ai/nomic-embed-text-v1.5||",
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": embedding_policy_fingerprint(
+                resolve_embedding_capabilities(
+                    {"backend": "fastembed", "fastembed_model": "nomic-ai/nomic-embed-text-v1.5"}
+                )
+            ),
         },
     )
 
@@ -749,6 +883,11 @@ def test_corpus_needs_rebuild_when_existing_source_is_now_excluded(
         meta={
             "embedding_model": "fastembed||nomic-ai/nomic-embed-text-v1.5||",
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": embedding_policy_fingerprint(
+                resolve_embedding_capabilities(
+                    {"backend": "fastembed", "fastembed_model": "nomic-ai/nomic-embed-text-v1.5"}
+                )
+            ),
         },
     )
 
@@ -774,6 +913,55 @@ def test_corpus_needs_rebuild_when_existing_source_is_now_excluded(
     )
 
     assert indexer._corpus_needs_rebuild("code") is True
+
+
+def test_oversized_source_does_not_force_permanent_corpus_rebuild(
+    tmp_path: Path, monkeypatch
+) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    (repo_root / "large.py").write_text("x = 1\n" * 20, encoding="utf-8")
+
+    class _FakeEmbedClient:
+        def embed(self, texts):
+            return [[1.0] for _ in texts]
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.indexer.build_embedding_client", lambda cfg: _FakeEmbedClient()
+    )
+    indexer = ChatbotIndexer(
+        repo_root,
+        {
+            "chatbot": {
+                "enabled": True,
+                "indexing": {"max_file_bytes": 10},
+            }
+        },
+    )
+    save_corpus(
+        indexer.index_dir,
+        "code",
+        [
+            ChunkRecord(
+                chunk_id="large",
+                kind="code",
+                source_key="large.py",
+                text="x = 1",
+                chunk_hash="large",
+                file_path="large.py",
+            )
+        ],
+        [[1.0]],
+        meta={
+            "embedding_model": service_model_identity(
+                indexer.chatbot_cfg["embeddings"]
+            ),
+            "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": indexer.embedding_policy_fingerprint,
+        },
+    )
+
+    assert indexer._corpus_needs_rebuild("code") is False
 
 
 def test_relationship_merge_replaces_existing_call_graph_chunks(
@@ -835,6 +1023,8 @@ def test_relationship_merge_replaces_existing_call_graph_chunks(
         fresh_records,
         changed_keys=[],
         deleted_keys=[],
+        existing_records=existing_records,
+        existing_vectors=[[1.0], [0.5]],
     )
 
     merged_records, _ = load_corpus(index_dir, "relationship")

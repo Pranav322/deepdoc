@@ -29,9 +29,14 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "quality": {
         "strict": False,
     },
+    "scan": {
+        "max_workers": 8,
+    },
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)
+    "manifest_checkpoint_pages": 10,
+    "manifest_checkpoint_seconds": 15.0,
     # ── Integration detection ────────────────────────────────────────────
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────
@@ -46,6 +51,15 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "base_url": None,
         "max_tokens": None,
         "temperature": 0.2,
+        "base_model": None,
+        "context_window_tokens": None,
+        "output_reserve_tokens": None,
+        "rate_limits": {
+            "max_concurrency": 6,
+            "requests_per_minute": 60,
+            "tokens_per_minute": 250000,
+            "adaptive_backoff": True,
+        },
     },
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
     "include": [],  # glob patterns — empty = everything
@@ -183,8 +197,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "api_version": "",
             "temperature": 0.1,
             "max_tokens": 24000,
+            "base_model": None,
+            "context_window_tokens": None,
+            "output_reserve_tokens": None,
             "continuation_retries": 2,
             "continuation_context_chars": 12000,
+            "rate_limits": {
+                "max_concurrency": 4,
+                "requests_per_minute": 60,
+                "tokens_per_minute": 100000,
+                "adaptive_backoff": True,
+            },
         },
         "embeddings": {
             "backend": "fastembed",
@@ -192,12 +215,20 @@ DEFAULT_CONFIG: dict[str, Any] = {
             # https://qdrant.github.io/fastembed/examples/Supported_Models/
             "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",
             "fastembed_batch_size": 4,
+            "base_model": None,
+            "max_input_tokens": None,
             "provider": "",
             "model": "",
             "api_key_env": "DEEPDOC_EMBED_API_KEY",
             "base_url": "",
             "api_version": "",
             "batch_size": 24,
+            "rate_limits": {
+                "mode": "auto",
+                "hosted_max_concurrency": 2,
+                "hosted_requests_per_minute": 60,
+                "hosted_tokens_per_minute": 1000000,
+            },
         },
         "vector_store": {
             "kind": "faiss",

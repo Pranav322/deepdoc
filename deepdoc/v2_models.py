@@ -143,6 +143,7 @@ class RepoScan:
     file_line_counts: dict[str, int] = field(default_factory=dict)
     parsed_files: dict[str, ParsedFile] = field(default_factory=dict)
     file_contents: dict[str, str] = field(default_factory=dict)
+    file_content_hashes: dict[str, str] = field(default_factory=dict)
     giant_file_clusters: dict[str, Any] = field(default_factory=dict)
     endpoint_bundles: list[Any] = field(default_factory=list)
     integration_identities: list[Any] = field(default_factory=list)
@@ -153,6 +154,7 @@ class RepoScan:
     doc_contexts: dict[str, str] = field(default_factory=dict)
     research_contexts: list[dict[str, Any]] = field(default_factory=list)
     semantic_file_token_cache: dict[str, set[str]] = field(default_factory=dict)
+    scan_timings: dict[str, float] = field(default_factory=dict)
     planner_timings: dict[str, float] = field(default_factory=dict)
     source_kind_by_file: dict[str, str] = field(default_factory=dict)
     file_frameworks: dict[str, list[str]] = field(default_factory=dict)
@@ -163,6 +165,7 @@ class RepoScan:
     flow_candidates: list[Any] = field(default_factory=list)
     service_boundaries: list[dict[str, Any]] = field(default_factory=list)
     file_services: dict[str, str] = field(default_factory=dict)
+    scan_scope: list[str] = field(default_factory=list)
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:

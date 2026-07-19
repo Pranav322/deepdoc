@@ -68,8 +68,6 @@ IGNORED_PARTS = {
     "coverage",
 }
 
-# Safe limit for text-embedding-3-small (8,192 token limit ≈ 6,000 chars for code)
-MAX_CHUNK_CHARS = 6000
 EMPTY_LINK_INFO = LinkInfo()
 
 
@@ -474,11 +472,6 @@ def _format_code_chunk_text(
     parts.append("")
     parts.append(snippet.strip())
     result = "\n".join(parts).strip()
-    if len(result) > MAX_CHUNK_CHARS:
-        # Truncate the snippet portion to stay within embedding model limits
-        header = result[: result.index("\n\n") + 2] if "\n\n" in result else ""
-        budget = MAX_CHUNK_CHARS - len(header) - 20  # room for truncation marker
-        result = header + snippet.strip()[:budget] + "\n... [truncated]"
     return result
 
 
@@ -651,11 +644,7 @@ def build_artifact_chunks(
         for start_line, end_line, section_name in windows:
             snippet = "\n".join(lines[start_line - 1 : end_line])
             header = f"Artifact: {rel_path}\nType: {artifact_type}\nSection: {section_name}\nLines: {start_line}-{end_line}\n\n"
-            body = snippet.strip()
-            if len(header) + len(body) > MAX_CHUNK_CHARS:
-                budget = MAX_CHUNK_CHARS - len(header) - 20
-                body = body[:budget] + "\n... [truncated]"
-            text = (header + body).strip()
+            text = (header + snippet.strip()).strip()
             chunk_hash = _hash_text(text)
             chunks.append(
                 ChunkRecord(
@@ -879,9 +868,6 @@ def build_relationship_chunks(
                 f"{Path(rel_path).name} defines {len(parsed.symbols)} symbols:\n"
                 + "\n".join(symbol_lines)
             )
-            # Respect embedding limits
-            if len(text) > MAX_CHUNK_CHARS:
-                text = text[: MAX_CHUNK_CHARS - 20] + "\n... [truncated]"
             chunk_hash = _hash_text(text)
             chunks.append(
                 ChunkRecord(

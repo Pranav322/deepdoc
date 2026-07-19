@@ -23,7 +23,7 @@ export function buildPageTree(): PageTree.Root {
       children.push({
         type: 'page',
         name: entry.title,
-        url: entry.slug === 'index' ? '/' : `/${entry.slug}`,
+        url: entry.slug === '/' || entry.slug === 'index' ? '/' : `/${entry.slug}`,
       });
     } else if (entry.type === 'section') {
       const sectionItems: PageTree.Node[] = (entry.items ?? []).map(
@@ -42,5 +42,5 @@ export function buildPageTree(): PageTree.Root {
     }
   }
 
-  return { $ref: {}, name: cfg.project_name ?? 'Docs', children };
+  return { name: cfg.project_name ?? 'Docs', children };
 }

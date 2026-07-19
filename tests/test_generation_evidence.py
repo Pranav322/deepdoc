@@ -2,6 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -14,9 +17,11 @@ from deepdoc.generator import (
     EvidenceAssembler,
     GenerationResult,
     PageValidator,
+    PageGenerator,
     ValidationResult,
     summarize_generation_results,
 )
+from deepdoc.llm import ModelCapabilities
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import RepoScan
 from deepdoc.prompts import OVERVIEW_V2, get_prompt_for_bucket
@@ -152,6 +157,168 @@ def _make_scan(repo_root: Path) -> RepoScan:
         ),
         flow_candidates=[],
     )
+
+
+def test_evidence_helper_indexes_are_built_once_per_assembler(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    bucket = make_bucket(
+        "Authentication",
+        "authentication",
+        ["src/routes.py"],
+        bucket_type="feature",
+        generation_hints={"prompt_style": "feature"},
+    )
+    plan = make_plan([bucket])
+
+    class CountingAssembler(EvidenceAssembler):
+        module_builds = 0
+        symbol_builds = 0
+
+        def _build_module_file_index(self):
+            self.module_builds += 1
+            return super()._build_module_file_index()
+
+        def _build_symbol_index(self):
+            self.symbol_builds += 1
+            return super()._build_symbol_index()
+
+    assembler = CountingAssembler(tmp_path, scan, plan, dict(DEFAULT_CONFIG))
+
+    assert assembler.module_builds == 1
+    assert assembler.symbol_builds == 1
+    assert assembler._resolve_repo_local_module("services.auth_service") == {
+        "src/services/auth_service.py"
+    }
+    assembler._resolve_repo_local_module("services.auth_service")
+    assert assembler.module_builds == 1
+    assert assembler.symbol_builds == 1
+
+
+def test_evidence_assembly_is_deterministic_across_threads(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    for rel_path, content in scan.file_contents.items():
+        path = tmp_path / rel_path
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(content, encoding="utf-8")
+    bucket = make_bucket(
+        "Authentication",
+        "authentication",
+        ["src/routes.py"],
+        bucket_type="feature",
+        generation_hints={"prompt_style": "feature"},
+    )
+    plan = make_plan([bucket])
+    assembler = EvidenceAssembler(tmp_path, scan, plan, dict(DEFAULT_CONFIG))
+
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        evidence = list(executor.map(lambda _: assembler.assemble(bucket), range(12)))
+
+    assert len({item.source_context for item in evidence}) == 1
+    assert len({item.helper_context for item in evidence}) == 1
+
+
+def test_context_window_controls_effective_evidence_budget(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    plan = make_plan([bucket])
+    small_cfg = deepcopy(DEFAULT_CONFIG)
+    small_cfg["llm"]["context_window_tokens"] = 16000
+    small_cfg["llm"]["output_reserve_tokens"] = 4000
+    large_cfg = deepcopy(DEFAULT_CONFIG)
+    large_cfg["llm"]["context_window_tokens"] = 128000
+    large_cfg["llm"]["output_reserve_tokens"] = 16000
+
+    small = EvidenceAssembler(tmp_path, scan, plan, small_cfg)
+    large = EvidenceAssembler(tmp_path, scan, plan, large_cfg)
+
+    assert small.evidence_budget_chars < large.evidence_budget_chars
+    assert small.source_budget <= small.evidence_budget_chars * 0.60
+    assert small.source_budget < int(small_cfg["source_context_budget"])
+
+
+def test_all_evidence_categories_share_one_budget(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg["llm"]["context_window_tokens"] = 16000
+    cfg["llm"]["output_reserve_tokens"] = 4000
+    assembler = EvidenceAssembler(tmp_path, scan, make_plan([bucket]), cfg)
+    contexts = {
+        "source_context": "source\n" * 10000,
+        "endpoints_detail": "endpoint\n" * 10000,
+        "artifact_context": "artifact\n" * 10000,
+    }
+
+    fitted, trimmed = assembler._fit_evidence_contexts(contexts)
+
+    assert sum(len(value) for value in fitted.values()) <= assembler.evidence_budget_chars
+    assert trimmed
+    assert fitted["source_context"].endswith("[trimmed to model context budget]")
+
+
+def test_page_generator_rejects_oversized_final_prompt_before_llm(tmp_path: Path) -> None:
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="x" * 30000,
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+    )
+    llm = MagicMock()
+    llm.capabilities = ModelCapabilities(
+        model="test",
+        capability_model="test",
+        context_window_tokens=4096,
+        max_output_tokens=1024,
+        source="test",
+    )
+    llm.output_reserve_tokens = 1024
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg["llm"]["context_window_tokens"] = 4096
+    cfg["llm"]["output_reserve_tokens"] = 1024
+    generator = PageGenerator(llm, cfg, tmp_path)
+
+    with pytest.raises(ValueError, match="required inventory exceeds"):
+        generator.generate(evidence, "", "")
+
+    llm.complete.assert_not_called()
+
+
+def test_page_generator_omits_optional_context_before_required_evidence(tmp_path: Path) -> None:
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="def checkout():\n    return True\n",
+        endpoints_detail="GET /checkout",
+        integration_context="integration " * 20000,
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+    )
+    llm = MagicMock()
+    llm.capabilities = ModelCapabilities(
+        model="test",
+        capability_model="test",
+        context_window_tokens=4096,
+        max_output_tokens=1024,
+        source="test",
+    )
+    llm.output_reserve_tokens = 1024
+    llm.complete.return_value = "# Feature\n"
+    generator = PageGenerator(llm, deepcopy(DEFAULT_CONFIG), tmp_path)
+
+    result = generator.generate(evidence, "## Sitemap\n", "")
+
+    assert result == "# Feature\n"
+    assert "integration" in evidence.prompt_omitted_contexts
+    prompt = llm.complete.call_args.args[1]
+    assert "def checkout" in prompt
+    assert "## Database Schema" not in prompt
 
 
 def test_flow_context_is_injected_and_validated(tmp_path: Path) -> None:
@@ -1688,18 +1855,35 @@ def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:
         repo_root / "docs",
     )
     content = "# Auth\n\nBody"
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="source",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_budget_chars=10000,
+        evidence_chars_used=9000,
+        trimmed_contexts=["repo_docs_context"],
+    )
 
     updated = engine._add_provenance_frontmatter(
         content,
         bucket,
         ValidationResult(is_valid=True),
-        None,
+        evidence,
     )
 
     assert "deepdoc_generated_at:" in updated
     assert f'deepdoc_generated_version: "{DEEPDOC_VERSION}"' in updated
     assert 'deepdoc_status: "valid"' in updated
     assert "deepdoc_evidence_files:" in updated
+    assert "deepdoc_evidence_budget_chars: 10000" in updated
+    assert "deepdoc_evidence_chars_used: 9000" in updated
+    assert "deepdoc_evidence_trimmed:" in updated
+    assert '  - "repo_docs_context"' in updated
 
 
 def test_generation_coverage_report_counts_files_endpoints_and_symbols(

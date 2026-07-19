@@ -51,7 +51,8 @@ from .persistence_v2 import (
     save_sync_receipt,
     save_sync_state,
 )
-from .v2_models import DocPlan, endpoint_owned_files, tracked_bucket_files
+from .telemetry import RunTelemetry
+from .v2_models import DocPlan, RepoScan, endpoint_owned_files, tracked_bucket_files
 
 console = Console()
 
@@ -84,6 +85,7 @@ class ChangeSet:
     semantic_changed_endpoint_keys: list[str] = field(default_factory=list)
     endpoint_structure_changed: bool = False
     total_plan_files: int = 0  # total files tracked in the plan (for threshold calc)
+    repo_scan: RepoScan | None = field(default=None, repr=False, compare=False)
 
     @property
     def strategy(self) -> str:
@@ -163,6 +165,7 @@ class SemanticImpact:
     changed_files: list[str] = field(default_factory=list)
     changed_endpoint_keys: list[str] = field(default_factory=list)
     endpoint_structure_changed: bool = False
+    repo_scan: RepoScan | None = field(default=None, repr=False, compare=False)
 
 
 class SmartUpdater:
@@ -172,14 +175,31 @@ class SmartUpdater:
         self.repo_root = repo_root
         self.cfg = cfg
         self.output_dir = repo_root / cfg.get("output_dir", "docs")
-        self.llm = LLMClient(cfg)
+        self.telemetry = RunTelemetry(repo_root, "update")
+        self.llm = LLMClient(cfg, telemetry=self.telemetry)
         self.manifest = Manifest(self.output_dir)
 
     def update(
         self, since: str = "HEAD~1", force_replan: bool = False
     ) -> dict[str, Any]:
-        with deepdoc_state_lock(self.repo_root):
-            return self._update_locked(since=since, force_replan=force_replan)
+        try:
+            with deepdoc_state_lock(self.repo_root):
+                stats = self._update_locked(
+                    since=since,
+                    force_replan=force_replan,
+                )
+            self.telemetry.finish(
+                stats.get("status", "success"),
+                strategy=stats.get("strategy", "unknown"),
+                changes=stats.get("changes", 0),
+                pages_updated=stats.get("pages_updated", 0),
+                pages_failed=stats.get("pages_failed", 0),
+                pages_skipped=stats.get("pages_skipped", 0),
+            )
+            return stats
+        except BaseException as exc:
+            self.telemetry.finish("failed", error_type=type(exc).__name__)
+            raise
 
     def _update_locked(
         self, since: str = "HEAD~1", force_replan: bool = False
@@ -209,12 +229,13 @@ class SmartUpdater:
         )
 
         # ── Step 2: Build sync plan ────────────────────────────────────
-        sync_plan = self._build_sync_plan(
-            plan,
-            since=since,
-            sync_state=sync_state,
-            force_replan=force_replan,
-        )
+        with self.telemetry.span("update.build_sync_plan"):
+            sync_plan = self._build_sync_plan(
+                plan,
+                since=since,
+                sync_state=sync_state,
+                force_replan=force_replan,
+            )
         change_set = sync_plan.change_set
         self._print_change_set(change_set)
         stats["changes"] = change_set.total_changes
@@ -267,7 +288,8 @@ class SmartUpdater:
                     border_style="yellow",
                 )
             )
-            run_result = self._full_replan_and_generate()
+            with self.telemetry.span("update.full_replan"):
+                run_result = self._full_replan_and_generate()
 
         elif sync_plan.strategy == "targeted_replan":
             reasons: list[str] = []
@@ -291,7 +313,8 @@ class SmartUpdater:
                     border_style="cyan",
                 )
             )
-            run_result = self._targeted_replan(plan, change_set)
+            with self.telemetry.span("update.targeted_replan"):
+                run_result = self._targeted_replan(plan, change_set)
 
         else:  # incremental
             console.print(
@@ -301,7 +324,8 @@ class SmartUpdater:
                     border_style="green",
                 )
             )
-            run_result = self._incremental_update(plan, change_set)
+            with self.telemetry.span("update.incremental"):
+                run_result = self._incremental_update(plan, change_set)
 
         executed_strategy = run_result.strategy
         stats["strategy"] = executed_strategy
@@ -361,13 +385,12 @@ class SmartUpdater:
         """Build one shared update plan for docs and chatbot refresh."""
         target_commit = self._resolve_head_commit()
         change_set = self._classify_changes(plan, since)
-        chatbot_recovery_needed = chatbot_enabled(
-            self.cfg
-        ) and chatbot_index_needs_refresh(
-            self.repo_root,
-            self.cfg,
-        )
         strategy = change_set.strategy
+        chatbot_recovery_needed = (
+            chatbot_enabled(self.cfg)
+            and strategy == "noop"
+            and chatbot_index_needs_refresh(self.repo_root, self.cfg)
+        )
         engine_mismatch = sync_state.get("engine_fingerprint") != ENGINE_FINGERPRINT
 
         if engine_mismatch or force_replan:
@@ -387,11 +410,31 @@ class SmartUpdater:
 
     # ── Strategy implementations ─────────────────────────────────────────
 
+    def _execution_scan(self, change_set: ChangeSet, purpose: str) -> RepoScan:
+        """Reuse the current run's semantic scan or perform one fallback scan."""
+        if change_set.repo_scan is not None:
+            console.print("[dim]Reusing semantic-classification scan...[/dim]")
+            self.telemetry.counter("update.scan_reused")
+            return change_set.repo_scan
+
+        from .planner import scan_repo as bucket_scan_repo
+
+        console.print(f"[dim]Scanning repo for {purpose}...[/dim]")
+        return bucket_scan_repo(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
+
     def _full_replan_and_generate(self) -> UpdateRunResult:
         """Run the full pipeline from scratch."""
         from .pipeline_v2 import PipelineV2
 
-        pipeline = PipelineV2(self.repo_root, self.cfg)
+        pipeline = PipelineV2(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
         result = pipeline.run(force=True, reconcile=True)
         chatbot_stats = result.get("chatbot", {}) if isinstance(result, dict) else {}
         return UpdateRunResult(
@@ -402,6 +445,61 @@ class SmartUpdater:
             replanned=True,
             refreshed_corpora=list(chatbot_stats.get("corpora_refreshed", [])),
             chatbot_failed=bool(result.get("chatbot_error")),
+        )
+
+    def _sync_chatbot_incremental(
+        self,
+        *,
+        plan: DocPlan,
+        scan: RepoScan,
+        changed_files: list[str],
+        deleted_files: list[str],
+        changed_doc_slugs: list[str],
+    ) -> dict[str, Any]:
+        """Sync chatbot state without allowing a scoped scan to truncate recovery."""
+        from .chatbot.indexer import ChatbotIndexer
+
+        indexer = ChatbotIndexer(
+            self.repo_root,
+            self.cfg,
+            telemetry=self.telemetry,
+        )
+        recovery_corpora = (
+            indexer.source_backed_corpora_needing_rebuild()
+            if scan.scan_scope
+            else []
+        )
+        chatbot_scan = scan
+        if recovery_corpora:
+            from .planner import scan_repo as bucket_scan_repo
+
+            console.print(
+                "[dim]Chatbot recovery requires a complete source scan: "
+                f"{', '.join(recovery_corpora)}[/dim]"
+            )
+            self.telemetry.counter("update.chatbot_full_scan_for_recovery")
+            chatbot_scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+            )
+            if "relationship" in recovery_corpora:
+                from .call_graph import build_call_graph
+
+                chatbot_scan.call_graph = build_call_graph(
+                    chatbot_scan.parsed_files,
+                    chatbot_scan.file_contents,
+                    chatbot_scan.api_endpoints,
+                )
+
+        return indexer.sync_incremental(
+            plan=plan,
+            scan=chatbot_scan,
+            output_dir=self.output_dir,
+            changed_files=changed_files,
+            deleted_files=deleted_files,
+            changed_doc_slugs=changed_doc_slugs,
+            has_openapi=chatbot_scan.has_openapi,
         )
 
     def _handle_deleted_files(
@@ -461,10 +559,6 @@ class SmartUpdater:
         from .planner import (
             plan_docs as bucket_plan_docs,
         )
-        from .planner import run_phase2_scans
-        from .planner import (
-            scan_repo as bucket_scan_repo,
-        )
 
         # Step 0: clean up deleted files and orphaned buckets before any LLM work
         plan = self._handle_deleted_files(plan, change_set)
@@ -483,9 +577,7 @@ class SmartUpdater:
             + change_set.semantic_changed_files,
         )
 
-        console.print("[dim]Re-scanning repo for targeted replan...[/dim]")
-        scan = bucket_scan_repo(self.repo_root, self.cfg)
-        scan = run_phase2_scans(scan, self.cfg, self.llm)
+        scan = self._execution_scan(change_set, "targeted replan")
 
         console.print("[dim]Running planner on new files only...[/dim]")
         # Build a mini-config scoped to new + changed files
@@ -538,7 +630,6 @@ class SmartUpdater:
         )
         engine.plan = mini_plan
         gen_results = engine.generate_all(force=True)
-        engine.update_manifest(gen_results)
         save_all(merged_plan, scan, gen_results, self.repo_root, self.output_dir)
         chatbot_ok = True
         updated_slugs = sorted(
@@ -554,14 +645,9 @@ class SmartUpdater:
         refreshed_corpora: list[str] = []
         if chatbot_enabled(self.cfg):
             try:
-                from .chatbot.indexer import ChatbotIndexer
-
-                chatbot_stats = ChatbotIndexer(
-                    self.repo_root, self.cfg
-                ).sync_incremental(
+                chatbot_stats = self._sync_chatbot_incremental(
                     plan=merged_plan,
                     scan=scan,
-                    output_dir=self.output_dir,
                     changed_files=(
                         change_set.changed_files
                         + change_set.new_files
@@ -573,7 +659,6 @@ class SmartUpdater:
                     + change_set.deleted_artifact_files
                     + change_set.deleted_doc_paths,
                     changed_doc_slugs=updated_slugs,
-                    has_openapi=scan.has_openapi,
                 )
                 refreshed_corpora = list(chatbot_stats.get("corpora_refreshed", []))
             except Exception as e:
@@ -599,7 +684,6 @@ class SmartUpdater:
     ) -> UpdateRunResult:
         """Regenerate only the stale buckets identified in the change set."""
         from .generator import BucketGenerationEngine
-        from .planner import scan_repo as bucket_scan_repo
 
         stale_slugs = set(change_set.stale_bucket_slugs)
         chatbot_stats: dict[str, Any] | None = None
@@ -612,8 +696,7 @@ class SmartUpdater:
             + change_set.semantic_changed_files,
         )
 
-        console.print("[dim]Scanning repo...[/dim]")
-        scan = bucket_scan_repo(self.repo_root, self.cfg)
+        scan = self._execution_scan(change_set, "incremental update")
         gen_results = []
         if stale_slugs:
             stale_buckets = [b for b in plan.buckets if b.slug in stale_slugs]
@@ -634,7 +717,6 @@ class SmartUpdater:
             engine.plan = mini_plan
 
             gen_results = engine.generate_all(force=True)
-            engine.update_manifest(gen_results)
         else:
             console.print(
                 "[green]✓ No stale buckets. Refreshing chatbot indexes only.[/green]"
@@ -654,14 +736,9 @@ class SmartUpdater:
         )
         if chatbot_enabled(self.cfg):
             try:
-                from .chatbot.indexer import ChatbotIndexer
-
-                chatbot_stats = ChatbotIndexer(
-                    self.repo_root, self.cfg
-                ).sync_incremental(
+                chatbot_stats = self._sync_chatbot_incremental(
                     plan=plan,
                     scan=scan,
-                    output_dir=self.output_dir,
                     changed_files=(
                         change_set.changed_files
                         + change_set.new_files
@@ -673,7 +750,6 @@ class SmartUpdater:
                     + change_set.deleted_artifact_files
                     + change_set.deleted_doc_paths,
                     changed_doc_slugs=updated_slugs,
-                    has_openapi=scan.has_openapi,
                 )
             except Exception as e:
                 chatbot_ok = False
@@ -748,17 +824,11 @@ class SmartUpdater:
                     + cs.deleted_artifact_files
                 ),
             )
-            semantic_impact = self._detect_semantic_impacts(
-                cs.changed_files
-                + cs.new_files
-                + cs.deleted_files
-                + cs.changed_artifact_files
-                + cs.new_artifact_files
-                + cs.deleted_artifact_files
-            )
+            semantic_impact = self._detect_semantic_impacts(plan, cs)
             cs.semantic_changed_files = semantic_impact.changed_files
             cs.semantic_changed_endpoint_keys = semantic_impact.changed_endpoint_keys
             cs.endpoint_structure_changed = semantic_impact.endpoint_structure_changed
+            cs.repo_scan = semantic_impact.repo_scan
             if cs.semantic_changed_files:
                 cs.stale_bucket_slugs = sorted(
                     set(cs.stale_bucket_slugs)
@@ -892,26 +962,178 @@ class SmartUpdater:
         )
         return sorted(stale)
 
-    def _detect_semantic_impacts(self, changed_paths: list[str]) -> SemanticImpact:
+    def _detect_semantic_impacts(
+        self, plan: DocPlan, change_set: ChangeSet
+    ) -> SemanticImpact:
         """Detect endpoint semantic changes from the saved scan cache to the current repo."""
+        changed_paths = sorted(
+            set(
+                change_set.changed_files
+                + change_set.new_files
+                + change_set.deleted_files
+                + change_set.changed_artifact_files
+                + change_set.new_artifact_files
+                + change_set.deleted_artifact_files
+            )
+        )
         if not changed_paths:
             return SemanticImpact()
 
         previous_scan = load_scan_cache(self.repo_root) or {}
-        previous_endpoints = previous_scan.get("api_endpoints") or []
-        if not previous_endpoints:
-            return SemanticImpact()
+        cached_endpoints = previous_scan.get("api_endpoints")
+        previous_endpoints = (
+            cached_endpoints if isinstance(cached_endpoints, list) else []
+        )
+        scan_scope, replacement_routes, fallback_reason = self._semantic_scan_scope(
+            plan,
+            change_set,
+            previous_scan,
+        )
 
         try:
             from .planner import scan_repo as bucket_scan_repo
 
-            current_scan = bucket_scan_repo(self.repo_root, self.cfg)
+            if fallback_reason:
+                console.print(
+                    f"[dim]Semantic scan using full-repository fallback: {fallback_reason}[/dim]"
+                )
+                self.telemetry.counter("update.scan_full_fallback")
+            else:
+                console.print(
+                    f"[dim]Semantic scan scoped to {len(scan_scope)} dependency file(s)...[/dim]"
+                )
+                self.telemetry.counter("update.scan_scoped")
+            current_scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+                scan_paths=None if fallback_reason else scan_scope,
+            )
         except Exception:
-            return SemanticImpact()
+            if fallback_reason:
+                return SemanticImpact()
+            console.print(
+                "[dim]Scoped semantic scan failed; retrying once with the full repository...[/dim]"
+            )
+            self.telemetry.counter("update.scan_full_fallback")
+            current_scan = bucket_scan_repo(
+                self.repo_root,
+                self.cfg,
+                telemetry=self.telemetry,
+            )
+            fallback_reason = "scoped scan failed"
 
-        return self._compute_endpoint_semantic_impact(
+        if not fallback_reason:
+            current_scan.api_endpoints = self._merge_scoped_endpoints(
+                previous_endpoints,
+                current_scan.api_endpoints,
+                replacement_routes,
+            )
+
+        impact = self._compute_endpoint_semantic_impact(
             previous_endpoints,
             current_scan.api_endpoints,
+        )
+        impact.repo_scan = current_scan
+        return impact
+
+    def _semantic_scan_scope(
+        self,
+        plan: DocPlan,
+        change_set: ChangeSet,
+        previous_scan: dict[str, Any],
+    ) -> tuple[set[str], set[str], str]:
+        """Return a safe source closure or a reason to use the full repository."""
+        previous_endpoints = previous_scan.get("api_endpoints")
+        if not isinstance(previous_endpoints, list):
+            return set(), set(), "scan cache is missing endpoint metadata"
+        if previous_scan.get("scan_complete") is False:
+            return set(), set(), "scan cache is not a complete repository snapshot"
+        if (
+            change_set.new_files
+            or change_set.deleted_files
+            or change_set.changed_artifact_files
+            or change_set.new_artifact_files
+            or change_set.deleted_artifact_files
+        ):
+            return set(), set(), "structural or artifact files changed"
+
+        changed = set(change_set.changed_files)
+        config_paths = set(previous_scan.get("config_files") or [])
+        openapi_paths = set(previous_scan.get("openapi_paths") or [])
+        if changed & (config_paths | openapi_paths):
+            return set(), set(), "configuration or OpenAPI inputs changed"
+
+        tracked_files = {
+            file_path
+            for bucket in plan.buckets
+            for file_path in tracked_bucket_files(bucket)
+        }
+        if not changed or not changed <= tracked_files:
+            return set(), set(), "changed files are outside the saved plan"
+
+        scope = set(changed)
+        replacement_routes = set(changed)
+        changed_scope = True
+        while changed_scope:
+            before = len(scope)
+            for bucket in plan.buckets:
+                bucket_files = set(tracked_bucket_files(bucket))
+                if scope & bucket_files:
+                    scope.update(bucket_files)
+            for endpoint in previous_endpoints:
+                owned_files = set(endpoint_owned_files(endpoint))
+                if not scope & owned_files:
+                    continue
+                route_file = str(endpoint.get("route_file") or "")
+                if not route_file:
+                    return set(), set(), "cached endpoint route ownership is incomplete"
+                if str(endpoint.get("framework") or "").lower() == "django":
+                    return set(), set(), "Django URL resolution requires a full scan"
+                scope.update(owned_files)
+                replacement_routes.add(route_file)
+            changed_scope = len(scope) != before
+
+        scope.update(previous_scan.get("entry_points") or [])
+        scope.update(config_paths)
+        scope = {
+            path
+            for path in scope
+            if path and (self.repo_root / path).is_file()
+        }
+        total_files = int(previous_scan.get("total_files") or 0)
+        if total_files and len(scope) * 2 >= total_files:
+            return set(), set(), "dependency scope covers at least half the repository"
+        return scope, replacement_routes, ""
+
+    def _merge_scoped_endpoints(
+        self,
+        previous_endpoints: list[dict[str, Any]],
+        current_endpoints: list[dict[str, Any]],
+        replacement_routes: set[str],
+    ) -> list[dict[str, Any]]:
+        """Replace authoritative route slices while retaining unaffected endpoints."""
+
+        def route_file(endpoint: dict[str, Any]) -> str:
+            return str(endpoint.get("route_file") or endpoint.get("file") or "")
+
+        merged = [
+            endpoint
+            for endpoint in previous_endpoints
+            if route_file(endpoint) not in replacement_routes
+        ]
+        merged.extend(
+            endpoint
+            for endpoint in current_endpoints
+            if route_file(endpoint) in replacement_routes
+        )
+        return sorted(
+            merged,
+            key=lambda endpoint: (
+                self._endpoint_identity_key(endpoint),
+                route_file(endpoint),
+                str(endpoint.get("handler_file") or endpoint.get("file") or ""),
+            ),
         )
 
     def _compute_endpoint_semantic_impact(

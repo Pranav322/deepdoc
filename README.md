@@ -49,7 +49,15 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 - **OpenAPI-aware API docs** — auto-detects OpenAPI/Swagger specs and renders an interactive Swagger UI page in the generated site.
 - **Local-first Next.js + Fumadocs site** — generates a `site/` shell (Fumadocs UI, Mermaid, syntax highlighting, built-in search); `deepdoc deploy` runs `next build` and exports a static site to any host. Requires Node.js ≥18.
 
-Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider. Parses Python, JavaScript/TypeScript, Go, PHP, and Vue.
+Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider.
+
+> **Use DeepDoc for its supported stacks.** DeepDoc is built and tested for
+> Python backends using **Django, Django REST Framework, or Falcon**;
+> JavaScript/TypeScript backends using **Express, Fastify, or NestJS**;
+> **Laravel** PHP applications; and conventional **Go** services. It also
+> extracts symbols from Vue SFCs. It is deliberately **not** a generic
+> framework-agnostic documentation generator: do not rely on it for FastAPI,
+> Flask, Nuxt, or unsupported frameworks just because their files can be parsed.
 
 ---
 
@@ -357,7 +365,7 @@ Generation writes quality artifacts under `.deepdoc/`:
 - `.deepdoc/generation_quality.json` records invalid/degraded pages, coverage metrics, local setup warnings, and consistency summary data.
 - `.deepdoc/consistency_warnings.json` records warning-only cross-page identifier consistency findings.
 
-Generated Markdown pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, and `deepdoc_prereqs` (prerequisite page slugs). The Fumadocs UI renders these pages with built-in navigation, search, and table of contents.
+Generated Markdown pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, `deepdoc_prereqs`, and evidence-budget usage/trimming fields. The Fumadocs UI renders these pages with built-in navigation, search, and table of contents.
 
 **Options:**
 
@@ -376,6 +384,20 @@ deepdoc status
 ```
 
 This is useful after `generate` or `update` when you want a quick health check without opening the site.
+
+### `deepdoc performance`
+
+Show the latest local pipeline timings, LLM token usage, retries, and I/O counters.
+
+```bash
+deepdoc performance
+```
+
+DeepDoc stores one sanitized JSON record per completed `generate` or `update`
+under `.deepdoc/performance/runs.jsonl`. Records contain measurements only—never
+source code, prompts, generated content, API keys, or endpoint URLs. The history
+rotates when it reaches 10 MB, and the command compares the latest duration with
+the previous run when available.
 
 ### `deepdoc serve`
 
@@ -588,8 +610,16 @@ llm:
   model: claude-3-5-sonnet-20241022
   api_key_env: ANTHROPIC_API_KEY
   base_url: null                    # Set for Ollama/custom endpoints
-  max_tokens: null                  # null = no cap (recommended); set a number to limit output
+  max_tokens: null                  # null = provider default; set a number to request an explicit cap
+  base_model: null                  # Set only for a custom/Azure deployment alias
+  context_window_tokens: null       # null = resolve locally from LiteLLM model metadata
+  output_reserve_tokens: null       # null = derive from the resolved model output capability
   temperature: 0.2
+  rate_limits:
+    max_concurrency: 6
+    requests_per_minute: 60
+    tokens_per_minute: 250000
+    adaptive_backoff: true
 
 languages:
   - python
@@ -651,8 +681,15 @@ site:
 | `llm.model` | `claude-3-5-sonnet-20241022` | Model name (use provider prefix for non-Anthropic, e.g. `azure/gpt-4.1`) |
 | `llm.api_key_env` | `ANTHROPIC_API_KEY` | Environment variable that holds the API key |
 | `llm.base_url` | `null` | Custom endpoint URL (required for Ollama, optional for Azure) |
-| `llm.max_tokens` | `null` | Max output tokens per LLM call. `null` = no cap (recommended). Set explicitly if your provider requires it (e.g. some Azure deployments). Typical values: `4096` for shorter pages, `8192`–`16384` for detailed docs |
+| `llm.base_model` | `null` | Canonical LiteLLM model name for an otherwise unknown Azure/custom deployment alias |
+| `llm.max_tokens` | `null` | Requested provider output cap. `null` omits the parameter and uses the provider default; configured values are clamped to `output_reserve_tokens` |
 | `llm.temperature` | `0.2` | LLM sampling temperature |
+| `llm.context_window_tokens` | `null` | Model context window resolved locally from LiteLLM; set an integer for an unknown/private deployment alias |
+| `llm.output_reserve_tokens` | `null` | Output reservation derived from the resolved model; set an integer to override or cap explicit `max_tokens` |
+| `llm.rate_limits.max_concurrency` | `6` | Maximum simultaneous documentation-model requests |
+| `llm.rate_limits.requests_per_minute` | `60` | Rolling request limit for the documentation model |
+| `llm.rate_limits.tokens_per_minute` | `250000` | Rolling estimated input-token limit for the documentation model |
+| `llm.rate_limits.adaptive_backoff` | `true` | Share provider `429`/`Retry-After` cooldown across workers |
 | **Generation** | | |
 | `generation_mode` | `feature_buckets` | Documentation generation mode |
 | `max_pages` | `0` | Max pages to generate. `0` = no cap |
@@ -662,8 +699,9 @@ site:
 | `include_endpoint_pages` | `true` | Generate endpoint documentation pages |
 | `include_integration_pages` | `true` | Generate integration documentation pages |
 | **Parallelism** | | |
-| `max_parallel_workers` | `6` | Concurrent LLM calls. Increase for Azure PTU or high-TPM deployments |
-| `batch_size` | `10` | Pages per batch before rate-limit pause |
+| `max_parallel_workers` | `6` | Generation executor size; actual hosted request concurrency is also bounded by `llm.rate_limits.max_concurrency` |
+| `batch_size` | `10` | Submission-throttle cadence retained for compatibility; generation uses one rolling executor, not batch barriers |
+| `scan.max_workers` | `8` | Bounded local workers for source reads, parsing, and per-file endpoint detection (`1` forces serial scanning) |
 | **File filters** | | |
 | `languages` | `[python, javascript, typescript, go, php, vue]` | Languages to parse |
 | `include` | `[]` | Glob patterns to include (empty = everything) |
@@ -709,7 +747,7 @@ All chatbot endpoints now share one response contract:
 - `evidence[]` is the canonical source of right-pane code/config snippets. Each item has an ID like `E1`, `file_path`, `start_line`, `end_line`, and `snippet`.
 - `references[]` contains generated docs or repo-authored docs. These are read-next links, not implementation proof.
 - Legacy fields such as `code_citations`, `doc_links`, `code_workspace_citations`, and `file_inventory` are derived for compatibility.
-- SQLite FTS, FAISS vectors, symbol chunks, and relationship chunks are candidate retrieval artifacts only. A candidate becomes evidence only after it is hydrated from the source archive/catalog.
+- SQLite FTS, FAISS vectors, symbol chunks, and relationship chunks are candidate retrieval artifacts only. A candidate becomes evidence only after it is hydrated from the content-addressed SQLite source archive/catalog. Existing gzip source archives migrate automatically on the next update.
 - Generated/internal paths such as `.deepdoc*`, `docs/`, `site/`, and `chatbot_backend/` are excluded from source evidence.
 - The answer validator rejects invented source paths, `line unknown`, unknown evidence IDs, and docs used as implementation proof. If a retry still fails, the backend returns a conservative answer with diagnostics.
 
@@ -927,7 +965,7 @@ The defaults work for almost every project. Expand below only when you need to t
 |-----|---------|-------------|
 | **General** | | |
 | `chatbot.enabled` | `false` | Enable chatbot indexing and backend (set automatically by `deepdoc init --with-chatbot`) |
-| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
+| `chatbot.index_dir` | `.deepdoc/chatbot` | Directory for the transactional SQLite source archive/catalog, SQLite lexical index, vector indexes, relationship artifacts, and chunk data |
 | **Indexing** | | |
 | `chatbot.indexing.include_repo_docs` | `true` | Index selected repo-authored docs such as README/design notes in a separate corpus |
 | `chatbot.indexing.include_tests` | `false` | Allow test/example/fixture docs into the repo-doc corpus |
@@ -1205,7 +1243,26 @@ deepdoc clean --yes    # Skip confirmation prompt
 
 ## Supported Languages & Frameworks
 
-**Parsing (tree-sitter AST + regex fallback):**
+> ## Supported Stacks Only
+>
+> **Use DeepDoc when your repository is primarily one of these targets:**
+>
+> - **Python:** Django, Django REST Framework, Falcon
+> - **JavaScript / TypeScript:** Express, Fastify, NestJS
+> - **PHP:** Laravel
+> - **Go:** conventional HTTP services and supported route helpers
+> - **Vue:** component and symbol extraction, not a standalone backend route target
+>
+> DeepDoc can parse a number of source formats, but parsing is not the same as
+> full framework support. Endpoint resolution, runtime discovery, call-graph
+> enrichment, and generated API documentation are only guaranteed for the
+> supported stacks above. **Do not adopt DeepDoc for FastAPI, Flask, Nuxt, or an
+> unlisted framework unless you are prepared to extend scanner coverage first.**
+
+### Supported Source Parsing
+
+These file types receive AST/symbol extraction. This alone does not imply
+framework-level route or runtime coverage.
 
 | Language | Extensions | Extracts |
 |----------|-----------|----------|
@@ -1216,7 +1273,7 @@ deepdoc clean --yes    # Skip confirmation prompt
 | PHP | `.php` | Functions, classes, methods, namespaces |
 | Vue | `.vue` | SFC script symbols, props/emits/slots, router/store usage |
 
-**High-confidence framework support (fixture-backed):**
+### Supported Framework Targets
 
 | Framework | Language | Proven patterns |
 |-----------|----------|-----------------|
@@ -1224,14 +1281,28 @@ deepdoc clean --yes    # Skip confirmation prompt
 | Django / DRF | Python | `path()`, `re_path()`, `@api_view`, `as_view()`, DRF routers, `@action` |
 | Express | JS/TS | Mounted routers via `app.use()`, nested prefixes, chained `route()` calls |
 | Fastify | JS/TS | Plugin `register(..., { prefix })`, shorthand methods, `route({ ... })`, schema hints |
+| NestJS | JS/TS | Decorator controllers and method routes |
 | Falcon | Python | `app.add_route()`, responder classes, imported resources, app middleware |
-| Vue | Vue SFC | Component detection, `defineProps`, `defineEmits`, `defineModel`, `defineSlots`, router/store signals |
+| Go services | Go | Conventional HTTP handlers and common route helpers |
 
-**Supported but not headline-high-confidence yet:**
+### Parser Coverage, Not A Supported Backend Target
 
 | Framework | Language | Current coverage |
 |-----------|----------|------------------|
-| Gin / Echo / Fiber | Go | Common route helpers (`GET`, `POST`, `HandleFunc`) |
+| Vue SFC | Vue | Component detection, `defineProps`, `defineEmits`, `defineModel`, `defineSlots`, router/store signals |
+| Gin / Echo / Fiber | Go | Common route helpers (`GET`, `POST`, `HandleFunc`); validate against your codebase before adoption |
+
+### Explicitly Unsupported Scan Targets
+
+| Framework | Why this matters |
+|-----------|------------------|
+| FastAPI | No supported route-resolution or scanner contract |
+| Flask | No supported route-resolution or scanner contract |
+| Nuxt | No supported route-resolution or scanner contract |
+
+If your framework is not listed under **Supported Framework Targets**, treat it
+as unsupported. Extend `deepdoc/scanner/` and route fixtures before using
+DeepDoc as the source of truth for that stack.
 
 **Runtime/background surface extraction:**
 

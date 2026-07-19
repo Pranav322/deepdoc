@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 from typing import Any
 
+from ..llm import ModelCapabilityError
 from .constants import DOC_SUFFIXES, STOPWORD_TOKENS
 from .persistence import (
     query_lexical_index,
@@ -902,16 +903,55 @@ class RetrievalMixin:
             header = " | ".join(bit for bit in metadata_bits if bit)
             previews.append(f"{i + 1}. [{hit.record.kind}] {header} :: {preview}")
 
-        rerank_prompt = (
-            f"Question: {question}\n\n"
-            "Rate each chunk's relevance to the question on a scale of 0 to 10. "
-            "Return ONLY the scores, one number per line, in the same order.\n\n"
-            + "\n".join(previews)
-        )
+        system_prompt = "You are a relevance scorer. Output only numbers, one per line."
+        fit_prompt = getattr(self.chat_client, "fit_prompt_sections", None)
+        if callable(fit_prompt):
+            def _render(sections: dict[str, str]) -> str:
+                return (
+                    f"Question: {sections['question']}\n\n"
+                    "Rate each chunk's relevance to the question on a scale of 0 to 10. "
+                    "Return ONLY the scores, one number per line, in the same order.\n\n"
+                    + "\n".join(
+                        sections.get(f"candidate_{index}", "")
+                        for index in range(len(previews))
+                    )
+                )
+
+            fitted = fit_prompt(
+                system=system_prompt,
+                render_prompt=_render,
+                required_sections={"question": question},
+                optional_sections=[
+                    (f"candidate_{index}", [preview])
+                    for index, preview in enumerate(previews)
+                ],
+                step_name="chatbot reranker",
+            )
+            candidates = [
+                candidate
+                for index, candidate in enumerate(candidates)
+                if f"candidate_{index}" not in fitted.omitted_records
+            ]
+            rerank_prompt = fitted.prompt
+        else:
+            rerank_prompt = (
+                f"Question: {question}\n\n"
+                "Rate each chunk's relevance to the question on a scale of 0 to 10. "
+                "Return ONLY the scores, one number per line, in the same order.\n\n"
+                + "\n".join(previews)
+            )
+        if not candidates:
+            profile = self._question_support_profile(question)
+            return (
+                self._sort_hits(code_hits, profile),
+                self._sort_hits(artifact_hits, profile),
+                self._sort_hits(doc_hits, profile),
+                self._sort_hits(relationship_hits, profile),
+            )
 
         try:
             raw = self.chat_client.complete(
-                "You are a relevance scorer. Output only numbers, one per line.",
+                system_prompt,
                 rerank_prompt,
             )
             scores = []
@@ -963,6 +1003,8 @@ class RetrievalMixin:
                 reranked_relationship,
             )
 
+        except ModelCapabilityError:
+            raise
         except Exception:
             # Fallback to original ordering if reranking fails
             profile = self._question_support_profile(question)

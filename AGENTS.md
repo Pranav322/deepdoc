@@ -28,7 +28,7 @@ Guidance for coding agents working in this repository.
 
 ### Planner
 - `deepdoc/planner/engine.py` — repo-scan entrypoint and bucket-planning orchestration
-- `deepdoc/planner/heuristics.py` — public planning API: `_merge_plan`, `_build_heuristic_assignment`, `_llm_step` (tests mock at this path); no longer contains `_shape_plan_nav` or `_decompose_buckets` — both removed as duplicates
+- `deepdoc/planner/heuristics.py` — public planning API: `_merge_plan`, `_build_heuristic_assignment`, `_partition_topology_assignment`, `_merge_partial_assignment`, `_llm_step` (tests mock at this path); no longer contains `_shape_plan_nav` or `_decompose_buckets` — both removed as duplicates
 - `deepdoc/planner/topology.py` — `build_topology_map()` derives `TopologyMap` from the call graph without LLM involvement; BFS + Jaccard-based clustering (threshold 0.40); feeds the classify step instead of a compressed file tree
 - `deepdoc/planner/flow_candidates.py` — `FlowCandidate`, `EntryPoint`; `build_flow_candidates()` traces endpoint families, runtime tasks, and schedulers through the call graph
 - `deepdoc/planner/specializations.py` — `_ensure_database_runtime_and_interface_buckets`, `_attach_flow_hints_to_cluster_buckets` (replaces the removed `_ensure_flow_buckets`), `_build_database_buckets`, `_build_runtime_buckets`, `_build_graphql_buckets`
@@ -54,22 +54,26 @@ Guidance for coding agents working in this repository.
 - `deepdoc/chatbot/routes.py` — FastAPI app factory; two endpoints: `POST /query` (fast), `POST /deep` (agentic); SSE variants `/query/stream` and `/deep/stream`; all SSE endpoints use `timeout=30` + `ping` keepalive
 - `deepdoc/chatbot/providers.py` — `LiteLLMChatClient` (including `complete_stream()`), embedding clients; Azure `api_version` propagated from `llm.*` config
 - `deepdoc/chatbot/indexer.py` — `ChatbotIndexer`; FAISS invalid-embedding filter (score ≤ -0.5)
-- `deepdoc/chatbot/source_archive.py` — `build_source_archive`, `update_source_archive`; archived source is the proof for evidence hydration
-- `deepdoc/chatbot/persistence.py` — FAISS index save/load; invalid-embedding filter on load
+- `deepdoc/chatbot/source_archive.py` — `build_source_archive`, `update_source_archive`; archived source is the proof for evidence hydration; updates read only changed paths under a stable archive policy
+- `deepdoc/chatbot/persistence.py` — FAISS index save/load plus the canonical `source_archive.sqlite3` content-addressed store; legacy gzip archives migrate on first write
 - `deepdoc/chatbot/settings.py` — chatbot config schema
 - `deepdoc/chatbot/scaffold.py` — chatbot `chatbot_backend/` scaffolding generator
 
 ### Site builder (Next.js + Fumadocs)
 - `deepdoc/site/builder/next_builder.py` — **canonical site builder**: `build_next_from_plan()` copies the Next.js + Fumadocs shell template from `next_template/` into `site/`, writes `site/deepdoc.config.json` (nav tree, brand colors, chatbot URL, project name) and `site/app/globals.css` (brand CSS vars). `mkdocs_builder.py` is kept for compatibility but no longer called by the pipeline.
 - `deepdoc/site/builder/next_template/` — shipped as package-data; contains the full Next.js + Fumadocs shell (`package.json`, `app/layout.tsx`, `app/[[...slug]]/page.tsx`, `lib/docs.ts`, `lib/nav.ts`, `components/chatbot.tsx`, etc.). Content (`docs/*.md`) is read at build time by `lib/docs.ts` via a **remark/rehype pipeline only** — no MDX JSX compiler ever runs on LLM-generated content, so `{`, `<Tag>` etc. in code blocks cannot crash a build.
+- `MermaidRunner` must select `HTMLElement` nodes (`querySelectorAll<HTMLElement>`) because current Mermaid types reject a generic `NodeListOf<Element>`.
 - `deepdoc/site/builder/mdx_utils.py` — frontmatter helpers (operate on generated `*.md`)
 - Generated pages are plain CommonMark `.md`. The LLM emits GitHub Alert callouts (`> [!NOTE]`, `> [!WARNING]`) and native HTML `<details>` for accordions — no MkDocs pymdownx blocks, no JSX.
 - **Chatbot UX** — React `ChatbotWidget` component (`components/chatbot.tsx`): FAB + dock popup using `usePathname()` for SPA-aware navigation (replaces vanilla JS `window.document$` dependency). The `/ask` page (`app/ask/page.tsx`) is a React client component. Brand colors flow via `--brand` / `--brand-light` / `--brand-dark` CSS vars set from `deepdoc.config.json` at generate time. Chatbot backend URL is read client-side from `window.__DD_CONFIG__` (injected by the layout from `deepdoc.config.json`).
 
 ### Other modules
 - `deepdoc/llm/retry.py` — `is_retryable_llm_error()`; single source of truth for transient-vs-fatal LLM error classification (used by both retry loops)
-- `deepdoc/call_graph.py` — `CallGraph`; function-level call extraction; `CALL_KIND_LOCAL`, `CALL_KIND_CELERY`, `CALL_KIND_SIGNAL`, `CALL_KIND_EVENT`; supports Python (Django/Falcon/DRF) and JS/TS (Express/Node)
-- `deepdoc/manifest.py` — `Manifest` class; tracks file → content-hash → doc-path; stored at `{output_dir}/.deepdoc_manifest.json`
+- `deepdoc/llm/rate_limit.py` — provider-neutral shared concurrency/RPM/TPM limiter with adaptive cooldown; one limiter belongs to each model service/client
+- `deepdoc/telemetry.py` — thread-safe, fail-open run telemetry; writes sanitized rotating JSONL under `.deepdoc/performance/` and exposes latest-run loaders for `deepdoc performance`
+- `deepdoc/plan_contract.py` — structural generation gate and canonical bucket output/site paths; rejects missing/multiple introductions, duplicate slugs/output writers, unresolved nav slugs, and duplicate nav references before workers start
+- `deepdoc/call_graph.py` — `CallGraph`; function-level call extraction; `CALL_KIND_LOCAL`, `CALL_KIND_CELERY`, `CALL_KIND_SIGNAL`, `CALL_KIND_EVENT`; current resolution is the baseline Python (Django/Falcon/DRF) and JS/TS (Express/Node) implementation. The import-evidence resolver, Go/PHP edges, and cross-file Python inheritance walk remain parked on `wip/audit-fixes-2026-07-10` and are not part of `main`.
+- `deepdoc/manifest.py` — `Manifest` class; tracks file → content hash → sorted owning doc paths (legacy single `doc_path` remains readable); stored atomically at `{output_dir}/.deepdoc_manifest.json`
 - `deepdoc/openapi.py` — `find_openapi_specs()`, OpenAPI/Swagger spec parser and importer
 - `deepdoc/source_metadata.py` — `SOURCE_KIND_CORE`, `SOURCE_KIND_SUPPORTING`, `LOW_TRUST_SOURCE_KINDS`, `FRAMEWORK_PRIORITIES`
 - `deepdoc/benchmark_v2.py` — `BenchmarkResult`; planner quality scorecard harness
@@ -107,25 +111,53 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 5. `_shape_plan_nav()` (canonical version in `nav_shaping.py`) orders sections by topology cluster depth; `Start Here`/`Overview` pinned front, `Testing`/`CI/CD`/`Supporting Material` pinned tail.
 
 ### Key invariants
+- Every full `DocPlan` must pass `validate_plan_contract()` before generation: exactly one `is_introduction_page` bucket, one owner per slug/output path, and every non-system nav slug resolved exactly once. The introduction owns `index.md` and `/`. Incremental engines validate the preserved full constructor plan, not their stale-bucket mini-plan.
 - `ChangeSet.strategy` never returns `full_replan` for normal changes — all code/file/endpoint changes route to `incremental` or `targeted_replan`. Full replan only via `force_replan=True` or engine fingerprint mismatch.
 - `_handle_deleted_files` in `SmartUpdater` is the single place that cleans orphaned buckets (removes from plan, deletes MDX, prunes ledger, cleans `nav_structure`). After it runs, orphaned slugs are filtered from `change_set.stale_bucket_slugs` to prevent redundant regeneration.
 - `_append_changelog()` must be called before `_rebuild_nav()` in `smart_update_v2.py` so the `whats-changed` page appears in nav on first run.
 - `pipeline_v2._build_site()` must be called after `_record_changelog()` for the same reason.
-- `CrossBucketConsistencyPass.run()` must be called after `engine.update_manifest(gen_results)` and before `summarize_generation_results()` in `pipeline_v2.py` so injected callouts are counted in the final summary and written to disk before any downstream site build step.
+- `CrossBucketConsistencyPass.run()` must be called after `engine.generate_all()` and before `summarize_generation_results()` so injected callouts are counted before downstream site build. `generate_all()` now owns in-memory manifest updates and final checkpoint persistence; do not restore a redundant `update_manifest()` caller pass.
 - After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `docs/whats-changed.md` is regenerated. Do not skip these calls when adding new execution paths.
 - Targeted replans merge by stable bucket identity (`semantic_id`) and preserve existing slugs when the same concept is rediscovered.
 - Bucket slug collision guard: fallback slug generation appends `-2`, `-3`, … suffixes; a bucket that has already absorbed another cannot be absorbed again in the same consolidation pass (`merge_target_slugs` set).
 - `_decompose_buckets` is canonical in `bucket_refinement.py` only — the duplicate was removed from `heuristics.py`.
 - `_normalize_nav_section` is canonical in `nav_shaping.py` only — the duplicate was removed from `heuristics.py`.
-- `_llm_step` no longer wraps LLM calls in `Rich.Live()` — that caused terminal corruption with concurrent `ThreadPoolExecutor` workers.
+- `_llm_step` labels planner calls through the shared telemetry operation context; `LLMClient` records model wait, character counts, actual provider tokens when available, labelled estimates otherwise, finish reason, and failure type without storing prompt/response text. A prior `Rich.Live()` wrapper was removed because concurrent planner workers corrupted terminal output.
+- `deepdoc/llm/token_budget.py` is the single owner of completion-model capabilities and local token counting. Resolution order is explicit config, LiteLLM metadata for `base_model` or model, then a hard configuration error. Capability lookup and token counting must not call a provider. Unknown Azure/custom aliases require `base_model` or explicit context; never invent a silent context default.
+- `deepdoc init` writes automatic completion capability defaults. Existing integer `context_window_tokens`/`output_reserve_tokens` values remain authoritative; custom aliases must supply `base_model` or explicit capability values before generation. The CLI must deep-copy default configuration before writing it.
+- Planner dynamic context is token-fitted through `fit_prompt_sections()`: required topology/named-cluster, assignment bucket, and unresolved-file inventories are never sliced; optional records are included whole in deterministic order until the rendered request reaches the resolved model envelope. A required inventory that cannot fit must fail before the LLM call, never fall back to a partial plan.
+- Active V2 page generation uses the same complete request envelope: raw source, contract, must-cite paths, flow, endpoints, OpenAPI, sitemap/dependencies, and retry material are required; supplemental evidence contexts are admitted whole by priority and recorded in generated provenance when omitted. Keep `LLMClient` preflight as the final assertion.
+- ASSIGN preassigns a file only when it is a normal product source with exactly one proposal candidate and a matching topology cluster. Foundational, giant, endpoint-owned, config, supporting-kind, overlapping, and topology-mismatched files remain in the LLM inventory. LLM ownership is filtered to that unresolved inventory before merging; on failure the existing full heuristic assignment remains authoritative.
+- Phase 1 performance fixes on `main`: `parse_file()` accepts cached content from `scan_repo`; primary generation evidence reads prefer `scan.file_contents`; route resolution builds only framework-required JS/Python/Go indexes; both generation retry loops use at most 3 attempts with exponential waits capped at 20 seconds. Preserve disk fallbacks for files absent from the scan cache.
+- `RepoScan.scan_timings` carries run-scoped base-scan and enrichment timings; when telemetry is active, the same phases plus file/byte counters are available through `deepdoc performance`. Do not persist timing observations in `scan_cache.json`.
+- Base scanning collects canonical sorted paths, then uses invocation-local workers for source reads, framework detection, parsing, and endpoint detection. `scan.max_workers` is clamped to 1–32; shared-state merges and progress updates occur only on the coordinator in path order, and repository-wide route resolution remains serial after all contents are available. Never share a tree-sitter `Parser` instance across workers.
+- `EvidenceAssembler` eagerly builds immutable module, symbol, file-line, and symbol-boundary indexes once per engine. Bucket workers must reuse those indexes; do not reintroduce per-bucket whole-repository index construction or mutable unbounded helper caches.
+- Evidence uses one context-derived global budget. `llm.context_window_tokens` minus output reserve, safety margin, and template headroom bounds all categories; raw source may use at most 60%. Preserve deterministic category order, line-boundary trimming, final prompt preflight for every retry stage, and provenance fields describing trims.
+- `RepoScan.file_content_hashes` is computed with source reads and reused by staleness, manifest, and ledger writes. Manifest ownership is multi-page and sorted. Generation checkpoints after 10 pages or 15 seconds plus final completion; preserve atomic writes and fallback hashing only for scan-missing files.
+- Manifest `doc_paths` represent pages completed for the stored source hash. A hash change resets ownership; same-hash checkpoints accumulate it. Bucket freshness requires matching hash, exact output-path ownership, and an existing Markdown file. Preserve this page-aware resume contract for shared sources.
+- Page generation uses one persistent bounded `ThreadPoolExecutor`; do not reintroduce per-batch executor creation or joins. Completion is processed as available, but returned results are normalized to plan order before persistence. Hosted requests are additionally bounded by per-service concurrency/RPM/TPM settings and shared adaptive cooldown.
 - Transient/non-transient LLM error classification is centralized in `deepdoc/llm/retry.py::is_retryable_llm_error()` (exported from `deepdoc.llm`). Both retry loops — `generator/generation.py::_call_with_retry()` and `pipeline_v2.py::_call_llm_with_retry()` — call it with the exception object; do **not** reintroduce a local `_is_retryable`. It classifies by litellm/openai exception *class name* along the `__cause__`/`__context__` chain (`LLMClient.complete` wraps failures in `RuntimeError(...) from e`, so the original type survives), with a substring fallback for message-only inputs. HTTP **500** / "the server had an error" (the common Azure/OpenAI blip) is **retryable**; auth/invalid-model/bad-request stay fatal and raise immediately.
 - MDX brace escaping (`{…}` → `&#123;…&#125;`) skips lines containing `={` to avoid mangling JSX prop assignments.
 - Smart-update `merged_plan` now propagates `orphaned_files`, `integration_candidates`, and `classification` from the full plan.
+- Semantic endpoint detection carries a transient `RepoScan` on `ChangeSet`; `_execution_scan()` must reuse it for incremental/targeted work and perform exactly one fallback scan only when semantic detection produced none. Never persist or globally memoize this run-scoped scan.
+- Safe smart updates build an exact-path scan closure from modified files, their bucket siblings, cached route/handler ownership, entry points, and required config. Collection filters before reads and parsing. New/deleted/artifact/config/OpenAPI changes, Django URL trees, incomplete ownership, or scopes covering at least half the repo visibly fall back to one full scan. Scoped endpoint results replace only authoritative route slices; unaffected cached endpoints and repository metadata must survive persistence.
+- A scoped update must perform one complete scan before rebuilding an unhealthy source-backed chatbot corpus (`code`, `symbol`, `artifact`, `repo_doc`, or `relationship`). Healthy corpus updates remain scoped. Never replace a source-backed corpus from a partial `RepoScan`.
+- `llm.output_reserve_tokens` protects prompt context but is not an implicit provider output cap. `llm.max_tokens: null` omits the provider parameter; explicit caps are bounded by the reserve. Treat `finish_reason="length"` as an actionable truncation error, never a planner fallback.
 
 ### Chatbot architecture
 Three independent model surfaces: `llm.*` (doc generation), `chatbot.answer.*` (answer LLM), `chatbot.embeddings.*` (vector embeddings).
 
 Retrieval is hybrid: FAISS vector search (invalid-embedding filter: score ≤ -0.5) + SQLite FTS + symbol chunks + relationship chunks → candidate set → optional rerank → prompt assembly. Evidence-first responses: `evidence[]` is canonical source proof (file path + line range); `references[]` is for generated/repo docs only. Legacy fields (`code_citations`, `doc_links`, `file_inventory`) are derived from those canonical fields.
+
+Incremental chatbot sync inspects each corpus once, skips healthy corpora without effective changed/deleted keys, and fully replaces JSONL/vector/FAISS/FTS state only for touched or unhealthy corpora. Corpus health includes embedding/schema identity, vector count, FAISS presence, and exact FTS row count. Intentionally oversized source files must not create a permanent rebuild loop.
+
+The canonical source archive is `source_archive.sqlite3`: path rows reference independently gzip-compressed SHA-256 blobs and carry catalog metadata in the same transaction. A stable policy fingerprint covers archive limits/excludes; policy changes trigger an atomic full rebuild, while normal updates read and transact only changed/deleted paths. `source_archive.json.gz` remains read-compatible and migrates on first write.
+
+Chatbot answer capability resolution is independent from document generation. An explicitly configured `chatbot.answer` model needs its own known LiteLLM model, `base_model`, or explicit context. Only an inherited answer model may inherit `llm.*` capability settings. Answer, continuation, reranker, and correction prompts must fit the answer-client envelope; retrieval candidate limits remain operational controls.
+
+Deep research uses that same answer-client envelope. Initial evidence is optional whole-record context, but the original goal, current sub-question, completed tool transcript, and completed synthesis findings are required. Never turn a `ModelCapabilityError` into a plausible partial research result.
+
+Embedding capacity is separate from completion capacity. Default FastEmbed Nomic resolves from the local token profile without importing or downloading FastEmbed; first actual embedding still triggers the normal lazy download. Hosted embedding aliases need a LiteLLM-known `base_model` or explicit `max_input_tokens`. Fitted embedding text, hash, and chunk ID must stay aligned, and capacity-policy fingerprint changes rebuild semantic corpora without rebuilding the source archive.
 
 Query modes:
 - `POST /query` — fast, single-pass, index-first
@@ -160,6 +192,7 @@ Supported scan targets: Python (Django, Falcon, DRF), Go, PHP (Laravel), JS/TS (
 - Put repo-aware route fixes in `deepdoc/parser/routes/repo_resolver.py`, not planner code.
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - If a change touches persisted state or freshness semantics, audit plan, ledger, sync state, manifest, and stale detection together.
+- Freshness treats a missing tracked path as a deletion only when that path had a recorded generation hash. Never-existing LLM artifact hints are not allowed to make a freshly generated bucket immediately stale.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 - CLI-facing failures should raise `click.ClickException` or print a clear Rich message.
 - If CLI behavior changes, update `README.md` and root `CHANGELOG.md` in the same task.
@@ -209,6 +242,7 @@ deepdoc init
 deepdoc generate
 deepdoc update
 deepdoc status
+deepdoc performance
 deepdoc clean
 deepdoc config show
 deepdoc config set llm.model gpt-4o
@@ -220,6 +254,7 @@ deepdoc benchmark
 Notes:
 - `deepdoc clean` — removes `.deepdoc.yaml`, generated docs, and saved state; prompts for confirmation unless `--yes`.
 - `deepdoc status` — shows all generated pages, staleness, and quality status.
+- `deepdoc performance` — shows the latest sanitized generate/update timing and LLM usage record from the 10 MB rotating local history.
 - `deepdoc benchmark` — runs the planner quality scorecard against a gold manifest catalog.
 - `deepdoc deploy` — runs `npm install` (if needed) + `next build` inside `site/` and exports static HTML to `site/out/`; blocked by the quality gate if failed/invalid/stub pages exist. Requires Node.js ≥18 (no Python site deps needed).
 - `deepdoc serve` and `deepdoc deploy` assume generated site files already exist under `site/`.

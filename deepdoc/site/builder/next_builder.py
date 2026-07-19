@@ -100,7 +100,7 @@ def _build_nav(plan: DocPlan, has_openapi: bool) -> list[dict]:
         nav.append({
             "type": "page",
             "title": slug_to_title.get(overview_slug, "Overview"),
-            "slug": "index" if overview_slug in ("index", "overview") else overview_slug,
+            "slug": "/",
         })
 
     # ── nav sections ─────────────────────────────────────────────────────────

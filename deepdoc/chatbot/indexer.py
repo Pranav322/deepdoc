@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from contextlib import nullcontext
 import json
 from pathlib import Path
 from typing import Any
@@ -9,6 +10,7 @@ from typing import Any
 from rich.console import Console
 
 from ..v2_models import DocPlan, RepoScan
+from ..telemetry import RunTelemetry
 from .chunker import (
     build_artifact_chunks,
     build_call_graph_chunks,
@@ -24,7 +26,18 @@ from .docs_summary import (
     build_repo_doc_chunks,
     discover_repo_doc_files,
 )
-from .persistence import corpus_paths, load_corpus, save_corpus, save_index_manifest
+from .embedding_capabilities import (
+    embedding_policy_fingerprint,
+    fit_embedding_records,
+    resolve_embedding_capabilities,
+)
+from .persistence import (
+    corpus_paths,
+    lexical_corpus_record_count,
+    load_corpus,
+    save_corpus,
+    save_index_manifest,
+)
 from .providers import build_embedding_client
 from .scaffold import scaffold_chatbot_backend
 from .settings import chatbot_index_dir, get_chatbot_cfg, service_model_identity
@@ -38,18 +51,40 @@ from .symbol_index import build_symbol_chunks
 from .types import ChunkRecord
 
 console = Console()
-CHATBOT_CORPUS_SCHEMA_VERSION = 5
+CHATBOT_CORPUS_SCHEMA_VERSION = 6
+SOURCE_BACKED_CORPORA = (
+    "code",
+    "symbol",
+    "artifact",
+    "repo_doc",
+    "relationship",
+)
 
 
 class ChatbotIndexer:
     """Builds and refreshes chatbot corpora."""
 
-    def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
+    def __init__(
+        self,
+        repo_root: Path,
+        cfg: dict[str, Any],
+        telemetry: RunTelemetry | None = None,
+    ) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
         self.chatbot_cfg = get_chatbot_cfg(cfg)
         self.index_dir = chatbot_index_dir(repo_root, cfg)
+        self.embedding_capabilities = resolve_embedding_capabilities(
+            self.chatbot_cfg["embeddings"]
+        )
+        self.embedding_policy_fingerprint = embedding_policy_fingerprint(
+            self.embedding_capabilities
+        )
         self.embedding_client = build_embedding_client(cfg)
+        self.telemetry = telemetry
+
+    def _span(self, name: str):
+        return self.telemetry.span(name) if self.telemetry is not None else nullcontext()
 
     def sync_full(
         self,
@@ -62,34 +97,42 @@ class ChatbotIndexer:
         console.print(
             "[dim]Chatbot sync: building code/symbol/artifact/doc/repo-doc/relationship corpora...[/dim]"
         )
-        code_records = build_code_chunks(scan, plan, self.cfg)
-        symbol_records = build_symbol_chunks(scan, plan, self.cfg)
-        artifact_records = build_artifact_chunks(
-            self.repo_root, scan, plan, output_dir, self.cfg
-        )
-        doc_summary_records = build_doc_summary_chunks(
-            output_dir, plan, self.cfg, has_openapi=has_openapi
-        )
-        doc_full_records = build_doc_full_chunks(
-            output_dir, plan, self.cfg, has_openapi=has_openapi
-        )
-        repo_doc_records = build_repo_doc_chunks(
-            self.repo_root,
-            scan,
-            plan,
-            self.cfg,
-            output_dir=output_dir,
-        )
-        relationship_records = build_relationship_chunks(scan, plan, self.cfg)
+        with self._span("chatbot.chunk.code"):
+            code_records = build_code_chunks(scan, plan, self.cfg)
+        with self._span("chatbot.chunk.symbol"):
+            symbol_records = build_symbol_chunks(scan, plan, self.cfg)
+        with self._span("chatbot.chunk.artifact"):
+            artifact_records = build_artifact_chunks(
+                self.repo_root, scan, plan, output_dir, self.cfg
+            )
+        with self._span("chatbot.chunk.doc_summary"):
+            doc_summary_records = build_doc_summary_chunks(
+                output_dir, plan, self.cfg, has_openapi=has_openapi
+            )
+        with self._span("chatbot.chunk.doc_full"):
+            doc_full_records = build_doc_full_chunks(
+                output_dir, plan, self.cfg, has_openapi=has_openapi
+            )
+        with self._span("chatbot.chunk.repo_doc"):
+            repo_doc_records = build_repo_doc_chunks(
+                self.repo_root,
+                scan,
+                plan,
+                self.cfg,
+                output_dir=output_dir,
+            )
+        with self._span("chatbot.chunk.relationship"):
+            relationship_records = build_relationship_chunks(scan, plan, self.cfg)
 
         # Call graph chunks — index execution chains for deep chatbot retrieval
         cg_chunks = []
         graph_chunks = []
         if hasattr(scan, "call_graph") and scan.call_graph is not None:
-            cg_chunks = build_call_graph_chunks(
-                scan.call_graph, scan.parsed_files, plan=plan
-            )
-            graph_chunks = build_graph_relation_chunks(scan.call_graph, plan=plan)
+            with self._span("chatbot.chunk.call_graph"):
+                cg_chunks = build_call_graph_chunks(
+                    scan.call_graph, scan.parsed_files, plan=plan
+                )
+                graph_chunks = build_graph_relation_chunks(scan.call_graph, plan=plan)
             relationship_records.extend(cg_chunks)
             relationship_records.extend(graph_chunks)
 
@@ -108,10 +151,13 @@ class ChatbotIndexer:
         self._save_records("repo_doc", repo_doc_records)
         self._save_records("relationship", relationship_records)
         console.print("[dim]Chatbot sync: packing full source text archive...[/dim]")
-        build_source_archive(self.repo_root, self.index_dir, self.cfg)
-        manifest = save_index_manifest(self.index_dir)
+        with self._span("chatbot.source_archive"):
+            build_source_archive(self.repo_root, self.index_dir, self.cfg)
+        with self._span("chatbot.index_manifest"):
+            manifest = save_index_manifest(self.index_dir)
         console.print("[dim]Chatbot sync: scaffolding backend...[/dim]")
-        scaffold_chatbot_backend(self.repo_root, self.cfg)
+        with self._span("chatbot.backend_scaffold"):
+            scaffold_chatbot_backend(self.repo_root, self.cfg)
         return {
             "code_chunks": len(code_records),
             "symbol_chunks": len(symbol_records),
@@ -220,15 +266,27 @@ class ChatbotIndexer:
             else []
         )
 
-        # If a previous full sync failed midway, recover any corpus that is
-        # still missing even when there are no changed files for it.
-        rebuild_code = self._corpus_needs_rebuild("code")
-        rebuild_symbol = self._corpus_needs_rebuild("symbol")
-        rebuild_artifact = self._corpus_needs_rebuild("artifact")
-        rebuild_doc_summary = self._corpus_needs_rebuild("doc_summary")
-        rebuild_doc_full = self._corpus_needs_rebuild("doc_full")
-        rebuild_repo_doc = self._corpus_needs_rebuild("repo_doc")
-        rebuild_relationship = self._corpus_needs_rebuild("relationship")
+        # Inspect each corpus once. Healthy, mutation-free corpora remain byte-for-byte
+        # untouched; unhealthy corpora still receive a complete recovery rebuild.
+        corpus_states = {
+            corpus: self._load_corpus_state(corpus)
+            for corpus in (
+                "code",
+                "symbol",
+                "artifact",
+                "doc_summary",
+                "doc_full",
+                "repo_doc",
+                "relationship",
+            )
+        }
+        rebuild_code = corpus_states["code"][0]
+        rebuild_symbol = corpus_states["symbol"][0]
+        rebuild_artifact = corpus_states["artifact"][0]
+        rebuild_doc_summary = corpus_states["doc_summary"][0]
+        rebuild_doc_full = corpus_states["doc_full"][0]
+        rebuild_repo_doc = corpus_states["repo_doc"][0]
+        rebuild_relationship = corpus_states["relationship"][0]
 
         if rebuild_code:
             code_records = build_code_chunks(scan, plan, self.cfg)
@@ -289,70 +347,58 @@ class ChatbotIndexer:
                 relationship_records.extend(cg_chunks)
                 relationship_records.extend(graph_chunks)
 
-        if rebuild_code:
-            self._save_records("code", code_records)
-        else:
-            self._merge_records(
-                "code",
-                code_records,
-                changed_keys=code_targets,
-                deleted_keys=deleted_files,
-            )
-        if rebuild_symbol:
-            self._save_records("symbol", symbol_records)
-        else:
-            self._merge_records(
-                "symbol",
-                symbol_records,
-                changed_keys=code_targets,
-                deleted_keys=deleted_files,
-            )
-        if rebuild_artifact:
-            self._save_records("artifact", artifact_records)
-        else:
-            self._merge_records(
-                "artifact",
-                artifact_records,
-                changed_keys=artifact_targets,
-                deleted_keys=deleted_files,
-            )
+        refreshed: dict[str, bool] = {}
+        refreshed["code"] = self._sync_incremental_corpus(
+            "code",
+            code_records,
+            changed_keys=code_targets,
+            deleted_keys=deleted_files,
+            state=corpus_states["code"],
+        )
+        refreshed["symbol"] = self._sync_incremental_corpus(
+            "symbol",
+            symbol_records,
+            changed_keys=code_targets,
+            deleted_keys=deleted_files,
+            state=corpus_states["symbol"],
+        )
+        refreshed["artifact"] = self._sync_incremental_corpus(
+            "artifact",
+            artifact_records,
+            changed_keys=artifact_targets,
+            deleted_keys=deleted_files,
+            state=corpus_states["artifact"],
+        )
         deleted_doc_paths = [path for path in deleted_files if path.endswith((".md", ".mdx"))]
-        if rebuild_doc_summary:
-            self._save_records("doc_summary", doc_summary_records)
-        else:
-            self._merge_records(
-                "doc_summary",
-                doc_summary_records,
-                changed_keys=[f"{slug}.md" for slug in changed_doc_slugs],
-                deleted_keys=deleted_doc_paths,
-            )
-        if rebuild_doc_full:
-            self._save_records("doc_full", doc_full_records)
-        else:
-            self._merge_records(
-                "doc_full",
-                doc_full_records,
-                changed_keys=[f"{slug}.md" for slug in changed_doc_slugs],
-                deleted_keys=deleted_doc_paths,
-            )
-        if rebuild_repo_doc:
-            self._save_records("repo_doc", repo_doc_records)
-        else:
-            self._merge_records(
-                "repo_doc",
-                repo_doc_records,
-                changed_keys=repo_doc_targets,
-                deleted_keys=deleted_files,
-            )
-        if rebuild_relationship:
-            self._save_records("relationship", relationship_records)
-        else:
-            self._merge_records(
-                "relationship",
-                relationship_records,
-                changed_keys=relationship_targets,
-                deleted_keys=deleted_files,
-            )
+        changed_doc_paths = [f"{slug}.md" for slug in changed_doc_slugs]
+        refreshed["doc_summary"] = self._sync_incremental_corpus(
+            "doc_summary",
+            doc_summary_records,
+            changed_keys=changed_doc_paths,
+            deleted_keys=deleted_doc_paths,
+            state=corpus_states["doc_summary"],
+        )
+        refreshed["doc_full"] = self._sync_incremental_corpus(
+            "doc_full",
+            doc_full_records,
+            changed_keys=changed_doc_paths,
+            deleted_keys=deleted_doc_paths,
+            state=corpus_states["doc_full"],
+        )
+        refreshed["repo_doc"] = self._sync_incremental_corpus(
+            "repo_doc",
+            repo_doc_records,
+            changed_keys=repo_doc_targets,
+            deleted_keys=deleted_files,
+            state=corpus_states["repo_doc"],
+        )
+        refreshed["relationship"] = self._sync_incremental_corpus(
+            "relationship",
+            relationship_records,
+            changed_keys=relationship_targets,
+            deleted_keys=deleted_files,
+            state=corpus_states["relationship"],
+        )
             
         update_source_archive(
             self.repo_root,
@@ -365,22 +411,7 @@ class ChatbotIndexer:
             
         scaffold_chatbot_backend(self.repo_root, self.cfg)
         refreshed_corpora = [
-            corpus
-            for corpus, refreshed in (
-                ("code", rebuild_code or bool(code_targets)),
-                ("symbol", rebuild_symbol or bool(code_targets)),
-                ("artifact", rebuild_artifact or bool(artifact_targets)),
-                ("doc_summary", rebuild_doc_summary or bool(changed_doc_slugs)),
-                ("doc_full", rebuild_doc_full or bool(changed_doc_slugs)),
-                ("repo_doc", rebuild_repo_doc or bool(repo_doc_targets)),
-                (
-                    "relationship",
-                    rebuild_relationship
-                    or bool(relationship_targets)
-                    or bool(graph_chunks),
-                ),
-            )
-            if refreshed
+            corpus for corpus, was_refreshed in refreshed.items() if was_refreshed
         ]
         return {
             "code_chunks": len(code_records),
@@ -396,19 +427,25 @@ class ChatbotIndexer:
         }
 
     def _save_records(self, corpus: str, records: list[ChunkRecord]) -> None:
+        records = fit_embedding_records(records, self.embedding_capabilities)
         console.print(
             f"[dim]Chatbot sync: embedding {corpus} corpus ({len(records)} records)...[/dim]"
         )
-        vectors = (
-            self.embedding_client.embed([record.text for record in records])
-            if records
-            else []
-        )
+        with self._span(f"chatbot.embed.{corpus}"):
+            vectors = (
+                self.embedding_client.embed([record.text for record in records])
+                if records
+                else []
+            )
         meta = {
             "embedding_model": service_model_identity(self.chatbot_cfg["embeddings"]),
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": self.embedding_policy_fingerprint,
         }
-        save_corpus(self.index_dir, corpus, records, vectors, meta=meta)
+        with self._span(f"chatbot.write.{corpus}"):
+            save_corpus(self.index_dir, corpus, records, vectors, meta=meta)
+        if self.telemetry is not None:
+            self.telemetry.counter(f"chatbot.records.{corpus}", len(records))
         console.print(
             f"[dim]Chatbot sync: saved {corpus} corpus ({len(records)} records).[/dim]"
         )
@@ -420,8 +457,10 @@ class ChatbotIndexer:
         *,
         changed_keys: list[str],
         deleted_keys: list[str],
+        existing_records: list[ChunkRecord],
+        existing_vectors: Any,
     ) -> None:
-        existing_records, existing_vectors = load_corpus(self.index_dir, corpus)
+        fresh_records = fit_embedding_records(fresh_records, self.embedding_capabilities)
         deleted = set(deleted_keys)
         changed = set(changed_keys)
         call_graph_sources = {
@@ -445,71 +484,128 @@ class ChatbotIndexer:
             if len(existing_vectors) > idx:
                 kept_vectors.append(existing_vectors[idx])
 
-        new_vectors = (
-            self.embedding_client.embed([record.text for record in fresh_records])
-            if fresh_records
-            else []
-        )
+        with self._span(f"chatbot.embed.{corpus}"):
+            new_vectors = (
+                self.embedding_client.embed([record.text for record in fresh_records])
+                if fresh_records
+                else []
+            )
         merged_records = kept_records + fresh_records
         merged_vectors = kept_vectors + new_vectors
         meta = {
             "embedding_model": service_model_identity(self.chatbot_cfg["embeddings"]),
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": self.embedding_policy_fingerprint,
         }
-        save_corpus(self.index_dir, corpus, merged_records, merged_vectors, meta=meta)
+        with self._span(f"chatbot.write.{corpus}"):
+            save_corpus(
+                self.index_dir, corpus, merged_records, merged_vectors, meta=meta
+            )
+        if self.telemetry is not None:
+            self.telemetry.counter(f"chatbot.records.{corpus}", len(fresh_records))
+
+    def _sync_incremental_corpus(
+        self,
+        corpus: str,
+        fresh_records: list[ChunkRecord],
+        *,
+        changed_keys: list[str],
+        deleted_keys: list[str],
+        state: tuple[bool, list[ChunkRecord], Any],
+    ) -> bool:
+        rebuild, existing_records, existing_vectors = state
+        if rebuild:
+            self._save_records(corpus, fresh_records)
+            return True
+
+        deleted = set(deleted_keys)
+        has_effective_deletion = any(
+            record.source_key in deleted for record in existing_records
+        )
+        if not changed_keys and not fresh_records and not has_effective_deletion:
+            return False
+
+        self._merge_records(
+            corpus,
+            fresh_records,
+            changed_keys=changed_keys,
+            deleted_keys=deleted_keys,
+            existing_records=existing_records,
+            existing_vectors=existing_vectors,
+        )
+        return True
 
     def _corpus_needs_rebuild(self, corpus: str) -> bool:
+        return self._load_corpus_state(corpus)[0]
+
+    def source_backed_corpora_needing_rebuild(self) -> list[str]:
+        """Return corpora that require a complete source scan to recover safely."""
+        return [
+            corpus
+            for corpus in SOURCE_BACKED_CORPORA
+            if self._corpus_needs_rebuild(corpus)
+        ]
+
+    def _load_corpus_state(
+        self, corpus: str
+    ) -> tuple[bool, list[ChunkRecord], Any]:
         paths = corpus_paths(self.index_dir, corpus)
         if (
             not paths["chunks"].exists()
             or not paths["vectors"].exists()
+            or not paths["index"].exists()
             or not paths["meta"].exists()
         ):
-            return True
+            return True, [], []
         try:
             meta = json.loads(paths["meta"].read_text(encoding="utf-8"))
         except Exception:
-            return True
+            return True, [], []
         if meta.get("schema_version") != CHATBOT_CORPUS_SCHEMA_VERSION:
-            return True
+            return True, [], []
         if meta.get("embedding_model") != service_model_identity(
             self.chatbot_cfg["embeddings"]
         ):
-            return True
+            return True, [], []
+        if meta.get("embedding_policy_fingerprint") != self.embedding_policy_fingerprint:
+            return True, [], []
 
-        records, vectors = load_corpus(self.index_dir, corpus)
         try:
+            with self._span(f"chatbot.load.{corpus}"):
+                records, vectors = load_corpus(self.index_dir, corpus)
             vector_count = int(getattr(vectors, "shape", [len(vectors)])[0])
         except Exception:
-            vector_count = len(vectors)
-        if not records:
-            return vector_count != 0
+            return True, [], []
         if vector_count != len(records):
-            return True
-        return self._corpus_has_unindexable_source_records(corpus, records)
+            return True, records, vectors
+        if lexical_corpus_record_count(self.index_dir, corpus) != len(records):
+            return True, records, vectors
+        if self._corpus_has_unindexable_source_records(corpus, records):
+            return True, records, vectors
+        return False, records, vectors
 
     def _corpus_has_unindexable_source_records(
         self,
         corpus: str,
         records: list[ChunkRecord],
     ) -> bool:
-        source_backed_corpora = {
-            "code",
-            "symbol",
-            "artifact",
-            "repo_doc",
-            "relationship",
-        }
-        if corpus not in source_backed_corpora:
+        if corpus not in SOURCE_BACKED_CORPORA:
             return False
 
+        max_file_bytes = int(
+            self.chatbot_cfg.get("indexing", {}).get("max_file_bytes", 250000)
+        )
         for record in records:
             rel_path = record.source_key or record.file_path
-            if rel_path and not source_path_is_archiveable(
-                self.repo_root,
-                rel_path,
-                self.cfg,
-            ):
+            if not rel_path:
+                continue
+            source_path = self.repo_root / rel_path
+            try:
+                if source_path.is_file() and source_path.stat().st_size > max_file_bytes:
+                    continue
+            except OSError:
+                return True
+            if not source_path_is_archiveable(self.repo_root, rel_path, self.cfg):
                 return True
         return False
 

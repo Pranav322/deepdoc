@@ -1,4 +1,5 @@
 from .common import *
+from ..llm import ModelCapabilityError, fit_prompt_sections
 
 
 def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
@@ -539,43 +540,74 @@ def _decompose_buckets(
         return plan
 
     def _build_decompose_prompt(bucket: DocBucket, other_titles: list[str]) -> str:
-        other_buckets_str = "\n".join(
-            line for line in other_titles if f"({bucket.slug})" not in line
+        file_list = "\n".join(
+            f"  - {file_path} ({scan.file_line_counts.get(file_path, 0)} lines)"
+            for file_path in bucket.owned_files
         )
-        file_summaries = _build_file_summaries_for_bucket(bucket, scan)
-        return DECOMPOSE_PROMPT.format(
-            title=bucket.title,
-            section=bucket.section,
-            bucket_type=bucket.bucket_type,
-            description=bucket.description,
-            file_count=len(bucket.owned_files),
-            # Show every filename. File names are cheap (~50 chars) and the LLM
-            # cannot design a sensible split for files it cannot see. The old
-            # 50-file cap caused oversized buckets (e.g. 92-file Wishlist) to
-            # survive both decompose passes because the LLM was choosing splits
-            # from a sample. See docs/planner_tuning.md.
-            file_list="\n".join(
-                f"  - {f} ({scan.file_line_counts.get(f, 0)} lines)"
-                for f in bucket.owned_files
-            ),
-            # Raised from 15_000 to 60_000 so all summaries fit for buckets up to
-            # ~200 files at ~300 chars per summary. Modern LLM context windows
-            # easily accommodate this; cost is bounded by bucket size.
-            file_summaries=file_summaries[:60000],
-            existing_buckets=other_buckets_str or "(none)",
-            repo_profile=repo_profile_str,
-        )
+        summary_records = [
+            json.dumps(
+                {
+                    "path": file_path,
+                    "lines": scan.file_line_counts.get(file_path, 0),
+                    "summary": scan.file_summaries.get(file_path, ""),
+                },
+                separators=(",", ":"),
+            )
+            for file_path in bucket.owned_files
+        ]
+
+        def _render(sections: dict[str, str]) -> str:
+            return DECOMPOSE_PROMPT.format(
+                title=bucket.title,
+                section=bucket.section,
+                bucket_type=bucket.bucket_type,
+                description=bucket.description,
+                file_count=len(bucket.owned_files),
+                file_list=sections["file_list"],
+                file_summaries=sections.get("file_summaries") or "(none)",
+                existing_buckets=sections.get("existing_buckets") or "(none)",
+                repo_profile=repo_profile_str,
+            )
+
+        return fit_prompt_sections(
+            llm.capabilities,
+            system=DECOMPOSE_SYSTEM,
+            render_prompt=_render,
+            required_sections={"file_list": file_list},
+            optional_sections=[
+                (
+                    "existing_buckets",
+                    [
+                        line
+                        for line in other_titles
+                        if f"({bucket.slug})" not in line
+                    ],
+                ),
+                ("file_summaries", summary_records),
+            ],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name=f"planner decomposition for {bucket.slug}",
+        ).prompt
 
     def _decompose_one(slug: str, prompt: str) -> tuple[str, dict | None]:
         return slug, _llm_step(llm, DECOMPOSE_SYSTEM, prompt, f"decompose-{slug}")
 
     # ── First pass ───────────────────────────────────────────────────────────
-    prompts: dict[str, tuple[DocBucket, str]] = {
-        bucket.slug: (bucket, _build_decompose_prompt(bucket, all_bucket_titles))
-        for bucket in candidates
-    }
+    prompts: dict[str, tuple[DocBucket, str]] = {}
+    for bucket in candidates:
+        try:
+            prompts[bucket.slug] = (
+                bucket,
+                _build_decompose_prompt(bucket, all_bucket_titles),
+            )
+        except ModelCapabilityError as exc:
+            console.print(
+                f"[yellow]⚠ Skipping decomposition for {bucket.slug}: {exc}[/yellow]"
+            )
 
-    max_workers = min(cfg.get("max_parallel_workers", 6), len(candidates))
+    max_workers = min(cfg.get("max_parallel_workers", 6), len(prompts))
+    if not prompts:
+        return plan
     console.print(
         f"  [dim]Decomposing {len(candidates)} bucket(s) with {max_workers} workers...[/dim]"
     )
@@ -620,21 +652,30 @@ def _decompose_buckets(
         all_bucket_titles_updated = [
             f"- {b.title} ({b.slug}) — {b.description[:80]}" for b in new_buckets
         ]
-        second_prompts: dict[str, tuple[DocBucket, str]] = {
-            b.slug: (b, _build_decompose_prompt(b, all_bucket_titles_updated))
-            for b in oversized
-        }
+        second_prompts: dict[str, tuple[DocBucket, str]] = {}
+        for bucket in oversized:
+            try:
+                second_prompts[bucket.slug] = (
+                    bucket,
+                    _build_decompose_prompt(bucket, all_bucket_titles_updated),
+                )
+            except ModelCapabilityError as exc:
+                console.print(
+                    f"[yellow]⚠ Skipping second-pass decomposition for "
+                    f"{bucket.slug}: {exc}[/yellow]"
+                )
 
         second_results: dict[str, dict | None] = {}
-        max_workers_2 = min(cfg.get("max_parallel_workers", 6), len(oversized))
-        with ThreadPoolExecutor(max_workers=max_workers_2) as executor:
-            futures2 = {
-                executor.submit(_decompose_one, slug, prompt): slug
-                for slug, (_, prompt) in second_prompts.items()
-            }
-            for future in as_completed(futures2):
-                slug, result = future.result()
-                second_results[slug] = result
+        if second_prompts:
+            max_workers_2 = min(cfg.get("max_parallel_workers", 6), len(second_prompts))
+            with ThreadPoolExecutor(max_workers=max_workers_2) as executor:
+                futures2 = {
+                    executor.submit(_decompose_one, slug, prompt): slug
+                    for slug, (_, prompt) in second_prompts.items()
+                }
+                for future in as_completed(futures2):
+                    slug, result = future.result()
+                    second_results[slug] = result
 
         oversized_slugs = {b.slug for b in oversized}
         retained = [b for b in new_buckets if b.slug not in oversized_slugs]

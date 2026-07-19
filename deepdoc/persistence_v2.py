@@ -26,6 +26,7 @@ from typing import Any
 
 from dataclasses import dataclass as _dataclass, field as _field
 
+from .plan_contract import bucket_output_path
 from .v2_models import DocBucket, DocPlan, build_bucket_semantic_id, tracked_bucket_files
 
 
@@ -530,6 +531,7 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
 
     data = {
         "version": "v2",
+        "scan_complete": True,
         "generated_at": _now_iso(),
         "total_files": scan.total_files,
         "languages": scan.languages,
@@ -647,6 +649,35 @@ def save_scan_cache(scan: Any, repo_root: Path) -> None:
             for k in (getattr(scan, "knex_artifacts", None) or [])[:100]
         ],
     }
+    scan_scope = set(getattr(scan, "scan_scope", []) or [])
+    if scan_scope:
+        previous = load_scan_cache(repo_root)
+        if not previous:
+            return
+        merged = dict(previous)
+        merged.update(
+            {
+                "version": "v2",
+                "scan_complete": True,
+                "generated_at": data["generated_at"],
+                "api_endpoints": data["api_endpoints"],
+            }
+        )
+        for field_name in (
+            "file_line_counts",
+            "source_kind_by_file",
+            "file_frameworks",
+            "file_services",
+        ):
+            values = dict(previous.get(field_name) or {})
+            current = data.get(field_name) or {}
+            for path in scan_scope:
+                if path in current:
+                    values[path] = current[path]
+                else:
+                    values.pop(path, None)
+            merged[field_name] = values
+        data = merged
     atomic_write_json(_state_dir(repo_root) / SCAN_CACHE_FILE, data)
 
 
@@ -679,7 +710,10 @@ def scan_cache_age_seconds(repo_root: Path) -> float | None:
 
 
 def save_generation_ledger(
-    results: list[Any], repo_root: Path, output_dir: Path
+    results: list[Any],
+    repo_root: Path,
+    output_dir: Path,
+    file_content_hashes: dict[str, str] | None = None,
 ) -> None:
     """Save a per-page generation record to .deepdoc/ledger.json.
 
@@ -724,11 +758,7 @@ def save_generation_ledger(
             "publication_tier": getattr(bucket, "publication_tier", "core"),
             "source_kind_summary": getattr(bucket, "source_kind_summary", {}),
             "generation_hints": getattr(bucket, "generation_hints", {}),
-            "doc_path": "index.md"
-            if (getattr(bucket, "generation_hints", {}) or {}).get(
-                "is_introduction_page"
-            )
-            else f"{bucket.slug}.md",
+            "doc_path": bucket_output_path(bucket),
             "success": is_success,
             "error": result.error,
             "generated_at": _now_iso(),
@@ -756,7 +786,11 @@ def save_generation_ledger(
 
         # File hashes at generation time (for smart invalidation)
         file_hashes: dict[str, str] = {}
+        cached_hashes = file_content_hashes or {}
         for src_file in tracked_bucket_files(bucket):
+            if cached_hashes.get(src_file):
+                file_hashes[src_file] = cached_hashes[src_file]
+                continue
             src_path = repo_root / src_file
             if src_path.exists():
                 try:
@@ -895,9 +929,12 @@ def find_stale_buckets(
         for src_file in tracked_bucket_files(bucket):
             src_path = repo_root / src_file
             if not src_path.exists():
-                # File was deleted — bucket is stale
-                changed = True
-                break
+                # A path that existed when generated is now deleted. Ignore
+                # never-grounded artifact hints that could not be hashed.
+                if src_file in recorded_hashes:
+                    changed = True
+                    break
+                continue
             try:
                 content = src_path.read_text(encoding="utf-8", errors="replace")
                 current_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()[:16]
@@ -978,7 +1015,14 @@ def save_all(
         except Exception:
             pass  # scan cache is best-effort
     if results:
-        save_generation_ledger(results, repo_root, output_dir)
+        save_generation_ledger(
+            results,
+            repo_root,
+            output_dir,
+            file_content_hashes=(
+                getattr(scan, "file_content_hashes", {}) if scan is not None else {}
+            ),
+        )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

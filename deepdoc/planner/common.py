@@ -18,7 +18,7 @@ from rich.progress import (
 )
 from rich.table import Table
 from ..call_graph import build_call_graph
-from ..llm import LLMClient
+from ..llm import LLMClient, LLMOutputTruncatedError
 from ..parser import parse_file, supported_extensions
 from ..parser.api_detector import APIEndpoint, detect_endpoints
 from ..parser.base import ParsedFile

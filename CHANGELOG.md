@@ -59,6 +59,13 @@ The automated release workflow reads the section that matches the version in
 
 ### Fixed
 
+- **Scoped chatbot recovery preserves complete corpora.** A scoped smart update
+  now performs one complete scan before replacing an unhealthy source-backed
+  corpus, preventing unaffected indexed records from being dropped.
+- **LLM output truncation is explicit.** `llm.max_tokens: null` now omits the
+  provider cap instead of imposing the 16K context reserve, and provider
+  `finish_reason="length"` responses raise a clear configuration error rather
+  than silently falling back to a degraded planner result.
 - **Generated Next.js sites compile with current Mermaid types.** The Mermaid
   runner now selects `HTMLElement` nodes explicitly before passing them to
   `mermaid.run()`, and table-of-contents extraction no longer requires an

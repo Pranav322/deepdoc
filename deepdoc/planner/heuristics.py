@@ -85,6 +85,8 @@ def _llm_step(llm: LLMClient, system: str, prompt: str, step_name: str) -> dict 
         )
         with operation:
             response = llm.complete(system, prompt)
+    except LLMOutputTruncatedError:
+        raise
     except Exception as e:
         console.print(f"[red]✗ LLM call failed for {step_name}: {e}[/red]")
         return None

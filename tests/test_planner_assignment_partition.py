@@ -1,6 +1,10 @@
 from __future__ import annotations
 
+import pytest
+
+from deepdoc.llm import LLMOutputTruncatedError
 from deepdoc.planner.heuristics import (
+    _llm_step,
     _merge_partial_assignment,
     _partition_topology_assignment,
 )
@@ -160,3 +164,14 @@ def test_missing_topology_leaves_complete_inventory_for_llm() -> None:
 
     assert deterministic["buckets"] == []
     assert unresolved == ["a.py", "b.py"]
+
+
+def test_planner_propagates_truncated_llm_output() -> None:
+    class _TruncatedLLM:
+        telemetry = None
+
+        def complete(self, system: str, prompt: str) -> str:
+            raise LLMOutputTruncatedError("output was truncated")
+
+    with pytest.raises(LLMOutputTruncatedError, match="output was truncated"):
+        _llm_step(_TruncatedLLM(), "system", "prompt", "propose")

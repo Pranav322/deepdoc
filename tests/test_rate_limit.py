@@ -12,7 +12,7 @@ import yaml
 from click.testing import CliRunner
 
 from deepdoc.cli import main
-from deepdoc.llm import LLMClient
+from deepdoc.llm import LLMClient, LLMOutputTruncatedError
 from deepdoc.llm.rate_limit import ProviderRateLimiter
 
 
@@ -148,6 +148,49 @@ def test_llm_output_cap_is_clamped_to_context_reserve() -> None:
     )
 
     assert client.max_tokens == 8000
+
+
+def test_llm_null_output_cap_uses_provider_default(monkeypatch) -> None:
+    completion = MagicMock()
+    completion.return_value = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="ok"), finish_reason="stop"
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "deepdoc.llm.client.prepare_litellm",
+        lambda: SimpleNamespace(completion=completion),
+    )
+    client = LLMClient(
+        {"llm": {"provider": "ollama", "model": "ollama/test", "max_tokens": None}}
+    )
+
+    assert client.max_tokens is None
+    assert client.complete("system", "user") == "ok"
+    assert "max_tokens" not in completion.call_args.kwargs
+
+
+def test_llm_length_finish_reason_raises_actionable_error(monkeypatch) -> None:
+    completion = MagicMock()
+    completion.return_value = SimpleNamespace(
+        choices=[
+            SimpleNamespace(
+                message=SimpleNamespace(content="partial"), finish_reason="length"
+            )
+        ]
+    )
+    monkeypatch.setattr(
+        "deepdoc.llm.client.prepare_litellm",
+        lambda: SimpleNamespace(completion=completion),
+    )
+    client = LLMClient(
+        {"llm": {"provider": "ollama", "model": "ollama/test", "max_tokens": 2048}}
+    )
+
+    with pytest.raises(LLMOutputTruncatedError, match="output was truncated"):
+        client.complete("system", "user")
 
 
 def test_llm_client_rejects_oversized_prompt_before_provider(monkeypatch) -> None:

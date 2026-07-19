@@ -13,6 +13,10 @@ from .litellm_compat import prepare_litellm
 from .rate_limit import ProviderRateLimiter
 
 
+class LLMOutputTruncatedError(RuntimeError):
+    """A provider stopped output before the requested response completed."""
+
+
 class LLMClient:
     """Thin wrapper around LiteLLM completion for deepdoc."""
 
@@ -34,9 +38,10 @@ class LLMClient:
             self.context_window_tokens // 2,
         )
         configured_max_tokens = llm_cfg.get("max_tokens")
-        self.max_tokens = min(
-            int(configured_max_tokens) if configured_max_tokens else self.output_reserve_tokens,
-            self.output_reserve_tokens,
+        self.max_tokens = (
+            min(max(1, int(configured_max_tokens)), self.output_reserve_tokens)
+            if configured_max_tokens is not None
+            else None
         )
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = str(llm_cfg.get("base_url") or "") or None
@@ -173,8 +178,8 @@ class LLMClient:
                 ],
                 "temperature": self.temperature,
             }
-            # Only pass max_tokens if explicitly set — otherwise let the model decide
-            if self.max_tokens:
+            # Preserve provider output defaults unless the user explicitly caps output.
+            if self.max_tokens is not None:
                 kwargs["max_tokens"] = self.max_tokens
             if self.base_url:
                 kwargs["base_url"] = self.base_url
@@ -186,6 +191,7 @@ class LLMClient:
             estimated_tokens = max(1, (len(system or "") + len(user or "")) // 4)
             with self.rate_limiter.slot(estimated_tokens):
                 response = litellm.completion(**kwargs)
+            self._raise_if_truncated(response)
             return response.choices[0].message.content or ""
 
         except ImportError:
@@ -193,6 +199,9 @@ class LLMClient:
             raise RuntimeError(
                 "litellm not installed. Run: pip install litellm"
             )
+        except LLMOutputTruncatedError:
+            error_type = "LLMOutputTruncatedError"
+            raise
         except Exception as e:
             error_type = type(e).__name__
             self._apply_provider_cooldown(e)
@@ -226,7 +235,7 @@ class LLMClient:
                 "temperature": self.temperature,
                 "stream": True,
             }
-            if self.max_tokens:
+            if self.max_tokens is not None:
                 kwargs["max_tokens"] = self.max_tokens
             if self.base_url:
                 kwargs["base_url"] = self.base_url
@@ -243,10 +252,14 @@ class LLMClient:
                     if delta and delta.content:
                         response_chars += len(delta.content)
                         yield delta.content
+            self._raise_if_truncated(final_chunk)
 
         except ImportError:
             error_type = "ImportError"
             raise RuntimeError("litellm not installed. Run: pip install litellm")
+        except LLMOutputTruncatedError:
+            error_type = "LLMOutputTruncatedError"
+            raise
         except Exception as exc:
             error_type = type(exc).__name__
             self._apply_provider_cooldown(exc)
@@ -278,6 +291,24 @@ class LLMClient:
                 f"({estimated_input_tokens:,} input + {self.output_reserve_tokens:,} "
                 f"reserved output > {self.context_window_tokens:,} total tokens)."
             )
+
+    def _raise_if_truncated(self, response: Any) -> None:
+        try:
+            finish_reason = str(response.choices[0].finish_reason or "").lower()
+        except (AttributeError, IndexError, TypeError):
+            return
+        if finish_reason != "length":
+            return
+        cap = (
+            f"the configured max_tokens={self.max_tokens}"
+            if self.max_tokens is not None
+            else "the provider's output limit"
+        )
+        raise LLMOutputTruncatedError(
+            "LLM output was truncated by "
+            f"{cap}. Increase llm.output_reserve_tokens and, when set, "
+            "llm.max_tokens before retrying."
+        )
 
     def _apply_provider_cooldown(self, error: Exception) -> None:
         if not self.adaptive_backoff:

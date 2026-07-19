@@ -172,9 +172,11 @@ derive one global evidence allowance with safety/template headroom. Raw source
 is capped at 60% of that allowance; all other evidence categories compete in
 deterministic priority order and trim on line boundaries. Drafts, quality
 retries, and full rewrites receive a final formatted-prompt preflight, while
-`LLMClient` applies the same guard to planner and consistency calls. Provider
-output requests are clamped to the reserved space. Generated frontmatter and
-telemetry expose budget use and trimmed categories.
+`LLMClient` applies the same guard to planner and consistency calls. The reserve
+limits explicitly configured provider output requests, while a null
+`llm.max_tokens` preserves the provider default. Provider length finishes raise
+an actionable truncation error rather than silently degrading a planner result.
+Generated frontmatter and telemetry expose budget use and trimmed categories.
 
 ### P1.4 — Generation uses batch barriers instead of rolling concurrency
 

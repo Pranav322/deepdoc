@@ -137,6 +137,8 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 - Smart-update `merged_plan` now propagates `orphaned_files`, `integration_candidates`, and `classification` from the full plan.
 - Semantic endpoint detection carries a transient `RepoScan` on `ChangeSet`; `_execution_scan()` must reuse it for incremental/targeted work and perform exactly one fallback scan only when semantic detection produced none. Never persist or globally memoize this run-scoped scan.
 - Safe smart updates build an exact-path scan closure from modified files, their bucket siblings, cached route/handler ownership, entry points, and required config. Collection filters before reads and parsing. New/deleted/artifact/config/OpenAPI changes, Django URL trees, incomplete ownership, or scopes covering at least half the repo visibly fall back to one full scan. Scoped endpoint results replace only authoritative route slices; unaffected cached endpoints and repository metadata must survive persistence.
+- A scoped update must perform one complete scan before rebuilding an unhealthy source-backed chatbot corpus (`code`, `symbol`, `artifact`, `repo_doc`, or `relationship`). Healthy corpus updates remain scoped. Never replace a source-backed corpus from a partial `RepoScan`.
+- `llm.output_reserve_tokens` protects prompt context but is not an implicit provider output cap. `llm.max_tokens: null` omits the provider parameter; explicit caps are bounded by the reserve. Treat `finish_reason="length"` as an actionable truncation error, never a planner fallback.
 
 ### Chatbot architecture
 Three independent model surfaces: `llm.*` (doc generation), `chatbot.answer.*` (answer LLM), `chatbot.embeddings.*` (vector embeddings).

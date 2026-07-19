@@ -385,13 +385,12 @@ class SmartUpdater:
         """Build one shared update plan for docs and chatbot refresh."""
         target_commit = self._resolve_head_commit()
         change_set = self._classify_changes(plan, since)
-        chatbot_recovery_needed = chatbot_enabled(
-            self.cfg
-        ) and chatbot_index_needs_refresh(
-            self.repo_root,
-            self.cfg,
-        )
         strategy = change_set.strategy
+        chatbot_recovery_needed = (
+            chatbot_enabled(self.cfg)
+            and strategy == "noop"
+            and chatbot_index_needs_refresh(self.repo_root, self.cfg)
+        )
         engine_mismatch = sync_state.get("engine_fingerprint") != ENGINE_FINGERPRINT
 
         if engine_mismatch or force_replan:

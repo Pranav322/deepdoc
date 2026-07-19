@@ -26,6 +26,10 @@ The automated release workflow reads the section that matches the version in
   affected bucket and route dependencies. Unaffected cached endpoints and scan
   metadata are retained, while structural, configuration, artifact, Django, or
   otherwise uncertain changes visibly fall back to one complete scan.
+- **Incremental chatbot corpus writes.** Update runs now load each corpus once
+  and skip healthy corpora without effective mutations. Touched corpora retain
+  complete JSONL/vector/FAISS/FTS replacement, while stronger FAISS and FTS
+  health checks preserve interrupted-write recovery.
 - **Shared generation evidence indexes.** Module resolution, helper symbols,
   source lines, and symbol boundaries are indexed once per generation engine
   instead of being rebuilt and rescanned for every documentation bucket.

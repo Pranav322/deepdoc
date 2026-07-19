@@ -140,6 +140,8 @@ Three independent model surfaces: `llm.*` (doc generation), `chatbot.answer.*` (
 
 Retrieval is hybrid: FAISS vector search (invalid-embedding filter: score ≤ -0.5) + SQLite FTS + symbol chunks + relationship chunks → candidate set → optional rerank → prompt assembly. Evidence-first responses: `evidence[]` is canonical source proof (file path + line range); `references[]` is for generated/repo docs only. Legacy fields (`code_citations`, `doc_links`, `file_inventory`) are derived from those canonical fields.
 
+Incremental chatbot sync inspects each corpus once, skips healthy corpora without effective changed/deleted keys, and fully replaces JSONL/vector/FAISS/FTS state only for touched or unhealthy corpora. Corpus health includes embedding/schema identity, vector count, FAISS presence, and exact FTS row count. Intentionally oversized source files must not create a permanent rebuild loop.
+
 Query modes:
 - `POST /query` — fast, single-pass, index-first
 - `POST /deep-research` — richer synthesis with bounded archived-source fallback

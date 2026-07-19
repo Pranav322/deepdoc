@@ -187,6 +187,28 @@ def query_lexical_index(
         conn.close()
 
 
+def lexical_corpus_record_count(index_dir: Path, corpus: str) -> int | None:
+    """Return an existing corpus row count without creating lexical state."""
+    db_path = index_dir / LEXICAL_DB_FILE
+    if not db_path.exists():
+        return None
+    conn = sqlite3.connect(db_path)
+    try:
+        table = conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lexical_chunks'"
+        ).fetchone()
+        if table is None:
+            return None
+        row = conn.execute(
+            "SELECT COUNT(*) FROM lexical_chunks WHERE corpus = ?", (corpus,)
+        ).fetchone()
+        return int(row[0]) if row is not None else None
+    except sqlite3.Error:
+        return None
+    finally:
+        conn.close()
+
+
 def _ensure_lexical_schema(conn: sqlite3.Connection) -> None:
     conn.execute(
         """

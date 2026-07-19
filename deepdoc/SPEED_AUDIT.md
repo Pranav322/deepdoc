@@ -223,18 +223,24 @@ symbol boundaries. Disk remains a fallback only for files absent from the scan
 cache. The indexes are eager and immutable, avoiding concurrent lazy-cache
 mutation and unbounded cache growth.
 
-### P1.7 — Chatbot incremental merges rewrite complete corpora
+### P1.7 — Completed: skip untouched chatbot corpora
 
 **Locations:** `chatbot/indexer.py:292-355,424-459,480`
 
-`_corpus_needs_rebuild` loads each corpus, and `_merge_records` loads it again.
-The incremental path calls merges for all non-rebuilt corpora, including
-untouched corpora, then rewrites chunk JSONL, vectors, FAISS, and FTS state.
-Only fresh records avoid re-embedding.
+**Resolution:** Incremental sync now inspects each corpus once and passes the
+loaded records/vectors into merge work. Healthy corpora with no effective
+changed or deleted source keys are skipped byte-for-byte; touched corpora retain
+the safe full JSONL/vector/FAISS/FTS replacement contract. Recovery checks now
+include FAISS presence and exact FTS row alignment, so skipping does not hide a
+partial prior write. Normal non-noop updates also avoid a redundant chatbot
+recovery inspection pass.
 
-**Action:** Skip untouched corpora. Pass already loaded records/vectors into
-updates. Longer term, use keyed shards or mutable stores so one changed file
-does not rewrite a complete corpus.
+The health check no longer treats intentionally oversized source files as
+permanently repairable corruption, while missing and explicitly excluded normal
+sources still trigger recovery. On `backend-tss-api_v2`, a 6,990-record full
+index followed by a one-file Python refresh rewrote only code, symbol, and
+relationship corpora; artifact, doc-summary, doc-full, and repo-doc JSONL files
+remained byte-identical.
 
 ### P1.8 — Incremental source archive updates are whole-archive rewrites
 

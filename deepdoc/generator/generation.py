@@ -36,7 +36,7 @@ from rich.progress import (
 )
 
 from .. import __version__ as DEEPDOC_VERSION
-from ..llm import LLMClient, is_retryable_llm_error
+from ..llm import LLMClient, fit_prompt_sections, is_retryable_llm_error
 from ..parser import parse_file, supported_extensions
 from ..parser.base import ParsedFile, Symbol
 from ..plan_contract import bucket_output_path, validate_plan_contract
@@ -123,42 +123,31 @@ class PageGenerator:
         # Select prompt template via generation_hints.prompt_style
         prompt_template = get_prompt_for_bucket(bucket)
 
-        # Compose the enriched source context
+        # Keep source proof mandatory; supplemental categories are fitted later.
         full_source = evidence.source_context
-        if evidence.compressed_cards_context:
-            full_source += (
+        optional_contexts = [
+            (
+                "compressed_cards",
                 "\n\n## Compressed File Coverage\n"
                 "These files were not dropped. They are represented by derived evidence "
                 "cards and still count as authoritative coverage inputs.\n\n"
-                f"{evidence.compressed_cards_context}"
-            )
-        if evidence.cluster_context:
-            full_source += f"\n\n## Giant File Clusters\n{evidence.cluster_context}"
-        if evidence.integration_context:
-            full_source += f"\n\n## Integration Context\n{evidence.integration_context}"
-        if evidence.database_context:
-            full_source += f"\n\n## Database Schema\n{evidence.database_context}"
-        if evidence.runtime_context:
-            full_source += (
-                f"\n\n## Runtime & Background Jobs\n{evidence.runtime_context}"
-            )
-        # flow_context is injected via dedicated template placeholder
-        if evidence.artifact_context:
-            full_source += f"\n\n## Artifacts\n{evidence.artifact_context}"
-        if evidence.graph_context:
-            full_source += f"\n\n## Dependency Graph\n{evidence.graph_context}"
-        if evidence.cross_ref_context:
-            full_source += f"\n\n{evidence.cross_ref_context}"
-        if evidence.plan_summary_context:
-            full_source += f"\n\n## Repository Map\n{evidence.plan_summary_context}"
-        if evidence.repo_docs_context:
-            full_source += f"\n\n{evidence.repo_docs_context}"
-        if evidence.helper_context:
-            full_source += f"\n\n{evidence.helper_context}"
-        if evidence.config_env_context:
-            full_source += (
-                f"\n\n## Config & Environment Evidence\n{evidence.config_env_context}"
-            )
+                + evidence.compressed_cards_context,
+            ),
+            ("cluster", "\n\n## Giant File Clusters\n" + evidence.cluster_context),
+            ("integration", "\n\n## Integration Context\n" + evidence.integration_context),
+            ("database", "\n\n## Database Schema\n" + evidence.database_context),
+            ("runtime", "\n\n## Runtime & Background Jobs\n" + evidence.runtime_context),
+            ("artifact", "\n\n## Artifacts\n" + evidence.artifact_context),
+            ("graph", "\n\n## Dependency Graph\n" + evidence.graph_context),
+            ("cross_reference", "\n\n" + evidence.cross_ref_context),
+            ("plan_summary", "\n\n## Repository Map\n" + evidence.plan_summary_context),
+            ("repo_docs", "\n\n" + evidence.repo_docs_context),
+            ("helpers", "\n\n" + evidence.helper_context),
+            (
+                "config_environment",
+                "\n\n## Config & Environment Evidence\n" + evidence.config_env_context,
+            ),
+        ]
         page_contract = (bucket.generation_hints or {}).get("page_contract", {})
         if page_contract:
             contract_lines = [
@@ -217,62 +206,70 @@ class PageGenerator:
         # Resource group for endpoint pages
         resource_group = bucket.slug.replace("-api", "").replace("-", " ").title()
 
-        user_prompt = prompt_template.format(
-            title=bucket.title,
-            project_name=self.cfg.get("project_name", self.repo_root.name),
-            description=self.cfg.get("description", ""),
-            page_description=bucket.description,
-            languages=", ".join(
-                k for k in (self.cfg.get("languages") or ["python", "javascript"])
-            ),
-            frameworks=", ".join(self.cfg.get("frameworks") or []),
-            source_context=full_source,
-            flow_context=evidence.flow_context or "",
-            endpoints_detail=evidence.endpoints_detail,
-            openapi_context=openapi_context,
-            resource_group=resource_group,
-            required_sections=required_sections,
-            required_diagrams=required_diagrams,
-            coverage_targets=coverage_targets,
-            sitemap_context=sitemap_context,
-            dependency_links=dependency_links,
-        )
-
-        if failure_prefix:
-            user_prompt = failure_prefix + "\n\n" + user_prompt
-
-        if quality_feedback:
-            user_prompt += (
-                "\n\n## Quality Feedback From Previous Draft\n"
-                "Revise the page to address these issues while staying grounded in the same evidence:\n"
-                f"{quality_feedback}\n"
+        def _render(sections: dict[str, str]) -> str:
+            source_context = sections["source_context"]
+            for name, _ in optional_contexts:
+                source_context += sections.get(name, "")
+            user_prompt = prompt_template.format(
+                title=bucket.title,
+                project_name=self.cfg.get("project_name", self.repo_root.name),
+                description=self.cfg.get("description", ""),
+                page_description=bucket.description,
+                languages=", ".join(
+                    k for k in (self.cfg.get("languages") or ["python", "javascript"])
+                ),
+                frameworks=", ".join(self.cfg.get("frameworks") or []),
+                source_context=source_context,
+                flow_context=sections["flow_context"],
+                endpoints_detail=sections["endpoints_detail"],
+                openapi_context=sections["openapi_context"],
+                resource_group=resource_group,
+                required_sections=required_sections,
+                required_diagrams=required_diagrams,
+                coverage_targets=coverage_targets,
+                sitemap_context=sections["sitemap_context"],
+                dependency_links=sections["dependency_links"],
             )
+            if sections["failure_prefix"]:
+                user_prompt = sections["failure_prefix"] + "\n\n" + user_prompt
+            if sections["quality_feedback"]:
+                user_prompt += (
+                    "\n\n## Quality Feedback From Previous Draft\n"
+                    "Revise the page to address these issues while staying grounded in the same evidence:\n"
+                    f"{sections['quality_feedback']}\n"
+                )
+            return user_prompt
 
-        context_tokens = max(
-            4096,
-            int((self.cfg.get("llm", {}) or {}).get("context_window_tokens", 128000)),
+        fitted = fit_prompt_sections(
+            self.llm.capabilities,
+            system=SYSTEM_V2,
+            render_prompt=_render,
+            required_sections={
+                "source_context": full_source,
+                "flow_context": evidence.flow_context or "",
+                "endpoints_detail": evidence.endpoints_detail or "",
+                "openapi_context": openapi_context or "",
+                "sitemap_context": sitemap_context or "",
+                "dependency_links": dependency_links or "",
+                "failure_prefix": failure_prefix or "",
+                "quality_feedback": quality_feedback or "",
+            },
+            optional_sections=[
+                (name, [value] if value else []) for name, value in optional_contexts
+            ],
+            output_reserve_tokens=self.llm.output_reserve_tokens,
+            step_name=f"page generation for {bucket.slug}",
         )
-        output_reserve = min(
-            max(
-                1024,
-                int((self.cfg.get("llm", {}) or {}).get("output_reserve_tokens", 16000)),
-            ),
-            context_tokens // 2,
-        )
-        estimated_input_tokens = max(
-            1,
-            (len(SYSTEM_V2) + len(user_prompt)) // 4,
-        )
-        max_input_tokens = context_tokens - output_reserve
-        if estimated_input_tokens > max_input_tokens:
-            raise ValueError(
-                "Generated prompt exceeds llm.context_window_tokens after evidence "
-                f"budgeting ({estimated_input_tokens:,} input + {output_reserve:,} "
-                f"reserved output > {context_tokens:,} context tokens). Increase the "
-                "context window or reduce evidence/output settings."
-            )
+        user_prompt = fitted.prompt
+        evidence.prompt_input_tokens = fitted.input_tokens
+        evidence.prompt_tokens_estimated = fitted.tokens_estimated
+        evidence.prompt_omitted_contexts = sorted(fitted.omitted_records)
 
         telemetry = getattr(self.llm, "telemetry", None)
+        if telemetry is not None:
+            telemetry.counter("generation.prompt_input_tokens", fitted.input_tokens)
+            for name, count in fitted.omitted_records.items():
+                telemetry.counter(f"generation.prompt_omitted_{name}", count)
         stage = "full_rewrite" if failure_prefix else (
             "quality_retry" if quality_feedback else "draft"
         )
@@ -1218,6 +1215,9 @@ Re-run `deepdoc generate` to retry.
                     "deepdoc_evidence_budget_chars": evidence.evidence_budget_chars,
                     "deepdoc_evidence_chars_used": evidence.evidence_chars_used,
                     "deepdoc_evidence_trimmed": evidence.trimmed_contexts,
+                    "deepdoc_prompt_input_tokens": evidence.prompt_input_tokens,
+                    "deepdoc_prompt_tokens_estimated": evidence.prompt_tokens_estimated,
+                    "deepdoc_prompt_omitted_contexts": evidence.prompt_omitted_contexts,
                 }
             )
         return _merge_frontmatter_fields(content, fields)

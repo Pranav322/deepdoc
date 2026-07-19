@@ -21,6 +21,7 @@ from deepdoc.generator import (
     ValidationResult,
     summarize_generation_results,
 )
+from deepdoc.llm import ModelCapabilities
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.planner import RepoScan
 from deepdoc.prompts import OVERVIEW_V2, get_prompt_for_bucket
@@ -268,15 +269,55 @@ def test_page_generator_rejects_oversized_final_prompt_before_llm(tmp_path: Path
         cross_ref_context="",
     )
     llm = MagicMock()
+    llm.capabilities = ModelCapabilities(
+        model="test",
+        capability_model="test",
+        context_window_tokens=4096,
+        max_output_tokens=1024,
+        source="test",
+    )
+    llm.output_reserve_tokens = 1024
     cfg = deepcopy(DEFAULT_CONFIG)
     cfg["llm"]["context_window_tokens"] = 4096
     cfg["llm"]["output_reserve_tokens"] = 1024
     generator = PageGenerator(llm, cfg, tmp_path)
 
-    with pytest.raises(ValueError, match="exceeds llm.context_window_tokens"):
+    with pytest.raises(ValueError, match="required inventory exceeds"):
         generator.generate(evidence, "", "")
 
     llm.complete.assert_not_called()
+
+
+def test_page_generator_omits_optional_context_before_required_evidence(tmp_path: Path) -> None:
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="def checkout():\n    return True\n",
+        endpoints_detail="GET /checkout",
+        integration_context="integration " * 20000,
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+    )
+    llm = MagicMock()
+    llm.capabilities = ModelCapabilities(
+        model="test",
+        capability_model="test",
+        context_window_tokens=4096,
+        max_output_tokens=1024,
+        source="test",
+    )
+    llm.output_reserve_tokens = 1024
+    llm.complete.return_value = "# Feature\n"
+    generator = PageGenerator(llm, deepcopy(DEFAULT_CONFIG), tmp_path)
+
+    result = generator.generate(evidence, "## Sitemap\n", "")
+
+    assert result == "# Feature\n"
+    assert "integration" in evidence.prompt_omitted_contexts
+    prompt = llm.complete.call_args.args[1]
+    assert "def checkout" in prompt
 
 
 def test_flow_context_is_injected_and_validated(tmp_path: Path) -> None:

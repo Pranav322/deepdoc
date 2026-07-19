@@ -17,6 +17,10 @@ The automated release workflow reads the section that matches the version in
   now preserve complete required inventories and fit optional records into the
   resolved model token envelope, replacing raw planner character slices and the
   previous 50-endpoint formatter cap.
+- **Complete page prompt fitting.** Active V2 page generation now token-fits the
+  final request, including templates, required evidence, OpenAPI, sitemap links,
+  and retry instructions. Omitted supplemental contexts are exposed in page
+  provenance instead of causing a late approximate context failure.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

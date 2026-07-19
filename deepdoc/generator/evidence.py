@@ -81,6 +81,9 @@ class AssembledEvidence:
     evidence_budget_chars: int = 0
     evidence_chars_used: int = 0
     trimmed_contexts: list[str] = field(default_factory=list)
+    prompt_input_tokens: int = 0
+    prompt_tokens_estimated: bool = False
+    prompt_omitted_contexts: list[str] = field(default_factory=list)
 
 
 @dataclass

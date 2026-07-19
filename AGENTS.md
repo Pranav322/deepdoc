@@ -152,6 +152,8 @@ Incremental chatbot sync inspects each corpus once, skips healthy corpora withou
 
 The canonical source archive is `source_archive.sqlite3`: path rows reference independently gzip-compressed SHA-256 blobs and carry catalog metadata in the same transaction. A stable policy fingerprint covers archive limits/excludes; policy changes trigger an atomic full rebuild, while normal updates read and transact only changed/deleted paths. `source_archive.json.gz` remains read-compatible and migrates on first write.
 
+Chatbot answer capability resolution is independent from document generation. An explicitly configured `chatbot.answer` model needs its own known LiteLLM model, `base_model`, or explicit context. Only an inherited answer model may inherit `llm.*` capability settings. Answer, continuation, reranker, and correction prompts must fit the answer-client envelope; retrieval candidate limits remain operational controls.
+
 Query modes:
 - `POST /query` — fast, single-pass, index-first
 - `POST /deep-research` — richer synthesis with bounded archived-source fallback

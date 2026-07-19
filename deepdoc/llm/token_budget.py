@@ -81,6 +81,8 @@ def _litellm_model_info(model: str) -> dict[str, Any] | None:
 def resolve_completion_capabilities(
     model: str,
     config: dict[str, Any] | None = None,
+    *,
+    config_prefix: str = "llm",
 ) -> ModelCapabilities:
     """Resolve completion capabilities from config, LiteLLM, or a base model."""
     config = config or {}
@@ -106,8 +108,8 @@ def resolve_completion_capabilities(
     if context_window is None:
         raise ModelCapabilityError(
             f"Could not resolve the context window for model {model!r}. "
-            "Set llm.base_model to a LiteLLM-known model or set "
-            "llm.context_window_tokens explicitly."
+            f"Set {config_prefix}.base_model to a LiteLLM-known model or set "
+            f"{config_prefix}.context_window_tokens explicitly."
         )
 
     max_output = explicit_output or metadata_output

@@ -21,6 +21,10 @@ The automated release workflow reads the section that matches the version in
   final request, including templates, required evidence, OpenAPI, sitemap links,
   and retry instructions. Omitted supplemental contexts are exposed in page
   provenance instead of causing a late approximate context failure.
+- **Chatbot answer prompt fitting.** Answer, continuation, reranker, and
+  correction requests now use the selected answer model's local LiteLLM
+  capability envelope. Retrieval fan-out remains bounded separately, and local
+  capacity failures are reported clearly before a provider request.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

@@ -4,6 +4,14 @@ from __future__ import annotations
 
 from typing import Any, Iterator
 
+from ..llm import (
+    ModelCapabilityError,
+    ModelCapabilityError,
+    build_prompt_budget,
+    count_message_tokens,
+    fit_prompt_sections,
+    resolve_completion_capabilities,
+)
 from ..llm.litellm_compat import prepare_litellm
 from .chunker import MAX_CHUNK_CHARS
 from .settings import get_chatbot_cfg, resolve_service_api_key
@@ -14,21 +22,106 @@ class LiteLLMChatClient:
 
     def __init__(self, service_cfg: dict[str, Any]) -> None:
         self.service_cfg = service_cfg
+        self.model = str(service_cfg.get("model") or "")
+        self.capabilities = resolve_completion_capabilities(
+            self.model,
+            service_cfg,
+            config_prefix="chatbot.answer",
+        )
+        self.prompt_budget = build_prompt_budget(
+            self.capabilities,
+            output_reserve_tokens=service_cfg.get("output_reserve_tokens"),
+        )
+        self.context_window_tokens = self.capabilities.context_window_tokens
+        self.output_reserve_tokens = self.prompt_budget.output_reserve_tokens
+        configured_max_tokens = service_cfg.get("max_tokens")
+        self.max_tokens = (
+            min(
+                max(1, int(configured_max_tokens)),
+                self.output_reserve_tokens,
+                self.capabilities.max_output_tokens or self.output_reserve_tokens,
+            )
+            if configured_max_tokens is not None
+            else None
+        )
+
+    def fit_prompt_sections(self, **kwargs):
+        """Fit a chatbot prompt through the answer model's resolved envelope."""
+        return fit_prompt_sections(
+            self.capabilities,
+            output_reserve_tokens=self.output_reserve_tokens,
+            **kwargs,
+        )
+
+    def fit_continuation_prompt(
+        self,
+        system: str,
+        instruction: str,
+        previous_answer: str,
+        legacy_char_limit: int,
+    ) -> str:
+        """Return the largest line-aligned answer suffix that fits the model."""
+        candidate = previous_answer[-max(400, legacy_char_limit) :]
+        lines = candidate.splitlines(keepends=True) or [candidate]
+
+        def _fit(tail: str):
+            return self.fit_prompt_sections(
+                system=system,
+                render_prompt=lambda sections: (
+                    instruction
+                    + "\n\nPrevious answer tail:\n"
+                    + sections.get("tail", "")
+                ),
+                required_sections={},
+                optional_sections=[("tail", [tail])],
+                step_name="chatbot continuation",
+            )
+
+        low, high = 0, len(lines) - 1
+        best = None
+        while low <= high:
+            middle = (low + high) // 2
+            fitted = _fit("".join(lines[middle:]))
+            if fitted.omitted_records.get("tail"):
+                low = middle + 1
+            else:
+                best = fitted
+                high = middle - 1
+        if best is None:
+            raise ModelCapabilityError(
+                "Chatbot continuation instruction and answer tail cannot fit the "
+                "resolved answer-model context window."
+            )
+        return best.prompt
+
+    def _validate_prompt_size(self, system: str, user: str) -> None:
+        input_tokens, _ = count_message_tokens(system, user, self.capabilities)
+        maximum_input = (
+            self.context_window_tokens
+            - self.output_reserve_tokens
+            - self.prompt_budget.safety_tokens
+        )
+        if input_tokens > maximum_input:
+            raise ModelCapabilityError(
+                "Chatbot prompt exceeds the resolved answer-model context window "
+                f"({input_tokens:,} input tokens > {maximum_input:,} available)."
+            )
 
     def complete(self, system: str, user: str) -> str:
         try:
+            self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
-                "model": self.service_cfg.get("model"),
+                "model": self.model,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
                 ],
                 "temperature": self.service_cfg.get("temperature", 0.1),
             }
-            if self.service_cfg.get("max_tokens"):
-                kwargs["max_tokens"] = self.service_cfg["max_tokens"]
+            if self.max_tokens is not None:
+                kwargs["max_tokens"] = self.max_tokens
             if self.service_cfg.get("base_url"):
                 kwargs["base_url"] = self.service_cfg["base_url"]
             if self.service_cfg.get("api_version"):
@@ -43,6 +136,8 @@ class LiteLLMChatClient:
             raise RuntimeError(
                 "litellm not installed. Install deepdoc[chatbot]."
             ) from exc
+        except ModelCapabilityError:
+            raise
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")
@@ -53,10 +148,11 @@ class LiteLLMChatClient:
 
     def complete_stream(self, system: str, user: str) -> Iterator[str]:
         try:
+            self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
-                "model": self.service_cfg.get("model"),
+                "model": self.model,
                 "messages": [
                     {"role": "system", "content": system},
                     {"role": "user", "content": user},
@@ -64,8 +160,8 @@ class LiteLLMChatClient:
                 "temperature": self.service_cfg.get("temperature", 0.1),
                 "stream": True,
             }
-            if self.service_cfg.get("max_tokens"):
-                kwargs["max_tokens"] = self.service_cfg["max_tokens"]
+            if self.max_tokens is not None:
+                kwargs["max_tokens"] = self.max_tokens
             if self.service_cfg.get("base_url"):
                 kwargs["base_url"] = self.service_cfg["base_url"]
             if self.service_cfg.get("api_version"):
@@ -83,6 +179,8 @@ class LiteLLMChatClient:
             raise RuntimeError(
                 "litellm not installed. Install deepdoc[chatbot]."
             ) from exc
+        except ModelCapabilityError:
+            raise
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")
@@ -203,6 +301,9 @@ def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:
                 "api_key_env": llm_cfg.get("api_key_env") or answer_cfg.get("api_key_env", ""),
                 "base_url": llm_cfg.get("base_url") or answer_cfg.get("base_url", ""),
                 "api_version": llm_cfg.get("api_version") or answer_cfg.get("api_version", ""),
+                "base_model": answer_cfg.get("base_model") or llm_cfg.get("base_model"),
+                "context_window_tokens": answer_cfg.get("context_window_tokens") or llm_cfg.get("context_window_tokens"),
+                "output_reserve_tokens": answer_cfg.get("output_reserve_tokens") or llm_cfg.get("output_reserve_tokens"),
             }
             provider, model = llm_provider, llm_model
 

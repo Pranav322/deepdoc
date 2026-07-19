@@ -2,11 +2,54 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
-from deepdoc.chatbot.providers import LiteLLMEmbeddingClient
+import pytest
+
+from deepdoc.llm import ModelCapabilityError
+from deepdoc.chatbot.providers import LiteLLMChatClient, LiteLLMEmbeddingClient
 
 
 class _FakeContextWindowError(Exception):
     pass
+
+
+def test_chat_client_clamps_output_and_rejects_oversized_prompt(monkeypatch) -> None:
+    completion_calls = []
+
+    class _FakeLiteLLM:
+        def get_model_info(self, model):
+            return {"max_input_tokens": 4096, "max_output_tokens": 1024}
+
+        def token_counter(self, **kwargs):
+            text = " ".join(message["content"] for message in kwargs["messages"])
+            return len(text.split())
+
+        def completion(self, **kwargs):
+            completion_calls.append(kwargs)
+            return SimpleNamespace(
+                choices=[SimpleNamespace(message=SimpleNamespace(content="ok"))]
+            )
+
+    monkeypatch.setattr(
+        "deepdoc.chatbot.providers.prepare_litellm", lambda: _FakeLiteLLM()
+    )
+    monkeypatch.setattr(
+        "deepdoc.llm.token_budget.prepare_litellm", lambda: _FakeLiteLLM()
+    )
+    client = LiteLLMChatClient(
+        {
+            "provider": "openai",
+            "model": "chat-test",
+            "context_window_tokens": 4096,
+            "output_reserve_tokens": 1024,
+            "max_tokens": 5000,
+        }
+    )
+
+    assert client.max_tokens == 1024
+    with pytest.raises(ModelCapabilityError, match="resolved answer-model context window"):
+        client.complete("system", "word " * 4000)
+
+    assert completion_calls == []
 
 
 def test_embedding_client_splits_batches_on_context_window_error(monkeypatch) -> None:

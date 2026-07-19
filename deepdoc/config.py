@@ -196,6 +196,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "api_version": "",
             "temperature": 0.1,
             "max_tokens": 24000,
+            "base_model": None,
+            "context_window_tokens": None,
+            "output_reserve_tokens": None,
             "continuation_retries": 2,
             "continuation_context_chars": 12000,
             "rate_limits": {

@@ -156,6 +156,8 @@ Chatbot answer capability resolution is independent from document generation. An
 
 Deep research uses that same answer-client envelope. Initial evidence is optional whole-record context, but the original goal, current sub-question, completed tool transcript, and completed synthesis findings are required. Never turn a `ModelCapabilityError` into a plausible partial research result.
 
+Embedding capacity is separate from completion capacity. Default FastEmbed Nomic resolves from the local token profile without importing or downloading FastEmbed; first actual embedding still triggers the normal lazy download. Hosted embedding aliases need a LiteLLM-known `base_model` or explicit `max_input_tokens`. Fitted embedding text, hash, and chunk ID must stay aligned, and capacity-policy fingerprint changes rebuild semantic corpora without rebuilding the source archive.
+
 Query modes:
 - `POST /query` — fast, single-pass, index-first
 - `POST /deep-research` — richer synthesis with bounded archived-source fallback

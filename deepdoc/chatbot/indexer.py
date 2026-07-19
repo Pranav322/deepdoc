@@ -26,6 +26,11 @@ from .docs_summary import (
     build_repo_doc_chunks,
     discover_repo_doc_files,
 )
+from .embedding_capabilities import (
+    embedding_policy_fingerprint,
+    fit_embedding_records,
+    resolve_embedding_capabilities,
+)
 from .persistence import (
     corpus_paths,
     lexical_corpus_record_count,
@@ -46,7 +51,7 @@ from .symbol_index import build_symbol_chunks
 from .types import ChunkRecord
 
 console = Console()
-CHATBOT_CORPUS_SCHEMA_VERSION = 5
+CHATBOT_CORPUS_SCHEMA_VERSION = 6
 SOURCE_BACKED_CORPORA = (
     "code",
     "symbol",
@@ -69,6 +74,12 @@ class ChatbotIndexer:
         self.cfg = cfg
         self.chatbot_cfg = get_chatbot_cfg(cfg)
         self.index_dir = chatbot_index_dir(repo_root, cfg)
+        self.embedding_capabilities = resolve_embedding_capabilities(
+            self.chatbot_cfg["embeddings"]
+        )
+        self.embedding_policy_fingerprint = embedding_policy_fingerprint(
+            self.embedding_capabilities
+        )
         self.embedding_client = build_embedding_client(cfg)
         self.telemetry = telemetry
 
@@ -416,6 +427,7 @@ class ChatbotIndexer:
         }
 
     def _save_records(self, corpus: str, records: list[ChunkRecord]) -> None:
+        records = fit_embedding_records(records, self.embedding_capabilities)
         console.print(
             f"[dim]Chatbot sync: embedding {corpus} corpus ({len(records)} records)...[/dim]"
         )
@@ -428,6 +440,7 @@ class ChatbotIndexer:
         meta = {
             "embedding_model": service_model_identity(self.chatbot_cfg["embeddings"]),
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": self.embedding_policy_fingerprint,
         }
         with self._span(f"chatbot.write.{corpus}"):
             save_corpus(self.index_dir, corpus, records, vectors, meta=meta)
@@ -447,6 +460,7 @@ class ChatbotIndexer:
         existing_records: list[ChunkRecord],
         existing_vectors: Any,
     ) -> None:
+        fresh_records = fit_embedding_records(fresh_records, self.embedding_capabilities)
         deleted = set(deleted_keys)
         changed = set(changed_keys)
         call_graph_sources = {
@@ -481,6 +495,7 @@ class ChatbotIndexer:
         meta = {
             "embedding_model": service_model_identity(self.chatbot_cfg["embeddings"]),
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": self.embedding_policy_fingerprint,
         }
         with self._span(f"chatbot.write.{corpus}"):
             save_corpus(
@@ -551,6 +566,8 @@ class ChatbotIndexer:
         if meta.get("embedding_model") != service_model_identity(
             self.chatbot_cfg["embeddings"]
         ):
+            return True, [], []
+        if meta.get("embedding_policy_fingerprint") != self.embedding_policy_fingerprint:
             return True, [], []
 
         try:

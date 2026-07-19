@@ -3,6 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.chatbot.chunker import build_artifact_chunks, build_code_chunks
+from deepdoc.chatbot.embedding_capabilities import (
+    embedding_policy_fingerprint,
+    resolve_embedding_capabilities,
+)
 from deepdoc.chatbot.docs_summary import (
     build_doc_full_chunks,
     build_doc_summary_chunks,
@@ -71,6 +75,7 @@ def _seed_healthy_corpora(indexer: ChatbotIndexer) -> None:
     meta = {
         "embedding_model": service_model_identity(indexer.chatbot_cfg["embeddings"]),
         "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+        "embedding_policy_fingerprint": indexer.embedding_policy_fingerprint,
     }
     for corpus in CORPUS_FILES:
         save_corpus(indexer.index_dir, corpus, [], [], meta=meta)
@@ -822,6 +827,11 @@ def test_corpus_does_not_rebuild_when_schema_version_matches(
         meta={
             "embedding_model": "fastembed||nomic-ai/nomic-embed-text-v1.5||",
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": embedding_policy_fingerprint(
+                resolve_embedding_capabilities(
+                    {"backend": "fastembed", "fastembed_model": "nomic-ai/nomic-embed-text-v1.5"}
+                )
+            ),
         },
     )
 
@@ -873,6 +883,11 @@ def test_corpus_needs_rebuild_when_existing_source_is_now_excluded(
         meta={
             "embedding_model": "fastembed||nomic-ai/nomic-embed-text-v1.5||",
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": embedding_policy_fingerprint(
+                resolve_embedding_capabilities(
+                    {"backend": "fastembed", "fastembed_model": "nomic-ai/nomic-embed-text-v1.5"}
+                )
+            ),
         },
     )
 
@@ -942,6 +957,7 @@ def test_oversized_source_does_not_force_permanent_corpus_rebuild(
                 indexer.chatbot_cfg["embeddings"]
             ),
             "schema_version": CHATBOT_CORPUS_SCHEMA_VERSION,
+            "embedding_policy_fingerprint": indexer.embedding_policy_fingerprint,
         },
     )
 

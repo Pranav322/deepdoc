@@ -28,6 +28,10 @@ The automated release workflow reads the section that matches the version in
 - **Deep-research prompt fitting.** Research decomposition, initial evidence,
   ReAct turns, and synthesis now use the answer-model token envelope. Required
   transcript and research findings cannot be silently dropped on context limits.
+- **Embedding capability profiles.** Local FastEmbed and hosted LiteLLM
+  embeddings now resolve input capacity separately from completion models. Index
+  records are fitted before persistence so vector text, lexical text, hashes, and
+  IDs agree; capacity-policy changes trigger safe corpus rebuilds.
 - **Local pipeline performance telemetry.** `deepdoc generate` and
   `deepdoc update` now record sanitized phase timings, LLM latency/token usage,
   retry backoff, evidence size, page-write bytes, and chatbot indexing stages in

@@ -6,14 +6,17 @@ from typing import Any, Iterator
 
 from ..llm import (
     ModelCapabilityError,
-    ModelCapabilityError,
     build_prompt_budget,
     count_message_tokens,
     fit_prompt_sections,
     resolve_completion_capabilities,
 )
 from ..llm.litellm_compat import prepare_litellm
-from .chunker import MAX_CHUNK_CHARS
+from .embedding_capabilities import (
+    EmbeddingCapabilityError,
+    fit_embedding_text,
+    resolve_embedding_capabilities,
+)
 from .settings import get_chatbot_cfg, resolve_service_api_key
 
 
@@ -195,6 +198,9 @@ class LiteLLMEmbeddingClient:
 
     def __init__(self, service_cfg: dict[str, Any]) -> None:
         self.service_cfg = service_cfg
+        self.capabilities = resolve_embedding_capabilities(
+            {**service_cfg, "backend": "litellm"}
+        )
         provider = (service_cfg.get("provider") or "").lower()
         model = (service_cfg.get("model") or "").lower()
         default_batch_size = (
@@ -205,6 +211,7 @@ class LiteLLMEmbeddingClient:
     def embed(self, texts: list[str]) -> list[list[float]]:
         if not texts:
             return []
+        texts = [fit_embedding_text(text, self.capabilities) for text in texts]
 
         try:
             litellm = prepare_litellm()
@@ -217,6 +224,8 @@ class LiteLLMEmbeddingClient:
             raise RuntimeError(
                 "litellm not installed. Install deepdoc[chatbot]."
             ) from exc
+        except EmbeddingCapabilityError:
+            raise
         except Exception as exc:
             model = self.service_cfg.get("model", "unknown")
             key_env = self.service_cfg.get("api_key_env", "")
@@ -236,9 +245,10 @@ class LiteLLMEmbeddingClient:
                     return self._embed_batch(litellm, batch[:mid]) + self._embed_batch(
                         litellm, batch[mid:]
                     )
-                trimmed = self._trim_text_for_retry(batch[0])
-                if trimmed != batch[0]:
-                    return self._embed_batch(litellm, [trimmed])
+                raise EmbeddingCapabilityError(
+                    "A token-fitted embedding input was rejected by the provider. "
+                    "Verify chatbot.embeddings.base_model or max_input_tokens."
+                ) from exc
             raise
 
     def _embedding_kwargs(self, batch: list[str]) -> dict[str, Any]:
@@ -266,21 +276,6 @@ class LiteLLMEmbeddingClient:
             or ("input length" in message and "tokens" in message)
             or ("requested" in message and "tokens" in message)
         )
-
-    def _trim_text_for_retry(self, text: str) -> str:
-        if len(text) <= 1200:
-            return text
-        provider = (self.service_cfg.get("provider") or "").lower()
-        if provider == "azure":
-            safe_cap = 2800
-            budget = min(safe_cap, max(int(len(text) * 0.5), 1200))
-        else:
-            budget = min(MAX_CHUNK_CHARS, max(int(len(text) * 0.75), 1200))
-        if budget >= len(text):
-            return text
-        trimmed = text[:budget].rstrip()
-        return trimmed + "\n... [truncated for embedding]"
-
 
 def build_chat_client(cfg: dict[str, Any]) -> LiteLLMChatClient:
     answer_cfg = get_chatbot_cfg(cfg).get("answer", {})
@@ -417,6 +412,9 @@ class FastembedEmbeddingClient:
             "fastembed_model", "nomic-ai/nomic-embed-text-v1.5"
         )
         self.batch_size = service_cfg.get("fastembed_batch_size", 4)
+        self.capabilities = resolve_embedding_capabilities(
+            {**service_cfg, "backend": "fastembed"}
+        )
 
     def embed(self, texts: list[str]) -> list[list[float]]:
         """Embed texts using fastembed. Returns shape (N, embedding_dim)."""
@@ -425,6 +423,7 @@ class FastembedEmbeddingClient:
         try:
             from .embeddings import get_embeddings
 
+            texts = [fit_embedding_text(text, self.capabilities) for text in texts]
             vecs = get_embeddings(
                 texts,
                 backend="fastembed",

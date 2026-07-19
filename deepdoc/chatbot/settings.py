@@ -40,6 +40,8 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         # https://qdrant.github.io/fastembed/examples/Supported_Models/
         "fastembed_model": "nomic-ai/nomic-embed-text-v1.5",
         "fastembed_batch_size": 4,
+        "base_model": None,
+        "max_input_tokens": None,
         "provider": "",  # only required when backend="litellm"
         "model": "",
         "api_key_env": "DEEPDOC_EMBED_API_KEY",

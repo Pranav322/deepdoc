@@ -49,6 +49,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "max_tokens": None,
         "temperature": 0.2,
         "context_window_tokens": 128000,
+        "output_reserve_tokens": 16000,
         "rate_limits": {
             "max_concurrency": 6,
             "requests_per_minute": 60,

@@ -357,7 +357,7 @@ Generation writes quality artifacts under `.deepdoc/`:
 - `.deepdoc/generation_quality.json` records invalid/degraded pages, coverage metrics, local setup warnings, and consistency summary data.
 - `.deepdoc/consistency_warnings.json` records warning-only cross-page identifier consistency findings.
 
-Generated Markdown pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, and `deepdoc_prereqs` (prerequisite page slugs). The Fumadocs UI renders these pages with built-in navigation, search, and table of contents.
+Generated Markdown pages include provenance frontmatter such as `deepdoc_generated_commit`, `deepdoc_generated_at`, `deepdoc_generated_version`, `deepdoc_status`, `deepdoc_evidence_files`, `deepdoc_prereqs`, and evidence-budget usage/trimming fields. The Fumadocs UI renders these pages with built-in navigation, search, and table of contents.
 
 **Options:**
 
@@ -665,9 +665,10 @@ site:
 | `llm.model` | `claude-3-5-sonnet-20241022` | Model name (use provider prefix for non-Anthropic, e.g. `azure/gpt-4.1`) |
 | `llm.api_key_env` | `ANTHROPIC_API_KEY` | Environment variable that holds the API key |
 | `llm.base_url` | `null` | Custom endpoint URL (required for Ollama, optional for Azure) |
-| `llm.max_tokens` | `null` | Max output tokens per LLM call. `null` = no cap (recommended). Set explicitly if your provider requires it (e.g. some Azure deployments). Typical values: `4096` for shorter pages, `8192`–`16384` for detailed docs |
+| `llm.max_tokens` | `null` | Requested output cap. `null` uses `output_reserve_tokens`; larger configured values are clamped to that reserve so input+output cannot exceed the context window |
 | `llm.temperature` | `0.2` | LLM sampling temperature |
 | `llm.context_window_tokens` | `128000` | Model context-window size used for evidence budgeting; `deepdoc init` lets interactive users accept or override it |
+| `llm.output_reserve_tokens` | `16000` | Context space reserved for generated output; also the default/effective upper bound for `max_tokens` |
 | `llm.rate_limits.max_concurrency` | `6` | Maximum simultaneous documentation-model requests |
 | `llm.rate_limits.requests_per_minute` | `60` | Rolling request limit for the documentation model |
 | `llm.rate_limits.tokens_per_minute` | `250000` | Rolling estimated input-token limit for the documentation model |

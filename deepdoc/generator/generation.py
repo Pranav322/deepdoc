@@ -248,6 +248,30 @@ class PageGenerator:
                 f"{quality_feedback}\n"
             )
 
+        context_tokens = max(
+            4096,
+            int((self.cfg.get("llm", {}) or {}).get("context_window_tokens", 128000)),
+        )
+        output_reserve = min(
+            max(
+                1024,
+                int((self.cfg.get("llm", {}) or {}).get("output_reserve_tokens", 16000)),
+            ),
+            context_tokens // 2,
+        )
+        estimated_input_tokens = max(
+            1,
+            (len(SYSTEM_V2) + len(user_prompt)) // 4,
+        )
+        max_input_tokens = context_tokens - output_reserve
+        if estimated_input_tokens > max_input_tokens:
+            raise ValueError(
+                "Generated prompt exceeds llm.context_window_tokens after evidence "
+                f"budgeting ({estimated_input_tokens:,} input + {output_reserve:,} "
+                f"reserved output > {context_tokens:,} context tokens). Increase the "
+                "context window or reduce evidence/output settings."
+            )
+
         telemetry = getattr(self.llm, "telemetry", None)
         stage = "full_rewrite" if failure_prefix else (
             "quality_retry" if quality_feedback else "draft"
@@ -639,6 +663,7 @@ class BucketGenerationEngine:
                 telemetry.counter("evidence.characters", evidence.total_evidence_chars)
                 telemetry.counter("evidence.files_raw", evidence.files_included_raw)
                 telemetry.counter("evidence.files_compressed", evidence.files_compressed)
+                telemetry.counter("evidence.trimmed_contexts", len(evidence.trimmed_contexts))
             degraded = False
 
             if evidence.files_compressed > 0:
@@ -1187,6 +1212,14 @@ Re-run `deepdoc generate` to retry.
             "deepdoc_evidence_records": evidence_records,
             "deepdoc_prereqs": bucket.depends_on,
         }
+        if evidence is not None:
+            fields.update(
+                {
+                    "deepdoc_evidence_budget_chars": evidence.evidence_budget_chars,
+                    "deepdoc_evidence_chars_used": evidence.evidence_chars_used,
+                    "deepdoc_evidence_trimmed": evidence.trimmed_contexts,
+                }
+            )
         return _merge_frontmatter_fields(content, fields)
 
     def _build_page_evidence_records(self, evidence_files: list[str]) -> list[dict[str, Any]]:

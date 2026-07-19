@@ -25,8 +25,19 @@ class LLMClient:
         self.telemetry = telemetry
         llm_cfg = cfg.get("llm", {})
         self.model = llm_cfg.get("model", "")
-        # max_tokens=None means don't cap — let the model use its full output capacity
-        self.max_tokens = llm_cfg.get("max_tokens", None)
+        self.context_window_tokens = max(
+            4096,
+            int(llm_cfg.get("context_window_tokens", 128000)),
+        )
+        self.output_reserve_tokens = min(
+            max(1024, int(llm_cfg.get("output_reserve_tokens", 16000))),
+            self.context_window_tokens // 2,
+        )
+        configured_max_tokens = llm_cfg.get("max_tokens")
+        self.max_tokens = min(
+            int(configured_max_tokens) if configured_max_tokens else self.output_reserve_tokens,
+            self.output_reserve_tokens,
+        )
         self.temperature = llm_cfg.get("temperature", 0.2)
         self.base_url = str(llm_cfg.get("base_url") or "") or None
         # YAML parses bare dates like 2024-12-01 as datetime.date — coerce to str
@@ -151,6 +162,7 @@ class LLMClient:
         error_type = ""
         try:
             self._record_usage(system, user)
+            self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
@@ -202,6 +214,7 @@ class LLMClient:
         error_type = ""
         try:
             self._record_usage(system, user)
+            self._validate_prompt_size(system, user)
             litellm = prepare_litellm()
 
             kwargs: dict[str, Any] = {
@@ -255,6 +268,16 @@ class LLMClient:
             self.usage["calls"] += 1
             self.usage["prompt_chars"] += prompt_chars
             self.usage["estimated_prompt_tokens"] += max(1, prompt_chars // 4)
+
+    def _validate_prompt_size(self, system: str, user: str) -> None:
+        estimated_input_tokens = max(1, (len(system or "") + len(user or "")) // 4)
+        max_input_tokens = self.context_window_tokens - self.output_reserve_tokens
+        if estimated_input_tokens > max_input_tokens:
+            raise ValueError(
+                "LLM prompt exceeds configured context window "
+                f"({estimated_input_tokens:,} input + {self.output_reserve_tokens:,} "
+                f"reserved output > {self.context_window_tokens:,} total tokens)."
+            )
 
     def _apply_provider_cooldown(self, error: Exception) -> None:
         if not self.adaptive_backoff:

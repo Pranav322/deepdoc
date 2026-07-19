@@ -4,11 +4,15 @@ from concurrent.futures import ThreadPoolExecutor
 import threading
 import time
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
+import pytest
 import yaml
 from click.testing import CliRunner
 
 from deepdoc.cli import main
+from deepdoc.llm import LLMClient
 from deepdoc.llm.rate_limit import ProviderRateLimiter
 
 
@@ -128,3 +132,42 @@ def test_init_noninteractive_uses_safe_limit_defaults(tmp_path: Path, monkeypatc
     assert cfg["llm"]["rate_limits"]["max_concurrency"] == 6
     assert cfg["llm"]["rate_limits"]["requests_per_minute"] == 60
     assert cfg["llm"]["rate_limits"]["tokens_per_minute"] == 250000
+
+
+def test_llm_output_cap_is_clamped_to_context_reserve() -> None:
+    client = LLMClient(
+        {
+            "llm": {
+                "provider": "ollama",
+                "model": "ollama/test",
+                "context_window_tokens": 32000,
+                "output_reserve_tokens": 8000,
+                "max_tokens": 500000,
+            }
+        }
+    )
+
+    assert client.max_tokens == 8000
+
+
+def test_llm_client_rejects_oversized_prompt_before_provider(monkeypatch) -> None:
+    completion = MagicMock()
+    monkeypatch.setattr(
+        "deepdoc.llm.client.prepare_litellm",
+        lambda: SimpleNamespace(completion=completion),
+    )
+    client = LLMClient(
+        {
+            "llm": {
+                "provider": "ollama",
+                "model": "ollama/test",
+                "context_window_tokens": 4096,
+                "output_reserve_tokens": 1024,
+            }
+        }
+    )
+
+    with pytest.raises(RuntimeError, match="exceeds configured context window"):
+        client.complete("system", "x" * 20000)
+
+    completion.assert_not_called()

@@ -78,6 +78,9 @@ class AssembledEvidence:
     flow_context: str = ""  # call graph + flow evidence (entrypoints, chains, side effects)
     evidence_file_paths: set[str] = field(default_factory=set)
     config_env_context: str = ""  # extracted env var names and config keys
+    evidence_budget_chars: int = 0
+    evidence_chars_used: int = 0
+    trimmed_contexts: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -125,7 +128,26 @@ class EvidenceAssembler:
         self.scan = scan
         self.plan = plan
         self.cfg = cfg
-        self.source_budget = int(cfg.get("source_context_budget", self.SOURCE_BUDGET))
+        llm_cfg = cfg.get("llm", {}) or {}
+        context_tokens = max(4096, int(llm_cfg.get("context_window_tokens", 128000)))
+        output_reserve = min(
+            max(1024, int(llm_cfg.get("output_reserve_tokens", 16000))),
+            context_tokens // 2,
+        )
+        safety_tokens = max(1024, context_tokens // 20)
+        prompt_overhead_tokens = max(2048, int(context_tokens * 0.15))
+        evidence_tokens = max(
+            1024,
+            context_tokens - output_reserve - safety_tokens - prompt_overhead_tokens,
+        )
+        self.evidence_budget_chars = evidence_tokens * 4
+        configured_source_budget = int(
+            cfg.get("source_context_budget", self.SOURCE_BUDGET)
+        )
+        self.source_budget = min(
+            configured_source_budget,
+            int(self.evidence_budget_chars * 0.60),
+        )
         self.large_file_lines = int(cfg.get("large_file_lines", 500))
         self.giant_file_lines = int(cfg.get("giant_file_lines", 2000))
         # Pre-index: file → bucket slugs for cross-referencing
@@ -193,52 +215,87 @@ class EvidenceAssembler:
             evidence_files.update(self.scan.config_files)
         evidence_files.update(repo_doc_files)
 
-        total = sum(
-            len(s)
-            for s in [
-                source_ctx,
-                compressed_cards_ctx,
-                endpoints_detail,
-                integration_ctx,
-                cluster_ctx,
-                artifact_ctx,
-                graph_ctx,
-                flow_ctx,
-                cross_ref_ctx,
-                database_ctx,
-                runtime_ctx,
-                plan_summary_ctx,
-                repo_docs_ctx,
-                helper_ctx,
-            ]
-        )
-
         config_env_ctx = self._build_config_env_context(bucket)
+
+        fitted, trimmed = self._fit_evidence_contexts(
+            {
+                "source_context": source_ctx,
+                "endpoints_detail": endpoints_detail,
+                "integration_context": integration_ctx,
+                "database_context": database_ctx,
+                "runtime_context": runtime_ctx,
+                "flow_context": flow_ctx,
+                "graph_context": graph_ctx,
+                "config_env_context": config_env_ctx,
+                "helper_context": helper_ctx,
+                "artifact_context": artifact_ctx,
+                "repo_docs_context": repo_docs_ctx,
+                "plan_summary_context": plan_summary_ctx,
+                "cross_ref_context": cross_ref_ctx,
+                "cluster_context": cluster_ctx,
+                "compressed_cards_context": compressed_cards_ctx,
+            }
+        )
+        total = sum(len(value) for value in fitted.values())
 
         return AssembledEvidence(
             bucket=bucket,
-            source_context=source_ctx,
-            compressed_cards_context=compressed_cards_ctx,
-            endpoints_detail=endpoints_detail,
-            integration_context=integration_ctx,
-            cluster_context=cluster_ctx,
-            artifact_context=artifact_ctx,
-            graph_context=graph_ctx,
-            cross_ref_context=cross_ref_ctx,
-            database_context=database_ctx,
-            runtime_context=runtime_ctx,
-            plan_summary_context=plan_summary_ctx,
-            repo_docs_context=repo_docs_ctx,
-            helper_context=helper_ctx,
-            flow_context=flow_ctx,
+            source_context=fitted["source_context"],
+            compressed_cards_context=fitted["compressed_cards_context"],
+            endpoints_detail=fitted["endpoints_detail"],
+            integration_context=fitted["integration_context"],
+            cluster_context=fitted["cluster_context"],
+            artifact_context=fitted["artifact_context"],
+            graph_context=fitted["graph_context"],
+            cross_ref_context=fitted["cross_ref_context"],
+            database_context=fitted["database_context"],
+            runtime_context=fitted["runtime_context"],
+            plan_summary_context=fitted["plan_summary_context"],
+            repo_docs_context=fitted["repo_docs_context"],
+            helper_context=fitted["helper_context"],
+            flow_context=fitted["flow_context"],
             total_evidence_chars=total,
             files_included_raw=files_included_raw,
             files_compressed=len(compressed_file_paths),
             compressed_file_paths=compressed_file_paths,
             coverage_files_total=coverage_total,
             evidence_file_paths=evidence_files,
-            config_env_context=config_env_ctx,
+            config_env_context=fitted["config_env_context"],
+            evidence_budget_chars=self.evidence_budget_chars,
+            evidence_chars_used=total,
+            trimmed_contexts=trimmed,
         )
+
+    def _fit_evidence_contexts(
+        self,
+        contexts: dict[str, str],
+    ) -> tuple[dict[str, str], list[str]]:
+        """Fit all evidence categories into one deterministic character budget."""
+        fitted: dict[str, str] = {}
+        trimmed: list[str] = []
+        remaining = self.evidence_budget_chars
+        for name, value in contexts.items():
+            if not value:
+                fitted[name] = ""
+                continue
+            if len(value) <= remaining:
+                fitted[name] = value
+                remaining -= len(value)
+                continue
+            fitted[name] = self._truncate_at_line(value, remaining)
+            trimmed.append(name)
+            remaining = max(0, remaining - len(fitted[name]))
+        return fitted, trimmed
+
+    @staticmethod
+    def _truncate_at_line(value: str, max_chars: int) -> str:
+        marker = "\n... [trimmed to model context budget]"
+        if max_chars <= len(marker):
+            return ""
+        prefix = value[: max_chars - len(marker)]
+        if "\n" in prefix:
+            prefix = prefix.rsplit("\n", 1)[0]
+        return prefix.rstrip() + marker
 
     # ── Source context (tiered + compressed coverage) ───────────────────
 

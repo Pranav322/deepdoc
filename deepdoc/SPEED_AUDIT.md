@@ -144,7 +144,7 @@ replan therefore does not receive a targeted scan.
 **Action:** Apply include roots during collection, or incrementally patch the
 saved scan, route index, and call graph for changed files.
 
-### P1.3 — Generation evidence has no shared token ceiling
+### P1.3 — Completed: shared context-window evidence ceiling
 
 **Locations:** `generator/evidence.py:114-119,365-416,1385-1406,1565-1642`;
 `generator/generation.py:124-249`
@@ -155,10 +155,14 @@ runtime, configuration, graph, repository-doc, and flow contexts are appended
 outside one global budget. Large prompts increase request upload, model prefill,
 cost, timeout risk, and retry cost.
 
-**Action:** Allocate one token-based budget across all evidence categories.
-Rank evidence by bucket ownership and relevance, reserve output/context-window
-headroom, deduplicate source repeated by specialized contexts, and log actual
-prompt tokens.
+**Resolution:** `llm.context_window_tokens` and `output_reserve_tokens` now
+derive one global evidence allowance with safety/template headroom. Raw source
+is capped at 60% of that allowance; all other evidence categories compete in
+deterministic priority order and trim on line boundaries. Drafts, quality
+retries, and full rewrites receive a final formatted-prompt preflight, while
+`LLMClient` applies the same guard to planner and consistency calls. Provider
+output requests are clamped to the reserved space. Generated frontmatter and
+telemetry expose budget use and trimmed categories.
 
 ### P1.4 — Generation uses batch barriers instead of rolling concurrency
 

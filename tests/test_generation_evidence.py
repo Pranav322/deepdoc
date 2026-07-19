@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 from concurrent.futures import ThreadPoolExecutor
+from copy import deepcopy
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -15,6 +17,7 @@ from deepdoc.generator import (
     EvidenceAssembler,
     GenerationResult,
     PageValidator,
+    PageGenerator,
     ValidationResult,
     summarize_generation_results,
 )
@@ -211,6 +214,69 @@ def test_evidence_assembly_is_deterministic_across_threads(tmp_path: Path) -> No
 
     assert len({item.source_context for item in evidence}) == 1
     assert len({item.helper_context for item in evidence}) == 1
+
+
+def test_context_window_controls_effective_evidence_budget(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    plan = make_plan([bucket])
+    small_cfg = deepcopy(DEFAULT_CONFIG)
+    small_cfg["llm"]["context_window_tokens"] = 16000
+    small_cfg["llm"]["output_reserve_tokens"] = 4000
+    large_cfg = deepcopy(DEFAULT_CONFIG)
+    large_cfg["llm"]["context_window_tokens"] = 128000
+    large_cfg["llm"]["output_reserve_tokens"] = 16000
+
+    small = EvidenceAssembler(tmp_path, scan, plan, small_cfg)
+    large = EvidenceAssembler(tmp_path, scan, plan, large_cfg)
+
+    assert small.evidence_budget_chars < large.evidence_budget_chars
+    assert small.source_budget <= small.evidence_budget_chars * 0.60
+    assert small.source_budget < int(small_cfg["source_context_budget"])
+
+
+def test_all_evidence_categories_share_one_budget(tmp_path: Path) -> None:
+    scan = _make_scan(tmp_path)
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg["llm"]["context_window_tokens"] = 16000
+    cfg["llm"]["output_reserve_tokens"] = 4000
+    assembler = EvidenceAssembler(tmp_path, scan, make_plan([bucket]), cfg)
+    contexts = {
+        "source_context": "source\n" * 10000,
+        "endpoints_detail": "endpoint\n" * 10000,
+        "artifact_context": "artifact\n" * 10000,
+    }
+
+    fitted, trimmed = assembler._fit_evidence_contexts(contexts)
+
+    assert sum(len(value) for value in fitted.values()) <= assembler.evidence_budget_chars
+    assert trimmed
+    assert fitted["source_context"].endswith("[trimmed to model context budget]")
+
+
+def test_page_generator_rejects_oversized_final_prompt_before_llm(tmp_path: Path) -> None:
+    bucket = make_bucket("Feature", "feature", ["src/routes.py"])
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="x" * 30000,
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+    )
+    llm = MagicMock()
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg["llm"]["context_window_tokens"] = 4096
+    cfg["llm"]["output_reserve_tokens"] = 1024
+    generator = PageGenerator(llm, cfg, tmp_path)
+
+    with pytest.raises(ValueError, match="exceeds llm.context_window_tokens"):
+        generator.generate(evidence, "", "")
+
+    llm.complete.assert_not_called()
 
 
 def test_flow_context_is_injected_and_validated(tmp_path: Path) -> None:
@@ -1747,18 +1813,35 @@ def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:
         repo_root / "docs",
     )
     content = "# Auth\n\nBody"
+    evidence = AssembledEvidence(
+        bucket=bucket,
+        source_context="source",
+        endpoints_detail="",
+        integration_context="",
+        cluster_context="",
+        artifact_context="",
+        graph_context="",
+        cross_ref_context="",
+        evidence_budget_chars=10000,
+        evidence_chars_used=9000,
+        trimmed_contexts=["repo_docs_context"],
+    )
 
     updated = engine._add_provenance_frontmatter(
         content,
         bucket,
         ValidationResult(is_valid=True),
-        None,
+        evidence,
     )
 
     assert "deepdoc_generated_at:" in updated
     assert f'deepdoc_generated_version: "{DEEPDOC_VERSION}"' in updated
     assert 'deepdoc_status: "valid"' in updated
     assert "deepdoc_evidence_files:" in updated
+    assert "deepdoc_evidence_budget_chars: 10000" in updated
+    assert "deepdoc_evidence_chars_used: 9000" in updated
+    assert "deepdoc_evidence_trimmed:" in updated
+    assert '  - "repo_docs_context"' in updated
 
 
 def test_generation_coverage_report_counts_files_endpoints_and_symbols(

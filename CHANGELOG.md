@@ -42,6 +42,11 @@ The automated release workflow reads the section that matches the version in
   source hash resets manifest ownership to pages actually completed at that
   hash; staleness checks require the current page ownership and output file, so
   unfinished pages cannot be skipped after a checkpointed sibling finishes.
+- **Context-window configuration now controls generation.** All evidence
+  categories share one context-derived budget, raw source is bounded within it,
+  output space is reserved, final draft/retry prompts receive a local preflight,
+  and generated frontmatter identifies trimmed categories instead of silently
+  overflowing a smaller provider context.
 
 ## [0.4.2] - 2026-06-23
 

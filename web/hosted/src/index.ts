@@ -179,7 +179,10 @@ async function handleAuthCallback(req: Request, env: Env): Promise<Response> {
   return new Response(null, {
     status: 302,
     headers: {
-      Location: "/try",
+      // "/" — the client decides the default view (projects if you have any,
+      // otherwise generate). Keeping one canonical entry point instead of
+      // hardcoding a page here.
+      Location: "/",
       "Set-Cookie": setCookie("dd_session", sessionId),
     },
   });
@@ -624,8 +627,19 @@ export default {
   async fetch(req: Request, env: Env): Promise<Response> {
     const url = new URL(req.url);
 
+    // Stale bookmarks to the old dashboard/account pages — redirect rather
+    // than 404. "/" resolves to the client's smart default (projects if any,
+    // else generate) instead of hardcoding a page here.
+    if (url.pathname === "/try" || url.pathname === "/account" || url.pathname === "/new") {
+      return new Response(null, { status: 302, headers: { Location: "/" } });
+    }
+
     // App-shell routes — the SPA reads location.pathname to pick a view.
-    if (url.pathname === "/try" || url.pathname === "/" || url.pathname === "/account") {
+    if (url.pathname === "/" || url.pathname === "/generate" || url.pathname === "/projects") {
+      return new Response(tryPageHtml(), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    }
+    const projectDetailMatch = url.pathname.match(/^\/projects\/([\w.-]+)\/([\w.-]+)\/?$/);
+    if (projectDetailMatch) {
       return new Response(tryPageHtml(), { headers: { "Content-Type": "text/html; charset=utf-8" } });
     }
     if (url.pathname === "/auth/github") return handleAuthStart(req, env);
@@ -646,7 +660,8 @@ export default {
     const deleteMatch = url.pathname.match(/^\/api\/projects\/([\w.-]+)\/([\w.-]+)$/);
     if (deleteMatch && req.method === "DELETE") return handleDeleteProject(req, env, deleteMatch[1], deleteMatch[2]);
 
-    // Vanity serving route — must stay last so it never shadows /try, /api/*, /auth/*.
+    // Vanity serving route — must stay last so it never shadows /generate,
+    // /projects(/:owner/:repo), /api/*, /auth/*.
     const ownerRepoMatch = url.pathname.match(/^\/([\w.-]+)\/([\w.-]+)\/?(.*)$/);
     if (ownerRepoMatch) {
       return handleOwnerRepoSite(req, env, ownerRepoMatch[1], ownerRepoMatch[2], ownerRepoMatch[3] || "index.html");

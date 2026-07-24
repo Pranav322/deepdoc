@@ -345,7 +345,7 @@ web/
 Single source of truth for the mark + wordmark (used by Header and Footer). `variant="full"` renders a **merged lockup**: the accent D mark is the leading letter, followed by "eepDoc" — never render the mark next to the full word "DeepDoc" (reads as a repeated D). The mark is em-sized off `wordSize` to match the wordmark cap height. Its scoped `<style>` block owns all `dd-*` styling; do not style `dd-*` classes from `global.css`. Accessibility: the container carries `role="img" aria-label="DeepDoc"`; mark and partial word are `aria-hidden`.
 
 ### Landing hero (`index.astro`)
-Centered, eraser.io-style: badge → headline (dual accent emphasis: "codebase" + "actually read.") → short sub → CTAs → full-width product window (`.hero-stage`/`.hero-window` in `global.css`) with the chat-proof card overlaid bottom-right (stacks static below 640px). `BackgroundRippleEffect.astro` (interactive cell grid, masked toward the top) renders behind the hero content alongside `.hero-halo`. `CodeToDocs.astro` (code→docs SVG/SMIL animation) is currently **unused** — kept for potential reuse; do not re-add it to the hero without being asked. First CTA is **"Try it free →"** linking to `https://cloud.deepdoc.tech` (the hosted-generation product, bare root serves the try/login page directly — see "Hosted-generation" section below), followed by the `pip install deepdoc` copy button and "View on GitHub".
+Centered, eraser.io-style: badge → headline (dual accent emphasis: "codebase" + "actually read.") → short sub → CTAs → full-width product window (`.hero-stage`/`.hero-window` in `global.css`) with the chat-proof card overlaid bottom-right (stacks static below 640px). `BackgroundRippleEffect.astro` (interactive cell grid, masked toward the top) renders behind the hero content alongside `.hero-halo`. `CodeToDocs.astro` (code→docs SVG/SMIL animation) is currently **unused** — kept for potential reuse; do not re-add it to the hero without being asked. First CTA is **"Try it free →"** linking to `https://cloud.deepdoc.tech` (the hosted-generation product — its bare root is a sign-in gate, not another landing page; see "Hosted-generation" section below), followed by the `pip install deepdoc` copy button and "View on GitHub".
 
 ### Features bento (`index.astro` "What it does")
 Real cards (18px gaps, 20px radius) with accent corner-glow background, top hairline shine, hover lift + accent border, and a staggered scroll-reveal (IntersectionObserver adds `.in-view`; gated behind `html.js` so no-JS users still see cards; respects `prefers-reduced-motion`). The chatbot card ends with a typing-indicator bubble and query-mode pills (`.feat-modes`).
@@ -384,20 +384,47 @@ maintenance commands, and teardown steps** — this section covers the code/dev
 side only.
 
 - `web/hosted/` — Cloudflare Worker (TypeScript, no framework), deployed as
-  `deepdoc-hosted` at custom domain `cloud.deepdoc.tech`. Routes: `GET /try`
-  (server-rendered HTML+vanilla-JS page — login card → repo picker with an
-  explicit confirm step → progress screen that pushes the URL to
-  `/owner/repo/` immediately → auto-navigates to the real generated site when
-  done), `GET /auth/github` / `GET /api/auth/callback/github` (OAuth, scope
-  `repo read:user` — `repo` is required to list/clone private repos),
-  `GET /api/repos`, `POST /api/generate` (**enqueues** a message onto the
-  Azure Storage Queue — see dispatch below), `GET /api/status/:id` (reads
-  `jobs/:id/status.json` from R2), `GET /api/projects` (+`DELETE
-  /api/projects/:owner/:repo`, `POST /api/projects/:owner/:repo/visibility`),
-  `POST /api/logout`, the `/account` app-shell route, and the vanity
-  `GET /:owner/:repo/*` site proxy (must stay last in routing so it never
-  shadows `/try`/`/account`/`/api/*`/`/auth/*`; the visibility POST must be
-  matched before the 2-segment DELETE).
+  `deepdoc-hosted` at custom domain `cloud.deepdoc.tech`. **IA revamped
+  2026-07-24** (full rationale + every page's spec in
+  `docs/HOSTED_UI_SPEC.md`) — the old `/try` dashboard (list + generate-form +
+  visibility all on one scrolling page) and dedicated `/account` page are
+  retired; both now 302-redirect to `/` for stale bookmarks. **`/` is not a
+  landing/marketing page** — `deepdoc.tech`'s own hero already sells the
+  product and its "Try it free" CTA sends people straight here, so an
+  unauthenticated `/` is just a sign-in gate (3-bullet GitHub repo-read
+  explainer + "Continue with GitHub", no hero, no mockup, no modal — see
+  `renderLoggedOut()`). For an authenticated user, `/` has no content of its
+  own either: the client resolves it to `/projects` if they have any saved
+  project, else `/generate`, rewriting the URL via `history.replaceState`
+  (same rule the OAuth callback and stale `/try`/`/account`/`/new` redirects
+  all funnel into — one canonical entry point, not a hardcoded target).
+  Current routes: `GET /` (see above), `GET /generate` (repo picker +
+  paste-URL + visibility + confirm, no dashboard framing), `GET /projects`
+  (pure click-through list, no buttons in the row — every row navigates into
+  project detail), `GET /projects/:owner/:repo` (**the only place per-project
+  actions live**: Visit-site / Visibility toggle / Danger-zone Delete with an
+  inline "Confirm delete?" step, no native `confirm()`), `GET /auth/github` /
+  `GET /api/auth/callback/github` (OAuth, scope `repo read:user` — `repo` is
+  required to list/clone private repos), `GET /api/repos`, `POST
+  /api/generate` (**enqueues** a message onto the Azure Storage Queue — see
+  dispatch below), `GET /api/status/:id` (reads `jobs/:id/status.json` from
+  R2), `GET /api/projects` (+`DELETE /api/projects/:owner/:repo`, `POST
+  /api/projects/:owner/:repo/visibility` — reused as-is by the project-detail
+  page, no separate single-project endpoint), `POST /api/logout`, and the
+  vanity `GET /:owner/:repo/*` site proxy (must stay last in routing so it
+  never shadows `/generate`, `/projects`(`/:owner/:repo`), `/api/*`,
+  `/auth/*`; the visibility POST must be matched before the 2-segment DELETE,
+  and `/projects/:owner/:repo` must be matched by its own regex before the
+  vanity catch-all, the same way `/try`/`/account` used to be).
+  A profile dropdown (avatar chip, click to open, outside-click/Escape to
+  close) replaces `/account` as a page — it's identity + a "Projects (N) ›"
+  link + "Generate new" + Log out **only**; it deliberately does not list
+  projects inline (that was tried and explicitly rejected — see
+  `docs/HOSTED_UI_SPEC.md` rule 14). **The app bar is a duplicate, by hand, of
+  `deepdoc.tech`'s own `Header.astro`/`Logo.astro`** (52px sticky bar, blurred
+  background, the same "depth D" brand-mark SVG inlined in `try_page.ts`'s
+  `brandMarkHtml()`) so the two domains read as one product, not a bolted-on
+  side app — keep them in sync if either header changes.
   **All state lives in Cloudflare D1** (`deepdoc-hosted-db`, schema in
   `web/hosted/schema.sql`: `sessions`, `oauth_states`, `projects`,
   `rate_limit_starts`, `owner_repo_jobs`) — in-memory Maps were the local-only
@@ -410,7 +437,7 @@ side only.
   Private-site access is enforced **server-side** in `handleOwnerRepoSite` —
   a private site requires `session.login == owner_login` before serving ANY
   byte incl. `/_next/*` assets (real boundary: the R2 bucket isn't public, the
-  Worker is the only read path). `/account` = a dedicated SPA view with logout. Local dev: `cd web/hosted && npm install && npm run dev` (port
+  Worker is the only read path). Local dev: `cd web/hosted && npm install && npm run dev` (port
   3000 — must use `localhost`, not `127.0.0.1`, GitHub's callback match is an
   exact string). Secrets (`GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`,
   `QUEUE_MESSAGES_URL`) come from `.dev.vars` locally and `wrangler secret put`

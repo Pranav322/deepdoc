@@ -7,7 +7,9 @@ scripts/
 /.codewiki_file_map.json
 
 # Generated docs/site output
-/docs/
+/docs/*
+!/docs/PRODUCTION_INFRA.md
+!/docs/HOSTED_UI_SPEC.md
 /build/
 /site/node_modules/
 deepdoc/generator/mdx_validator/node_modules/

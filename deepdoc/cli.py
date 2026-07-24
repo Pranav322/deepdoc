@@ -1257,7 +1257,13 @@ def _deploy():
                 "[bold green]✓ Build complete! Static files are in site/out/[/bold green]"
             )
         else:
-            console.print("[red]Build failed.[/red]")
+            # Must actually fail the process — a caller (CI, the hosted
+            # runner) relies on the exit code to detect a broken build, and
+            # silently returning 0 here hid the real `next build` error
+            # behind a much less useful "site/out/ was not produced" message.
+            raise click.ClickException(
+                "next build failed — see the output above for the real error."
+            )
     except FileNotFoundError:
         console.print(
             "[red]npx not found. Install Node.js >=18 from [bold]https://nodejs.org[/bold][/red]"

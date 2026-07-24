@@ -7,6 +7,12 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.5.2] - 2026-07-25
+
+### Fixed
+- **Generated sites could fail to build when the documented repo is itself a JS/Next.js project with its own `postcss.config.js`/`tailwind.config.*`.** Next.js's PostCSS loader searches upward through parent directories for a config file, so it could pick up the target repo's own Tailwind config instead of the generated site's — crashing with `Cannot find module 'tailwindcss'` since the generated site never depends on it. The Next.js template now ships its own minimal `postcss.config.mjs`, which always shadows any ancestor config.
+- **`deepdoc deploy` silently reported success even when `next build` failed.** It printed "Build failed." but still exited 0, hiding the real error behind a much less useful downstream "site/out/ was not produced" message. It now raises properly on a failed build.
+
 ## [0.5.1] - 2026-07-24
 
 ### Added

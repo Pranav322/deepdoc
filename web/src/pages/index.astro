@@ -65,7 +65,7 @@ const chatMessages = [
     <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
       <div class="flex flex-col items-center text-center">
 
-        <!-- Version badge — STABLE -->
+        <!-- Identity badge -->
         <div
           class="anim-fade-up mb-5 inline-flex items-center gap-2.5 rounded-full px-4 py-1.5"
           style="background: color-mix(in srgb, var(--color-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); font-family: var(--font-mono); font-size: 12px; color: var(--color-accent);"
@@ -74,7 +74,7 @@ const chatMessages = [
             class="h-2 w-2 rounded-full"
             style="background: var(--color-accent); box-shadow: 0 0 6px var(--color-accent);"
           ></span>
-          <strong style="font-weight: 600;">v3.2 STABLE</strong>
+          <strong style="font-weight: 600;">Open source</strong>
           <span style="opacity: 0.5; margin: 0 1px;">·</span>
           in-site AI chat
         </div>
@@ -97,69 +97,85 @@ const chatMessages = [
           assistant that answers using your actual source code.
         </p>
 
-        <!-- CTAs -->
-        <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-center">
+        <!-- CTAs — two clearly distinct paths: self-host (open source) vs hosted (cloud) -->
+        <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col items-center gap-x-5 gap-y-6 sm:flex-row sm:items-start sm:justify-center">
             <span id="copy-sr" aria-live="polite" class="sr-only"></span>
-            <button
-              id="copy-install"
-              type="button"
-              class="group flex h-10 items-center gap-2.5 rounded-lg px-4"
-              style="background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: opacity 0.15s; white-space: nowrap;"
-              aria-label="Copy install command to clipboard"
-              onmouseover="this.style.opacity='0.88'"
-              onmouseout="this.style.opacity='1'"
-            >
-              pip install deepdoc
-              <svg
-                id="copy-icon"
-                xmlns="http://www.w3.org/2000/svg"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-                style="opacity: 0.6;"
-              ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
-              <svg
-                id="check-icon"
-                class="hidden"
-                xmlns="http://www.w3.org/2000/svg"
-                width="13"
-                height="13"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="2.5"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              ><polyline points="20 6 9 17 4 12"></polyline></svg>
-            </button>
 
-            <a
-              href="https://github.com/tss-pranavkumar/deepdoc"
-              target="_blank"
-              rel="noreferrer"
-              class="flex h-10 items-center gap-2 rounded-lg px-4 text-[13px] transition-colors"
-              style="border: 1px solid var(--color-line-strong); color: var(--color-ink-muted); font-family: var(--font-sans); font-weight: 400; text-decoration: none;"
-              onmouseover="this.style.color='var(--color-ink)'; this.style.borderColor='rgba(255,255,255,0.2)'"
-              onmouseout="this.style.color='var(--color-ink-muted)'; this.style.borderColor='var(--color-line-strong)'"
-            >
-              <svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
-                <path d="M12 .3a12 12 0 0 0-3.8 23.4c.6.1.8-.3.8-.6v-2.2c-3.3.7-4-1.6-4-1.6-.6-1.4-1.3-1.7-1.3-1.7-1.1-.7.1-.7.1-.7 1.2.1 1.8 1.2 1.8 1.2 1 1.8 2.8 1.3 3.5 1 .1-.8.4-1.3.7-1.6-2.6-.3-5.4-1.3-5.4-5.9 0-1.3.5-2.4 1.2-3.2-.1-.3-.5-1.5.1-3.1 0 0 1-.3 3.3 1.2a11 11 0 0 1 6 0c2.3-1.5 3.3-1.2 3.3-1.2.6 1.6.2 2.8.1 3.1.8.8 1.2 1.9 1.2 3.2 0 4.6-2.8 5.6-5.4 5.9.4.4.8 1.1.8 2.2v3.3c0 .3.2.7.8.6A12 12 0 0 0 12 .3"/>
-              </svg>
-              View on GitHub
-            </a>
+            <!-- Path 1: self-host / open source -->
+            <div class="flex flex-col items-center gap-2">
+              <button
+                id="copy-install"
+                type="button"
+                class="group flex h-10 items-center gap-2.5 rounded-lg px-4"
+                style="background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: opacity 0.15s; white-space: nowrap;"
+                aria-label="Copy install command to clipboard"
+                onmouseover="this.style.opacity='0.88'"
+                onmouseout="this.style.opacity='1'"
+              >
+                pip install deepdoc
+                <svg
+                  id="copy-icon"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                  style="opacity: 0.6;"
+                ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+                <svg
+                  id="check-icon"
+                  class="hidden"
+                  xmlns="http://www.w3.org/2000/svg"
+                  width="13"
+                  height="13"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  stroke-width="2.5"
+                  stroke-linecap="round"
+                  stroke-linejoin="round"
+                ><polyline points="20 6 9 17 4 12"></polyline></svg>
+              </button>
+              <span style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--color-ink-faint);">
+                self-host &middot; open source
+              </span>
+            </div>
+
+            <!-- Path 2: hosted / cloud -->
+            <div class="flex flex-col items-center gap-2">
+              <a
+                href="https://cloud.deepdoc.tech"
+                class="flex h-10 items-center gap-2 rounded-lg px-4"
+                style="border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: background 0.15s; white-space: nowrap; text-decoration: none;"
+                onmouseover="this.style.background='color-mix(in srgb, var(--color-accent) 16%, transparent)'"
+                onmouseout="this.style.background='color-mix(in srgb, var(--color-accent) 8%, transparent)'"
+              >
+                Try it free &rarr;
+              </a>
+              <span style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--color-ink-faint);">
+                hosted &middot; nothing to install
+              </span>
+            </div>
 
           </div>
 
           <p
-            class="anim-fade-up anim-delay-4 mt-6"
+            class="anim-fade-up anim-delay-4 mt-8"
             style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);"
           >
-            Python 3.10+ &middot; MIT license &middot; Any LLM provider
+            Python 3.10+ &middot; MIT license &middot; Any LLM provider &middot;
+            <a
+              href="https://github.com/tss-pranavkumar/deepdoc"
+              target="_blank"
+              rel="noreferrer"
+              style="color: var(--color-ink-faint); text-decoration: underline; text-underline-offset: 2px; transition: color 0.15s;"
+              onmouseover="this.style.color='var(--color-ink)'"
+              onmouseout="this.style.color='var(--color-ink-faint)'"
+            >View on GitHub</a>
           </p>
         </div>
 

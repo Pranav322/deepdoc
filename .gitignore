@@ -32,6 +32,10 @@ chatbot_backend/.venv/
 chatbot_backend/__pycache__/
 codewiki.egg-info/
 deepdoc.egg-info/
+
+# Hosted-generation local validation harness
+hosted-runner/.venv/
+hosted-runner/__pycache__/
 pytest-cache-files-7ktathll
 .claude/
 
@@ -72,6 +76,11 @@ web/*
 !web/scripts/**
 !web/src/
 !web/src/**
+!web/hosted/
+!web/hosted/**
+web/hosted/node_modules/
+web/hosted/.wrangler/
+web/hosted/.dev.vars
 web/node_modules/
 web/artifacts/**/node_modules/
 web/artifacts/**/dist/

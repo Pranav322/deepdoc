@@ -321,7 +321,7 @@ python3 -m pytest -k "route or stale or chatbot" -q
 - Prefer the smallest command that exercises the edited area first.
 
 ## Web / Marketing Site (`web/`)
-An **Astro 5** static marketing/changelog/docs site (Tailwind v4 via `@tailwindcss/vite`) deployed to Vercel. Build with `pnpm build`, dev with `pnpm dev`.
+An **Astro 5** static marketing/changelog/docs site (Tailwind v4 via `@tailwindcss/vite`) deployed to **Cloudflare Pages** (project `deepdoc`, direct-upload — no Git provider connected, confirmed 2026-07-24 via DNS/`wrangler pages project list`; earlier docs here saying Vercel were stale). Build with `pnpm build`, dev with `pnpm dev`, deploy with `npx wrangler pages deploy dist --project-name=deepdoc` from `web/`.
 
 ### Structure
 ```
@@ -339,7 +339,7 @@ web/
 Single source of truth for the mark + wordmark (used by Header and Footer). `variant="full"` renders a **merged lockup**: the accent D mark is the leading letter, followed by "eepDoc" — never render the mark next to the full word "DeepDoc" (reads as a repeated D). The mark is em-sized off `wordSize` to match the wordmark cap height. Its scoped `<style>` block owns all `dd-*` styling; do not style `dd-*` classes from `global.css`. Accessibility: the container carries `role="img" aria-label="DeepDoc"`; mark and partial word are `aria-hidden`.
 
 ### Landing hero (`index.astro`)
-Centered, eraser.io-style: badge → headline (dual accent emphasis: "codebase" + "actually read.") → short sub → CTAs → full-width product window (`.hero-stage`/`.hero-window` in `global.css`) with the chat-proof card overlaid bottom-right (stacks static below 640px). `BackgroundRippleEffect.astro` (interactive cell grid, masked toward the top) renders behind the hero content alongside `.hero-halo`. `CodeToDocs.astro` (code→docs SVG/SMIL animation) is currently **unused** — kept for potential reuse; do not re-add it to the hero without being asked.
+Centered, eraser.io-style: badge → headline (dual accent emphasis: "codebase" + "actually read.") → short sub → CTAs → full-width product window (`.hero-stage`/`.hero-window` in `global.css`) with the chat-proof card overlaid bottom-right (stacks static below 640px). `BackgroundRippleEffect.astro` (interactive cell grid, masked toward the top) renders behind the hero content alongside `.hero-halo`. `CodeToDocs.astro` (code→docs SVG/SMIL animation) is currently **unused** — kept for potential reuse; do not re-add it to the hero without being asked. First CTA is **"Try it free →"** linking to `https://cloud.deepdoc.tech` (the hosted-generation product, bare root serves the try/login page directly — see "Hosted-generation" section below), followed by the `pip install deepdoc` copy button and "View on GitHub".
 
 ### Features bento (`index.astro` "What it does")
 Real cards (18px gaps, 20px radius) with accent corner-glow background, top hairline shine, hover lift + accent border, and a staggered scroll-reveal (IntersectionObserver adds `.in-view`; gated behind `html.js` so no-JS users still see cards; respects `prefers-reduced-motion`). The chatbot card ends with a typing-indicator bubble and query-mode pills (`.feat-modes`).
@@ -357,13 +357,121 @@ Marketing copy is **outcome-led, not implementation-led** — say "your docs sta
 ### Changelog
 `changelog.astro` is currently a placeholder (marked `noindex`). The canonical release history lives in root `CHANGELOG.md`.
 
-### Vercel deployment settings
+### Cloudflare Pages deployment
 | Setting | Value |
 |---|---|
+| Project name | `deepdoc` |
+| Bound domains | `deepdoc.tech`, `deepdoc.pages.dev` |
 | Root Directory | `web` |
 | Install Command | `pnpm install` |
 | Build Command | `pnpm build` |
 | Output Directory | `dist` |
+| Deploy command | `npx wrangler pages deploy dist --project-name=deepdoc` (from `web/`, after `pnpm build`) |
+
+## Hosted-generation ("Try DeepDoc") — LIVE IN PRODUCTION at cloud.deepdoc.tech
+
+A secondary, no-CLI hosted flow: sign in with GitHub, pick a repo (yours —
+public or private — via a picker, or paste any public URL), and get a real
+generated docs site at a vanity `/owner/repo/` URL. Deployed on Azure +
+Cloudflare. **See `docs/PRODUCTION_INFRA.md` for the full resource inventory,
+maintenance commands, and teardown steps** — this section covers the code/dev
+side only.
+
+- `web/hosted/` — Cloudflare Worker (TypeScript, no framework), deployed as
+  `deepdoc-hosted` at custom domain `cloud.deepdoc.tech`. Routes: `GET /try`
+  (server-rendered HTML+vanilla-JS page — login card → repo picker with an
+  explicit confirm step → progress screen that pushes the URL to
+  `/owner/repo/` immediately → auto-navigates to the real generated site when
+  done), `GET /auth/github` / `GET /api/auth/callback/github` (OAuth, scope
+  `repo read:user` — `repo` is required to list/clone private repos),
+  `GET /api/repos`, `POST /api/generate` (**enqueues** a message onto the
+  Azure Storage Queue — see dispatch below), `GET /api/status/:id` (reads
+  `jobs/:id/status.json` from R2), `GET /api/projects` (+`DELETE
+  /api/projects/:owner/:repo`, `POST /api/projects/:owner/:repo/visibility`),
+  `POST /api/logout`, the `/account` app-shell route, and the vanity
+  `GET /:owner/:repo/*` site proxy (must stay last in routing so it never
+  shadows `/try`/`/account`/`/api/*`/`/auth/*`; the visibility POST must be
+  matched before the 2-segment DELETE).
+  **All state lives in Cloudflare D1** (`deepdoc-hosted-db`, schema in
+  `web/hosted/schema.sql`: `sessions`, `oauth_states`, `projects`,
+  `rate_limit_starts`, `owner_repo_jobs`) — in-memory Maps were the local-only
+  prototype and are gone; real Cloudflare production runs many ephemeral
+  isolates with no shared memory, so this migration was mandatory, not
+  optional. **Accounts & visibility** (`docs/PRODUCTION_INFRA.md` has the full
+  detail): each site has a `visibility` (`private` default for new generations)
+  on both `projects` and `owner_repo_jobs`; `owner_repo_jobs.owner_login` is the
+  single owner (first generation wins, `handleGenerate` 409s a second user).
+  Private-site access is enforced **server-side** in `handleOwnerRepoSite` —
+  a private site requires `session.login == owner_login` before serving ANY
+  byte incl. `/_next/*` assets (real boundary: the R2 bucket isn't public, the
+  Worker is the only read path). `/account` = a dedicated SPA view with logout. Local dev: `cd web/hosted && npm install && npm run dev` (port
+  3000 — must use `localhost`, not `127.0.0.1`, GitHub's callback match is an
+  exact string). Secrets (`GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`,
+  `QUEUE_MESSAGES_URL`) come from `.dev.vars` locally and `wrangler secret put`
+  in production — never from `[vars]` in `wrangler.toml` (a plaintext var and a
+  secret can't share a binding name).
+- **Dispatch = queue + event-driven Container Apps Job (autoscaling, since
+  2026-07-24).** Generation compute is NO LONGER an always-on runner — the old
+  `deepdoc-runner` Container App is retired. `handleGenerate` mints a `job_id`
+  and enqueues `{job_id,owner,repo,github_token,visibility}` (base64-JSON) onto
+  the Azure Storage Queue `deepdoc-jobs` via `QUEUE_MESSAGES_URL` (queue REST +
+  add-only SAS). A KEDA `azure-queue` scaler on the Container Apps **Job**
+  `deepdoc-gen-job` starts one isolated execution per message (min 0 / max 10,
+  4 vCPU / 8 GiB each) → **scale-to-zero when idle (~$0)**. The token rides in
+  the message (private queue, deleted after processing). Status/serving are R2:
+  the job writes `jobs/{id}/status.json` and the site `{owner}/{repo}/…`, and
+  the Worker reads both from R2 — it never talks to a container. **KEDA can
+  occasionally spawn a duplicate no-op execution (polling race); it's harmless
+  — only one execution can lease a message, so no duplicate generation. Stop a
+  lingering one with `az containerapp job stop`.**
+- `hosted-runner/` — the container image (`deepdoc-runner:vN` in ACR, build
+  context = **repo root**). `pipeline.py` holds the shared clone → `deepdoc
+  generate` → `deepdoc deploy` → R2-upload logic plus `write_status` (R2
+  `jobs/{id}/status.json`). `job.py` is the Job entrypoint (`--command python
+  --args job.py`): dequeues one message from `deepdoc-jobs` with a 1-hr
+  visibility lease (so it isn't redelivered mid-run / double-counted), runs the
+  pipeline, deletes the message on any terminal state, exits. `app.py` (the old
+  FastAPI HTTP server) is legacy/vestigial post-cutover — kept but unused.
+  `DEEPDOC_BIN` resolves to a local `.venv/bin/deepdoc` if present else `PATH`
+  (do not re-hardcode the `.venv` path — that was a real bug). The message
+  encoding is **base64(JSON)** on both sides: the Worker `btoa()`s it,
+  `job.py` uses `TextBase64DecodePolicy` — keep them in sync.
+- **Next.js `basePath` must be baked in at build time to match the serving
+  URL, or CSS/JS 404s.** The generated static export assumes root-path
+  hosting by default; since sites are served at `/{owner}/{repo}/`, not
+  domain root, the runner sets `NEXT_PUBLIC_BASE_PATH=/{owner}/{repo}` as a
+  build-time env var before running `deepdoc deploy` (the template already
+  reads this var — see `deepdoc/site/builder/next_template/next.config.mjs`).
+  This bit twice during development (once locally, once — differently — for
+  the vanity-URL redesign) before landing on baking the real owner/repo path
+  directly rather than a job-id path. Do not revert to job-id-based serving
+  paths without re-deriving this.
+- **Known-working Azure config for the custom `DeepSeek-V4-Flash` deployment**:
+  LiteLLM has no metadata for this alias, so `llm.context_window_tokens: 128000`
+  and `llm.output_reserve_tokens: 16000` must be set explicitly in
+  `.deepdoc.yaml`, and `llm.api_key_env` must be `AZURE_API_KEY` (not
+  `AZURE_OPENAI_API_KEY`). Omitting `context_window_tokens` fails fast with
+  `ModelCapabilityError` before any LLM call — `deepdoc/llm/token_budget.py`'s
+  intended fail-closed behavior, not a bug to work around. Foundry account
+  `deepdoc-foundry` (pre-existing) lives in Azure resource group
+  `deepdoc-main`/`eastus`, `base_url:
+  https://deepdoc-foundry.services.ai.azure.com/`.
+- Verified end-to-end live in real production (not just local): private-repo
+  clone with an authenticated token, a full generate→deploy run through the
+  real deployed Worker → Container App → Foundry pipeline, the resulting site
+  served correctly at its real `cloud.deepdoc.tech/<owner>/<repo>/` URL with
+  working CSS, and the project persisting in D1 across requests (proving
+  real state persistence, not same-isolate luck).
+- **Access control now enforced** (was previously absent) — sites default to
+  private (owner-only, session-checked server-side including asset paths); a
+  user opts into public via the dashboard toggle. See the accounts/visibility
+  note above and `docs/PRODUCTION_INFRA.md`.
+- Known limitations accepted for this first production pass (see
+  `docs/PRODUCTION_INFRA.md` for the full list): runner job state is still
+  in-process memory (fine at min=max=1 replica, lost on restart); no Key
+  Vault (Container App secrets are sufficient at this scale); scale-to-zero
+  Container Apps Jobs is a deferred cost optimization over the current
+  always-on Container App.
 
 ## Notes from the creator
 - Internal tool for a team working in: Python, Go, PHP, JS/TS — frameworks include Fastify, Express, Laravel, Django, Falcon, Go.

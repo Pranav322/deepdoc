@@ -133,6 +133,7 @@ There is no enforced linter. `python3 -m compileall deepdoc` + pytest is the sta
 ### What to test
 
 | Change area | Minimum expected coverage |
+
 |---|---|
 | Route detection / parser | Route-detector unit tests + at least one `scan_repo(...)` regression. |
 | Planner / topology | Topology clustering unit tests + downstream bucket and nav behaviour. |

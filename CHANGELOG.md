@@ -7,6 +7,11 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.5.1] - 2026-07-24
+
+### Added
+- **Full FastAPI framework support.** DeepDoc can now accurately parse FastAPI codebases, including `add_api_route` declarations and cross-file router resolution. 
+
 ## [0.5.0] - 2026-07-19
 
 ### Added

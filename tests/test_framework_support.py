@@ -903,3 +903,55 @@ class AjaxExportLogsView(View):
         "AjaxExportLogsView",
         "report/datatables/export_datatable.py",
     ) in endpoints
+
+def test_fastapi_detects_decorator_routes():
+    content = """
+from fastapi import FastAPI, Depends
+
+app = FastAPI()
+
+@app.get("/users")
+def get_users():
+    pass
+
+@app.post("/users", response_model=User)
+async def create_user(user: User):
+    pass
+"""
+    endpoints = detect_endpoints(Path("main.py"), content, "python")
+    method_paths = {(ep.method, ep.path, ep.handler) for ep in endpoints}
+    
+    assert ("GET", "/users", "get_users") in method_paths
+    assert ("POST", "/users", "create_user") in method_paths
+
+def test_fastapi_detects_router_routes():
+    content = """
+from fastapi import APIRouter
+
+router = APIRouter()
+
+@router.delete("/items/{item_id}")
+async def delete_item(item_id: int):
+    pass
+"""
+    endpoints = detect_endpoints(Path("items.py"), content, "python")
+    method_paths = {(ep.method, ep.path, ep.handler) for ep in endpoints}
+    
+    assert ("DELETE", "/items/{item_id}", "delete_item") in method_paths
+
+def test_fastapi_detects_api_route():
+    content = """
+from fastapi import FastAPI
+
+app = FastAPI()
+
+def common_handler():
+    pass
+
+app.add_api_route("/health", common_handler, methods=["GET", "POST"])
+"""
+    endpoints = detect_endpoints(Path("main.py"), content, "python")
+    method_paths = {(ep.method, ep.path, ep.handler) for ep in endpoints}
+    
+    assert ("GET", "/health", "common_handler") in method_paths
+    assert ("POST", "/health", "common_handler") in method_paths

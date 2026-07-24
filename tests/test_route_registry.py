@@ -17,6 +17,7 @@ def test_route_registry_is_the_single_dispatch_entrypoint() -> None:
     assert tuple(d.name for d in ROUTE_DETECTOR_REGISTRY["python"]) == (
         "falcon",
         "django",
+        "fastapi",
     )
     assert tuple(d.name for d in ROUTE_DETECTOR_REGISTRY["go"]) == ("go",)
     assert tuple(d.name for d in ROUTE_DETECTOR_REGISTRY["php"]) == ("laravel",)

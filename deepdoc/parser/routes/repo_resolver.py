@@ -76,11 +76,14 @@ def resolve_repo_endpoints(
     if required_frameworks & {"express", "fastify"}:
         js_index = _build_js_index(file_contents)
     py_index = None
-    if required_frameworks & {"falcon", "django"}:
+    if required_frameworks & {"falcon", "django", "fastapi"}:
         py_index = _build_python_index(file_contents)
     go_index = None
     if "go" in required_frameworks:
         go_index = _build_go_index(repo_root, file_contents)
+    fastapi_mounts = None
+    if "fastapi" in required_frameworks and py_index is not None:
+        fastapi_mounts = _extract_fastapi_routers(file_contents, py_index)
 
     resolved: list[APIEndpoint] = []
     has_django = False
@@ -93,6 +96,10 @@ def resolve_repo_endpoints(
         elif framework == "falcon" and py_index is not None:
             resolved.extend(
                 _resolve_falcon_endpoint(repo_root, endpoint, file_contents, py_index)
+            )
+        elif framework == "fastapi" and py_index is not None and fastapi_mounts is not None:
+            resolved.extend(
+                _resolve_fastapi_endpoint(repo_root, endpoint, py_index, fastapi_mounts)
             )
         elif framework == "go" and go_index is not None:
             resolved.extend(_resolve_go_endpoint(repo_root, endpoint, go_index))
@@ -1449,3 +1456,90 @@ def _ordered_unique(items: list[str]) -> list[str]:
         if item and item not in ordered:
             ordered.append(item)
     return ordered
+
+def _extract_fastapi_routers(
+    file_contents: dict[str, str], py_index: dict[str, PythonImportIndex]
+) -> dict[str, list[str]]:
+    mounts: list[tuple[str, str, str]] = []
+    from .common import parse_string_arg
+
+    for rel_path, content in file_contents.items():
+        if Path(rel_path).suffix.lower() != ".py":
+            continue
+        index = py_index.get(rel_path)
+
+        for match in re.finditer(
+            r"""(?:\w+)\s*\.\s*include_router\s*\(\s*([\w\.]+)(.*?)\)""",
+            content,
+            re.DOTALL,
+        ):
+            router_expr = match.group(1)
+            rest_args = match.group(2)
+
+            prefix = ""
+            prefix_match = re.search(r"""prefix\s*=\s*(['"][^'"]+['"])""", rest_args)
+            if prefix_match:
+                prefix = parse_string_arg(prefix_match.group(1)) or prefix_match.group(1).strip("'\"")
+
+            qualifier = router_expr.split(".")[0]
+            if index and qualifier in index.imports:
+                target_file = index.imports[qualifier]
+                target_router = router_expr.split(".")[-1] if "." in router_expr else qualifier
+                mounts.append((target_file, target_router, prefix))
+            else:
+                mounts.append((rel_path, qualifier, prefix))
+
+    file_prefixes: dict[str, list[str]] = {}
+    for target_file, _, prefix in mounts:
+        if target_file not in file_prefixes:
+            file_prefixes[target_file] = []
+        file_prefixes[target_file].append(prefix)
+
+    return file_prefixes
+
+
+def _resolve_fastapi_endpoint(
+    repo_root: Path,
+    endpoint: APIEndpoint,
+    py_index: dict[str, PythonImportIndex],
+    fastapi_mounts: dict[str, list[str]],
+) -> list[APIEndpoint]:
+    from .common import join_route_path, parse_string_arg
+
+    resolved = _normalize_endpoint(repo_root, endpoint)
+    route_file = resolved.route_file
+
+    handler_file = _resolve_fastapi_handler_file(
+        resolved.handler, py_index.get(route_file), route_file
+    )
+    resolved.handler_file = handler_file or resolved.handler_file
+    resolved.file = resolved.handler_file or resolved.file
+
+    prefixes = fastapi_mounts.get(route_file, [""])
+    if not prefixes:
+        prefixes = [""]
+
+    route_path = (
+        parse_string_arg(resolved.raw_path or "") or resolved.raw_path or resolved.path
+    )
+
+    endpoints: list[APIEndpoint] = []
+    for prefix in prefixes:
+        ep = copy.deepcopy(resolved)
+        ep.path = join_route_path(prefix, route_path)
+        endpoints.append(ep)
+
+    return endpoints
+
+
+def _resolve_fastapi_handler_file(
+    handler_name: str,
+    index: PythonImportIndex | None,
+    current_file: str,
+) -> str:
+    if not handler_name or not index:
+        return current_file
+    qualifier = handler_name.split(".")[0]
+    if qualifier in index.imports:
+        return index.imports[qualifier]
+    return current_file

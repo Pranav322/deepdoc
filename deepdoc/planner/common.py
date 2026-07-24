@@ -103,6 +103,7 @@ CONFIG_FILE_PATTERNS = {
 }
 
 FRAMEWORK_INDICATORS = {
+    "fastapi": ["FastAPI()", "from fastapi", "APIRouter()", "@app.get", "@router.get"],
     "express": ["express()", "require('express')", "from 'express'"],
     "fastify": ["fastify()", "require('fastify')", "from 'fastify'"],
     "nestjs": ["@nestjs/", "@Controller", "@Injectable"],

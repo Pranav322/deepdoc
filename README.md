@@ -51,13 +51,12 @@ DeepDoc scans your repo, builds a bucket-based documentation plan, generates ric
 
 Works with Anthropic, OpenAI, Azure OpenAI, Google Gemini, Ollama, and any other LiteLLM-compatible provider.
 
-> **Use DeepDoc for its supported stacks.** DeepDoc is built and tested for
-> Python backends using **Django, Django REST Framework, or Falcon**;
-> JavaScript/TypeScript backends using **Express, Fastify, or NestJS**;
-> **Laravel** PHP applications; and conventional **Go** services. It also
-> extracts symbols from Vue SFCs. It is deliberately **not** a generic
-> framework-agnostic documentation generator: do not rely on it for FastAPI,
-> Flask, Nuxt, or unsupported frameworks just because their files can be parsed.
+> **Use DeepDoc for its supported stacks.** DeepDoc requires one of the supported backend frameworks to do its magic. It is **not** a generic Python/JS scanner.
+> 
+> If you point it at an **Express**, **NestJS**, **Fastify**, **Django**, **Falcon**, **Laravel**, **Go**, or **FastAPI** repo, it will construct a beautiful topology of your service and map out your routes perfectly.
+>
+> - **GraphQL**: Schema stitching/federation. Simple resolvers sometimes get lumped into normal Python parsing, but we don't build GraphQL schema trees.
+> - **Flask**: (Currently under evaluation).
 
 ---
 
@@ -1242,22 +1241,6 @@ deepdoc clean --yes    # Skip confirmation prompt
 ---
 
 ## Supported Languages & Frameworks
-
-> ## Supported Stacks Only
->
-> **Use DeepDoc when your repository is primarily one of these targets:**
->
-> - **Python:** Django, Django REST Framework, Falcon
-> - **JavaScript / TypeScript:** Express, Fastify, NestJS
-> - **PHP:** Laravel
-> - **Go:** conventional HTTP services and supported route helpers
-> - **Vue:** component and symbol extraction, not a standalone backend route target
->
-> DeepDoc can parse a number of source formats, but parsing is not the same as
-> full framework support. Endpoint resolution, runtime discovery, call-graph
-> enrichment, and generated API documentation are only guaranteed for the
-> supported stacks above. **Do not adopt DeepDoc for FastAPI, Flask, Nuxt, or an
-> unlisted framework unless you are prepared to extend scanner coverage first.**
 
 ### Supported Source Parsing
 

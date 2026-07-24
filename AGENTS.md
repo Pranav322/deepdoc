@@ -184,7 +184,13 @@ Chatbot is opt-in. When `chatbot.enabled` is false, no `/ask` route, chatbot com
 `bucket_injection.py` caps glossary evidence at 10 model files. The domain-glossary prompt enforces a 40-term hard cap, skips generic fields (`id`, `created_at`, `email`, etc.), uses `/// details | Domain` grouped output, one Mermaid diagram max, and 300-line page length limit.
 
 ### Framework targets
-Supported scan targets: Python (Django, Falcon, DRF), Go, PHP (Laravel), JS/TS (Express, Fastify, NestJS). Nuxt, FastAPI, and Flask are **not** supported scan targets. The generated site is Next.js + Fumadocs (requires Node.js ≥18); the chatbot backend remains a FastAPI stack. Extend scanner coverage in `deepdoc/scanner/` before adding generator-only heuristics.
+- **Python:** Django, Django REST Framework, Falcon, FastAPI
+- **JavaScript / TypeScript:** Express, Fastify, NestJS
+- **PHP:** Laravel
+- **Go:** conventional HTTP services and supported route helpers
+- **Vue:** component and symbol extraction, not a standalone backend route target
+
+DeepDoc can parse a number of source formats, but parsing is not the same as full framework support. Endpoint resolution, runtime discovery, call-graph enrichment, and generated API documentation are only guaranteed for the supported stacks above. **Do not adopt DeepDoc for Flask, Nuxt, or an unlisted framework unless you are prepared to extend scanner coverage first.**
 
 ### Other rules
 - Prefer extending `_v2` modules over creating new parallel flows.

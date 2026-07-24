@@ -65,6 +65,27 @@ function rehypeGitHubAlerts() {
   };
 }
 
+// Root-absolute internal doc links (e.g. "/getting-started") are emitted by
+// the generator assuming the site is served at domain root. Next.js only
+// auto-prefixes `basePath` for its own <Link>/router navigation — never a
+// literal href baked into rendered Markdown content — so when a site is
+// served under a basePath (hosted generation serves each site at
+// /<owner>/<repo>/), these links 404 unless rewritten here at render time.
+const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH || '';
+
+function rehypeBasePath() {
+  return (tree: HastRoot) => {
+    if (!BASE_PATH) return;
+    visit(tree, 'element', (node: Element) => {
+      if (node.tagName !== 'a') return;
+      const href = node.properties?.href;
+      if (typeof href !== 'string') return;
+      if (!href.startsWith('/') || href === BASE_PATH || href.startsWith(BASE_PATH + '/')) return;
+      node.properties.href = BASE_PATH + href;
+    });
+  };
+}
+
 // Wrap ```mermaid fences for client-side rendering via mermaid.js
 function rehypeMermaid() {
   return (tree: HastRoot) => {
@@ -100,6 +121,7 @@ async function getProcessor() {
         .use(rehypeRaw)
         .use(rehypeGitHubAlerts)
         .use(rehypeMermaid)
+        .use(rehypeBasePath)
         .use(rehypeShiki, {
           themes: { light: 'github-light', dark: 'github-dark' },
           fallbackLanguage: 'text',

@@ -452,6 +452,21 @@ side only.
     client-side vanilla-JS SPA — **ported verbatim** from the old
     `try_page.ts`, not rewritten, to avoid regressions in already-shipped,
     already-tested UI).
+    - The "Continue with GitHub" button (`startGithubAuth`) and the
+      "Generate"/"Regenerate" button (`startJob`) both disable + swap to a
+      pulsing-dot loading label (`.btn-spinner`, reuses the existing `pulse`
+      keyframe) immediately on click, since both trigger a real network
+      round-trip (D1 write + OAuth redirect; DB reads/writes + queue enqueue)
+      with no other feedback otherwise. `startJob` restores the button and
+      shows an error box on any failure (non-2xx *or* a thrown `fetch`) so it
+      never gets stuck disabled. The generation stage list's "cloning" glow
+      is not separately delayed — it already lights up the instant the
+      generating screen mounts; the perceived lateness was this same
+      pre-fetch dead-click gap.
+    - The stage-list accordion's sub-items (`STAGE_DETAIL`) are still static
+      placeholder copy, not real per-page progress — making them real
+      requires new plumbing (deepdoc's generation loop has no live progress
+      artifact to tail; see `.claude/MEMORY.md` if a follow-up picks this up).
   - `web/src/env.d.ts` — `App.Locals` typed via `@astrojs/cloudflare`'s
     `Runtime<T>` so every endpoint gets `locals.runtime.env.DB` /
     `.SITES` / etc. with real types (needs `@cloudflare/workers-types` as a

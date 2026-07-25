@@ -115,11 +115,11 @@ const chatMessages = [
               <button
                 id="copy-install"
                 type="button"
-                class="group flex h-10 items-center gap-2.5 rounded-lg px-4"
-                style="background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: opacity 0.15s; white-space: nowrap;"
+                class="group flex h-14 items-center gap-2.5 rounded-xl px-7"
+                style="border: 1.5px solid var(--color-accent); color: var(--color-accent); background: transparent; font-family: var(--font-sans); font-size: 16px; font-weight: 700; transition: background 0.15s; white-space: nowrap;"
                 aria-label="Copy install command to clipboard"
-                onmouseover="this.style.opacity='0.88'"
-                onmouseout="this.style.opacity='1'"
+                onmouseover="this.style.background='color-mix(in srgb, var(--color-accent) 12%, transparent)'"
+                onmouseout="this.style.background='transparent'"
               >
                 pip install deepdoc
                 <svg
@@ -159,10 +159,10 @@ const chatMessages = [
               <button
                 type="button"
                 id="try-free-btn"
-                class="flex h-10 items-center gap-2 rounded-lg px-4"
-                style="border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: background 0.15s; white-space: nowrap; cursor: pointer;"
-                onmouseover="this.style.background='color-mix(in srgb, var(--color-accent) 16%, transparent)'"
-                onmouseout="this.style.background='color-mix(in srgb, var(--color-accent) 8%, transparent)'"
+                class="flex h-14 items-center gap-2 rounded-xl px-7"
+                style="border: none; color: var(--color-surface); background: var(--color-accent); font-family: var(--font-sans); font-size: 16px; font-weight: 700; transition: opacity 0.15s; white-space: nowrap; cursor: pointer;"
+                onmouseover="this.style.opacity='0.88'"
+                onmouseout="this.style.opacity='1'"
               >
                 Try it free &rarr;
               </button>

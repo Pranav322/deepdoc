@@ -49,18 +49,19 @@ export function tryPageHtml(): string {
   .wrap-narrow { width: 100%; max-width: 560px; margin: 0 auto; padding: 0 28px 40px; }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
 
-  /* ── App bar — matches deepdoc.tech's Header.astro recipe so both
-     domains read as one product: same 52px sticky bar, same blur, same
-     brand mark (see web/src/components/Logo.astro, duplicated here since
-     the Worker can't import an Astro component). ─────────────────────── */
+  /* ── App bar — byte-for-byte the same recipe as deepdoc.tech's
+     Header.astro/Logo.astro (same container width, same brand-mark sizing/
+     spacing, same font-size) so switching domains reads as one product, not
+     two. Duplicated here (not imported) since these are plain .ts endpoints,
+     not .astro components — keep in sync with Header.astro/Logo.astro by
+     hand if either changes. ───────────────────────────────────────────── */
   .appbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in oklab, var(--surface) 86%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); flex-shrink: 0; }
-  .appbar-inner { max-width: 880px; margin: 0 auto; height: 52px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
-  .brand { font-family: var(--font-sans); font-weight: 600; font-size: 1.15rem; text-decoration: none; letter-spacing: -0.015em; color: var(--ink); display: flex; align-items: center; cursor: pointer; }
-  .dd-mark { display: block; flex-shrink: 0; width: 1.16em; height: 1.16em; margin-right: 0.04em; transform: translateY(-0.05em); }
+  .appbar-inner { max-width: 1152px; margin: 0 auto; height: 52px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
+  .brand { font-family: var(--font-sans); font-weight: 600; font-size: 1.2rem; text-decoration: none; letter-spacing: -0.015em; color: var(--ink); display: flex; align-items: center; cursor: pointer; }
+  .dd-mark { display: block; flex-shrink: 0; width: 1.16em; height: 1.16em; margin-left: -0.33em; margin-right: 0.04em; transform: translateY(-0.05em); }
   .dd-mark .dd-front { fill: var(--accent); }
   .dd-mark .dd-echo { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
   .dd-mark .dd-echo-1 { opacity: 0.4; } .dd-mark .dd-echo-2 { opacity: 0.18; }
-  .cloud-tag { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); border: 1px solid var(--line-strong); border-radius: 999px; padding: 2px 8px; margin-left: 10px; text-transform: uppercase; letter-spacing: 0.04em; }
   .account-chip { display: flex; align-items: center; gap: 8px; background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 12px 4px 4px; color: var(--ink); font-family: var(--font-sans); font-size: 13px; font-weight: 500; height: auto; cursor: pointer; transition: border-color 0.15s; }
   .account-chip:hover { border-color: var(--ink-faint); }
   .account-chip img { width: 24px; height: 24px; border-radius: 50%; }
@@ -97,15 +98,16 @@ export function tryPageHtml(): string {
   input:focus { border-color: var(--accent); }
   code, .mono { font-family: var(--font-mono); }
 
-  /* ── Sign-in prompt (unauthenticated root) ───────────────────────────
-     No hero, no marketing copy — deepdoc.tech's own landing page already
-     sells the product; this is just the gate you hit on the way in from
-     its "Try it free" CTA. */
-  .signin-wrap { flex: 1; display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
-  .signin-card { width: 100%; max-width: 400px; text-align: center; }
-  .signin-card h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 10px; }
-  .signin-card p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 22px; }
-  .signin-card ul { text-align: left; margin: 0 0 26px; padding-left: 18px; font-size: 13px; color: var(--ink-muted); line-height: 1.8; }
+  /* ── Sign-in popup (unauthenticated root) ────────────────────────────
+     Not a full pitch page — deepdoc.tech's own landing page already sells
+     the product. This pops up over a quiet, mostly-empty backdrop (same
+     header, no marketing copy) and can't be dismissed without signing in —
+     there's nothing else to do on this domain unauthenticated. */
+  .modal-veil { position: fixed; inset: 0; background: rgba(6,6,9,0.7); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 20; }
+  .modal { width: 100%; max-width: 400px; background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-lift); text-align: center; animation: confirm-rise 0.18s ease-out; }
+  .modal h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 10px; }
+  .modal p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 20px; }
+  .modal ul { text-align: left; margin: 0 0 24px; padding-left: 18px; font-size: 13px; color: var(--ink-muted); line-height: 1.8; }
 
   /* ── Section headers (shared across authed views) ──────────────── */
   .page-head { display: flex; align-items: baseline; justify-content: space-between; padding: 40px 0 24px; flex-wrap: wrap; gap: 12px; }
@@ -199,11 +201,13 @@ export function tryPageHtml(): string {
 <body>
   <div id="appbar-slot"></div>
   <div id="content"></div>
+  <div id="modal-slot"></div>
   <script>
     const state = {
       me: null, projects: [], quota: null, repos: null, selected: null, visibility: 'private',
       genStart: null, genTimer: null, expandedStage: null, ddOpen: false,
     };
+    const GITHUB_ICON_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>';
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
     const STAGE_DETAIL = {
@@ -314,29 +318,41 @@ export function tryPageHtml(): string {
           <path class="dd-echo dd-echo-2" d="M14 9 H24 A15 15 0 0 1 24 39 H14" transform="translate(6 6)"></path>
           <path class="dd-echo dd-echo-1" d="M14 9 H24 A15 15 0 0 1 24 39 H14" transform="translate(3 3)"></path>
           <path class="dd-front" fill-rule="evenodd" d="M14 9 H24 A15 15 0 0 1 24 39 H14 Z M20 15 H24 A9 9 0 0 1 24 33 H20 Z"></path>
-        </svg>eepDoc<span class="cloud-tag">cloud</span>\`;
+        </svg>eepDoc\`;
     }
 
-    // ── Sign-in prompt (unauthenticated root) — no hero, no marketing copy.
+    // ── Sign-in popup (unauthenticated root) — no hero, no marketing copy.
     // deepdoc.tech's own landing page is the pitch; its "Try it free" CTA
-    // sends people straight here, so this is just the gate, not a second
-    // sales pitch.
+    // opens this same popup there (see index.astro), then sends people here
+    // once signed in. If someone lands here directly without a session, the
+    // popup opens automatically over a quiet backdrop — same header as
+    // everywhere else, nothing else to interact with until signed in.
     function renderLoggedOut() {
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
         </div></header>\`;
-      document.getElementById('content').innerHTML = \`
-        <div class="signin-wrap">
-          <div class="signin-card">
-            <h1>Sign in to generate docs</h1>
+      document.getElementById('content').innerHTML = '';
+      document.getElementById('modal-slot').innerHTML = signInModalHtml('/auth/github', false);
+    }
+
+    // Shared between the auto-popup here and (in spirit — index.astro keeps
+    // its own copy since it's a separate rendering system) the marketing
+    // site's "Try now" trigger. dismissible is false here — there's
+    // nothing else to do on this domain unauthenticated — but kept
+    // parameterized in case that changes.
+    function signInModalHtml(authHref, dismissible) {
+      return \`
+        <div class="modal-veil" \${dismissible ? "onclick=\\"if(event.target===this) this.remove()\\"" : ''}>
+          <div class="modal">
+            <h1>Sign in with GitHub</h1>
             <p>DeepDoc needs read access to clone the repo you pick and generate its docs. We only use it for that.</p>
             <ul>
               <li>Nothing is posted or changed in your GitHub account</li>
               <li>Generated sites are private by default — you choose if to make one public</li>
               <li>You can revoke access from GitHub at any time</li>
             </ul>
-            <button class="btn full" onclick="location.href='/auth/github'">Continue with GitHub</button>
+            <button class="btn full" style="display:flex;align-items:center;justify-content:center;gap:8px;" onclick="location.href='\${authHref}'">\${GITHUB_ICON_SVG}Continue with GitHub</button>
           </div>
         </div>\`;
     }

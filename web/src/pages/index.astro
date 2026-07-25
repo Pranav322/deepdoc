@@ -156,15 +156,16 @@ const chatMessages = [
 
             <!-- Path 2: hosted / cloud -->
             <div class="flex flex-col items-center gap-2">
-              <a
-                href="https://cloud.deepdoc.tech"
+              <button
+                type="button"
+                id="try-free-btn"
                 class="flex h-10 items-center gap-2 rounded-lg px-4"
-                style="border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: background 0.15s; white-space: nowrap; text-decoration: none;"
+                style="border: 1px solid color-mix(in srgb, var(--color-accent) 45%, transparent); color: var(--color-accent); background: color-mix(in srgb, var(--color-accent) 8%, transparent); font-family: var(--font-mono); font-size: 13px; font-weight: 500; transition: background 0.15s; white-space: nowrap; cursor: pointer;"
                 onmouseover="this.style.background='color-mix(in srgb, var(--color-accent) 16%, transparent)'"
                 onmouseout="this.style.background='color-mix(in srgb, var(--color-accent) 8%, transparent)'"
               >
                 Try it free &rarr;
-              </a>
+              </button>
               <span style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--color-ink-faint);">
                 hosted &middot; nothing to install
               </span>
@@ -566,6 +567,57 @@ $ deepdoc serve
   </section>
 
   <Footer />
+
+  <!-- "Try it free" opens this instead of navigating away — the GitHub
+       repo-read grant is explained before the OAuth redirect, not after.
+       Button links to the absolute cloud.deepdoc.tech URL since OAuth start
+       lives on that domain; the callback lands the user there too. -->
+  <div id="signin-modal-slot"></div>
+
+  <style is:global>
+    /* is:global — this markup is injected client-side via innerHTML at
+       runtime (openSignInModal below), so it never receives the
+       data-astro-cid-* attribute Astro's scoped CSS relies on to match.
+       Scoped rules here would silently never apply (this shipped broken
+       once already — the modal rendered with none of these rules, showing
+       up in normal document flow instead of as a fixed-position overlay). */
+    .modal-veil { position: fixed; inset: 0; background: rgba(6,6,9,0.7); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 50; }
+    .modal { width: 100%; max-width: 400px; background: var(--color-surface-raised); border: 1px solid var(--color-line-strong); border-radius: 16px; padding: 28px; box-shadow: 0 30px 90px rgba(0, 0, 0, 0.52); text-align: center; font-family: var(--font-sans); }
+    .modal h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 10px; color: var(--color-ink); }
+    .modal p { font-size: 13.5px; line-height: 1.7; color: var(--color-ink-muted); margin: 0 0 20px; }
+    .modal ul { text-align: left; margin: 0 0 24px; padding-left: 18px; font-size: 13px; color: var(--color-ink-muted); line-height: 1.8; }
+    .modal button { height: 42px; width: 100%; border-radius: 8px; border: none; cursor: pointer; background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; }
+  </style>
+
+  <script>
+    const GITHUB_ICON = '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>';
+
+    function openSignInModal() {
+      const slot = document.getElementById('signin-modal-slot');
+      if (!slot) return;
+      slot.innerHTML = `
+        <div class="modal-veil" id="signin-veil">
+          <div class="modal">
+            <h1>Sign in with GitHub</h1>
+            <p>DeepDoc needs read access to clone the repo you pick and generate its docs. We only use it for that.</p>
+            <ul>
+              <li>Nothing is posted or changed in your GitHub account</li>
+              <li>Generated sites are private by default — you choose if to make one public</li>
+              <li>You can revoke access from GitHub at any time</li>
+            </ul>
+            <button id="signin-continue">${GITHUB_ICON}Continue with GitHub</button>
+          </div>
+        </div>`;
+      document.getElementById('signin-veil')?.addEventListener('click', (e) => {
+        if (e.target === e.currentTarget) slot.innerHTML = '';
+      });
+      document.getElementById('signin-continue')?.addEventListener('click', () => {
+        location.href = 'https://cloud.deepdoc.tech/auth/github';
+      });
+    }
+
+    document.getElementById('try-free-btn')?.addEventListener('click', openSignInModal);
+  </script>
 </Layout>
 
 <script>

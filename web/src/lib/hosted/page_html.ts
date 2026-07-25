@@ -84,6 +84,7 @@ export function tryPageHtml(): string {
   .btn:hover:not(:disabled) { opacity: 0.88; }
   .btn:active:not(:disabled) { transform: scale(0.98); }
   .btn:disabled { opacity: 0.35; cursor: not-allowed; }
+  .btn-spinner { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
   .btn.secondary { background: var(--surface-high); color: var(--ink); border: 1px solid var(--line-strong); }
   .btn.ghost { background: transparent; color: var(--ink-muted); border: 1px solid var(--line-strong); }
   .btn.full { width: 100%; }
@@ -352,9 +353,19 @@ export function tryPageHtml(): string {
               <li>Generated sites are private by default — you choose if to make one public</li>
               <li>You can revoke access from GitHub at any time</li>
             </ul>
-            <button class="btn full" style="display:flex;align-items:center;justify-content:center;gap:8px;" onclick="location.href='\${authHref}'">\${GITHUB_ICON_SVG}Continue with GitHub</button>
+            <button class="btn full" style="display:flex;align-items:center;justify-content:center;gap:8px;" onclick="startGithubAuth(this,'\${authHref}')">\${GITHUB_ICON_SVG}Continue with GitHub</button>
           </div>
         </div>\`;
+    }
+
+    // GitHub OAuth is a real page navigation, so there's no "restore" path —
+    // the loading state just shows until the browser unloads for /auth/github.
+    function startGithubAuth(btn, authHref) {
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-spinner"></span>Redirecting…';
+      }
+      location.href = authHref;
     }
 
     async function logout() {
@@ -581,7 +592,7 @@ export function tryPageHtml(): string {
         <div class="confirm-panel">
           <div class="who">\${titleHtml}</div>
           \${visChoiceHtml()}
-          <button class="btn full" style="margin-top:16px" onclick="\${generateFn}()">\${isRegenerate ? 'Regenerate' : 'Generate'}</button>
+          <button id="generate-submit-btn" class="btn full" style="margin-top:16px" onclick="\${generateFn}()">\${isRegenerate ? 'Regenerate' : 'Generate'}</button>
         </div>\`;
     }
 
@@ -652,13 +663,27 @@ export function tryPageHtml(): string {
     async function startJob(body) {
       const errSlot = document.getElementById('error-slot');
       if (errSlot) errSlot.innerHTML = '';
-      const res = await fetch('/api/generate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      });
-      const data = await res.json();
+      const btn = document.getElementById('generate-submit-btn');
+      const originalBtnHtml = btn ? btn.innerHTML : null;
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="btn-spinner"></span>Generating…';
+      }
+      let res, data;
+      try {
+        res = await fetch('/api/generate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        data = await res.json();
+      } catch {
+        if (btn) { btn.disabled = false; btn.innerHTML = originalBtnHtml; }
+        if (errSlot) errSlot.innerHTML = '<div class="error-box">Network error — try again.</div>';
+        return;
+      }
       if (!res.ok) {
+        if (btn) { btn.disabled = false; btn.innerHTML = originalBtnHtml; }
         if (errSlot) errSlot.innerHTML = '<div class="error-box">' + (data.error || 'unknown error') + '</div>';
         return;
       }

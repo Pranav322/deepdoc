@@ -181,7 +181,7 @@ export function tryPageHtml(): string {
   .gen-repo img { width: 22px; height: 22px; border-radius: 50%; }
   .gen-elapsed { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-faint); margin-bottom: 24px; }
   .gen-col { width: 100%; max-width: 420px; text-align: left; }
-  .stage-row { border-bottom: 1px solid var(--line); padding: 14px 2px; cursor: pointer; }
+  .stage-row { border-bottom: 1px solid var(--line); padding: 14px 2px; }
   .stage-row:last-child { border-bottom: none; }
   .stage-head { display: flex; align-items: center; gap: 11px; }
   .stage-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); flex-shrink: 0; }
@@ -189,11 +189,6 @@ export function tryPageHtml(): string {
   .stage-row.done .stage-dot { background: var(--accent); }
   .stage-label { font-size: 14px; color: var(--ink-muted); flex: 1; }
   .stage-row.active .stage-label, .stage-row.done .stage-label { color: var(--ink); font-weight: 500; }
-  .stage-chev { color: var(--ink-faint); font-size: 11px; transition: transform 0.15s; }
-  .stage-row.expanded .stage-chev { transform: rotate(90deg); }
-  .stage-detail { max-height: 0; overflow: hidden; transition: max-height 0.2s ease; }
-  .stage-row.expanded .stage-detail { max-height: 160px; margin: 10px 0 2px 19px; }
-  .stage-detail ul { margin: 0; padding-left: 16px; font-size: 12.5px; color: var(--ink-muted); line-height: 1.85; }
   .gen-result { margin-top: 26px; }
 
   .sub { color: var(--ink-muted); font-size: 13.5px; line-height: 1.7; }
@@ -206,20 +201,11 @@ export function tryPageHtml(): string {
   <script>
     const state = {
       me: null, projects: [], quota: null, repos: null, selected: null, visibility: 'private',
-      genStart: null, genTimer: null, expandedStage: null, ddOpen: false,
+      genStart: null, genTimer: null, ddOpen: false,
     };
     const GITHUB_ICON_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>';
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
-    const STAGE_DETAIL = {
-      cloning: ['Pulling the repository down over your GitHub token'],
-      generating: [
-        'Tracing the call graph and clustering related code',
-        'Naming domain clusters, planning page structure',
-        'Writing pages grounded in the actual code',
-      ],
-      building: ['Assembling the static site', 'Wiring up navigation and search'],
-    };
 
     async function main() {
       state.me = await fetch('/api/me').then(r => r.json());
@@ -238,6 +224,7 @@ export function tryPageHtml(): string {
             owner: inFlight.owner, repo: inFlight.repo,
             description: inFlight.description, language: inFlight.language,
             avatarUrl: inFlight.avatarUrl || state.me.avatarUrl,
+            createdAt: inFlight.createdAt,
           });
           poll(inFlight.jobId, inFlight.owner, inFlight.repo);
           return;
@@ -694,6 +681,7 @@ export function tryPageHtml(): string {
         description: body.description || null,
         language: body.language || null,
         avatarUrl: body.avatarUrl || state.me.avatarUrl,
+        createdAt: data.createdAt,
       });
       poll(data.job_id, data.owner, data.repo);
     }
@@ -708,36 +696,27 @@ export function tryPageHtml(): string {
       if (state.genTimer) { clearInterval(state.genTimer); state.genTimer = null; }
     }
 
-    function stageDetailHtml(stage) {
-      const items = STAGE_DETAIL[stage] || [];
-      return '<ul>' + items.map(t => '<li>' + t + '</li>').join('') + '</ul>';
-    }
-
     function renderStageList(currentStage) {
       const list = document.getElementById('stage-list');
       if (!list) return;
       const currentIdx = STAGES.indexOf(currentStage);
       list.innerHTML = STAGES.map((s, i) => {
         const cls = i < currentIdx ? 'done' : (i === currentIdx ? 'active' : '');
-        const isExpanded = state.expandedStage === s || (state.expandedStage === null && i === currentIdx);
         return \`
-          <div class="stage-row \${cls} \${isExpanded ? 'expanded' : ''}" onclick="toggleStage('\${s}')">
-            <div class="stage-head"><span class="stage-dot"></span><span class="stage-label">\${STAGE_LABEL[s]}</span><span class="stage-chev">▸</span></div>
-            <div class="stage-detail">\${stageDetailHtml(s)}</div>
+          <div class="stage-row \${cls}">
+            <div class="stage-head"><span class="stage-dot"></span><span class="stage-label">\${STAGE_LABEL[s]}</span></div>
           </div>\`;
       }).join('');
-    }
-    function toggleStage(s) {
-      state.expandedStage = state.expandedStage === s ? '__none__' : s;
-      renderStageList(state.currentStage || 'cloning');
     }
 
     function renderGenerating(info) {
       renderAppBar();
       state.currentGenInfo = info;
       state.currentStage = 'cloning';
-      state.expandedStage = null;
-      state.genStart = Date.now();
+      // info.createdAt is the real server-side job-creation timestamp (D1
+      // projects.created_at) — using it instead of Date.now() means the
+      // elapsed timer survives a page refresh instead of resetting to 0:00.
+      state.genStart = info.createdAt || Date.now();
       stopGenTimer();
       document.getElementById('content').innerHTML = \`
         <div class="gen-wrap">

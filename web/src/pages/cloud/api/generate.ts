@@ -66,8 +66,19 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     // in-flight job instead of enqueuing a duplicate.
     const existing = await fetchJobStatus(env, existingJobRow.job_id);
     if (existing.status && existing.status !== "done" && existing.status !== "failed") {
+      const existingProject = await env.DB.prepare(
+        "SELECT created_at FROM projects WHERE user_login = ? AND LOWER(owner) = LOWER(?) AND LOWER(repo) = LOWER(?)",
+      )
+        .bind(user.login, owner, repo)
+        .first<{ created_at: number }>();
       return new Response(
-        JSON.stringify({ job_id: existingJobRow.job_id, status: existing.status, owner, repo }),
+        JSON.stringify({
+          job_id: existingJobRow.job_id,
+          status: existing.status,
+          owner,
+          repo,
+          createdAt: existingProject?.created_at ?? null,
+        }),
         { status: 202, headers: { "Content-Type": "application/json" } },
       );
     }
@@ -142,7 +153,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     ),
   ]);
 
-  return new Response(JSON.stringify({ ...job, owner, repo }), {
+  return new Response(JSON.stringify({ ...job, owner, repo, createdAt: now }), {
     status: 202,
     headers: { "Content-Type": "application/json" },
   });

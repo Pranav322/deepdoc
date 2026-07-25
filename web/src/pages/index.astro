@@ -579,6 +579,9 @@ $ deepdoc serve
     .modal p { font-size: 13.5px; line-height: 1.7; color: var(--color-ink-muted); margin: 0 0 20px; }
     .modal ul { text-align: left; margin: 0 0 24px; padding-left: 18px; font-size: 13px; color: var(--color-ink-muted); line-height: 1.8; }
     .modal button { height: 42px; width: 100%; border-radius: 8px; border: none; cursor: pointer; background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; display: flex; align-items: center; justify-content: center; gap: 8px; }
+    .modal button:disabled { opacity: 0.6; cursor: not-allowed; }
+    .modal-btn-spinner { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: modal-btn-pulse 1.2s ease-in-out infinite; }
+    @keyframes modal-btn-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
   </style>
 
   <script>
@@ -603,7 +606,10 @@ $ deepdoc serve
       document.getElementById('signin-veil')?.addEventListener('click', (e) => {
         if (e.target === e.currentTarget) slot.innerHTML = '';
       });
-      document.getElementById('signin-continue')?.addEventListener('click', () => {
+      document.getElementById('signin-continue')?.addEventListener('click', (e) => {
+        const btn = e.currentTarget;
+        btn.disabled = true;
+        btn.innerHTML = '<span class="modal-btn-spinner"></span>Redirecting…';
         location.href = 'https://cloud.deepdoc.tech/auth/github';
       });
     }

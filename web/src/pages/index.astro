@@ -72,14 +72,23 @@ const chatMessages = [
 
     <BackgroundRippleEffect />
 
-    <!-- Soft accent glow that follows the cursor within the hero, à la
-         redocly.com's hero background — same idea (a blurred radial
-         gradient translated to the pointer position via rAF-lerped
-         mousemove), our own single brand-accent color instead of their
-         multi-hue blobs, matching the restrained-accent direction
-         elsewhere on this page. Off on touch devices (no mousemove) and
-         prefers-reduced-motion (script below no-ops). -->
-    <div id="cursor-glow" class="cursor-glow" aria-hidden="true"></div>
+    <!-- Fluid cursor-following glow, à la redocly.com's hero: several
+         blurred, screen-blended blobs in a shared blurred container, so
+         overlapping blobs brighten into each other instead of just
+         stacking as flat translucent circles. Their blobs use 4 different
+         hues; ours stays in the single brand-accent family (varying
+         size/opacity only) to keep the restrained-accent direction used
+         elsewhere on this page. Ambient blobs drift on their own infinite
+         loops; one extra blob is driven by the mousemove/rAF-lerp script
+         below. All of it is inert under prefers-reduced-motion (animations
+         off via media query, cursor-tracking script no-ops) and naturally
+         inert on touch (no mousemove events). -->
+    <div class="gradients-container" aria-hidden="true">
+      <div class="blob blob-1"></div>
+      <div class="blob blob-2"></div>
+      <div class="blob blob-3"></div>
+      <div id="cursor-glow" class="blob cursor-glow"></div>
+    </div>
 
     <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
       <div class="flex flex-col items-center text-center">
@@ -649,7 +658,7 @@ $ deepdoc serve
         if (!active) {
           curX = targetX;
           curY = targetY;
-          glow.style.opacity = '1';
+          glow.style.opacity = '0.8';
           active = true;
         }
       });

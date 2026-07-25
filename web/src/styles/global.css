@@ -179,22 +179,49 @@ body {
   pointer-events: none;
 }
 
-/* Cursor-following accent glow (hero only) — see index.astro for the
-   mousemove/rAF script. Hidden until the pointer actually enters the hero
-   (opacity toggled by the script), and off-screen by default so there's no
-   flash-of-glow at (0,0) before the first mousemove. */
-.cursor-glow {
+/* ── Fluid hero blobs (goo filter + screen blend) — see index.astro for
+   the SVG filter def and the mousemove/rAF script. The goo filter is what
+   makes overlapping blobs melt into each other instead of just stacking as
+   flat translucent circles; screen blend (not redocly's hard-light — that
+   reads as darkening against our near-black surface, screen only adds
+   light) is what lets overlaps read as a brighter, more saturated green
+   instead of a muddy double-transparency. ─────────────────────────────── */
+.gradients-container {
   position: absolute;
+  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
+  filter: blur(24px);
+}
+.blob {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(circle, var(--color-accent) 0%, transparent 70%);
+  mix-blend-mode: screen;
+}
+.blob-1 { width: 480px; height: 480px; top: -120px; left: 8%;  opacity: 0.3; animation: blobDrift1 34s ease-in-out infinite; }
+.blob-2 { width: 380px; height: 380px; top: 40px;   right: 6%; opacity: 0.24; animation: blobDrift2 40s ease-in-out infinite; }
+.blob-3 { width: 320px; height: 320px; bottom: -140px; left: 38%; opacity: 0.2; animation: blobDrift3 27s ease-in-out infinite; }
+@keyframes blobDrift1 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(70px, 40px); } }
+@keyframes blobDrift2 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-60px, 50px); } }
+@keyframes blobDrift3 { 0%, 100% { transform: translate(0, 0); } 33% { transform: translate(50px, -30px); } 66% { transform: translate(-40px, 20px); } }
+@media (prefers-reduced-motion: reduce) {
+  .blob-1, .blob-2, .blob-3 { animation: none; }
+}
+
+/* Cursor-following blob (hero only) — see index.astro for the mousemove/
+   rAF script. Hidden until the pointer actually enters the hero (opacity
+   toggled by the script), and off-screen by default so there's no
+   flash-of-glow at (0,0) before the first mousemove. Bigger than the
+   ambient blobs so it dominates and visibly "leads" wherever the cursor
+   goes, same as the interactive blob on redocly.com. */
+.cursor-glow {
   top: 0;
   left: 0;
-  width: 480px;
-  height: 480px;
-  margin-left: -240px;
-  margin-top: -240px;
-  border-radius: 50%;
-  background: radial-gradient(circle, rgba(194,255,77,0.16) 0%, rgba(194,255,77,0) 70%);
-  filter: blur(40px);
-  pointer-events: none;
+  width: 620px;
+  height: 620px;
+  margin-left: -310px;
+  margin-top: -310px;
   opacity: 0;
   transition: opacity 0.4s ease;
   will-change: transform;

@@ -1,13 +1,25 @@
 # Hosted UI spec — cloud.deepdoc.tech
 
-This documents the **current** `cloud.deepdoc.tech` UI (server routes in
-`web/hosted/src/index.ts`, all markup/CSS/JS in `web/hosted/src/try_page.ts`)
-as of 2026-07-24, after the IA/visual revamp. Purpose: a checklist so a future
-change doesn't silently drop a flow, a business rule, or an edge case.
+This documents the **current** `cloud.deepdoc.tech` UI as of 2026-07-25 —
+IA/visual content unchanged since the 2026-07-24 revamp described below, but
+**as of 2026-07-25 the code moved**: `web/hosted/` (a standalone Cloudflare
+Worker) is retired, merged into the same Astro project as the marketing site
+(`web/`). Server routes now live under `web/src/pages/cloud/` (one thin
+endpoint file per route — `index.ts`, `generate.ts`, `projects/index.ts`,
+`projects/[owner]/[repo].ts`, the `api/*` endpoints, and the
+`[owner]/[repo]/[...path].ts` site-proxy catch-all); the markup/CSS/client-JS
+payload (`tryPageHtml()`, `privateSitePage()`, `stalePageHtml()`) was ported
+verbatim into `web/src/lib/hosted/page_html.ts`. `web/src/middleware.ts` is
+what routes `cloud.deepdoc.tech` requests into that `cloud/` namespace while
+keeping marketing (`deepdoc.tech`) untouched — see `AGENTS.md`'s
+"Hosted-generation" section for the full mechanics. Purpose of this file: a
+checklist so a future change doesn't silently drop a flow, a business rule,
+or an edge case — none of that changed in the framework move.
 
-Everything here is one single-file server-rendered SPA (`tryPageHtml()`) plus
-two standalone one-off pages (`privateSitePage`, `stalePageHtml`; the served
-static doc sites themselves aren't part of this app).
+Everything here is one server-rendered SPA (`tryPageHtml()`, now in
+`page_html.ts`) plus two standalone one-off pages (`privateSitePage`,
+`stalePageHtml`; the served static doc sites themselves aren't part of this
+app).
 
 ---
 

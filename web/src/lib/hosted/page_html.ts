@@ -1,9 +1,15 @@
-// Server-rendered by the Worker (not Astro) so auth cookies + API calls stay
-// same-origin. This is its own visual identity from deepdoc.tech's marketing
-// site — same brand accent (#C2FF4D) for continuity, but its own tinted
-// neutral scale, restrained accent usage, and editorial/technical layout.
-// Do not reintroduce the old "borrow the marketing card recipe verbatim"
-// approach — this app now owns its design system (see docs/HOSTED_UI_SPEC.md).
+// Ported verbatim from web/hosted/src/try_page.ts as part of the Astro
+// unification — server-rendered HTML+vanilla-JS strings, called from thin
+// Astro pages under src/pages/cloud/. All internal fetch()/nav() calls use
+// root-relative paths (/api/me, /generate, ...) matching the clean external
+// URL that src/middleware.ts's hostname rewrite preserves — nothing here
+// needed to change to work through that rewrite.
+//
+// This is its own visual identity from deepdoc.tech's marketing site — same
+// brand accent (#C2FF4D) for continuity, but its own tinted neutral scale,
+// restrained accent usage, and editorial/technical layout. Do not
+// reintroduce the old "borrow the marketing card recipe verbatim" approach —
+// this app now owns its design system (see docs/HOSTED_UI_SPEC.md).
 //
 // IA: /generate is the only post-login home (repo picker + paste + confirm).
 // All project management (list, visit, visibility, delete) lives under

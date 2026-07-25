@@ -1,0 +1,20 @@
+name = "deepdoc"
+pages_build_output_dir = "./dist"
+compatibility_date = "2026-07-01"
+compatibility_flags = ["nodejs_compat"]
+
+# GITHUB_CLIENT_ID/GITHUB_SECRET_ID/QUEUE_MESSAGES_URL are set as
+# `wrangler pages secret put` for production, and as .dev.vars locally (not
+# [vars] here) — a plaintext var and a secret can't share the same binding
+# name. Custom domains (deepdoc.tech, cloud.deepdoc.tech) are configured on
+# the Pages project directly (dashboard or `wrangler pages domain add`), not
+# here — that's a Workers-only `routes` concept, not a Pages one.
+
+[[d1_databases]]
+binding = "DB"
+database_name = "deepdoc-hosted-db"
+database_id = "ba724999-e3e3-4eb3-bfed-9d85f49dd01e"
+
+[[r2_buckets]]
+binding = "SITES"
+bucket_name = "deepdoc-hosted-sites"

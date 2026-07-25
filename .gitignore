@@ -58,6 +58,7 @@ web/*
 !web/*.d.ts
 !web/*.ts
 !web/*.tsx
+!web/*.toml
 !web/content/
 !web/server/
 !web/server/**

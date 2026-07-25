@@ -383,82 +383,123 @@ Cloudflare. **See `docs/PRODUCTION_INFRA.md` for the full resource inventory,
 maintenance commands, and teardown steps** — this section covers the code/dev
 side only.
 
-- `web/hosted/` — Cloudflare Worker (TypeScript, no framework), deployed as
-  `deepdoc-hosted` at custom domain `cloud.deepdoc.tech`. **IA revamped
-  2026-07-24** (full rationale + every page's spec in
-  `docs/HOSTED_UI_SPEC.md`) — the old `/try` dashboard (list + generate-form +
-  visibility all on one scrolling page) and dedicated `/account` page are
-  retired; both now 302-redirect to `/` for stale bookmarks. **`/` is not a
-  landing/marketing page** — `deepdoc.tech`'s own hero already sells the
-  product and its "Try it free" CTA sends people straight here, so an
-  unauthenticated `/` is just a sign-in gate (3-bullet GitHub repo-read
-  explainer + "Continue with GitHub", no hero, no mockup, no modal — see
-  `renderLoggedOut()`). For an authenticated user, `/` has no content of its
-  own either: the client resolves it to `/projects` if they have any saved
-  project, else `/generate`, rewriting the URL via `history.replaceState`
-  (same rule the OAuth callback and stale `/try`/`/account`/`/new` redirects
-  all funnel into — one canonical entry point, not a hardcoded target).
-  Current routes: `GET /` (see above), `GET /generate` (repo picker +
-  paste-URL + visibility + confirm, no dashboard framing), `GET /projects`
-  (pure click-through list, no buttons in the row — every row navigates into
-  project detail), `GET /projects/:owner/:repo` (**the only place per-project
-  actions live**: Visit-site / Visibility toggle / Danger-zone Delete with an
-  inline "Confirm delete?" step, no native `confirm()`), `GET /auth/github` /
-  `GET /api/auth/callback/github` (OAuth, scope `repo read:user` — `repo` is
-  required to list/clone private repos), `GET /api/repos`, `POST
-  /api/generate` (**enqueues** a message onto the Azure Storage Queue — see
-  dispatch below), `GET /api/status/:id` (reads `jobs/:id/status.json` from
-  R2), `GET /api/projects` (+`DELETE /api/projects/:owner/:repo`, `POST
-  /api/projects/:owner/:repo/visibility` — reused as-is by the project-detail
-  page, no separate single-project endpoint), `POST /api/logout`, and the
-  vanity `GET /:owner/:repo/*` site proxy (must stay last in routing so it
-  never shadows `/generate`, `/projects`(`/:owner/:repo`), `/api/*`,
-  `/auth/*`; the visibility POST must be matched before the 2-segment DELETE,
-  and `/projects/:owner/:repo` must be matched by its own regex before the
-  vanity catch-all, the same way `/try`/`/account` used to be).
-  A profile dropdown (avatar chip, click to open, outside-click/Escape to
-  close) replaces `/account` as a page — it's identity + a "Projects (N) ›"
-  link + "Generate new" + Log out **only**; it deliberately does not list
-  projects inline (that was tried and explicitly rejected — see
-  `docs/HOSTED_UI_SPEC.md` rule 14). **The app bar is a duplicate, by hand, of
-  `deepdoc.tech`'s own `Header.astro`/`Logo.astro`** (52px sticky bar, blurred
-  background, the same "depth D" brand-mark SVG inlined in `try_page.ts`'s
-  `brandMarkHtml()`) so the two domains read as one product, not a bolted-on
-  side app — keep them in sync if either header changes.
-  **All state lives in Cloudflare D1** (`deepdoc-hosted-db`, schema in
-  `web/hosted/schema.sql`: `sessions`, `oauth_states`, `projects`,
-  `rate_limit_starts`, `owner_repo_jobs`) — in-memory Maps were the local-only
-  prototype and are gone; real Cloudflare production runs many ephemeral
-  isolates with no shared memory, so this migration was mandatory, not
-  optional. **Accounts & visibility** (`docs/PRODUCTION_INFRA.md` has the full
-  detail): each site has a `visibility` (`private` default for new generations)
-  on both `projects` and `owner_repo_jobs`; `owner_repo_jobs.owner_login` is the
-  single owner (first generation wins, `handleGenerate` 409s a second user).
-  Private-site access is enforced **server-side** in `handleOwnerRepoSite` —
-  a private site requires `session.login == owner_login` before serving ANY
-  byte incl. `/_next/*` assets (real boundary: the R2 bucket isn't public, the
-  Worker is the only read path). Local dev: `cd web/hosted && npm install && npm run dev` (port
-  3000 — must use `localhost`, not `127.0.0.1`, GitHub's callback match is an
-  exact string). Secrets (`GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`,
-  `QUEUE_MESSAGES_URL`) come from `.dev.vars` locally and `wrangler secret put`
-  in production — never from `[vars]` in `wrangler.toml` (a plaintext var and a
-  secret can't share a binding name).
+- **`web/hosted/` is retired (2026-07-25) — merged into `web/`.** The hosted
+  app is no longer a separate Cloudflare Worker; it's now part of the same
+  Astro project that serves the marketing site, both on the same Cloudflare
+  **Pages** project (`deepdoc`), with `cloud.deepdoc.tech` and `deepdoc.tech`
+  as two custom domains on that one project. This was a deliberate
+  unification (near-zero hosted-product traffic at the time made it the
+  cheapest possible moment) — see `docs/PRODUCTION_INFRA.md` for the
+  before/after and the exact cutover steps taken, and `docs/HOSTED_UI_SPEC.md`
+  for the full page/route spec (IA/visual content unchanged by this move —
+  only the framework and deploy target changed).
+  - `web/astro.config.mjs` — `output: 'server'` + `@astrojs/cloudflare` adapter
+    (**pinned to `12.6.13`** — the `13.x`/`14.x` lines require Astro 6/7, this
+    project is on Astro 5.18.1; do not blindly `pnpm up` this package).
+  - `web/wrangler.toml` — D1 (`DB` → `deepdoc-hosted-db`) + R2 (`SITES` →
+    `deepdoc-hosted-sites`) bindings for the Pages project. Secrets
+    (`GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`, `QUEUE_MESSAGES_URL`) are
+    `wrangler pages secret put --project-name=deepdoc` in production, `.dev.vars`
+    locally — same pattern as before, just `pages secret` instead of `secret`.
+  - `web/src/middleware.ts` — **the entire routing trick.** Marketing pages
+    (`index.astro`, `docs.astro`, `changelog.astro`) live unprefixed at the
+    project root; the hosted app's pages/endpoints live under
+    `src/pages/cloud/`. The middleware rewrites any request whose hostname is
+    `cloud.deepdoc.tech` (or `cloud.localhost` for local dev — see below) by
+    prefixing `/cloud` onto the path before Astro's router resolves it — so
+    the *external* URL a browser or GitHub's OAuth callback sees stays
+    unprefixed (`/`, `/generate`, `/api/auth/callback/github`, ...), byte-for-byte
+    what it was on the old Worker. GitHub's registered OAuth callback URL did
+    not need to change.
+  - **`index.astro` is intentionally NOT prerendered**, unlike `docs.astro`/
+    `changelog.astro`. `/` is the one path both domains use (marketing
+    homepage vs. the hosted app's shell/sign-in-gate), and Cloudflare Pages
+    serves a prerendered path as a static asset *before* the Function/
+    middleware ever runs — so if `/` were static, it would always serve the
+    marketing homepage regardless of hostname. This was a real bug caught
+    during the migration verification, not a hypothetical. Do not
+    re-prerender `index.astro` without re-deriving this.
+  - Local dev: real hostname-based branching needs a real hostname, not just
+    a path — visiting `/cloud/generate` directly does **not** work (the
+    client JS's relative `fetch('/api/me')` would hit the marketing
+    namespace, not `/cloud/api/me`). Either add `127.0.0.1 cloud.localhost`
+    to `/etc/hosts` and browse `http://cloud.localhost:4321`, or for one-off
+    curl testing use `curl --resolve cloud.localhost:PORT:127.0.0.1 ...`
+    (no `/etc/hosts` edit needed). `pnpm build && npx wrangler pages dev dist`
+    gives real D1/R2 bindings locally (`astro dev` alone does not);
+    `wrangler d1 execute deepdoc-hosted-db --local --file=hosted-schema-backup...`
+    equivalent — the local D1 SQLite file is empty until you apply the schema
+    once (see `web/hosted`'s old `schema.sql`, kept for reference during the
+    transition — the table structure itself did not change).
+  - Route structure under `src/pages/cloud/`: `index.ts`, `generate.ts`,
+    `projects/index.ts`, `projects/[owner]/[repo].ts` (all four just serve
+    the same app-shell HTML — the client-side script picks the view),
+    `try.ts`/`account.ts`/`new.ts` (302 stale-bookmark redirects to `/`),
+    `auth/github.ts` + `api/auth/callback/github.ts` (OAuth), `api/me.ts`,
+    `api/repos.ts`, `api/generate.ts`, `api/status/[id].ts`,
+    `api/projects/index.ts`, `api/projects/[owner]/[repo].ts` (DELETE),
+    `api/projects/[owner]/[repo]/visibility.ts` (POST), and
+    `[owner]/[repo]/[...path].ts` (the site-proxy catch-all). **Astro's own
+    static-route-beats-dynamic-route priority replaces the old Worker's
+    manual regex-ordering comments** ("must stay last", "must be matched
+    before") — a literal file always wins over a `[...path]` catch-all at the
+    same position, so there's no ordering to get wrong here.
+  - Shared logic lives in `web/src/lib/hosted/`: `queue.ts` (`enqueueJob`/
+    `fetchJobStatus` — the Azure Storage Queue dispatch contract, unchanged),
+    `session.ts` (session/quota helpers — cookie handling now goes through
+    Astro's `cookies.get/set/delete` instead of manual `Cookie`/`Set-Cookie`
+    header parsing), `page_html.ts` (the actual page markup + the entire
+    client-side vanilla-JS SPA — **ported verbatim** from the old
+    `try_page.ts`, not rewritten, to avoid regressions in already-shipped,
+    already-tested UI).
+  - `web/src/env.d.ts` — `App.Locals` typed via `@astrojs/cloudflare`'s
+    `Runtime<T>` so every endpoint gets `locals.runtime.env.DB` /
+    `.SITES` / etc. with real types (needs `@cloudflare/workers-types` as a
+    devDependency for the ambient `D1Database`/`R2Bucket` globals it
+    references).
+  - **A profile dropdown** (avatar chip, click to open, outside-click/Escape
+    to close) is the only account surface — identity + a "Projects (N) ›"
+    link + "Generate new" + Log out **only**; it deliberately does not list
+    projects inline (that was tried and explicitly rejected — see
+    `docs/HOSTED_UI_SPEC.md` rule 14). **The app bar reuses `deepdoc.tech`'s
+    own `Header.astro`/`Logo.astro` recipe** (52px sticky bar, blurred
+    background, the same "depth D" brand-mark SVG, still inlined as a JS
+    string in `page_html.ts`'s `brandMarkHtml()` rather than a real shared
+    Astro component — the hosted pages are plain `.ts` endpoints returning
+    raw HTML strings, not `.astro` components, so they can't `import
+    Logo.astro` directly. A true shared component is a reasonable future
+    cleanup, not done in this pass).
+  - **All state lives in Cloudflare D1** (`deepdoc-hosted-db`, schema:
+    `sessions`, `oauth_states`, `projects`, `rate_limit_starts`,
+    `owner_repo_jobs`) — unchanged by the migration. **Accounts & visibility**
+    (`docs/PRODUCTION_INFRA.md` has the full detail): each site has a
+    `visibility` (`private` default for new generations) on both `projects`
+    and `owner_repo_jobs`; `owner_repo_jobs.owner_login` is the single owner
+    (first generation wins, `handleGenerate` 409s a second user). Private-site
+    access is enforced **server-side** in the `[owner]/[repo]/[...path].ts`
+    catch-all — a private site requires `session.login == owner_login` before
+    serving ANY byte incl. `/_next/*` assets (real boundary: the R2 bucket
+    isn't public, this endpoint is the only read path).
 - **Dispatch = queue + event-driven Container Apps Job (autoscaling, since
   2026-07-24).** Generation compute is NO LONGER an always-on runner — the old
-  `deepdoc-runner` Container App is retired. `handleGenerate` mints a `job_id`
-  and enqueues `{job_id,owner,repo,github_token,visibility}` (base64-JSON) onto
-  the Azure Storage Queue `deepdoc-jobs` via `QUEUE_MESSAGES_URL` (queue REST +
-  add-only SAS). A KEDA `azure-queue` scaler on the Container Apps **Job**
+  `deepdoc-runner` Container App is retired. `src/pages/cloud/api/generate.ts`
+  mints a `job_id` and enqueues `{job_id,owner,repo,github_token,visibility}`
+  (base64-JSON, via `src/lib/hosted/queue.ts`'s `enqueueJob`) onto the Azure
+  Storage Queue `deepdoc-jobs` via `QUEUE_MESSAGES_URL` (queue REST + add-only
+  SAS). A KEDA `azure-queue` scaler on the Container Apps **Job**
   `deepdoc-gen-job` starts one isolated execution per message (min 0 / max 10,
   4 vCPU / 8 GiB each) → **scale-to-zero when idle (~$0)**. The token rides in
   the message (private queue, deleted after processing). Status/serving are R2:
   the job writes `jobs/{id}/status.json` and the site `{owner}/{repo}/…`, and
-  the Worker reads both from R2 — it never talks to a container. **KEDA can
-  occasionally spawn a duplicate no-op execution (polling race); it's harmless
-  — only one execution can lease a message, so no duplicate generation. Stop a
-  lingering one with `az containerapp job stop`.**
+  the Pages Function reads both from R2 (`fetchJobStatus`) — it never talks to
+  a container. **KEDA can occasionally spawn a duplicate no-op execution
+  (polling race); it's harmless — only one execution can lease a message, so
+  no duplicate generation. Stop a lingering one with `az containerapp job
+  stop`.**
 - `hosted-runner/` — the container image (`deepdoc-runner:vN` in ACR, build
-  context = **repo root**). `pipeline.py` holds the shared clone → `deepdoc
+  context = **repo root**). Unaffected by the Astro unification — it talks to
+  Cloudflare D1/R2 via bindings/S3-API, never to whatever is consuming the
+  queue on the Cloudflare side. `pipeline.py` holds the shared clone → `deepdoc
   generate` → `deepdoc deploy` → R2-upload logic plus `write_status` (R2
   `jobs/{id}/status.json`). `job.py` is the Job entrypoint (`--command python
   --args job.py`): dequeues one message from `deepdoc-jobs` with a 1-hr
@@ -467,7 +508,7 @@ side only.
   FastAPI HTTP server) is legacy/vestigial post-cutover — kept but unused.
   `DEEPDOC_BIN` resolves to a local `.venv/bin/deepdoc` if present else `PATH`
   (do not re-hardcode the `.venv` path — that was a real bug). The message
-  encoding is **base64(JSON)** on both sides: the Worker `btoa()`s it,
+  encoding is **base64(JSON)** on both sides: the Cloudflare side `btoa()`s it,
   `job.py` uses `TextBase64DecodePolicy` — keep them in sync.
 - **Next.js `basePath` must be baked in at build time to match the serving
   URL, or CSS/JS 404s.** The generated static export assumes root-path
@@ -489,12 +530,13 @@ side only.
   `deepdoc-foundry` (pre-existing) lives in Azure resource group
   `deepdoc-main`/`eastus`, `base_url:
   https://deepdoc-foundry.services.ai.azure.com/`.
-- Verified end-to-end live in real production (not just local): private-repo
-  clone with an authenticated token, a full generate→deploy run through the
-  real deployed Worker → Container App → Foundry pipeline, the resulting site
-  served correctly at its real `cloud.deepdoc.tech/<owner>/<repo>/` URL with
-  working CSS, and the project persisting in D1 across requests (proving
-  real state persistence, not same-isolate luck).
+- Verified end-to-end live in real production (not just local), both before
+  and after the Astro unification: private-repo clone with an authenticated
+  token, a full generate→deploy run through the real deployed
+  Cloudflare → Container App → Foundry pipeline, the resulting site served
+  correctly at its real `cloud.deepdoc.tech/<owner>/<repo>/` URL with working
+  CSS, and the project persisting in D1 across requests (proving real state
+  persistence, not same-isolate luck).
 - **Access control now enforced** (was previously absent) — sites default to
   private (owner-only, session-checked server-side including asset paths); a
   user opts into public via the dashboard toggle. See the accounts/visibility

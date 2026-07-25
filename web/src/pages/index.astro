@@ -1,4 +1,13 @@
 ---
+// NOT prerendered (unlike docs.astro/changelog.astro): this exact path (/)
+// is also where the hosted app's shell lives (src/pages/cloud/index.ts),
+// reached via src/middleware.ts rewriting cloud.deepdoc.tech requests.
+// Cloudflare Pages serves a prerendered path as a static asset *before* the
+// Function/middleware ever runs, so if this were prerendered, "/" would
+// always serve the marketing homepage regardless of hostname. Rendering
+// per-request (still deterministic, same output) lets middleware branch
+// correctly. docs.astro/changelog.astro have no such collision and can stay
+// static.
 import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";

@@ -1,0 +1,4 @@
+import type { APIRoute } from "astro";
+
+// Stale bookmark to the old account page — redirect rather than 404.
+export const GET: APIRoute = () => new Response(null, { status: 302, headers: { Location: "/" } });

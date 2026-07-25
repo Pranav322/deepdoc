@@ -72,22 +72,13 @@ const chatMessages = [
 
     <BackgroundRippleEffect />
 
-    <!-- Fluid cursor-following glow, à la redocly.com's hero: several
-         blurred, screen-blended blobs in a shared blurred container, so
-         overlapping blobs brighten into each other instead of just
-         stacking as flat translucent circles. Their blobs use 4 different
-         hues; ours stays in the single brand-accent family (varying
-         size/opacity only) to keep the restrained-accent direction used
-         elsewhere on this page. Ambient blobs drift on their own infinite
-         loops; one extra blob is driven by the mousemove/rAF-lerp script
-         below. All of it is inert under prefers-reduced-motion (animations
-         off via media query, cursor-tracking script no-ops) and naturally
-         inert on touch (no mousemove events). -->
+    <!-- Ambient hero blobs: blurred, screen-blended, drifting on their own
+         infinite loops (no cursor-tracking — that was tried and rejected as
+         "ugly", see git history). -->
     <div class="gradients-container" aria-hidden="true">
       <div class="blob blob-1"></div>
       <div class="blob blob-2"></div>
       <div class="blob blob-3"></div>
-      <div id="cursor-glow" class="blob cursor-glow"></div>
     </div>
 
     <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
@@ -127,22 +118,17 @@ const chatMessages = [
 
         <!-- CTAs — two clearly distinct paths: self-host (open source) vs hosted (cloud) -->
         <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col items-center gap-x-3 gap-y-6 sm:flex-row sm:items-start sm:justify-center">
-            <span id="copy-sr" aria-live="polite" class="sr-only"></span>
-
             <!-- Path 1: self-host / open source -->
             <div class="flex flex-col items-center gap-2">
-              <button
-                id="copy-install"
-                type="button"
+              <a
+                href="#get-started"
                 class="group flex h-11 items-center gap-2 rounded-lg px-5"
-                style="border: 1px solid var(--color-accent); color: var(--color-accent); background: transparent; font-family: var(--font-sans); font-size: 14px; font-weight: 600; transition: background 0.15s; white-space: nowrap;"
-                aria-label="Copy install command to clipboard"
+                style="border: 1px solid var(--color-accent); color: var(--color-accent); background: transparent; font-family: var(--font-sans); font-size: 14px; font-weight: 600; transition: background 0.15s; white-space: nowrap; text-decoration: none;"
                 onmouseover="this.style.background='color-mix(in srgb, var(--color-accent) 12%, transparent)'"
                 onmouseout="this.style.background='transparent'"
               >
                 Run Locally with pip
                 <svg
-                  id="copy-icon"
                   xmlns="http://www.w3.org/2000/svg"
                   width="13"
                   height="13"
@@ -153,21 +139,8 @@ const chatMessages = [
                   stroke-linecap="round"
                   stroke-linejoin="round"
                   style="opacity: 0.6;"
-                ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
-                <svg
-                  id="check-icon"
-                  class="hidden"
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2.5"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                ><polyline points="20 6 9 17 4 12"></polyline></svg>
-              </button>
+                ><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
+              </a>
               <span style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--color-ink-faint);">
                 self-host &middot; open source
               </span>
@@ -471,7 +444,7 @@ const chatMessages = [
   </section>
 
   <!-- ── Getting started ─────────────────────────────────────────── -->
-  <section class="section-raised">
+  <section id="get-started" class="section-raised" style="scroll-margin-top: 76px;">
     <div class="mx-auto max-w-6xl px-6 py-16">
       <div class="grid grid-cols-1 items-start gap-12 lg:grid-cols-2">
         <!-- Left: copy -->
@@ -638,43 +611,6 @@ $ deepdoc serve
     document.getElementById('try-free-btn')?.addEventListener('click', openSignInModal);
   </script>
 
-  <!-- Cursor-following hero glow — scoped to the hero section only
-       (matches redocly.com's own scoping: their effect lives only in
-       their top hero, not the full page). rAF + lerp for a soft trailing
-       feel instead of the glow snapping straight to the pointer. -->
-  <script>
-    (function () {
-      const zone = document.getElementById('hero-cursor-zone');
-      const glow = document.getElementById('cursor-glow');
-      if (!zone || !glow) return;
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-
-      let targetX = 0, targetY = 0, curX = 0, curY = 0, active = false;
-
-      zone.addEventListener('mousemove', (e) => {
-        const rect = zone.getBoundingClientRect();
-        targetX = e.clientX - rect.left;
-        targetY = e.clientY - rect.top;
-        if (!active) {
-          curX = targetX;
-          curY = targetY;
-          glow.style.opacity = '0.8';
-          active = true;
-        }
-      });
-      zone.addEventListener('mouseleave', () => {
-        glow.style.opacity = '0';
-      });
-
-      function tick() {
-        curX += (targetX - curX) * 0.12;
-        curY += (targetY - curY) * 0.12;
-        glow.style.transform = `translate(${curX}px, ${curY}px)`;
-        requestAnimationFrame(tick);
-      }
-      requestAnimationFrame(tick);
-    })();
-  </script>
 </Layout>
 
 <script>
@@ -699,7 +635,6 @@ $ deepdoc serve
       } catch {}
     });
   }
-  attachCopy("copy-install", "copy-sr", "copy-icon", "check-icon");
   attachCopy("copy-install-2");
 
   // ── Feature cards: staggered scroll reveal ────────────────────────

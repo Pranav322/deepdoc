@@ -63,6 +63,7 @@ const chatMessages = [
 
   <!-- ── Hero ─────────────────────────────────────────────────────── -->
   <section
+    id="hero-cursor-zone"
     class="relative overflow-hidden"
     style="border-bottom: 1px solid var(--color-line);"
   >
@@ -70,6 +71,15 @@ const chatMessages = [
     <div class="hero-halo" aria-hidden="true"></div>
 
     <BackgroundRippleEffect />
+
+    <!-- Soft accent glow that follows the cursor within the hero, à la
+         redocly.com's hero background — same idea (a blurred radial
+         gradient translated to the pointer position via rAF-lerped
+         mousemove), our own single brand-accent color instead of their
+         multi-hue blobs, matching the restrained-accent direction
+         elsewhere on this page. Off on touch devices (no mousemove) and
+         prefers-reduced-motion (script below no-ops). -->
+    <div id="cursor-glow" class="cursor-glow" aria-hidden="true"></div>
 
     <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
       <div class="flex flex-col items-center text-center">
@@ -617,6 +627,44 @@ $ deepdoc serve
     }
 
     document.getElementById('try-free-btn')?.addEventListener('click', openSignInModal);
+  </script>
+
+  <!-- Cursor-following hero glow — scoped to the hero section only
+       (matches redocly.com's own scoping: their effect lives only in
+       their top hero, not the full page). rAF + lerp for a soft trailing
+       feel instead of the glow snapping straight to the pointer. -->
+  <script>
+    (function () {
+      const zone = document.getElementById('hero-cursor-zone');
+      const glow = document.getElementById('cursor-glow');
+      if (!zone || !glow) return;
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+
+      let targetX = 0, targetY = 0, curX = 0, curY = 0, active = false;
+
+      zone.addEventListener('mousemove', (e) => {
+        const rect = zone.getBoundingClientRect();
+        targetX = e.clientX - rect.left;
+        targetY = e.clientY - rect.top;
+        if (!active) {
+          curX = targetX;
+          curY = targetY;
+          glow.style.opacity = '1';
+          active = true;
+        }
+      });
+      zone.addEventListener('mouseleave', () => {
+        glow.style.opacity = '0';
+      });
+
+      function tick() {
+        curX += (targetX - curX) * 0.12;
+        curY += (targetY - curY) * 0.12;
+        glow.style.transform = `translate(${curX}px, ${curY}px)`;
+        requestAnimationFrame(tick);
+      }
+      requestAnimationFrame(tick);
+    })();
   </script>
 </Layout>
 

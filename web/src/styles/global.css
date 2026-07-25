@@ -178,6 +178,27 @@ body {
   filter: blur(48px);
   pointer-events: none;
 }
+
+/* Cursor-following accent glow (hero only) — see index.astro for the
+   mousemove/rAF script. Hidden until the pointer actually enters the hero
+   (opacity toggled by the script), and off-screen by default so there's no
+   flash-of-glow at (0,0) before the first mousemove. */
+.cursor-glow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 480px;
+  height: 480px;
+  margin-left: -240px;
+  margin-top: -240px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(194,255,77,0.16) 0%, rgba(194,255,77,0) 70%);
+  filter: blur(40px);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.4s ease;
+  will-change: transform;
+}
 /* ── Centered hero composition ───────────────────────────────────── */
 .hero-stage {
   position: relative;

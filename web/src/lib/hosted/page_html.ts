@@ -151,11 +151,40 @@ export function tryPageHtml(): string {
      React/framer-motion dependency needed for it. */
   .gallery-heading { font-size: 15px; font-weight: 500; color: var(--ink-muted); letter-spacing: -0.01em; margin: 0; }
   .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
-  .gallery-card { border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface-raised); overflow: hidden; cursor: pointer; transition: border-color 0.12s, transform 0.08s ease-out; will-change: transform; }
-  .gallery-card:hover { border-color: var(--ink-faint); }
+  .gallery-card { position: relative; border-radius: 14px; cursor: pointer; transition: transform 0.08s ease-out; will-change: transform; }
+  /* Border beam — a light trail that travels around the card's edge on
+     hover. Not a mask trick (mask-composite: exclude turned out to be too
+     fragile across browsers to get right) — instead the classic, robust
+     version: a full-bleed rotating conic-gradient sits behind the card
+     (::before), and the real content lives in an inner box
+     (.gallery-card-surface) inset by exactly the border's thickness via
+     margin, so only that thin margin gap reveals the gradient underneath.
+     No mask/clip-path involved. */
+  .gallery-card::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: conic-gradient(from var(--beam-angle, 0deg), transparent 0%, transparent 78%, var(--accent) 90%, transparent 100%);
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .gallery-card:hover::before { opacity: 1; animation: gallery-beam 2.2s linear infinite; }
+  @property --beam-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+  }
+  @keyframes gallery-beam { to { --beam-angle: 360deg; } }
+  @media (prefers-reduced-motion: reduce) {
+    .gallery-card:hover::before { animation: none; opacity: 0.6; }
+  }
+  .gallery-card-surface { position: relative; z-index: 1; margin: 1.5px; border: 1px solid var(--line-strong); border-radius: 12.5px; background: var(--surface-raised); overflow: hidden; transition: border-color 0.12s; }
+  .gallery-card:hover .gallery-card-surface { border-color: transparent; }
   .gallery-preview { position: relative; height: 150px; overflow: hidden; background: var(--surface-high); pointer-events: none; }
   .gallery-preview-inner { width: 400%; height: 400%; transform: scale(0.25); transform-origin: top left; }
-  .gallery-preview-inner iframe { width: 100%; height: 100%; border: none; display: block; }
+  .gallery-preview-inner iframe { width: 100%; height: 100%; border: none; display: block; opacity: 0; transition: opacity 0.35s ease; }
+  .gallery-preview-inner iframe.loaded { opacity: 1; }
   .gallery-avatar-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-weight: 700; font-size: 28px; color: rgba(255,255,255,0.9); }
   .gallery-body { padding: 12px 16px 16px; min-width: 0; }
   .gallery-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -406,16 +435,18 @@ export function tryPageHtml(): string {
         const siteUrl = '/' + e.owner + '/' + e.repo + '/';
         return \`
         <div class="gallery-card" onclick="location.href='\${siteUrl}'">
-          <div class="gallery-preview" style="background: hsl(\${hue}, 55%, 32%);">
-            <div class="gallery-avatar-fallback">\${initial}</div>
-            <div class="gallery-preview-inner">
-              <iframe src="\${siteUrl}" loading="lazy" tabindex="-1" title="Preview of \${e.owner}/\${e.repo} docs"></iframe>
+          <div class="gallery-card-surface">
+            <div class="gallery-preview" style="background: hsl(\${hue}, 55%, 32%);">
+              <div class="gallery-avatar-fallback">\${initial}</div>
+              <div class="gallery-preview-inner">
+                <iframe src="\${siteUrl}" loading="lazy" tabindex="-1" title="Preview of \${e.owner}/\${e.repo} docs" onload="this.classList.add('loaded')"></iframe>
+              </div>
             </div>
-          </div>
-          <div class="gallery-body">
-            <div class="gallery-name">\${e.owner}/\${e.repo}</div>
-            \${e.description ? '<div class="gallery-desc">' + e.description + '</div>' : ''}
-            \${e.language ? '<div class="gallery-lang">' + e.language + '</div>' : ''}
+            <div class="gallery-body">
+              <div class="gallery-name">\${e.owner}/\${e.repo}</div>
+              \${e.description ? '<div class="gallery-desc">' + e.description + '</div>' : ''}
+              \${e.language ? '<div class="gallery-lang">' + e.language + '</div>' : ''}
+            </div>
           </div>
         </div>\`;
       }).join('');

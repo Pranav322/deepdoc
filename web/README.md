@@ -9,15 +9,15 @@ Public-facing website for DeepDoc at `https://deepdoc.tech`. Built with **Astro 
 | Astro | 5.x | Static site generator and component framework |
 | Tailwind CSS | 4.x | Utility-first styling via the Vite plugin |
 | TypeScript | 5.x | Type checking for `.astro` and `.ts` files |
-| pnpm | — | Package manager |
+| Bun | — | Package manager |
 
 ## Local development
 
 ```bash
-pnpm install
-pnpm dev        # dev server at http://localhost:4321 with hot reload
-pnpm build      # production build → ./dist/
-pnpm preview    # serve the built dist/ locally before deploying
+bun install
+bun run dev        # dev server at http://localhost:4321 with hot reload
+bun run build      # production build → ./dist/
+bun run preview    # serve the built dist/ locally before deploying
 ```
 
 ## Structure
@@ -57,9 +57,9 @@ The `dist/` output is plain static HTML/CSS/JS. It deploys to any static host:
 
 | Platform | How |
 |---|---|
-| Vercel | Connect the repo, set root to `web/`, build command `pnpm build`, output `dist` |
-| Netlify | Same — build command `pnpm build`, publish directory `dist` |
-| Cloudflare Pages | Build command `pnpm build`, output `dist` |
+| Vercel | Connect the repo, set root to `web/`, build command `bun run build`, output `dist` |
+| Netlify | Same — build command `bun run build`, publish directory `dist` |
+| Cloudflare Pages | Build command `bun run build`, output `dist` |
 | GitHub Pages | Upload `dist/` via `actions/upload-pages-artifact` |
 
 The site URL is set to `https://deepdoc.dev` in `astro.config.mjs` — update this if deploying to a different domain.

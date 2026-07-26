@@ -327,7 +327,7 @@ python3 -m pytest -k "route or stale or chatbot" -q
 - Prefer the smallest command that exercises the edited area first.
 
 ## Web / Marketing Site (`web/`)
-An **Astro 5** static marketing/changelog/docs site (Tailwind v4 via `@tailwindcss/vite`) deployed to **Cloudflare Pages** (project `deepdoc`, direct-upload — no Git provider connected, confirmed 2026-07-24 via DNS/`wrangler pages project list`; earlier docs here saying Vercel were stale). Build with `pnpm build`, dev with `pnpm dev`, deploy with `npx wrangler pages deploy dist --project-name=deepdoc` from `web/`.
+An **Astro 5** static marketing/changelog/docs site (Tailwind v4 via `@tailwindcss/vite`) deployed to **Cloudflare Pages** (project `deepdoc`, direct-upload — no Git provider connected, confirmed 2026-07-24 via DNS/`wrangler pages project list`; earlier docs here saying Vercel were stale). Build with `bun run build`, dev with `bun run dev`, deploy with `npx wrangler pages deploy dist --project-name=deepdoc` from `web/`.
 
 ### Structure
 ```
@@ -369,10 +369,10 @@ Marketing copy is **outcome-led, not implementation-led** — say "your docs sta
 | Project name | `deepdoc` |
 | Bound domains | `deepdoc.tech`, `deepdoc.pages.dev` |
 | Root Directory | `web` |
-| Install Command | `pnpm install` |
-| Build Command | `pnpm build` |
+| Install Command | `bun install` |
+| Build Command | `bun run build` |
 | Output Directory | `dist` |
-| Deploy command | `npx wrangler pages deploy dist --project-name=deepdoc` (from `web/`, after `pnpm build`) |
+| Deploy command | `npx wrangler pages deploy dist --project-name=deepdoc` (from `web/`, after `bun run build`) |
 
 ## Hosted-generation ("Try DeepDoc") — LIVE IN PRODUCTION at cloud.deepdoc.tech
 
@@ -395,7 +395,7 @@ side only.
   only the framework and deploy target changed).
   - `web/astro.config.mjs` — `output: 'server'` + `@astrojs/cloudflare` adapter
     (**pinned to `12.6.13`** — the `13.x`/`14.x` lines require Astro 6/7, this
-    project is on Astro 5.18.1; do not blindly `pnpm up` this package).
+    project is on Astro 5.18.1; do not blindly `bun update` this package).
   - `web/wrangler.toml` — D1 (`DB` → `deepdoc-hosted-db`) + R2 (`SITES` →
     `deepdoc-hosted-sites`) bindings for the Pages project. Secrets
     (`GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`, `QUEUE_MESSAGES_URL`) are
@@ -425,7 +425,7 @@ side only.
     namespace, not `/cloud/api/me`). Either add `127.0.0.1 cloud.localhost`
     to `/etc/hosts` and browse `http://cloud.localhost:4321`, or for one-off
     curl testing use `curl --resolve cloud.localhost:PORT:127.0.0.1 ...`
-    (no `/etc/hosts` edit needed). `pnpm build && npx wrangler pages dev dist`
+    (no `/etc/hosts` edit needed). `bun run build && npx wrangler pages dev dist`
     gives real D1/R2 bindings locally (`astro dev` alone does not);
     `wrangler d1 execute deepdoc-hosted-db --local --file=hosted-schema-backup...`
     equivalent — the local D1 SQLite file is empty until you apply the schema

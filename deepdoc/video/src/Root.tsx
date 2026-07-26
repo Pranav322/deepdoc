@@ -1,5 +1,5 @@
 import { Composition } from "remotion";
-import { T } from "./constants";
+import { TOTAL_DURATION } from "./constants";
 import { DeepDocVideo } from "./DeepDocVideo";
 
 export const RemotionRoot = () => {
@@ -7,7 +7,7 @@ export const RemotionRoot = () => {
     <Composition
       id="DeepDocVideo"
       component={DeepDocVideo}
-      durationInFrames={T.TOTAL}
+      durationInFrames={TOTAL_DURATION}
       fps={30}
       width={1920}
       height={1080}

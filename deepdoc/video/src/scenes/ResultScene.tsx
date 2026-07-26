@@ -95,7 +95,7 @@ export const ResultScene = () => {
           borderRadius: 18, background: C.surface, overflow: "hidden",
           transform: `translateX(${(1 - leftSpring) * -60}px)`,
           opacity: leftSpring,
-          boxShadow: `0 0 80px rgba(55,120,255,0.10)`,
+          boxShadow: `0 0 80px rgba(0,229,160,0.10)`,
         }}>
           {/* Browser chrome */}
           <div style={{
@@ -205,11 +205,11 @@ export const ResultScene = () => {
         {/* ── Chatbot mock ─────────────────────────────────── */}
         <div style={{
           flex: 0.9,
-          border: `1px solid rgba(155,127,255,0.35)`,
+          border: `1px solid rgba(255,95,135,0.35)`,
           borderRadius: 18, background: C.surface, overflow: "hidden",
           transform: `translateX(${(1 - rightSpring) * 60}px)`,
           opacity: rightSpring,
-          boxShadow: `0 0 80px rgba(155,127,255,0.10)`,
+          boxShadow: `0 0 80px rgba(255,95,135,0.10)`,
         }}>
           {/* Chat header */}
           <div style={{
@@ -219,7 +219,7 @@ export const ResultScene = () => {
           }}>
             <div style={{
               width: 8, height: 8, borderRadius: "50%",
-              background: C.purple, boxShadow: `0 0 10px ${C.purple}`,
+              background: C.pink, boxShadow: `0 0 10px ${C.pink}`,
             }} />
             <span style={{
               fontFamily: F.sans, fontSize: 14, fontWeight: 600, color: C.ink,

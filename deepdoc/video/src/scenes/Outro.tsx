@@ -5,7 +5,7 @@ import {
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
-import { C, F } from "../constants";
+import { C, F, SPRING } from "../constants";
 
 const TAGS = ["Python 3.10+", "Node 18+", "MIT License", "deepdoc.tech"];
 
@@ -17,9 +17,9 @@ export const Outro = () => {
   const fadeOut = interpolate(frame, [108, 135], [1, 0], { extrapolateLeft: "clamp" });
   const opacity = Math.min(fadeIn, fadeOut);
 
-  const titleSpring = spring({ frame, fps, config: { damping: 12, stiffness: 100, mass: 1.0 } });
-  const cmdSpring   = spring({ frame: Math.max(0, frame - 16), fps, config: { damping: 15, stiffness: 115 } });
-  const tagsSpring  = spring({ frame: Math.max(0, frame - 30), fps, config: { damping: 16, stiffness: 120 } });
+  const titleSpring = spring({ frame, fps, config: SPRING.soft });
+  const cmdSpring   = spring({ frame: Math.max(0, frame - 16), fps, config: SPRING.snappy });
+  const tagsSpring  = spring({ frame: Math.max(0, frame - 30), fps, config: SPRING.snappy });
 
   // Pulse on the accent dot
   const pulse = 0.8 + Math.sin(frame * 0.18) * 0.2;
@@ -27,34 +27,36 @@ export const Outro = () => {
   return (
     <AbsoluteFill style={{ background: C.bg, overflow: "hidden", opacity }}>
 
-      {/* Aurora */}
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        WebkitMaskImage: "radial-gradient(ellipse 80% 70% at 50% 50%, black 30%, transparent 100%)",
-        maskImage:        "radial-gradient(ellipse 80% 70% at 50% 50%, black 30%, transparent 100%)",
-      }}>
+      {/* Aurora — full-bleed + vignette, not a hard CSS mask edge */}
+      <div style={{ position: "absolute", inset: -200, overflow: "hidden", pointerEvents: "none" }}>
         <div style={{
-          position: "absolute", top: "-30%", left: "-10%",
-          width: "70%", height: "110%",
-          background: `radial-gradient(ellipse at 40% 40%, ${C.accentGlow} 0%, transparent 65%)`,
-          filter: "blur(64px)",
+          position: "absolute", top: "-16%", left: "2%",
+          width: "58%", height: "88%",
+          background: `radial-gradient(ellipse at 40% 40%, ${C.accentGlow} 0%, transparent 68%)`,
+          filter: "blur(130px)",
         }} />
         <div style={{
-          position: "absolute", bottom: "-20%", right: "-5%",
-          width: "55%", height: "90%",
-          background: `radial-gradient(ellipse at 60% 60%, rgba(55,120,255,0.14) 0%, transparent 65%)`,
-          filter: "blur(72px)",
+          position: "absolute", bottom: "-14%", right: "2%",
+          width: "50%", height: "78%",
+          background: `radial-gradient(ellipse at 60% 60%, rgba(0,229,160,0.15) 0%, transparent 66%)`,
+          filter: "blur(140px)",
         }} />
       </div>
+      <div style={{
+        position: "absolute", inset: 0, pointerEvents: "none",
+        background: `radial-gradient(ellipse 66% 60% at 50% 50%, transparent 0%, ${C.bg} 90%)`,
+      }} />
 
       {/* Dot grid */}
       <div style={{
         position: "absolute", inset: 0, pointerEvents: "none",
-        backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.10) 1px, transparent 1px)`,
+        backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)`,
         backgroundSize: "36px 36px",
-        WebkitMaskImage: "radial-gradient(ellipse 70% 65% at 50% 50%, black 30%, transparent 100%)",
-        maskImage:        "radial-gradient(ellipse 70% 65% at 50% 50%, black 30%, transparent 100%)",
-        opacity: 0.65,
+        opacity: 0.5,
+      }} />
+      <div style={{
+        position: "absolute", inset: 0, pointerEvents: "none",
+        background: `radial-gradient(ellipse 60% 56% at 50% 50%, transparent 12%, ${C.bg} 88%)`,
       }} />
 
       {/* Content */}

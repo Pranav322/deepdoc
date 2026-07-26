@@ -142,20 +142,21 @@ export function tryPageHtml(): string {
   .back-link:hover { color: var(--ink); }
 
   /* ── Public gallery (logged-out root) — grid of real generated docs,
-     shown instead of an immediate sign-in wall. A real card (image banner
-     on top, body below), not a flat icon+text row — every card gets a
-     banner either way: a real avatar image if the repo has one, or a
-     deterministic color + initial (hashed from owner/repo, same idea as
-     GitHub's own default org avatars) if it doesn't, so there's never a
-     blank placeholder. ─────────────────────────────────────────────── */
+     shown instead of an immediate sign-in wall. The card's main visual is a
+     LIVE preview of the real generated site's homepage (an iframe pointed
+     at the same /{owner}/{repo}/ this app already serves, scaled down —
+     no separate screenshot pipeline needed, and it's always current), not
+     an avatar. A subtle 3D tilt on mousemove — plain CSS transform +
+     mousemove math, the same effect a framer-motion card gives you, no
+     React/framer-motion dependency needed for it. */
   .gallery-heading { font-size: 15px; font-weight: 500; color: var(--ink-muted); letter-spacing: -0.01em; margin: 0; }
-  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
-  .gallery-card { border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface-raised); overflow: hidden; cursor: pointer; transition: border-color 0.12s, transform 0.12s; }
-  .gallery-card:hover { border-color: var(--ink-faint); transform: translateY(-2px); }
-  .gallery-banner { height: 84px; display: flex; align-items: center; justify-content: center; background: linear-gradient(135deg, var(--surface-high), var(--surface)); }
-  .gallery-avatar, .gallery-avatar-fallback { width: 48px; height: 48px; border-radius: 50%; border: 3px solid var(--surface-raised); flex-shrink: 0; }
-  .gallery-avatar { object-fit: cover; }
-  .gallery-avatar-fallback { display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-weight: 700; font-size: 17px; color: rgba(255,255,255,0.92); }
+  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 18px; }
+  .gallery-card { border: 1px solid var(--line-strong); border-radius: 14px; background: var(--surface-raised); overflow: hidden; cursor: pointer; transition: border-color 0.12s, transform 0.08s ease-out; will-change: transform; }
+  .gallery-card:hover { border-color: var(--ink-faint); }
+  .gallery-preview { position: relative; height: 150px; overflow: hidden; background: var(--surface-high); pointer-events: none; }
+  .gallery-preview-inner { width: 400%; height: 400%; transform: scale(0.25); transform-origin: top left; }
+  .gallery-preview-inner iframe { width: 100%; height: 100%; border: none; display: block; }
+  .gallery-avatar-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-weight: 700; font-size: 28px; color: rgba(255,255,255,0.9); }
   .gallery-body { padding: 12px 16px 16px; min-width: 0; }
   .gallery-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
@@ -377,15 +378,13 @@ export function tryPageHtml(): string {
       document.getElementById('modal-slot').innerHTML = signInModalHtml('/auth/github', true);
     }
 
-    // Deterministic hue + initial for repos with no GitHub avatar, so every
-    // card gets a real banner instead of a blank placeholder — same idea as
-    // GitHub's own default org avatars.
-    function fallbackAvatarHtml(owner) {
+    // Deterministic hue + initial, shown behind the live preview iframe as
+    // a backdrop (in case the iframe is slow, still building, or fails) —
+    // never a flat blank box while the real preview loads.
+    function fallbackHue(owner) {
       let hash = 0;
       for (let i = 0; i < owner.length; i++) hash = (hash * 31 + owner.charCodeAt(i)) | 0;
-      const hue = Math.abs(hash) % 360;
-      const initial = (owner[0] || '?').toUpperCase();
-      return '<div class="gallery-avatar-fallback" style="background: hsl(' + hue + ', 55%, 32%);">' + initial + '</div>';
+      return Math.abs(hash) % 360;
     }
 
     function renderPublicGallery(examples) {
@@ -402,12 +401,17 @@ export function tryPageHtml(): string {
         return;
       }
       const cards = examples.map(e => {
-        const avatar = e.avatarUrl
-          ? '<img class="gallery-avatar" src="' + e.avatarUrl + '" alt="" />'
-          : fallbackAvatarHtml(e.owner);
+        const hue = fallbackHue(e.owner);
+        const initial = (e.owner[0] || '?').toUpperCase();
+        const siteUrl = '/' + e.owner + '/' + e.repo + '/';
         return \`
-        <div class="gallery-card" onclick="location.href='/\${e.owner}/\${e.repo}/'">
-          <div class="gallery-banner">\${avatar}</div>
+        <div class="gallery-card" onclick="location.href='\${siteUrl}'">
+          <div class="gallery-preview" style="background: hsl(\${hue}, 55%, 32%);">
+            <div class="gallery-avatar-fallback">\${initial}</div>
+            <div class="gallery-preview-inner">
+              <iframe src="\${siteUrl}" loading="lazy" tabindex="-1" title="Preview of \${e.owner}/\${e.repo} docs"></iframe>
+            </div>
+          </div>
           <div class="gallery-body">
             <div class="gallery-name">\${e.owner}/\${e.repo}</div>
             \${e.description ? '<div class="gallery-desc">' + e.description + '</div>' : ''}
@@ -422,6 +426,23 @@ export function tryPageHtml(): string {
           </div>
           <div class="gallery-grid">\${cards}</div>
         </div>\`;
+      attachTilt();
+    }
+
+    // Subtle 3D tilt on mousemove — plain CSS transform + a bit of math,
+    // the same effect a framer-motion card gives you without needing
+    // React/framer-motion in this codebase.
+    function attachTilt() {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+      document.querySelectorAll('.gallery-card').forEach((card) => {
+        card.addEventListener('mousemove', (e) => {
+          const rect = card.getBoundingClientRect();
+          const x = (e.clientX - rect.left) / rect.width - 0.5;
+          const y = (e.clientY - rect.top) / rect.height - 0.5;
+          card.style.transform = 'perspective(700px) rotateX(' + (-y * 7).toFixed(2) + 'deg) rotateY(' + (x * 7).toFixed(2) + 'deg) translateY(-2px)';
+        });
+        card.addEventListener('mouseleave', () => { card.style.transform = ''; });
+      });
     }
 
     // Shared between the auto-popup here and (in spirit — index.astro keeps

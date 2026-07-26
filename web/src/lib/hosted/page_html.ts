@@ -105,10 +105,32 @@ export function tryPageHtml(): string {
      header, no marketing copy) and can't be dismissed without signing in —
      there's nothing else to do on this domain unauthenticated. */
   .modal-veil { position: fixed; inset: 0; background: rgba(6,6,9,0.7); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 20; }
-  .modal { width: 100%; max-width: 400px; background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 16px; padding: 28px; box-shadow: var(--shadow-lift); text-align: center; animation: confirm-rise 0.18s ease-out; }
-  .modal h1 { font-size: 20px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 10px; }
-  .modal p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 20px; }
-  .modal ul { text-align: left; margin: 0 0 24px; padding-left: 18px; font-size: 13px; color: var(--ink-muted); line-height: 1.8; }
+  .modal { width: 100%; max-width: 440px; background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 20px; padding: 36px 32px 32px; box-shadow: var(--shadow-lift); text-align: center; animation: confirm-rise 0.18s ease-out; }
+  .modal h1 { font-size: 25px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 10px; }
+  .modal p.modal-sub { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0; }
+  .modal-icon-wrap { position: relative; height: 104px; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+  .modal-dot-grid {
+    position: absolute; inset: 0;
+    background-image: radial-gradient(circle, var(--line-strong) 1.5px, transparent 1.5px);
+    background-size: 18px 18px;
+    -webkit-mask-image: radial-gradient(ellipse 65% 70% at 50% 50%, black 15%, transparent 78%);
+    mask-image: radial-gradient(ellipse 65% 70% at 50% 50%, black 15%, transparent 78%);
+  }
+  .modal-icon-badge {
+    position: relative; width: 76px; height: 76px; border-radius: 50%;
+    background: #0d1117; display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 0 0 1px var(--line-strong), 0 0 30px 6px rgba(194,255,77,0.32);
+  }
+  .modal-icon-badge svg { width: 38px; height: 38px; color: #fff; }
+  .modal-divider { height: 1px; background: var(--line); margin: 24px 0 6px; }
+  .modal-features { display: flex; flex-direction: column; margin: 0 0 24px; text-align: left; }
+  .modal-feature { display: flex; align-items: flex-start; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
+  .modal-feature:last-child { border-bottom: none; }
+  .modal-feature-icon { flex-shrink: 0; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-dim); border: 1px solid var(--accent-line); display: flex; align-items: center; justify-content: center; color: var(--accent); }
+  .modal-feature-icon svg { width: 20px; height: 20px; }
+  .modal-feature-title { font-size: 14.5px; font-weight: 700; color: var(--ink); margin: 0 0 3px; }
+  .modal-feature-desc { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; margin: 0; }
+  .modal .btn.full { height: 54px; font-size: 15px; font-weight: 700; border-radius: 12px; }
 
   /* ── Section headers (shared across authed views) ──────────────── */
   .page-head { display: flex; align-items: baseline; justify-content: space-between; padding: 40px 0 24px; flex-wrap: wrap; gap: 12px; }
@@ -204,6 +226,11 @@ export function tryPageHtml(): string {
       genStart: null, genTimer: null, ddOpen: false,
     };
     const GITHUB_ICON_SVG = '<svg viewBox="0 0 16 16" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"></path></svg>';
+    // Sign-in modal feature icons — minimal 24x24 outline set (Lucide-style),
+    // shared by signInModalHtml below.
+    const SHIELD_CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5z"/><path d="m9 12 2 2 4-4"/></svg>';
+    const GLOBE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg>';
+    const HISTORY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>';
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
 
@@ -333,14 +360,37 @@ export function tryPageHtml(): string {
       return \`
         <div class="modal-veil" \${dismissible ? "onclick=\\"if(event.target===this) this.remove()\\"" : ''}>
           <div class="modal">
+            <div class="modal-icon-wrap">
+              <div class="modal-dot-grid"></div>
+              <div class="modal-icon-badge">\${GITHUB_ICON_SVG}</div>
+            </div>
             <h1>Sign in with GitHub</h1>
-            <p>DeepDoc needs read access to clone the repo you pick and generate its docs. We only use it for that.</p>
-            <ul>
-              <li>Nothing is posted or changed in your GitHub account</li>
-              <li>Generated sites are private by default — you choose if to make one public</li>
-              <li>You can revoke access from GitHub at any time</li>
-            </ul>
-            <button class="btn full" style="display:flex;align-items:center;justify-content:center;gap:8px;" onclick="startGithubAuth(this,'\${authHref}')">\${GITHUB_ICON_SVG}Continue with GitHub</button>
+            <p class="modal-sub">DeepDoc needs read access to clone the repo you pick and generate its docs. We only use it for that.</p>
+            <div class="modal-divider"></div>
+            <div class="modal-features">
+              <div class="modal-feature">
+                <div class="modal-feature-icon">\${SHIELD_CHECK_ICON}</div>
+                <div>
+                  <p class="modal-feature-title">Nothing is posted or changed</p>
+                  <p class="modal-feature-desc">We view your code, we don't modify it.</p>
+                </div>
+              </div>
+              <div class="modal-feature">
+                <div class="modal-feature-icon">\${GLOBE_ICON}</div>
+                <div>
+                  <p class="modal-feature-title">Generated sites are private by default</p>
+                  <p class="modal-feature-desc">You choose if to make one public.</p>
+                </div>
+              </div>
+              <div class="modal-feature">
+                <div class="modal-feature-icon">\${HISTORY_ICON}</div>
+                <div>
+                  <p class="modal-feature-title">You're in control</p>
+                  <p class="modal-feature-desc">You can revoke access from GitHub at any time.</p>
+                </div>
+              </div>
+            </div>
+            <button class="btn full" style="display:flex;align-items:center;justify-content:center;gap:10px;" onclick="startGithubAuth(this,'\${authHref}')">\${GITHUB_ICON_SVG}Continue with GitHub</button>
           </div>
         </div>\`;
     }

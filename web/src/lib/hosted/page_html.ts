@@ -141,6 +141,17 @@ export function tryPageHtml(): string {
   .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-muted); text-decoration: none; margin: 28px 0 4px; cursor: pointer; }
   .back-link:hover { color: var(--ink); }
 
+  /* ── Public gallery (logged-out root) — grid of real generated docs,
+     shown instead of an immediate sign-in wall. ────────────────────── */
+  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; }
+  .gallery-card { display: flex; gap: 14px; padding: 18px; border: 1px solid var(--line-strong); border-radius: 12px; background: var(--surface-raised); cursor: pointer; transition: border-color 0.12s, background 0.12s; }
+  .gallery-card:hover { border-color: var(--ink-faint); background: var(--surface-high); }
+  .gallery-avatar { width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0; background: var(--surface-high); }
+  .gallery-body { min-width: 0; }
+  .gallery-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .gallery-lang { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); margin-top: 8px; }
+
   /* ── /projects — click-through rows, no per-row buttons ──────────── */
   .proj-row { display: flex; align-items: center; gap: 14px; padding: 17px 14px; margin: 0 -14px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 8px; transition: background 0.12s; }
   .proj-row:hover { background: var(--surface-raised); }
@@ -336,19 +347,57 @@ export function tryPageHtml(): string {
         </svg>eepDoc\`;
     }
 
-    // ── Sign-in popup (unauthenticated root) — no hero, no marketing copy.
-    // deepdoc.tech's own landing page is the pitch; its "Try it free" CTA
-    // opens this same popup there (see index.astro), then sends people here
-    // once signed in. If someone lands here directly without a session, the
-    // popup opens automatically over a quiet backdrop — same header as
-    // everywhere else, nothing else to interact with until signed in.
-    function renderLoggedOut() {
+    // ── Public gallery (unauthenticated root) — show real generated docs
+    // before ever asking for GitHub access, for people skeptical about
+    // signing in cold. deepdoc.tech's "Try the Demo" CTA sends people
+    // straight here now (see index.astro) instead of opening its own
+    // sign-in modal. The modal only appears once someone actually clicks
+    // "Generate your own" — see renderPublicGallery below.
+    async function renderLoggedOut() {
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
         </div></header>\`;
-      document.getElementById('content').innerHTML = '';
-      document.getElementById('modal-slot').innerHTML = signInModalHtml('/auth/github', false);
+      document.getElementById('modal-slot').innerHTML = '';
+      const data = await fetch('/api/examples').then(r => r.json()).catch(() => ({ examples: [] }));
+      renderPublicGallery(data.examples || []);
+    }
+
+    function openSignInFromGallery() {
+      document.getElementById('modal-slot').innerHTML = signInModalHtml('/auth/github', true);
+    }
+
+    function renderPublicGallery(examples) {
+      const genBtn = '<button class="btn" onclick="openSignInFromGallery()">Generate your own</button>';
+      if (!examples.length) {
+        document.getElementById('content').innerHTML = \`
+          <div class="wrap">
+            <div class="page-head"><h1>Examples</h1></div>
+            <div class="empty-state">
+              <h2>No public docs yet</h2>
+              <p>Nothing's been shared publicly so far — check back soon, or be the first.</p>
+              \${genBtn}
+            </div>
+          </div>\`;
+        return;
+      }
+      const cards = examples.map(e => \`
+        <div class="gallery-card" onclick="location.href='/\${e.owner}/\${e.repo}/'">
+          \${e.avatarUrl ? '<img class="gallery-avatar" src="' + e.avatarUrl + '" alt="" />' : '<div class="gallery-avatar"></div>'}
+          <div class="gallery-body">
+            <div class="gallery-name">\${e.owner}/\${e.repo}</div>
+            \${e.description ? '<div class="gallery-desc">' + e.description + '</div>' : ''}
+            \${e.language ? '<div class="gallery-lang">' + e.language + '</div>' : ''}
+          </div>
+        </div>\`).join('');
+      document.getElementById('content').innerHTML = \`
+        <div class="wrap">
+          <div class="page-head">
+            <h1>See what DeepDoc generates</h1>
+            \${genBtn}
+          </div>
+          <div class="gallery-grid">\${cards}</div>
+        </div>\`;
     }
 
     // Shared between the auto-popup here and (in spirit — index.astro keeps

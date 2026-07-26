@@ -1,0 +1,51 @@
+import type { APIRoute } from "astro";
+
+interface Example {
+  owner: string;
+  repo: string;
+  description: string | null;
+  language: string | null;
+  avatarUrl: string | null;
+  createdAt: number;
+}
+
+// Intentionally the one public, unauthenticated read in the whole app —
+// powers the logged-out gallery on cloud.deepdoc.tech's root. visibility is
+// canonical on owner_repo_jobs (per-repo, single serving authority); the
+// richer per-generation metadata (description/language/avatar/created_at)
+// only lives on projects (per-user-owned row), so join back to the owner's
+// own row to get it.
+export const GET: APIRoute = async ({ locals }) => {
+  const env = locals.runtime.env;
+
+  const { results } = await env.DB.prepare(
+    `SELECT o.owner, o.repo, p.description, p.language, p.avatar_url, p.created_at
+     FROM owner_repo_jobs o
+     JOIN projects p
+       ON LOWER(p.owner) = LOWER(o.owner) AND LOWER(p.repo) = LOWER(o.repo)
+       AND p.user_login = o.owner_login
+     WHERE o.visibility = 'public'
+     ORDER BY p.created_at DESC
+     LIMIT 60`,
+  ).all<{
+    owner: string;
+    repo: string;
+    description: string | null;
+    language: string | null;
+    avatar_url: string | null;
+    created_at: number;
+  }>();
+
+  const examples: Example[] = results.map((row) => ({
+    owner: row.owner,
+    repo: row.repo,
+    description: row.description,
+    language: row.language,
+    avatarUrl: row.avatar_url,
+    createdAt: row.created_at,
+  }));
+
+  return new Response(JSON.stringify({ examples }), {
+    headers: { "Content-Type": "application/json" },
+  });
+};

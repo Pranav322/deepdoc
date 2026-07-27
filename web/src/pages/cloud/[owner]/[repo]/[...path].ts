@@ -101,7 +101,13 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
 
   const result = await fetchJobStatus(env, jobRow.job_id);
 
-  if (result.status && result.status !== "done" && result.status !== "failed") {
+  // result.status is `null` (not "queued") whenever the job's status.json
+  // doesn't exist in R2 yet — true for every job in the real window between
+  // "enqueued" and "the runner container actually started and wrote its
+  // first status". Treating that as falsy here used to fall through to
+  // stalePageHtml (the "regenerate" error screen) for a job that was
+  // legitimately just starting, not done/failed with nothing to show.
+  if (result.status !== "done" && result.status !== "failed") {
     // Still queued/running (or the browser hit this URL directly mid-generation)
     // — serve the app shell so its client-side JS resumes the progress view.
     return new Response(tryPageHtml(), { headers: { "Content-Type": "text/html; charset=utf-8" } });

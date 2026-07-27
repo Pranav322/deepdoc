@@ -296,7 +296,24 @@ export function tryPageHtml(): string {
 
     async function main() {
       state.me = await fetch('/api/me').then(r => r.json());
-      if (!state.me.authenticated) { renderLoggedOut(); return; }
+      if (!state.me.authenticated) {
+        // The server only serves this SPA shell to a logged-out visitor at
+        // /{owner}/{repo}/ when that job is genuinely still in progress (a
+        // finished/public site is served directly from R2 before this code
+        // ever runs, and a done/failed job with no site shows a separate
+        // static stalePageHtml() page, not this shell) — so unconditionally
+        // dropping every logged-out visitor into the gallery here, ignoring
+        // the URL entirely, meant visiting a specific repo mid-generation
+        // (or a gallery card's own iframe preview loading that same URL)
+        // showed the full gallery recursively instead of that repo's state.
+        const pathMatch = window.location.pathname.match(/^\\/([\\w.-]+)\\/([\\w.-]+)\\/?$/);
+        if (pathMatch) {
+          renderPublicInProgress(pathMatch[1], pathMatch[2]);
+        } else {
+          renderLoggedOut();
+        }
+        return;
+      }
       await refreshProjects();
 
       const pathMatch = window.location.pathname.match(/^\\/([\\w.-]+)\\/([\\w.-]+)\\/?$/);
@@ -411,6 +428,30 @@ export function tryPageHtml(): string {
       document.getElementById('modal-slot').innerHTML = '';
       const data = await fetch('/api/examples').then(r => r.json()).catch(() => ({ examples: [] }));
       renderPublicGallery(data.examples || []);
+    }
+
+    // A logged-out visitor hitting /{owner}/{repo}/ directly while that
+    // job is still running (or embedded as a gallery card's own iframe
+    // preview) — no sign-in needed to see this, the repo is already public.
+    // No live polling here on purpose: an unauthenticated visitor has no
+    // job_id to poll (there's no public status-by-repo endpoint), so this
+    // is a static message with a manual refresh rather than new plumbing
+    // for what's a fairly rare thing to land on directly.
+    function renderPublicInProgress(owner, repo) {
+      document.getElementById('appbar-slot').innerHTML = \`
+        <header class="appbar"><div class="appbar-inner">
+          <span class="brand">\${brandMarkHtml()}</span>
+          <button class="btn" onclick="location.href='/'">See all examples</button>
+        </div></header>\`;
+      document.getElementById('modal-slot').innerHTML = '';
+      document.getElementById('content').innerHTML = \`
+        <div class="wrap-wide">
+          <div class="empty-state">
+            <h2>\${owner}/\${repo} is still being generated</h2>
+            <p>Larger repos can take a few minutes. Check back shortly.</p>
+            <button class="btn" onclick="location.reload()">Refresh</button>
+          </div>
+        </div>\`;
     }
 
     function openSignInFromGallery() {

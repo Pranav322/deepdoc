@@ -29,8 +29,15 @@ llm:
   base_url: https://deepdoc-foundry.services.ai.azure.com/
   max_tokens: null
   temperature: 0.2
-  context_window_tokens: 128000
-  output_reserve_tokens: 16000
+  # Real deployment limits: 1,000,000 token context window, 128,000 token
+  # max output. The old context_window_tokens: 128000 was wrong — it was
+  # the *output* limit, not the context window — so the planner's classify
+  # step was budgeting off a window ~8x smaller than the model actually
+  # has, and a large repo (e.g. a 154K-token required classify prompt)
+  # could hard-fail on a false token-budget error after already burning
+  # hours in the scan phase.
+  context_window_tokens: 1000000
+  output_reserve_tokens: 128000
   api_version: '2024-02-01'
 
 chatbot:
@@ -125,19 +132,36 @@ def _run(
     if redact:
         echoed = echoed.replace(redact, "***")
     log.append(f"$ {echoed}")
+    print(f"$ {echoed}", flush=True)
     env = {**os.environ, **extra_env} if extra_env else None
     # No timeout — a legitimately slow generation/build shouldn't be killed;
     # only a real non-zero exit is a failure.
-    result = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, env=env)
-    log.append(result.stdout)
-    if result.stderr:
-        log.append(result.stderr)
-    if result.returncode != 0:
+    #
+    # Popen + line-by-line streaming, not subprocess.run(capture_output=True):
+    # capture_output fully buffers the child's stdout/stderr in memory and
+    # only hands it back once the process exits, so a multi-hour scan/plan
+    # step produced literally nothing in Azure's logs until it was already
+    # done or dead — no way to tell "still working" from "hung" from
+    # outside. Printing each line as it arrives makes it our own process's
+    # stdout in real time, which is what Azure's log stream actually reads.
+    proc = subprocess.Popen(
+        cmd, cwd=cwd, env=env,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, bufsize=1,
+    )
+    output_lines: list[str] = []
+    assert proc.stdout is not None
+    for line in proc.stdout:
+        print(line, end="", flush=True)
+        output_lines.append(line)
+    proc.wait()
+    combined = "".join(output_lines)
+    log.append(combined)
+    if proc.returncode != 0:
         # Surface the real reason (e.g. the quality gate's blocker list) instead
         # of a bare "deepdoc deploy failed" — this tail is what the UI shows.
-        detail = (result.stderr or result.stdout or "").strip()
-        detail_tail = "\n".join(detail.splitlines()[-12:])
-        raise RuntimeError(f"command failed ({result.returncode}): {echoed}\n{detail_tail}")
+        detail_tail = "\n".join(combined.strip().splitlines()[-12:])
+        raise RuntimeError(f"command failed ({proc.returncode}): {echoed}\n{detail_tail}")
 
 
 def run_generation(

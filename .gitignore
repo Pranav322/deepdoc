@@ -122,3 +122,8 @@ deepdoc/CONCEPTS.md
 
 
 .agents/
+.deepdoc/
+.deepdoc_plan.json
+.deepdoc_file_map.json
+jobs/
+chatbot_backend/

@@ -12,8 +12,7 @@ import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 import PipelineOrbit from "../components/PipelineOrbit.astro";
-import BackgroundRippleEffect from "../components/BackgroundRippleEffect.astro";
-import CodeToDocs from "../components/CodeToDocs.astro";
+import AuroraHeroBackground from "../components/AuroraHeroBackground.astro";
 
 const features = [
   {
@@ -67,109 +66,53 @@ const chatMessages = [
     class="relative overflow-hidden"
     style="border-bottom: 1px solid var(--color-line);"
   >
-    <!-- Single calm halo behind the headline -->
-    <div class="hero-halo" aria-hidden="true"></div>
-
-    <BackgroundRippleEffect />
-
-    <!-- Ambient hero blobs: blurred, screen-blended, drifting on their own
-         infinite loops (no cursor-tracking — that was tried and rejected as
-         "ugly", see git history). -->
-    <div class="gradients-container" aria-hidden="true">
-      <div class="blob blob-1"></div>
-      <div class="blob blob-2"></div>
-      <div class="blob blob-3"></div>
-    </div>
+    <AuroraHeroBackground />
+    <div class="hero-scrim" aria-hidden="true"></div>
 
     <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
       <div class="flex flex-col items-center text-center">
 
         <!-- Identity badge -->
         <div
-          class="anim-fade-up mb-5 inline-flex items-center gap-2.5 rounded-full px-4 py-1.5"
-          style="background: color-mix(in srgb, var(--color-accent) 12%, transparent); border: 1px solid color-mix(in srgb, var(--color-accent) 35%, transparent); font-family: var(--font-mono); font-size: 12px; color: var(--color-accent);"
+          class="mb-5 inline-flex items-center gap-2"
+          style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--color-ink-muted); text-transform: uppercase;"
         >
-          <span
-            class="h-2 w-2 rounded-full"
-            style="background: var(--color-accent); box-shadow: 0 0 6px var(--color-accent);"
-          ></span>
-          <strong style="font-weight: 600;">Open source</strong>
-          <span style="opacity: 0.5; margin: 0 1px;">·</span>
-          in-site AI chat
+          <span class="not-yc-mark" aria-hidden="true">YC</span>
+          Not backed by YC
         </div>
 
         <!-- Headline -->
         <h1
-          class="anim-fade-up anim-delay-1 display"
-          style="font-size: clamp(2.5rem, 5.2vw, 4.25rem); color: var(--color-ink); max-width: 960px;"
+          class="marketing-display"
+          style="font-size: clamp(2.75rem, 5.2vw, 4.5rem); color: var(--color-ink); max-width: 1160px;"
         >
-          Turn any <span class="accent-italic">codebase</span> into docs<br class="hidden sm:inline" />
-          your team will <span class="accent-italic">actually read.</span>
+          <span class="hero-headline-line">Documentation that keeps pace</span>
+          <span class="hero-headline-line">with your <span class="hero-accent">codebase.</span></span>
         </h1>
 
         <!-- Sub -->
         <p
-          class="anim-fade-up anim-delay-2 mt-6 max-w-xl leading-relaxed"
+          class="mt-6 max-w-xl leading-relaxed"
           style="font-size: 1.0625rem; color: var(--color-ink-muted); font-family: var(--font-sans);"
         >
-          Generate complete documentation from your repository — with an AI
-          assistant that answers using your actual source code.
+          Turn your repository into a navigable docs site, then keep it accurate
+          as code changes—with answers tied back to the source.
         </p>
 
-        <!-- CTAs — two clearly distinct paths: self-host (open source) vs hosted (cloud) -->
-        <div class="anim-fade-up anim-delay-3 mt-9 flex flex-col items-center gap-x-3 gap-y-6 sm:flex-row sm:items-start sm:justify-center">
-            <!-- Path 1: self-host / open source -->
-            <div class="flex flex-col items-center gap-2">
-              <a
-                href="#get-started"
-                class="group flex h-11 items-center gap-2 rounded-lg px-5"
-                style="border: 1px solid var(--color-accent); color: var(--color-accent); background: transparent; font-family: var(--font-sans); font-size: 14px; font-weight: 600; transition: background 0.15s; white-space: nowrap; text-decoration: none;"
-                onmouseover="this.style.background='color-mix(in srgb, var(--color-accent) 12%, transparent)'"
-                onmouseout="this.style.background='transparent'"
-              >
-                Run Locally with pip
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="13"
-                  height="13"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  stroke-width="2"
-                  stroke-linecap="round"
-                  stroke-linejoin="round"
-                  style="opacity: 0.6;"
-                ><line x1="12" y1="5" x2="12" y2="19"></line><polyline points="19 12 12 19 5 12"></polyline></svg>
-              </a>
-              <span style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--color-ink-faint);">
-                self-host &middot; open source
-              </span>
-            </div>
-
-            <!-- Path 2: hosted / cloud -->
-            <div class="flex flex-col items-center gap-2">
-              <button
-                type="button"
-                id="try-free-btn"
-                class="flex h-11 items-center gap-2 rounded-lg px-5"
-                style="border: none; color: var(--color-surface); background: var(--color-accent); font-family: var(--font-sans); font-size: 14px; font-weight: 600; transition: opacity 0.15s; white-space: nowrap; cursor: pointer;"
-                onmouseover="this.style.opacity='0.88'"
-                onmouseout="this.style.opacity='1'"
-              >
-                Try the Demo &rarr;
-              </button>
-              <span style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.04em; color: var(--color-ink-faint);">
-                hosted &middot; nothing to install
-              </span>
-            </div>
-
-          </div>
+        <div class="hero-paths mt-9" aria-label="Choose how to use DeepDoc">
+          <a href="https://cloud.deepdoc.tech/" class="hero-path hero-path-hosted">
+            <span>Explore the live demo</span>
+          </a>
+          <a href="#get-started" class="hero-path hero-path-local">
+            <span>Install DeepDoc locally</span>
+          </a>
+        </div>
 
           <p
-            class="anim-fade-up anim-delay-4 mt-8"
+            class="mt-8"
             style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);"
           >
-            Python 3.10+ &middot; MIT license &middot; Any LLM provider &middot;
+            Python 3.10+ &middot; MIT license &middot; Bring your own LLM &middot;
             <a
               href="https://github.com/tss-pranavkumar/deepdoc"
               target="_blank"
@@ -182,8 +125,7 @@ const chatMessages = [
         </div>
 
         <!-- Full-width product window -->
-        <div class="anim-fade-up anim-delay-4 hero-stage">
-          <div class="hero-glow" aria-hidden="true"></div>
+        <div class="hero-stage">
           <div class="hero-window">
             <div class="proof-bar">
               <span class="dot red"></span>
@@ -207,6 +149,12 @@ const chatMessages = [
                 decoding="async"
               />
             </div>
+          </div>
+
+          <div class="hero-status-strip" aria-label="DeepDoc product capabilities">
+            <div><strong>Reader-first docs</strong><span>organized by domain</span></div>
+            <div><strong>Source-backed answers</strong><span>files and line ranges</span></div>
+            <div><strong>Focused updates</strong><span>only changed pages regenerate</span></div>
           </div>
 
           <div class="chat-proof-card">
@@ -347,105 +295,43 @@ const chatMessages = [
       </div>
 
       <div class="features-bento">
-
-        <!-- 01: Organized docs (wide) -->
         <div class="feat-card feat-card-wide">
           <div class="feat-num">01</div>
           <h3 class="feat-title">Your docs stay organized</h3>
-          <p class="feat-body">
-            Architecture, endpoints, integrations, and schemas — grouped the way
-            readers actually look for them, not one noisy page per file.
-          </p>
+          <p class="feat-body">Architecture, endpoints, integrations, and schemas — grouped the way readers actually look for them, not one noisy page per file.</p>
           <div class="feat-visual">
-            <div class="feat-visual-row">
-              <span class="feat-visual-files">auth.py, middleware.ts</span>
-              <span class="feat-visual-arrow">→</span>
-              <span class="feat-visual-bucket">Auth &amp; Permissions</span>
-            </div>
-            <div class="feat-visual-row">
-              <span class="feat-visual-files">billing/routes.py, usage.py</span>
-              <span class="feat-visual-arrow">→</span>
-              <span class="feat-visual-bucket">Billing &amp; Usage</span>
-            </div>
-            <div class="feat-visual-row">
-              <span class="feat-visual-files">api/webhooks.ts, stripe.py</span>
-              <span class="feat-visual-arrow">→</span>
-              <span class="feat-visual-bucket">Integrations</span>
-            </div>
-            <div class="feat-visual-row">
-              <span class="feat-visual-files">db/models.py, migrations/*.sql</span>
-              <span class="feat-visual-arrow">→</span>
-              <span class="feat-visual-bucket">Data &amp; Schema</span>
-            </div>
+            <div class="feat-visual-row"><span class="feat-visual-files">auth.py, middleware.ts</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Auth &amp; Permissions</span></div>
+            <div class="feat-visual-row"><span class="feat-visual-files">billing/routes.py, usage.py</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Billing &amp; Usage</span></div>
+            <div class="feat-visual-row"><span class="feat-visual-files">api/webhooks.ts, stripe.py</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Integrations</span></div>
+            <div class="feat-visual-row"><span class="feat-visual-files">db/models.py, migrations/*.sql</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Data &amp; Schema</span></div>
           </div>
         </div>
 
-        <!-- 02: AI answers cite real files (tall) -->
         <div class="feat-card feat-card-tall">
           <div class="feat-num">02</div>
           <h3 class="feat-title">AI answers cite real files</h3>
-          <p class="feat-body">
-            Ask your docs anything. Every answer points to exact file paths and
-            line ranges from your actual source — not hallucinations. Follow-ups
-            keep the whole thread in-page.
-          </p>
+          <p class="feat-body">Ask your docs anything. Every answer points to exact file paths and line ranges from your actual source — not hallucinations.</p>
           <div class="feat-chat">
-            <div class="feat-chat-bubble user">
-              Where does billing verification happen?
-            </div>
-            <div class="feat-chat-bubble bot">
-              Payment verification runs in the Razorpay billing flow, persisted through usage records.
-              <div class="feat-chat-ref">↗ billing/routes.py:41-88</div>
-              <div class="feat-chat-ref">↗ services/usage.py:12-57</div>
-            </div>
-            <div class="feat-chat-bubble user">
-              How does the widget token flow work?
-            </div>
-            <div class="feat-chat-bubble bot">
-              The widget fetches a short-lived token from <code style="font-size:11px; opacity:0.8;">/api/widget-token</code>, then attaches it to every chat request.
-              <div class="feat-chat-ref">↗ api/widget.ts:18-64</div>
-            </div>
-            <div class="feat-chat-bubble bot feat-chat-typing" aria-hidden="true">
-              <span class="feat-typing-dot"></span>
-              <span class="feat-typing-dot"></span>
-              <span class="feat-typing-dot"></span>
-            </div>
+            <div class="feat-chat-bubble user">Where does billing verification happen?</div>
+            <div class="feat-chat-bubble bot">Payment verification runs in the Razorpay billing flow, persisted through usage records.<div class="feat-chat-ref">↗ billing/routes.py:41-88</div><div class="feat-chat-ref">↗ services/usage.py:12-57</div></div>
+            <div class="feat-chat-bubble user">How does the widget token flow work?</div>
+            <div class="feat-chat-bubble bot">The widget fetches a short-lived token from <code style="font-size:11px; opacity:0.8;">/api/widget-token</code>, then attaches it to every chat request.<div class="feat-chat-ref">↗ api/widget.ts:18-64</div></div>
+            <div class="feat-chat-bubble bot feat-chat-typing" aria-hidden="true"><span class="feat-typing-dot"></span><span class="feat-typing-dot"></span><span class="feat-typing-dot"></span></div>
           </div>
-          <div class="feat-modes">
-            <span class="feat-mode active">fast lookup</span>
-            <span class="feat-mode">deep research</span>
-            <span class="feat-mode">code-first</span>
-          </div>
+          <div class="feat-modes"><span class="feat-mode active">fast lookup</span><span class="feat-mode">deep research</span><span class="feat-mode">code-first</span></div>
         </div>
 
-        <!-- 03: Updates regenerate only what changed (wide) -->
         <div class="feat-card feat-card-wide">
           <div class="feat-num">03</div>
           <h3 class="feat-title">Updates regenerate only what changed</h3>
-          <p class="feat-body">
-            Push a commit, run <code style="font-family: var(--font-mono); font-size: 12px; opacity: 0.85;">deepdoc update</code>, and only the affected pages
-            regenerate. Your docs keep up without a full rebuild.
-          </p>
+          <p class="feat-body">Push a commit, run <code style="font-family: var(--font-mono); font-size: 12px; opacity: 0.85;">deepdoc update</code>, and only the affected pages regenerate.</p>
           <div class="feat-diff">
             <div class="feat-diff-header">deepdoc update — 3 files changed</div>
-            <div class="feat-diff-row">
-              <span class="feat-diff-dot changed"></span>
-              <span class="feat-diff-label">billing/routes.py</span>
-              <span class="feat-diff-tag regen">regenerate</span>
-            </div>
-            <div class="feat-diff-row">
-              <span class="feat-diff-dot changed"></span>
-              <span class="feat-diff-label">services/stripe.py</span>
-              <span class="feat-diff-tag regen">regenerate</span>
-            </div>
-            <div class="feat-diff-row">
-              <span class="feat-diff-dot unchanged"></span>
-              <span class="feat-diff-label">db/models.py</span>
-              <span class="feat-diff-tag skip">skip</span>
-            </div>
+            <div class="feat-diff-row"><span class="feat-diff-dot changed"></span><span class="feat-diff-label">billing/routes.py</span><span class="feat-diff-tag regen">regenerate</span></div>
+            <div class="feat-diff-row"><span class="feat-diff-dot changed"></span><span class="feat-diff-label">services/stripe.py</span><span class="feat-diff-tag regen">regenerate</span></div>
+            <div class="feat-diff-row"><span class="feat-diff-dot unchanged"></span><span class="feat-diff-label">db/models.py</span><span class="feat-diff-tag skip">skip</span></div>
           </div>
         </div>
-
       </div>
     </div>
   </section>
@@ -472,8 +358,8 @@ const chatMessages = [
 
   <!-- ── Getting started ─────────────────────────────────────────── -->
   <section id="get-started" class="section-raised" style="scroll-margin-top: 76px;">
-    <div class="mx-auto max-w-6xl px-6 py-16">
-      <div class="grid grid-cols-1 items-start gap-12 lg:grid-cols-2">
+    <div class="mx-auto max-w-6xl px-6 py-12">
+      <div class="grid grid-cols-1 items-center gap-8 lg:grid-cols-2">
         <!-- Left: copy -->
         <div>
           <div
@@ -485,14 +371,13 @@ const chatMessages = [
             class="display"
             style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
           >
-            Three commands.
+            Run it in your repo.
           </h2>
           <p
             style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.75; color: var(--color-ink-muted); max-width: 420px;"
           >
-            Initialize against any Python, JavaScript/TypeScript, Go, PHP, or Vue
-            codebase. Set one API key. Generate. The chatbot inherits the same key
-            and runs fully on your machine.
+            From your repository root, initialize DeepDoc with your preferred provider. It writes
+            <code style="font-family: var(--font-mono); font-size: 12px; color: var(--color-ink);">.deepdoc.yaml</code>, then generates and serves your docs locally.
           </p>
           <a
             href="/docs"
@@ -527,18 +412,16 @@ const chatMessages = [
           <div class="terminal-body"><span class="c"># 1 — install</span>
 $ pip install deepdoc
 
-<span class="c"># 2 — initialize against your repo</span>
-$ deepdoc init --with-chatbot --provider anthropic
+<span class="c"># 2 — configure a provider (creates .deepdoc.yaml)</span>
+$ deepdoc init --provider anthropic
 $ export ANTHROPIC_API_KEY=sk-ant-...
 
-<span class="c"># 3 — generate and preview</span>
+<span class="c"># 3 — generate, then preview (Node.js 18+)</span>
 $ deepdoc generate
 <span class="acc">✓</span> 47 pages generated in 1m 12s
-<span class="acc">✓</span> Chatbot index built (1,247 chunks)
 
 $ deepdoc serve
-  Docs   → http://localhost:3000
-  Chat   → http://localhost:3000/ask</div>
+  Docs → http://localhost:3000</div>
         </div>
       </div>
     </div>
@@ -568,8 +451,9 @@ $ deepdoc serve
         onmouseover="this.style.opacity='0.88'"
         onmouseout="this.style.opacity='1'"
       >
-        pip install deepdoc
+        <span>pip install deepdoc</span>
         <svg
+          id="copy-icon-2"
           xmlns="http://www.w3.org/2000/svg"
           width="13"
           height="13"
@@ -581,6 +465,8 @@ $ deepdoc serve
           stroke-linejoin="round"
           style="opacity: 0.6;"
         ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
+        <svg id="check-icon-2" class="hidden" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
+        <span id="copy-status-2" class="sr-only" aria-live="polite"></span>
       </button>
     </div>
   </section>
@@ -621,7 +507,7 @@ $ deepdoc serve
       } catch {}
     });
   }
-  attachCopy("copy-install-2");
+  attachCopy("copy-install-2", "copy-status-2", "copy-icon-2", "check-icon-2");
 
   // ── Feature cards: staggered scroll reveal ────────────────────────
   (function () {

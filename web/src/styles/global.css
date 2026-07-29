@@ -14,8 +14,8 @@
 
 @theme static {
   --color-ink: #F0EFEA;
-  --color-ink-muted: #7E7D76;
-  --color-ink-faint: #44433C;
+  --color-ink-muted: #9E9D96;
+  --color-ink-faint: #5E5D56;
   --color-surface: #09090D;
   --color-surface-raised: #10101A;
   --color-surface-high: #181820;
@@ -170,62 +170,28 @@ body {
 .terminal-body .c   { color: var(--color-ink-faint); }
 .terminal-body .acc { color: var(--color-accent); }
 
-/* ── Centered hero composition ───────────────────────────────────── */
-.hero-halo {
-  position: absolute;
-  top: -160px;
-  left: 50%;
-  transform: translateX(-50%);
-  width: min(920px, 100%);
-  height: 480px;
-  background: radial-gradient(ellipse at 50% 35%, rgba(194,255,77,0.09) 0%, transparent 65%);
-  filter: blur(48px);
-  pointer-events: none;
-}
-
-/* ── Fluid hero blobs (goo filter + screen blend) — see index.astro for
-   the SVG filter def and the mousemove/rAF script. The goo filter is what
-   makes overlapping blobs melt into each other instead of just stacking as
-   flat translucent circles; screen blend (not redocly's hard-light — that
-   reads as darkening against our near-black surface, screen only adds
-   light) is what lets overlaps read as a brighter, more saturated green
-   instead of a muddy double-transparency. ─────────────────────────────── */
-.gradients-container {
+/* ── Marketing hero ──────────────────────────────────────────────── */
+.hero-scrim {
   position: absolute;
   inset: 0;
-  overflow: hidden;
   pointer-events: none;
-  filter: blur(24px);
+  background: linear-gradient(180deg, var(--color-surface) 0%, transparent 28%, transparent 76%, var(--color-surface) 100%);
 }
-.blob {
-  position: absolute;
-  border-radius: 50%;
-  background: radial-gradient(circle, var(--color-accent) 0%, transparent 70%);
-  mix-blend-mode: screen;
-}
-.blob-1 { width: 480px; height: 480px; top: -120px; left: 8%;  opacity: 0.3; animation: blobDrift1 34s ease-in-out infinite; }
-.blob-2 { width: 380px; height: 380px; top: 40px;   right: 6%; opacity: 0.24; animation: blobDrift2 40s ease-in-out infinite; }
-.blob-3 { width: 320px; height: 320px; bottom: -140px; left: 38%; opacity: 0.2; animation: blobDrift3 27s ease-in-out infinite; }
-@keyframes blobDrift1 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(70px, 40px); } }
-@keyframes blobDrift2 { 0%, 100% { transform: translate(0, 0); } 50% { transform: translate(-60px, 50px); } }
-@keyframes blobDrift3 { 0%, 100% { transform: translate(0, 0); } 33% { transform: translate(50px, -30px); } 66% { transform: translate(-40px, 20px); } }
-@media (prefers-reduced-motion: reduce) {
-  .blob-1, .blob-2, .blob-3 { animation: none; }
-}
-
-/* ── Centered hero composition ───────────────────────────────────── */
+.marketing-display { font-family: var(--font-sans); font-weight: 600; letter-spacing: -0.052em; line-height: 0.98; }
+.hero-headline-line { display: block; }
+.not-yc-mark { display: inline-grid; width: 21px; height: 21px; place-items: center; border-radius: 4px; background: #ff5a1f; color: #fff; font-family: var(--font-sans); font-size: 8px; font-weight: 800; letter-spacing: -0.08em; line-height: 1; }
+.hero-accent { color: var(--color-accent); }
+.hero-paths { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; }
+.hero-path { display: inline-flex; min-height: 44px; align-items: center; justify-content: center; border: 1px solid var(--color-line-strong); border-radius: 8px; padding: 0 14px; text-align: center; text-decoration: none; transition: border-color 160ms, background 160ms, transform 160ms, box-shadow 160ms; }
+.hero-path > span { color: var(--color-ink); font-size: 13px; font-weight: 650; letter-spacing: -0.01em; }
+.hero-path:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--color-accent) 65%, var(--color-line-strong)); }
+.hero-path:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
+.hero-path-hosted { border-color: color-mix(in srgb, var(--color-accent) 78%, transparent); background: var(--color-accent); box-shadow: 0 8px 20px rgba(194, 255, 77, 0.18); }
+.hero-path-hosted > span { color: #111119; }.hero-path-hosted small { color: rgba(17, 17, 25, 0.7); }.hero-path-hosted:hover { box-shadow: 0 16px 42px rgba(194, 255, 77, 0.3); }
+.hero-path-local { background: color-mix(in oklab, var(--color-surface-high) 82%, var(--color-surface)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
 .hero-stage {
   position: relative;
-  margin-top: 56px;
-}
-.hero-glow {
-  position: absolute;
-  inset: -3% -4%;
-  background:
-    linear-gradient(128deg, rgba(194,255,77,0.12), transparent 40%),
-    linear-gradient(308deg, rgba(55,120,255,0.08), transparent 45%);
-  filter: blur(42px);
-  pointer-events: none;
+  margin-top: 64px;
 }
 .hero-image-wrap {
   aspect-ratio: 1.9 / 1;
@@ -360,6 +326,11 @@ body {
   color: var(--color-accent);
   background: rgba(194,255,77,0.055);
 }
+.hero-status-strip { display: grid; grid-template-columns: repeat(3, 1fr); margin: 12px auto 0; width: min(94%, 900px); border: 1px solid var(--color-line-strong); border-radius: 12px; overflow: hidden; background: color-mix(in oklab, var(--color-surface-raised) 75%, var(--color-surface)); }
+.hero-status-strip div { display: flex; flex-direction: column; gap: 3px; padding: 13px 16px; border-right: 1px solid var(--color-line); text-align: left; }
+.hero-status-strip div:last-child { border-right: 0; }
+.hero-status-strip strong { color: var(--color-ink); font-size: 12px; font-weight: 600; letter-spacing: -0.01em; }
+.hero-status-strip span { color: var(--color-ink-muted); font-family: var(--font-mono); font-size: 10px; }
 
 /* Inline code pill */
 .inline-code {
@@ -679,6 +650,26 @@ html[data-theme="light"] .feat-card:hover {
 }
 .feat-diff-tag.regen { background: rgba(194,255,77,0.12); color: var(--color-accent); }
 .feat-diff-tag.skip  { background: var(--color-surface-high); color: var(--color-ink-faint); }
+
+/* The cards remain readable at rest; their proof elements only get a quiet
+   repeating pulse once the existing scroll-reveal has brought them on screen. */
+@media (prefers-reduced-motion: no-preference) {
+  .feat-card.in-view .feat-visual-row { animation: feature-row-sweep 7s ease-in-out infinite; }
+  .feat-card.in-view .feat-visual-row:nth-child(2) { animation-delay: 0.7s; }
+  .feat-card.in-view .feat-visual-row:nth-child(3) { animation-delay: 1.4s; }
+  .feat-card.in-view .feat-visual-row:nth-child(4) { animation-delay: 2.1s; }
+  .feat-card.in-view .feat-chat-bubble { animation: feature-chat-breathe 7s ease-in-out infinite; }
+  .feat-card.in-view .feat-chat-bubble:nth-child(2) { animation-delay: 1.1s; }
+  .feat-card.in-view .feat-chat-bubble:nth-child(3) { animation-delay: 2.2s; }
+  .feat-card.in-view .feat-chat-bubble:nth-child(4) { animation-delay: 3.3s; }
+  .feat-card.in-view .feat-diff-dot.changed { animation: feature-status-pulse 2.2s ease-in-out infinite; }
+  .feat-card.in-view .feat-diff-row:nth-child(3) .feat-diff-dot { animation-delay: 0.5s; }
+  .feat-card.in-view .feat-diff-tag.regen { animation: feature-tag-flash 3.4s ease-in-out infinite; }
+}
+@keyframes feature-row-sweep { 0%, 54%, 100% { background: transparent; } 8%, 24% { background: rgba(194, 255, 77, 0.055); } }
+@keyframes feature-chat-breathe { 0%, 56%, 100% { transform: translateY(0); border-color: var(--color-line); } 8%, 26% { transform: translateY(-2px); border-color: rgba(194, 255, 77, 0.3); } }
+@keyframes feature-status-pulse { 0%, 100% { box-shadow: 0 0 4px rgba(194,255,77,0.3); } 50% { box-shadow: 0 0 13px rgba(194,255,77,0.9); } }
+@keyframes feature-tag-flash { 0%, 100% { opacity: 0.72; } 50% { opacity: 1; } }
 
 @media (max-width: 860px) {
   .features-bento {

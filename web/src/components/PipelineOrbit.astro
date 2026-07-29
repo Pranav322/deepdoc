@@ -81,7 +81,7 @@ const phases = [
         data-id={p.id}
         role="button"
         tabindex="0"
-        aria-label={`Phase ${p.num}: ${p.name}`}
+        aria-label={`Phase ${p.num}: ${p.name}. Hover or focus to explore.`}
       >
         <!-- Glow aura -->
         <div class="orbit-node-aura"></div>
@@ -110,7 +110,7 @@ const phases = [
 
     <!-- Empty state — phase list overview -->
     <div id="orbit-info-empty" class="orbit-info-empty">
-      <div class="orbit-phase-list-header">Select a phase to explore</div>
+      <div class="orbit-phase-list-header">Hover a phase to explore</div>
       <div class="orbit-phase-list">
         {phases.map((p) => (
           <button
@@ -555,37 +555,29 @@ const phases = [
 
   const timer = setInterval(tick, INTERVAL);
 
-  // ── Node click ─────────────────────────────────────────────
+  // ── Phase preview ───────────────────────────────────────────
+  // Pointer hover is the primary interaction. Focus retains keyboard access.
   nodeEls.forEach((el, i) => {
     if (!el) return;
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      const id = phases[i].id;
-      if (activeId === id) {
-        deactivate();
-      } else {
-        activate(id);
+    el.addEventListener('pointerenter', () => activate(phases[i].id));
+    el.addEventListener('focus', () => activate(phases[i].id));
+    el.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        activate(phases[i].id);
       }
     });
-    el.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') el.click();
-    });
   });
 
-  // Phase list row clicks
+  // List rows mirror the hover interaction.
   document.querySelectorAll('.orbit-phase-row').forEach(btn => {
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      activate(Number(btn.dataset.target));
-    });
+    const preview = () => activate(Number(btn.dataset.target));
+    btn.addEventListener('pointerenter', preview);
+    btn.addEventListener('focus', preview);
   });
 
-  // Click outside → deactivate
-  document.addEventListener('click', (e) => {
-    if (stage && !stage.contains(e.target) && infoWrap && !infoWrap.contains(e.target)) {
-      deactivate();
-    }
-  });
+  // Return to the overview only after leaving the entire explorer.
+  wrapper?.addEventListener('pointerleave', deactivate);
 
   function activate(id) {
     activeId = id;

@@ -1,0 +1,109 @@
+---
+// Decorative only: a slow, original aurora that gives the hero gentle motion
+// while preserving contrast for the product proof and headline.
+---
+
+<div class="aurora-background" aria-hidden="true">
+  <svg viewBox="0 0 1440 860" preserveAspectRatio="xMidYMid slice" focusable="false">
+    <defs>
+      <radialGradient id="aurora-lime" cx="50%" cy="50%" r="50%">
+        <stop offset="0" stop-color="#C2FF4D" stop-opacity="0.28" />
+        <stop offset="0.55" stop-color="#7EE000" stop-opacity="0.11" />
+        <stop offset="1" stop-color="#7EE000" stop-opacity="0" />
+      </radialGradient>
+      <radialGradient id="aurora-teal" cx="50%" cy="50%" r="50%">
+        <stop offset="0" stop-color="#00E5A0" stop-opacity="0.19" />
+        <stop offset="0.62" stop-color="#00E5A0" stop-opacity="0.06" />
+        <stop offset="1" stop-color="#00E5A0" stop-opacity="0" />
+      </radialGradient>
+      <radialGradient id="aurora-warm" cx="50%" cy="50%" r="50%">
+        <stop offset="0" stop-color="#F0EFEA" stop-opacity="0.13" />
+        <stop offset="1" stop-color="#F0EFEA" stop-opacity="0" />
+      </radialGradient>
+      <filter id="aurora-soften" x="-30%" y="-30%" width="160%" height="160%">
+        <feGaussianBlur stdDeviation="28" />
+      </filter>
+      <linearGradient id="aurora-line" x1="0" y1="0" x2="1440" y2="860" gradientUnits="userSpaceOnUse">
+        <stop stop-color="#C2FF4D" stop-opacity="0" />
+        <stop offset="0.32" stop-color="#C2FF4D" stop-opacity="0.34" />
+        <stop offset="0.68" stop-color="#00E5A0" stop-opacity="0.26" />
+        <stop offset="1" stop-color="#00E5A0" stop-opacity="0" />
+      </linearGradient>
+    </defs>
+
+    <g filter="url(#aurora-soften)">
+      <ellipse class="aurora-field aurora-field-lime" cx="290" cy="590" rx="490" ry="270" fill="url(#aurora-lime)" />
+      <ellipse class="aurora-field aurora-field-teal" cx="1090" cy="510" rx="500" ry="250" fill="url(#aurora-teal)" />
+      <ellipse class="aurora-field aurora-field-warm" cx="735" cy="300" rx="390" ry="210" fill="url(#aurora-warm)" />
+    </g>
+
+    <g class="aurora-contours" fill="none" stroke="url(#aurora-line)">
+      <path d="M-90 640C175 466 286 748 542 612C770 492 878 700 1110 548C1244 460 1350 474 1530 346" />
+      <path d="M-80 690C150 550 320 790 570 664C782 558 908 742 1134 610C1280 526 1372 544 1514 438" />
+      <path d="M-40 738C180 642 342 822 618 720C826 644 942 794 1168 682C1302 616 1406 640 1500 554" />
+    </g>
+  </svg>
+</div>
+
+<style>
+  .aurora-background {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    mask-image: linear-gradient(to bottom, transparent 0%, black 18%, black 82%, transparent 100%);
+  }
+
+  svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    min-width: 860px;
+  }
+
+  .aurora-field {
+    transform-box: fill-box;
+    transform-origin: center;
+    will-change: transform;
+  }
+
+  .aurora-field-lime { animation: aurora-lime-drift 26s ease-in-out infinite alternate; }
+  .aurora-field-teal { animation: aurora-teal-drift 31s ease-in-out infinite alternate; }
+  .aurora-field-warm { animation: aurora-warm-drift 23s ease-in-out infinite alternate; }
+
+  .aurora-contours {
+    stroke-width: 1.1;
+    stroke-dasharray: 3 10;
+    opacity: 0.55;
+    animation: aurora-contour-flow 18s linear infinite;
+  }
+
+  @keyframes aurora-lime-drift {
+    from { transform: translate3d(-30px, 18px, 0) scale(0.96); }
+    to { transform: translate3d(74px, -34px, 0) scale(1.09); }
+  }
+
+  @keyframes aurora-teal-drift {
+    from { transform: translate3d(42px, -20px, 0) scale(1.05); }
+    to { transform: translate3d(-70px, 34px, 0) scale(0.94); }
+  }
+
+  @keyframes aurora-warm-drift {
+    from { transform: translate3d(-20px, -10px, 0) scale(0.94); }
+    to { transform: translate3d(42px, 24px, 0) scale(1.08); }
+  }
+
+  @keyframes aurora-contour-flow {
+    to { stroke-dashoffset: -135px; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .aurora-field,
+    .aurora-contours { animation: none; }
+  }
+
+  @media (max-width: 640px) {
+    svg { min-width: 680px; transform: translateX(-18%); }
+    .aurora-contours { opacity: 0.34; }
+  }
+</style>

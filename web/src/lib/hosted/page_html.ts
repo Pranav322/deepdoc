@@ -301,6 +301,16 @@ export function tryPageHtml(): string {
     const SHIELD_CHECK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 2 4 5v6c0 5 3.5 9.5 8 11 4.5-1.5 8-6 8-11V5z"/><path d="m9 12 2 2 4-4"/></svg>';
     const GLOBE_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"/><path d="M2 12h20"/><path d="M12 2a15 15 0 0 1 0 20 15 15 0 0 1 0-20z"/></svg>';
     const HISTORY_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 12a9 9 0 1 0 2.64-6.36L3 8"/><path d="M3 3v5h5"/><path d="M12 7v5l4 2"/></svg>';
+    // Guards against a second POST /api/generate while one is in flight.
+    // Disabling the submit button alone wasn't enough: regenerateProject()
+    // runs from the project-detail page, which had no #generate-submit-btn, so
+    // the lookup was null and two quick clicks fired two requests. The server
+    // couldn't catch it either, because job status is null during container
+    // cold-start. Two containers for one repo means the first bills untracked.
+    // Reset on every route change and whenever a build reaches a terminal
+    // state, or the guard would outlive the submit and disable Retry.
+    let startInFlight = false;
+
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
 
@@ -378,6 +388,11 @@ export function tryPageHtml(): string {
     }
 
     function route() {
+      // Any navigation means no submit is in flight any more. Without this the
+      // guard set by startJob() stays true for the rest of the page's life, so
+      // Retry after a failed build and the Generate button after "Back to
+      // generate" would both silently do nothing.
+      startInFlight = false;
       renderAppBar();
       const path = window.location.pathname;
       const projMatch = path.match(/^\\/projects\\/([\\w.-]+)\\/([\\w.-]+)\\/?$/);
@@ -387,6 +402,14 @@ export function tryPageHtml(): string {
       // Any other path (typically '/', including the bare domain) — land on
       // the sensible default: your projects if you have any, otherwise the
       // generate flow. Rewrite the URL so the address bar matches the view.
+      //
+      // If the projects load *failed* we cannot tell "no projects" from "we
+      // don't know", and silently dropping someone into /generate is how this
+      // reads as "my projects were deleted". Show the error instead.
+      if (state.projectsError) {
+        history.replaceState({}, '', '/projects');
+        return renderProjects();
+      }
       const target = state.projects.length ? '/projects' : '/generate';
       history.replaceState({}, '', target);
       return target === '/projects' ? renderProjects() : renderGenerate();
@@ -725,7 +748,23 @@ export function tryPageHtml(): string {
     // ── /projects/:owner/:repo — the only place project actions live ─
     function renderProjectDetail(owner, repo) {
       const p = state.projects.find(x => x.owner.toLowerCase() === owner.toLowerCase() && x.repo.toLowerCase() === repo.toLowerCase());
-      if (!p) { nav(null, '/projects'); return; }
+      // Deep-linking here used to bounce silently to /projects. If the list
+      // simply failed to load that reads as "my project vanished", so say
+      // which of the two actually happened.
+      if (!p) {
+        document.getElementById('content').innerHTML = \`
+          <div class="wrap-narrow" style="max-width:600px;">
+            <a class="back-link" onclick="nav(event,'/projects')">← Back to projects</a>
+            \${state.projectsError
+              ? errorBoxHtml("Couldn't load your projects, so we can't show this one. It hasn't gone anywhere.", 'reloadProjects()')
+              : \`<div class="empty-state">
+                   <h2>Project not found</h2>
+                   <p><span style="font-family:var(--font-mono)">\${escapeHtml(owner + '/' + repo)}</span> isn't in your projects.</p>
+                   <button class="btn" onclick="nav(event,'/projects')">See your projects</button>
+                 </div>\`}
+          </div>\`;
+        return;
+      }
       const isDone = p.status === 'done';
       const createdStr = p.createdAt ? new Date(p.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
       document.getElementById('content').innerHTML = \`
@@ -1039,15 +1078,6 @@ export function tryPageHtml(): string {
       startJob({ repo_url: url, visibility: state.visibility });
     }
 
-    // Guards against a second POST /api/generate while one is in flight.
-    // Disabling the button alone wasn't enough: regenerateProject() runs from
-    // the project-detail page, which had no #generate-submit-btn, so the btn
-    // lookup was null and two quick clicks fired two requests. Server dedup
-    // couldn't
-    // catch it either, because status is null during container cold-start.
-    // Two containers for one repo means the first one bills untracked.
-    let startInFlight = false;
-
     async function startJob(body) {
       if (startInFlight) return;
       startInFlight = true;
@@ -1236,6 +1266,9 @@ export function tryPageHtml(): string {
       }
       if (data.status === 'failed') {
         stopGenTimer();
+        // Terminal state, and Retry runs without a route change — release the
+        // submit guard here or the Retry button below is inert.
+        startInFlight = false;
         document.getElementById('result-slot').innerHTML = \`
           <div class="error-box">Generation failed.\\n\${escapeHtml(data.error || '')}</div>
           <div style="display:flex; gap:8px; margin-top:12px;">
@@ -1257,7 +1290,19 @@ export function tryPageHtml(): string {
       route();
     }
 
-    main();
+    // Last resort. The three body slots ship empty, so any error that escapes
+    // to the top leaves a blank dark page with no explanation — the single
+    // most common way this app "felt broken". If nothing has painted yet, say
+    // something. Never overwrite a screen that did render.
+    function renderFatal() {
+      const content = document.getElementById('content');
+      if (!content || content.children.length || content.textContent.trim()) return;
+      content.innerHTML = errorBoxHtml('Something went wrong loading the page.', 'location.reload()');
+    }
+    window.addEventListener('unhandledrejection', renderFatal);
+    window.addEventListener('error', renderFatal);
+
+    main().catch(renderFatal);
   </script>
 </body>
 </html>`;

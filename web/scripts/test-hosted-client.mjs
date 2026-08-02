@@ -21,8 +21,14 @@ const html = await res.text();
 const scriptMatch = html.match(/<script>([\s\S]*?)<\/script>\s*<\/body>/);
 if (!scriptMatch) { console.error("Could not find the client script in the rendered page."); process.exit(1); }
 const raw = scriptMatch[1];
-// Strip the boot call so importing the script doesn't kick off the whole app.
-const src = raw.replace(/\bmain\(\);\s*$/, "");
+// Strip the boot call so evaluating the script doesn't kick off the whole app
+// and consume our stubbed fetch. Matches both `main();` and
+// `main().catch(renderFatal);`.
+const src = raw.replace(/\bmain\(\)(?:\.catch\([^)]*\))?;\s*$/, "");
+if (/\bmain\(\)/.test(src.slice(-400))) {
+  console.error("Could not strip the boot call — the harness would run main(). Update the regex.");
+  process.exit(1);
+}
 
 function makeEl(id) {
   return {
@@ -51,7 +57,9 @@ function harness({ fetchImpl, present = ["stage-list", "result-slot", "gen-elaps
     clearTimeout() {}, setInterval: () => 1, clearInterval() {},
     console,
   };
-  const fn = new Function(...Object.keys(ctx), src + "\n;return { poll, escapeHtml, pollDelayMs, selectRepoByName, state };");
+  const fn = new Function(...Object.keys(ctx), src +
+    "\n;return { poll, escapeHtml, pollDelayMs, selectRepoByName, state, route," +
+    " getStartInFlight: () => startInFlight, setStartInFlight: (v) => { startInFlight = v; } };");
   const api = fn(...Object.values(ctx));
   return { api, els, scheduled };
 }
@@ -143,6 +151,30 @@ const check = (name, cond) => { assert.ok(cond, "FAILED: " + name); console.log(
   const out = api.escapeHtml('<img src=x onerror=alert(1)>');
   check("escapeHtml neutralises tags", !out.includes("<") && out.includes("&lt;"));
   check("escapeHtml neutralises quotes", api.escapeHtml(`a"b'c`) === "a&quot;b&#39;c");
+}
+
+// ── 8. The submit guard must not outlive the submit ─────────────────────
+// Regression: startJob() sets startInFlight and only cleared it on the two
+// failure paths, so after a successful POST the flag stayed true for the life
+// of the page — making the Retry button on a failed build, and the Generate
+// button after "Back to generate", silently inert.
+{
+  const { api, els } = harness({
+    fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({ status: "failed", error: "boom" }) }),
+  });
+  api.setStartInFlight(true);
+  await api.poll("job7", "a", "b");
+  check("a failed build releases the submit guard so Retry works", api.getStartInFlight() === false);
+  check("a failed build still renders the Retry button", /retryJob/.test(els.get("result-slot").innerHTML));
+  check("backend error text is escaped, not injected", !/<script/i.test(els.get("result-slot").innerHTML));
+}
+{
+  const { api } = harness({ fetchImpl: async () => ({ ok: true, status: 200, json: async () => ({}) }) });
+  api.setStartInFlight(true);
+  api.state.me = { authenticated: true };
+  api.state.projects = [];
+  try { api.route(); } catch { /* rendering needs DOM we don't stub; the reset is what matters */ }
+  check("navigating releases the submit guard", api.getStartInFlight() === false);
 }
 
 console.log(`\n${passed} checks passed`);

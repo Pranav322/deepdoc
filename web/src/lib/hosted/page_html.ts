@@ -55,6 +55,13 @@ export function tryPageHtml(): string {
      two. Duplicated here (not imported) since these are plain .ts endpoints,
      not .astro components — keep in sync with Header.astro/Logo.astro by
      hand if either changes. ───────────────────────────────────────────── */
+  /* Reserve the bar's height and the main column before any JS runs. Both
+     slots ship empty and are filled only after /api/me resolves — without
+     these the whole page jumped 52px downward on boot and the page height
+     popped again when content arrived. */
+  #appbar-slot { min-height: 52px; border-bottom: 1px solid var(--line); }
+  #appbar-slot:has(.appbar) { border-bottom: none; }
+  #content { min-height: 60vh; }
   .appbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in oklab, var(--surface) 86%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); flex-shrink: 0; }
   .appbar-inner { max-width: 1152px; margin: 0 auto; height: 52px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
   .brand { font-family: var(--font-sans); font-weight: 600; font-size: 1.2rem; text-decoration: none; letter-spacing: -0.015em; color: var(--ink); display: flex; align-items: center; cursor: pointer; }
@@ -226,6 +233,9 @@ export function tryPageHtml(): string {
   /* ── /generate — the only post-login home ─────────────────────────── */
   .step-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin: 8px 0 12px; }
   .repo-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 10px; margin-top: 10px; }
+  /* Shown when /api/repos fails or returns nothing — previously this state
+     was bare unstyled text, or no text at all. */
+  .repo-empty { padding: 16px; font-size: 13px; color: var(--ink-muted); line-height: 1.5; }
   .repo-item { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid var(--line); transition: background 0.1s; }
   .repo-item:hover { background: var(--surface-high); }
   .repo-item:last-child { border-bottom: none; }
@@ -294,9 +304,39 @@ export function tryPageHtml(): string {
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
 
+    // Everything below builds markup with innerHTML, so any value that came
+    // from GitHub (repo descriptions) or from the backend (error strings) has
+    // to go through here first.
+    function escapeHtml(v) {
+      return String(v == null ? '' : v)
+        .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+    }
+
+    // Rendered whenever a fetch we depend on fails. Without one of these the
+    // affected view just sits on its loading text forever.
+    function errorBoxHtml(message, retryFn) {
+      return \`
+        <div class="empty-state">
+          <h2>Something went wrong</h2>
+          <p>\${escapeHtml(message)}</p>
+          \${retryFn ? \`<button class="btn" onclick="\${retryFn}">Try again</button>\` : ''}
+        </div>\`;
+    }
+
     async function main() {
-      state.me = await fetch('/api/me').then(r => r.json());
-      if (!state.me.authenticated) {
+      // If this throws unguarded the page stays permanently blank — the three
+      // body slots ship empty and nothing else ever writes to them.
+      try {
+        const res = await fetch('/api/me');
+        if (!res.ok) throw new Error('me ' + res.status);
+        state.me = await res.json();
+      } catch (err) {
+        document.getElementById('content').innerHTML =
+          errorBoxHtml("Couldn't reach the server. Check your connection and try again.", 'location.reload()');
+        return;
+      }
+      if (!state.me || !state.me.authenticated) {
         // The server only serves this SPA shell to a logged-out visitor at
         // /{owner}/{repo}/ when that job is genuinely still in progress (a
         // finished/public site is served directly from R2 before this code
@@ -586,10 +626,28 @@ export function tryPageHtml(): string {
       window.location.href = '/';
     }
 
+    // Returns false when the load failed so callers can avoid rendering a
+    // misleading "No projects yet" over what is really a network error.
     async function refreshProjects() {
-      const data = await fetch('/api/projects').then(r => r.json());
-      state.projects = data.projects || [];
-      state.quota = data.quota || null;
+      try {
+        const res = await fetch('/api/projects');
+        if (!res.ok) throw new Error('projects ' + res.status);
+        const data = await res.json();
+        state.projects = Array.isArray(data.projects) ? data.projects : [];
+        state.quota = data.quota || null;
+        state.projectsError = false;
+        return true;
+      } catch (err) {
+        state.projects = [];
+        state.quota = null;
+        state.projectsError = true;
+        return false;
+      }
+    }
+
+    async function reloadProjects() {
+      await refreshProjects();
+      route();
     }
 
     // ── /projects — click-through list, no per-row buttons ───────────
@@ -597,6 +655,17 @@ export function tryPageHtml(): string {
       const q = state.quota;
       const atQuota = q && q.maxSavedProjects != null && q.savedProjects >= q.maxSavedProjects;
       const genBtn = \`<button class="btn" \${atQuota ? 'disabled title="At your project limit — delete one to free a slot"' : ''} onclick="nav(event,'/generate')">Generate new</button>\`;
+
+      // A failed /api/projects used to fall through to "No projects yet",
+      // telling the user their work was gone when it was a network error.
+      if (state.projectsError) {
+        document.getElementById('content').innerHTML = \`
+          <div class="wrap">
+            <div class="page-head"><h1>Projects</h1></div>
+            \${errorBoxHtml("Couldn't load your projects. They're still there — this is a connection problem.", 'reloadProjects()')}
+          </div>\`;
+        return;
+      }
 
       if (!state.projects.length) {
         document.getElementById('content').innerHTML = \`
@@ -633,6 +702,7 @@ export function tryPageHtml(): string {
       document.getElementById('content').innerHTML = \`
         <div class="wrap-narrow" style="max-width:600px;">
           <a class="back-link" onclick="nav(event,'/projects')">← Back to projects</a>
+          <div id="detail-error-slot"></div>
           <div class="proj-head" style="margin-top:10px;">
             <div class="title-block">
               <h1>\${p.owner}/\${p.repo}</h1>
@@ -685,18 +755,41 @@ export function tryPageHtml(): string {
         </div>\`;
     }
 
+    // Surfaces a failure inline on the detail page instead of silently
+    // pretending the mutation worked.
+    function showDetailError(message) {
+      const slot = document.getElementById('detail-error-slot');
+      if (slot) slot.innerHTML = \`<div class="error-box">\${escapeHtml(message)}</div>\`;
+    }
+
     async function setProjectVisibility(owner, repo, visibility) {
-      await fetch('/api/projects/' + owner + '/' + repo + '/visibility', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ visibility }),
-      });
+      try {
+        const res = await fetch('/api/projects/' + owner + '/' + repo + '/visibility', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ visibility }),
+        });
+        // Previously unchecked — a rejected change still re-rendered with the
+        // new pill selected, so the UI disagreed with the server.
+        if (!res.ok) throw new Error('visibility ' + res.status);
+      } catch (err) {
+        showDetailError("Couldn't change visibility. Nothing was saved — try again.");
+        return;
+      }
       await refreshProjects();
       renderProjectDetail(owner, repo);
     }
 
     async function deleteProject(owner, repo) {
-      await fetch('/api/projects/' + owner + '/' + repo, { method: 'DELETE' });
+      try {
+        const res = await fetch('/api/projects/' + owner + '/' + repo, { method: 'DELETE' });
+        // Previously unchecked — a failed DELETE still navigated to /projects,
+        // so a project that still exists looked deleted until the next reload.
+        if (!res.ok) throw new Error('delete ' + res.status);
+      } catch (err) {
+        showDetailError("Couldn't delete this project. It's still there — try again.");
+        return;
+      }
       await refreshProjects();
       nav(null, '/projects');
     }
@@ -753,8 +846,23 @@ export function tryPageHtml(): string {
     }
 
     async function loadRepos() {
-      state.repos = await fetch('/api/repos').then(r => r.json());
-      renderRepoList(state.repos);
+      const list = document.getElementById('repo-list');
+      try {
+        const res = await fetch('/api/repos');
+        if (!res.ok) throw new Error('repos ' + res.status);
+        const repos = await res.json();
+        // An expired GitHub token returns an error *object*, not an array.
+        // Without this check repos.length is undefined, renderRepoList draws
+        // nothing, and "Loading your repos…" stays on screen forever.
+        if (!Array.isArray(repos)) throw new Error('repos payload not an array');
+        state.repos = repos;
+        renderRepoList(state.repos);
+      } catch (err) {
+        state.repos = [];
+        if (list) {
+          list.innerHTML = \`<div class="repo-empty">Couldn't load your repositories. <a onclick="loadRepos()" style="color:var(--accent);cursor:pointer;">Retry</a>, or paste a public repo URL below.</div>\`;
+        }
+      }
     }
 
     // Look up whether a repo already has a project — drives both the list
@@ -812,27 +920,56 @@ export function tryPageHtml(): string {
     function renderRepoList(repos) {
       const list = document.getElementById('repo-list');
       if (!list) return;
-      if (!repos.length) { list.textContent = 'No repos found.'; return; }
+      if (!repos.length) { list.innerHTML = '<div class="repo-empty">No repositories found.</div>'; return; }
       list.innerHTML = repos.map(r => {
         const isSelected = state.selected && state.selected.owner === r.owner && state.selected.repo === r.repo;
         const existing = findProject(r.owner, r.repo);
         return \`
-          <div class="repo-item\${isSelected ? ' selected' : ''}" onclick='selectRepo(\${JSON.stringify(r)})'>
+          <div class="repo-item\${isSelected ? ' selected' : ''}" data-name="\${escapeHtml(String(r.fullName || '').toLowerCase())}" onclick="selectRepoByName('\${escapeHtml(r.owner)}','\${escapeHtml(r.repo)}')">
             <div class="top-line">
-              \${r.fullName}
+              \${escapeHtml(r.fullName)}
               \${r.private ? '<span class="priv">private</span>' : ''}
-              \${r.language ? '<span class="lang">' + r.language + '</span>' : ''}
+              \${r.language ? '<span class="lang">' + escapeHtml(r.language) + '</span>' : ''}
               \${projectTagHtml(existing)}
             </div>
-            \${r.description ? '<div class="desc">' + r.description + '</div>' : ''}
+            \${r.description ? '<div class="desc">' + escapeHtml(r.description) + '</div>' : ''}
           </div>\`;
       }).join('');
     }
 
+    // Look the repo back up by name rather than embedding a JSON blob in an
+    // onclick attribute — a description containing a quote could previously
+    // break out of that attribute.
+    function selectRepoByName(owner, repo) {
+      const r = (state.repos || []).find(x => x.owner === owner && x.repo === repo);
+      if (r) selectRepo(r);
+    }
+
+    // Filter by toggling rows instead of rebuilding the list. Re-rendering
+    // innerHTML on every keystroke reset the 280px scroller to the top while
+    // the user was still typing.
     function filterRepos(q) {
-      if (!state.repos) return;
-      const needle = q.toLowerCase();
-      renderRepoList(state.repos.filter(r => r.fullName.toLowerCase().includes(needle)));
+      const list = document.getElementById('repo-list');
+      if (!list) return;
+      const needle = String(q || '').trim().toLowerCase();
+      let shown = 0;
+      list.querySelectorAll('.repo-item').forEach(el => {
+        const match = !needle || (el.dataset.name || '').includes(needle);
+        el.hidden = !match;
+        if (match) shown++;
+      });
+      let empty = list.querySelector('.repo-empty');
+      if (!shown) {
+        if (!empty) {
+          empty = document.createElement('div');
+          empty.className = 'repo-empty';
+          list.appendChild(empty);
+        }
+        empty.textContent = 'No repositories match that search.';
+        empty.hidden = false;
+      } else if (empty) {
+        empty.hidden = true;
+      }
     }
 
     function selectRepo(repo) {
@@ -970,11 +1107,76 @@ export function tryPageHtml(): string {
       el.textContent = m + ':' + rem + ' elapsed';
     }
 
+    // Consecutive poll failures. Lives outside poll() so a manual retry can
+    // reset it, and so backoff survives across scheduled attempts.
+    let pollFails = 0;
+    const POLL_BASE_MS = 2000;
+    const POLL_MAX_FAILS = 5;
+
+    function pollDelayMs() {
+      // Exponential backoff on failure so a flapping network or a cold
+      // backend isn't hammered every 2s indefinitely.
+      return Math.min(POLL_BASE_MS * Math.pow(2, pollFails), 15000);
+    }
+
+    function showPollProblem(jobId, owner, repo, message) {
+      const slot = document.getElementById('result-slot');
+      if (!slot) return;
+      slot.innerHTML = \`
+        <div class="error-box">\${escapeHtml(message)}</div>
+        <div style="display:flex; gap:8px; margin-top:12px;">
+          <button class="btn" onclick="resumePoll('\${owner}','\${repo}','\${jobId}')">Try again</button>
+          <button class="btn ghost" onclick="backToGenerate()">Back to generate</button>
+        </div>\`;
+    }
+
+    function resumePoll(owner, repo, jobId) {
+      pollFails = 0;
+      const slot = document.getElementById('result-slot');
+      if (slot) slot.innerHTML = '';
+      // Resume the elapsed counter (stopGenTimer ran when we gave up).
+      stopGenTimer();
+      updateElapsed();
+      state.genTimer = setInterval(updateElapsed, 1000);
+      poll(jobId, owner, repo);
+    }
+
     async function poll(jobId, owner, repo) {
-      const res = await fetch('/api/status/' + jobId);
-      const data = await res.json();
-      const stageList = document.getElementById('stage-list');
-      if (!stageList) return; // page already re-rendered elsewhere
+      // Page navigated away — stop cleanly rather than leaking a timer.
+      if (!document.getElementById('stage-list')) return;
+
+      let data;
+      try {
+        const res = await fetch('/api/status/' + jobId);
+        // A 401 means the session expired mid-generation. Previously this fell
+        // through to res.json(), leaving data.status undefined — neither 'done'
+        // nor 'failed' — so the poll rescheduled forever and the user stared at
+        // a frozen stage list with a ticking elapsed timer. The build itself is
+        // unaffected, so say that rather than implying it died.
+        if (res.status === 401) {
+          stopGenTimer();
+          showPollProblem(jobId, owner, repo,
+            'Your session expired, so we stopped tracking progress. The build itself is still running — sign in again to pick it back up.');
+          return;
+        }
+        if (!res.ok) throw new Error('status ' + res.status);
+        data = await res.json();
+        if (!data || typeof data.status !== 'string') throw new Error('malformed status payload');
+        pollFails = 0;
+      } catch (err) {
+        pollFails++;
+        if (pollFails >= POLL_MAX_FAILS) {
+          stopGenTimer();
+          showPollProblem(jobId, owner, repo,
+            "Lost contact with the build after several attempts. It may still be running — reload this page to check on it.");
+          return;
+        }
+        setTimeout(() => poll(jobId, owner, repo), pollDelayMs());
+        return;
+      }
+
+      // Re-check: an await gives the user time to navigate away.
+      if (!document.getElementById('stage-list')) return;
 
       if (data.status === 'done') {
         stopGenTimer();
@@ -984,7 +1186,7 @@ export function tryPageHtml(): string {
       if (data.status === 'failed') {
         stopGenTimer();
         document.getElementById('result-slot').innerHTML = \`
-          <div class="error-box">Generation failed.\\n\${data.error || ''}</div>
+          <div class="error-box">Generation failed.\\n\${escapeHtml(data.error || '')}</div>
           <div style="display:flex; gap:8px; margin-top:12px;">
             <button class="btn" onclick="retryJob('\${owner}','\${repo}')">Retry</button>
             <button class="btn ghost" onclick="backToGenerate()">Back to generate</button>
@@ -994,7 +1196,7 @@ export function tryPageHtml(): string {
       }
       state.currentStage = data.status;
       renderStageList(data.status);
-      setTimeout(() => poll(jobId, owner, repo), 2000);
+      setTimeout(() => poll(jobId, owner, repo), POLL_BASE_MS);
     }
 
     async function backToGenerate() {

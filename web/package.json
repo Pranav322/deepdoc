@@ -9,6 +9,7 @@
     "start": "astro dev",
     "build": "astro build",
     "images": "node scripts/build-images.mjs",
+    "test:hosted": "node scripts/test-hosted-client.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },

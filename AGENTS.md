@@ -365,6 +365,34 @@ Marketing copy is **outcome-led, not implementation-led** — say "your docs sta
 - Meta descriptions must stay ≤160 chars and titles ≤60, or they truncate in the SERP.
 - Every page needs exactly one `<h1>`. `docs.astro` has a compact one at the top of its main column (it has no hero); don't remove it when reworking that page.
 
+### Hosted app client JS — no compiler covers it
+
+The hosted app's ~720 lines of client JS live inside a template string in
+`src/lib/hosted/page_html.ts`. Neither `tsc` nor the Astro build ever parses that string, so
+a syntax error or a regressed failure path ships silently. Every backtick and `${` inside it
+must be escaped (`` \` ``, `\${`).
+
+`npm run test:hosted` pulls the **rendered** script off a running server and exercises
+`poll()`'s failure paths against a stubbed DOM. Run it after touching that file:
+
+```bash
+npm run build && npx wrangler pages dev dist --port 8788 &
+npm run test:hosted
+```
+
+Stability invariants it protects — do not regress these:
+- `poll()` must treat HTTP 401 as "session expired, build still running", not as a stage.
+  An unchecked `res.json()` there yields `status: undefined`, which is neither `done` nor
+  `failed`, so the poll reschedules forever behind a ticking timer.
+- Every `fetch` in that file needs a `catch` **and** a `res.ok` check. `/api/me` failing
+  unguarded leaves the page permanently blank; unchecked mutations make a failed delete or
+  visibility change look successful.
+- Values from GitHub or the backend go through `escapeHtml()` before reaching `innerHTML`.
+- `#appbar-slot` and `#content` carry `min-height` so the page doesn't jump on boot.
+
+To exercise the real hostname locally without editing `/etc/hosts`, launch Chrome with
+`--host-resolver-rules="MAP cloud.localhost 127.0.0.1"` and visit `http://cloud.localhost:8788/`.
+
 ### Image pipeline (`scripts/build-images.mjs`)
 Hero screenshots and the OG card are pre-optimized **offline** by sharp into `public/`, from masters in `src/assets/`. Run `npm run images` after replacing a master.
 

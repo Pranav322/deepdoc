@@ -75,6 +75,14 @@ const nav = [
   function applyTheme(theme: string) {
     document.documentElement.setAttribute("data-theme", theme);
     localStorage.setItem("theme", theme);
+    // localStorage is scoped per hostname, so it can never reach
+    // cloud.deepdoc.tech. A cookie on .deepdoc.tech is the only channel that
+    // spans both, and the hosted app reads it server-side. The domain
+    // attribute must be omitted on localhost or the browser drops the cookie
+    // outright.
+    document.cookie =
+      "dd_theme=" + theme + ";path=/;max-age=31536000;samesite=lax" +
+      (location.hostname.endsWith("deepdoc.tech") ? ";domain=.deepdoc.tech;secure" : "");
     const sun = document.getElementById("icon-sun");
     const moon = document.getElementById("icon-moon");
     const glow = document.getElementById("accent-glow");

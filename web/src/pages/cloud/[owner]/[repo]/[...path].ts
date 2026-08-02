@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { requireSession } from "../../../../lib/hosted/session";
 import { fetchJobStatus } from "../../../../lib/hosted/queue";
-import { tryPageHtml, privateSitePage, stalePageHtml } from "../../../../lib/hosted/page_html";
+import { tryPageHtml, privateSitePage, stalePageHtml, readTheme } from "../../../../lib/hosted/page_html";
 
 const CONTENT_TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -51,7 +51,7 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
     const isOwner =
       viewer && jobRow.owner_login && viewer.login.toLowerCase() === jobRow.owner_login.toLowerCase();
     if (!isOwner) {
-      return new Response(privateSitePage(owner, repo, !!viewer), {
+      return new Response(privateSitePage(owner, repo, !!viewer, readTheme(cookies)), {
         status: 403,
         headers: { "Content-Type": "text/html; charset=utf-8" },
       });
@@ -124,13 +124,13 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
   if (result.status !== "done" && result.status !== "failed") {
     // Still queued/running (or the browser hit this URL directly mid-generation)
     // — serve the app shell so its client-side JS resumes the progress view.
-    return new Response(tryPageHtml(), { headers: { "Content-Type": "text/html; charset=utf-8" } });
+    return new Response(tryPageHtml(readTheme(cookies)), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
   // Status says done/failed but nothing's in R2 under this path — the built
   // files are gone (or never uploaded). Say so plainly instead of silently
   // falling back to the dashboard.
-  return new Response(stalePageHtml(owner, repo), {
+  return new Response(stalePageHtml(owner, repo, readTheme(cookies)), {
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },
   });

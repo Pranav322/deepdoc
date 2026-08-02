@@ -80,7 +80,13 @@ const jsonLd = {
     <!-- No-flash theme init: runs before first paint -->
     <script is:inline>
       (function () {
-        var stored = localStorage.getItem("theme");
+        // Cookie first: it is the cross-subdomain channel, so a preference set
+        // on cloud.deepdoc.tech is honoured here too. localStorage stays as the
+        // same-origin fallback for anyone who set a theme before the cookie
+        // existed. These pages are prerendered, so this can't be read
+        // server-side — hence the inline script.
+        var m = document.cookie.match(/(?:^|;\s*)dd_theme=(dark|light)/);
+        var stored = (m && m[1]) || localStorage.getItem("theme");
         var prefer = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
         var theme = stored || prefer;
         document.documentElement.setAttribute("data-theme", theme);

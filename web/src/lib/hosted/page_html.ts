@@ -15,9 +15,52 @@
 // All project management (list, visit, visibility, delete) lives under
 // /projects and /projects/:owner/:repo — never inline on /generate, never in
 // the profile dropdown (which is identity + nav links only).
-export function tryPageHtml(): string {
+export type Theme = "dark" | "light";
+
+/**
+ * Styling for the two standalone one-off pages (private-site block, stale
+ * site). Previously duplicated byte-for-byte in both, with its own dark-only
+ * oklch palette that matched neither the app nor deepdoc.tech.
+ */
+const MINI_PAGE_CSS = `
+  :root {
+    --surface: #09090D; --surface-raised: #10101A;
+    --ink: #F0EFEA; --ink-muted: #9E9D96;
+    --line-strong: rgba(255,255,255,0.11); --accent: #C2FF4D; --accent-ink: #09090D;
+    --shadow: 0 24px 60px -20px rgba(0,0,0,0.6);
+    --font-sans: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  }
+  html[data-theme="light"] {
+    --surface: #F5F4F0; --surface-raised: #ECEAE4;
+    --ink: #111110; --ink-muted: #6B6B63;
+    --line-strong: rgba(0,0,0,0.13); --accent: #4C8B00; --accent-ink: #F5F4F0;
+    --shadow: 0 24px 60px -20px rgba(0,0,0,0.18);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100vh; background: var(--surface); color: var(--ink); font-family: var(--font-sans); display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
+  .card { width: 100%; max-width: 460px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); padding: 32px; box-shadow: var(--shadow); }
+  h1 { font-size: 18px; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.01em; }
+  p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 22px; }
+  code { font-family: var(--font-mono); color: var(--ink); }
+  .btn { height: 40px; border-radius: 8px; border: none; cursor: pointer; padding: 0 16px; background: var(--accent); color: var(--accent-ink); font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; }
+`;
+
+/**
+ * Theme preference, shared with deepdoc.tech.
+ *
+ * localStorage is scoped per hostname, so the marketing site's toggle could
+ * never reach cloud.deepdoc.tech — pick light over there, click through, and
+ * you were slammed back into dark. A cookie on .deepdoc.tech is the only
+ * channel that spans both. Read server-side here, which also means the theme
+ * is correct in the very first byte: no inline no-flash script needed.
+ */
+export function readTheme(cookies: { get(name: string): { value: string } | undefined }): Theme {
+  return cookies.get("dd_theme")?.value === "light" ? "light" : "dark";
+}
+
+export function tryPageHtml(theme: Theme = "dark"): string {
   return `<!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="${theme}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -26,15 +69,41 @@ export function tryPageHtml(): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
+  /* Palette is the marketing site's, value for value — see
+     src/styles/global.css. It used to be an independent set of blue-tinted
+     oklch neutrals, so deepdoc.tech and cloud.deepdoc.tech rendered visibly
+     different greys side by side and read as two products.
+
+     The short names (--ink, --surface) are kept rather than renamed to
+     --color-*: ~250 lines of CSS below reference them, and the rename buys
+     nothing until this file becomes real .astro pages. tests/... no:
+     web/scripts/test-hosted-tokens.mjs fails the build if these values ever
+     drift from global.css, so "keep in sync by hand" is now enforced. */
   :root {
-    --surface: oklch(16% 0.008 250); --surface-raised: oklch(20% 0.009 250); --surface-high: oklch(25% 0.011 250);
-    --ink: oklch(93% 0.004 250); --ink-muted: oklch(64% 0.012 250); --ink-faint: oklch(42% 0.012 250);
-    --line: oklch(45% 0.012 250 / 22%); --line-strong: oklch(55% 0.014 250 / 34%);
-    --accent: #C2FF4D; --accent-ink: oklch(16% 0.008 250); --accent-dim: rgba(194,255,77,0.08); --accent-line: rgba(194,255,77,0.3);
+    --surface: #09090D; --surface-raised: #10101A; --surface-high: #181820;
+    --ink: #F0EFEA; --ink-muted: #9E9D96; --ink-faint: #5E5D56;
+    --line: rgba(255,255,255,0.06); --line-strong: rgba(255,255,255,0.11);
+    --accent: #C2FF4D; --accent-ink: #09090D; --accent-dim: rgba(194,255,77,0.09); --accent-line: rgba(194,255,77,0.3);
     --danger: #ff6b6b; --danger-dim: rgba(255,107,107,0.08);
     --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
     --shadow-lift: 0 24px 60px -20px rgba(0,0,0,0.6);
+  }
+  /* Light theme. The app was hard-locked to dark: data-theme was hardcoded and
+     nothing read it, so anyone who picked light on deepdoc.tech got slammed
+     back into dark on clicking through. Mirrors global.css's light palette.
+
+     Two values can't simply mirror it: --accent-ink is the text colour on an
+     accent-filled button, and on light's #4C8B00 accent that has to be the
+     light surface rather than near-black; and --danger needs darkening to stay
+     legible on a light background. */
+  html[data-theme="light"] {
+    --surface: #F5F4F0; --surface-raised: #ECEAE4; --surface-high: #E2E0DA;
+    --ink: #111110; --ink-muted: #6B6B63; --ink-faint: #A8A89E;
+    --line: rgba(0,0,0,0.07); --line-strong: rgba(0,0,0,0.13);
+    --accent: #4C8B00; --accent-ink: #F5F4F0; --accent-dim: rgba(76,139,0,0.09); --accent-line: rgba(76,139,0,0.3);
+    --danger: #C0392B; --danger-dim: rgba(192,57,43,0.08);
+    --shadow-lift: 0 24px 60px -20px rgba(0,0,0,0.18);
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
@@ -59,6 +128,12 @@ export function tryPageHtml(): string {
      slots ship empty and are filled only after /api/me resolves — without
      these the whole page jumped 52px downward on boot and the page height
      popped again when content arrived. */
+  /* Matches deepdoc.tech's Header.astro toggle: 8x8 hit area, muted until hover. */
+  .theme-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+    border-radius: 6px; border: 1px solid transparent; background: transparent; cursor: pointer;
+    color: var(--ink-muted); transition: color 0.12s, background 0.12s; }
+  .theme-toggle:hover { color: var(--ink); background: var(--surface-raised); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   #appbar-slot { min-height: 52px; border-bottom: 1px solid var(--line); }
   #appbar-slot:has(.appbar) { border-bottom: none; }
   #content { min-height: 60vh; }
@@ -449,11 +524,14 @@ export function tryPageHtml(): string {
         <header class="appbar">
           <div class="appbar-inner">
             <a class="brand" onclick="return nav(event,'/')">\${brandMarkHtml()}</a>
-            <div class="account-wrap">
-              <button class="account-chip" onclick="event.stopPropagation(); toggleDropdown()">
-                <img src="\${state.me.avatarUrl}" alt="" /><span>\${state.me.login}</span>
-              </button>
-              <div id="profile-dd"></div>
+            <div style="display:flex; align-items:center; gap:6px;">
+              \${themeToggleHtml()}
+              <div class="account-wrap">
+                <button class="account-chip" onclick="event.stopPropagation(); toggleDropdown()">
+                  <img src="\${escapeHtml(state.me.avatarUrl || '')}" alt="" /><span>\${escapeHtml(state.me.login || '')}</span>
+                </button>
+                <div id="profile-dd"></div>
+              </div>
             </div>
           </div>
         </header>\`;
@@ -488,6 +566,35 @@ export function tryPageHtml(): string {
     function closeDropdownOnce() { closeDropdown(); }
     function closeDropdownOnEscape(e) { if (e.key === 'Escape') closeDropdown(); }
 
+    // Theme toggle — same sun/moon affordance as deepdoc.tech's Header.astro.
+    // Writes the shared dd_theme cookie so the choice follows the visitor back
+    // to the marketing site, and vice versa. No localStorage here: the cookie
+    // is the cross-subdomain channel and the server already reads it, so
+    // there's nothing to rehydrate on the client.
+    const SUN_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M2 12h2M20 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg>';
+    const MOON_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>';
+
+    function currentTheme() {
+      return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
+    }
+    function themeToggleHtml() {
+      const isLight = currentTheme() === 'light';
+      return \`<button class="theme-toggle" type="button" onclick="toggleTheme()"
+        aria-label="Switch to \${isLight ? 'dark' : 'light'} mode">\${isLight ? MOON_ICON : SUN_ICON}</button>\`;
+    }
+    function toggleTheme() {
+      const next = currentTheme() === 'light' ? 'dark' : 'light';
+      document.documentElement.setAttribute('data-theme', next);
+      document.cookie = 'dd_theme=' + next + ';path=/;max-age=31536000;samesite=lax'
+        + (location.hostname.endsWith('deepdoc.tech') ? ';domain=.deepdoc.tech;secure' : '');
+      // Re-render just the bar so the icon flips; everything else is CSS vars.
+      if (state.me && state.me.authenticated) renderAppBar();
+      else {
+        const btn = document.querySelector('.theme-toggle');
+        if (btn) btn.outerHTML = themeToggleHtml();
+      }
+    }
+
     // Brand mark — duplicated from web/src/components/Logo.astro (the Worker
     // can't import an Astro component) so both domains read as one product.
     function brandMarkHtml() {
@@ -508,7 +615,10 @@ export function tryPageHtml(): string {
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
-          <button class="btn" onclick="openSignInFromGallery()">Generate your own</button>
+          <div style="display:flex; align-items:center; gap:8px;">
+            \${themeToggleHtml()}
+            <button class="btn" onclick="openSignInFromGallery()">Generate your own</button>
+          </div>
         </div></header>\`;
       document.getElementById('modal-slot').innerHTML = '';
       const data = await fetch('/api/examples').then(r => r.json()).catch(() => ({ examples: [] }));
@@ -1340,14 +1450,14 @@ export function tryPageHtml(): string {
 // Shown when someone hits a private site they don't own (or aren't signed in
 // for). Never leaks any of the real content. `authed` = the viewer has a valid
 // session but simply isn't the owner (so signing in again won't help them).
-export function privateSitePage(owner: string, repo: string, authed: boolean): string {
+export function privateSitePage(owner: string, repo: string, authed: boolean, theme: Theme = "dark"): string {
   const body = authed
     ? `<p>The documentation for <code>${owner}/${repo}</code> is private, and it isn't yours to view.</p>
        <button class="btn" onclick="location.href='/projects'">Go to your projects</button>`
     : `<p>The documentation for <code>${owner}/${repo}</code> is private. If it's yours, sign in to view it.</p>
        <button class="btn" onclick="location.href='/auth/github'">Sign in with GitHub</button>`;
   return `<!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="${theme}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -1355,21 +1465,7 @@ export function privateSitePage(owner: string, repo: string, authed: boolean): s
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<style>
-  :root {
-    --surface: oklch(16% 0.008 250); --surface-raised: oklch(20% 0.009 250);
-    --ink: oklch(93% 0.004 250); --ink-muted: oklch(64% 0.012 250);
-    --line-strong: oklch(55% 0.014 250 / 34%); --accent: #C2FF4D; --accent-ink: oklch(16% 0.008 250);
-    --font-sans: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: var(--surface); color: var(--ink); font-family: var(--font-sans); display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
-  .card { width: 100%; max-width: 460px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); padding: 32px; box-shadow: 0 24px 60px -20px rgba(0,0,0,0.6); }
-  h1 { font-size: 18px; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.01em; }
-  p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 22px; }
-  code { font-family: var(--font-mono); color: var(--ink); }
-  .btn { height: 40px; border-radius: 8px; border: none; cursor: pointer; padding: 0 16px; background: var(--accent); color: var(--accent-ink); font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; }
-</style>
+<style>${MINI_PAGE_CSS}</style>
 </head>
 <body>
   <div class="card">
@@ -1383,9 +1479,9 @@ export function privateSitePage(owner: string, repo: string, authed: boolean): s
 // Shown when a repo's record says "done" but the actual generated files are
 // gone (e.g. a runner restart happened before this site's content made it to
 // R2) — plain and honest instead of silently falling back to the dashboard.
-export function stalePageHtml(owner: string, repo: string): string {
+export function stalePageHtml(owner: string, repo: string, theme: Theme = "dark"): string {
   return `<!doctype html>
-<html lang="en" data-theme="dark">
+<html lang="en" data-theme="${theme}">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -1393,21 +1489,7 @@ export function stalePageHtml(owner: string, repo: string): string {
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
-<style>
-  :root {
-    --surface: oklch(16% 0.008 250); --surface-raised: oklch(20% 0.009 250);
-    --ink: oklch(93% 0.004 250); --ink-muted: oklch(64% 0.012 250);
-    --line-strong: oklch(55% 0.014 250 / 34%); --accent: #C2FF4D; --accent-ink: oklch(16% 0.008 250);
-    --font-sans: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  }
-  * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: var(--surface); color: var(--ink); font-family: var(--font-sans); display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
-  .card { width: 100%; max-width: 460px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); padding: 32px; box-shadow: 0 24px 60px -20px rgba(0,0,0,0.6); }
-  h1 { font-size: 18px; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.01em; }
-  p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 22px; }
-  code { font-family: var(--font-mono); color: var(--ink); }
-  .btn { height: 40px; border-radius: 8px; border: none; cursor: pointer; padding: 0 16px; background: var(--accent); color: var(--accent-ink); font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; }
-</style>
+<style>${MINI_PAGE_CSS}</style>
 </head>
 <body>
   <div class="card">

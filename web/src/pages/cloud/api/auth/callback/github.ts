@@ -36,7 +36,17 @@ export const GET: APIRoute = async ({ url, locals, cookies }) => {
       "User-Agent": "deepdoc-hosted",
     },
   });
-  const user = (await userRes.json()) as { login: string; id: number; avatar_url: string };
+  // The token exchange above checks its response; this call did not. If
+  // GitHub's /user failed we still parsed the body, got undefined for login,
+  // and INSERTed a session row for nobody — leaving the visitor "signed in"
+  // as an identity that matches none of their projects.
+  if (!userRes.ok) {
+    return new Response("Could not read your GitHub profile. Please try signing in again.", { status: 502 });
+  }
+  const user = (await userRes.json()) as { login?: string; id?: number; avatar_url?: string };
+  if (!user || typeof user.login !== "string" || !user.login) {
+    return new Response("GitHub returned an unexpected profile. Please try signing in again.", { status: 502 });
+  }
 
   const sessionId = crypto.randomUUID();
   const now = Date.now();

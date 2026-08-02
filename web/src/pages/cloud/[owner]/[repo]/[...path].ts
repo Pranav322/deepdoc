@@ -92,6 +92,20 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
     if (object) {
       const headers = new Headers();
       headers.set("Content-Type", object.httpMetadata?.contentType || guessContentType(candidate));
+      // Without these every asset on every page of a generated site
+      // round-tripped R2 through the Worker on each navigation, which is most
+      // of why the docs sites feel sluggish. Fingerprinted build assets are
+      // safe to pin hard; HTML must stay revalidated so a regenerate is
+      // visible immediately. The ETag lets even HTML come back as a 304.
+      // Candidates are prefix-relative ("_next/static/..."), so the leading
+      // slash must be optional or the Next.js chunk case never matches.
+      const isFingerprinted = /(^|\/)(_next\/static|assets)\//.test(candidate)
+        || /\.[0-9a-f]{8,}\.(js|css|woff2?|png|jpg|svg)$/i.test(candidate);
+      headers.set(
+        "Cache-Control",
+        isFingerprinted ? "public, max-age=31536000, immutable" : "public, max-age=0, must-revalidate",
+      );
+      if (object.httpEtag) headers.set("ETag", object.httpEtag);
       return new Response(object.body as unknown as BodyInit, { headers });
     }
   }

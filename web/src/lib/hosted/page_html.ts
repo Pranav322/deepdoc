@@ -520,23 +520,30 @@ export function tryPageHtml(): string {
           </div>\`;
         return;
       }
+      // This grid is served to unauthenticated visitors, and description /
+      // owner / repo all come from GitHub. Interpolating them raw made any
+      // public repo whose description contained markup a stored-XSS vector
+      // against every visitor, and an apostrophe in the URL used to break out
+      // of the onclick attribute and make the card silently unclickable.
       const cards = examples.map(e => {
         const hue = fallbackHue(e.owner);
-        const initial = (e.owner[0] || '?').toUpperCase();
-        const siteUrl = '/' + e.owner + '/' + e.repo + '/';
+        const initial = escapeHtml((String(e.owner || '?')[0] || '?').toUpperCase());
+        const siteUrl = '/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo) + '/';
+        const safeUrl = escapeHtml(siteUrl);
+        const safeName = escapeHtml(e.owner + '/' + e.repo);
         return \`
-        <div class="gallery-card" onclick="location.href='\${siteUrl}'">
+        <div class="gallery-card" role="link" tabindex="0" data-href="\${safeUrl}">
           <div class="gallery-card-surface">
-            <div class="gallery-preview" style="background: hsl(\${hue}, 55%, 32%);">
+            <div class="gallery-preview" style="background: hsl(\${Number(hue) || 0}, 55%, 32%);">
               <div class="gallery-avatar-fallback">\${initial}</div>
               <div class="gallery-preview-inner">
-                <iframe src="\${siteUrl}" loading="lazy" tabindex="-1" title="Preview of \${e.owner}/\${e.repo} docs" onload="this.classList.add('loaded')"></iframe>
+                <iframe src="\${safeUrl}" loading="lazy" tabindex="-1" title="Preview of \${safeName} docs" onload="this.classList.add('loaded')"></iframe>
               </div>
             </div>
             <div class="gallery-body">
-              <div class="gallery-name">\${e.owner}/\${e.repo}</div>
-              \${e.description ? '<div class="gallery-desc">' + e.description + '</div>' : ''}
-              \${e.language ? '<div class="gallery-lang">' + e.language + '</div>' : ''}
+              <div class="gallery-name">\${safeName}</div>
+              \${e.description ? '<div class="gallery-desc">' + escapeHtml(e.description) + '</div>' : ''}
+              \${e.language ? '<div class="gallery-lang">' + escapeHtml(e.language) + '</div>' : ''}
             </div>
           </div>
         </div>\`;
@@ -548,7 +555,29 @@ export function tryPageHtml(): string {
           </div>
           <div class="gallery-grid">\${cards}</div>
         </div>\`;
+      attachGalleryNav();
       attachTilt();
+    }
+
+    // Cards navigate from a data-href via one delegated listener rather than
+    // an inline onclick, so nothing from GitHub is ever parsed as code.
+    // role="link" + tabindex on the card means keyboard users get it too,
+    // which the old onclick-only version didn't offer.
+    function attachGalleryNav() {
+      const grid = document.querySelector('.gallery-grid');
+      if (!grid) return;
+      const go = (el) => {
+        const href = el && el.getAttribute('data-href');
+        if (href) window.location.href = href;
+      };
+      grid.addEventListener('click', (e) => go(e.target.closest('.gallery-card')));
+      grid.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' && e.key !== ' ') return;
+        const card = e.target.closest('.gallery-card');
+        if (!card) return;
+        e.preventDefault();
+        go(card);
+      });
     }
 
     // Subtle 3D tilt on mousemove — plain CSS transform + a bit of math,
@@ -709,7 +738,7 @@ export function tryPageHtml(): string {
               <div class="proj-meta-row"><span class="status-text \${p.status === 'done' ? 'done' : p.status === 'failed' ? 'failed' : 'building'}"><span class="sdot"></span>\${p.status}</span>\${createdStr ? '<span>generated ' + createdStr + '</span>' : ''}</div>
             </div>
             <div style="display:flex; gap:8px;">
-              <button class="btn secondary" onclick="regenerateProject('\${p.owner}','\${p.repo}')">Regenerate</button>
+              <button id="regenerate-btn" class="btn secondary" onclick="regenerateProject('\${p.owner}','\${p.repo}')">Regenerate</button>
               <button class="btn" \${isDone ? '' : 'disabled'} onclick="window.open('/\${p.owner}/\${p.repo}/', '_blank')">Visit site ↗</button>
             </div>
           </div>
@@ -1010,10 +1039,22 @@ export function tryPageHtml(): string {
       startJob({ repo_url: url, visibility: state.visibility });
     }
 
+    // Guards against a second POST /api/generate while one is in flight.
+    // Disabling the button alone wasn't enough: regenerateProject() runs from
+    // the project-detail page, which had no #generate-submit-btn, so the btn
+    // lookup was null and two quick clicks fired two requests. Server dedup
+    // couldn't
+    // catch it either, because status is null during container cold-start.
+    // Two containers for one repo means the first one bills untracked.
+    let startInFlight = false;
+
     async function startJob(body) {
+      if (startInFlight) return;
+      startInFlight = true;
       const errSlot = document.getElementById('error-slot');
       if (errSlot) errSlot.innerHTML = '';
-      const btn = document.getElementById('generate-submit-btn');
+      // Either screen's submit control.
+      const btn = document.getElementById('generate-submit-btn') || document.getElementById('regenerate-btn');
       const originalBtnHtml = btn ? btn.innerHTML : null;
       if (btn) {
         btn.disabled = true;
@@ -1028,15 +1069,19 @@ export function tryPageHtml(): string {
         });
         data = await res.json();
       } catch {
+        startInFlight = false;
         if (btn) { btn.disabled = false; btn.innerHTML = originalBtnHtml; }
         if (errSlot) errSlot.innerHTML = '<div class="error-box">Network error — try again.</div>';
         return;
       }
       if (!res.ok) {
+        startInFlight = false;
         if (btn) { btn.disabled = false; btn.innerHTML = originalBtnHtml; }
-        if (errSlot) errSlot.innerHTML = '<div class="error-box">' + (data.error || 'unknown error') + '</div>';
+        if (errSlot) errSlot.innerHTML = '<div class="error-box">' + escapeHtml((data && data.error) || 'unknown error') + '</div>';
         return;
       }
+      // Deliberately left true on success: we are navigating to the progress
+      // screen, and nothing on the way there should be able to enqueue again.
       history.pushState({}, '', '/' + data.owner + '/' + data.repo + '/');
       renderGenerating({
         owner: data.owner,
@@ -1091,6 +1136,12 @@ export function tryPageHtml(): string {
             <div class="gen-elapsed" id="gen-elapsed">0:00 elapsed</div>
             <div id="stage-list"></div>
             <div id="result-slot"></div>
+            <!-- startJob() writes failures into #error-slot. This screen used
+                 to omit it, so the "Retry" button on a failed generation hit
+                 a null element and did nothing — and it failed predictably,
+                 because a failed start still consumes one of the two daily
+                 starts, so the retry usually 429s. -->
+            <div id="error-slot"></div>
           </div>
         </div>\`;
       renderStageList('cloning');

@@ -65,7 +65,18 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     // Owner clicking again while a job is already running — hand back the
     // in-flight job instead of enqueuing a duplicate.
     const existing = await fetchJobStatus(env, existingJobRow.job_id);
-    if (existing.status && existing.status !== "done" && existing.status !== "failed") {
+    // `status === null` means jobs/{id}/status.json does not exist yet — the
+    // window between enqueue and the container writing its first status. That
+    // is in-flight, not absent. Treating null as falsy here let a second
+    // request through during exactly that window, enqueuing a duplicate job:
+    // two Container Apps executions for one repo, both writing the same R2
+    // prefix, with D1 keeping only the second job_id so the first billed on
+    // untracked. Same failure class as the openclaw/openclaw incident, and
+    // the same null-is-in-flight lesson already learned in
+    // [owner]/[repo]/[...path].ts.
+    const inFlight = existing.status === null
+      || (existing.status !== "done" && existing.status !== "failed");
+    if (inFlight) {
       const existingProject = await env.DB.prepare(
         "SELECT created_at FROM projects WHERE user_login = ? AND LOWER(owner) = LOWER(?) AND LOWER(repo) = LOWER(?)",
       )
@@ -74,7 +85,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       return new Response(
         JSON.stringify({
           job_id: existingJobRow.job_id,
-          status: existing.status,
+          // Normalise the pre-cold-start null to the same "queued" the first
+          // POST returns, so the client never has to reason about null.
+          status: existing.status ?? "queued",
           owner,
           repo,
           createdAt: existingProject?.created_at ?? null,

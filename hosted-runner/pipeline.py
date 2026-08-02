@@ -102,23 +102,77 @@ def write_status(job_id: str, status: str, error: str | None = None, log: list |
         pass
 
 
+def _iter_r2_keys(client, prefix: str):
+    """Every key under prefix. Paginates — a large docs site easily exceeds the
+    1000-key page limit, and missing the tail would leave stale files behind."""
+    token = None
+    while True:
+        kwargs = {"Bucket": R2_BUCKET, "Prefix": prefix}
+        if token:
+            kwargs["ContinuationToken"] = token
+        page = client.list_objects_v2(**kwargs)
+        for obj in page.get("Contents", []) or []:
+            yield obj["Key"]
+        if not page.get("IsTruncated"):
+            return
+        token = page.get("NextContinuationToken")
+        if not token:
+            return
+
+
 def upload_site_to_r2(owner: str, repo: str, site_out: Path, log: list) -> None:
     client = _r2_client()
     if client is None:
         log.append("R2 credentials not configured — skipping upload")
         return
     prefix = f"{owner.lower()}/{repo.lower()}/"
-    count = 0
-    for file_path in site_out.rglob("*"):
-        if not file_path.is_file():
-            continue
+
+    files = [p for p in site_out.rglob("*") if p.is_file()]
+
+    # Upload assets before HTML.
+    #
+    # A regenerate writes into the same prefix a live site is being served
+    # from, so ordering decides what a visitor mid-rebuild actually gets.
+    # Uploading in rglob order meant new HTML could land while it still
+    # referenced content-hashed chunks that hadn't been written yet — the
+    # visitor got a missing-chunk error, or Next's "Unexpected token '<'"
+    # when the 404 body came back as HTML. Writing every asset first means
+    # old HTML keeps resolving against old chunks (still present) until the
+    # moment new HTML appears, by which point its chunks are already there.
+    def is_html(p: Path) -> bool:
+        return p.suffix.lower() in (".html", ".htm")
+
+    ordered = [p for p in files if not is_html(p)] + [p for p in files if is_html(p)]
+
+    uploaded_keys = set()
+    for file_path in ordered:
         rel = file_path.relative_to(site_out).as_posix()
         content_type = mimetypes.guess_type(rel)[0] or "application/octet-stream"
+        key = prefix + rel
         client.put_object(
-            Bucket=R2_BUCKET, Key=prefix + rel, Body=file_path.read_bytes(), ContentType=content_type
+            Bucket=R2_BUCKET, Key=key, Body=file_path.read_bytes(), ContentType=content_type
         )
-        count += 1
-    log.append(f"uploaded {count} files to R2 at {prefix}")
+        uploaded_keys.add(key)
+    log.append(f"uploaded {len(uploaded_keys)} files to R2 at {prefix}")
+
+    # Sweep whatever the previous build left behind.
+    #
+    # Uploads used to be purely additive, so a page deleted or renamed between
+    # builds stayed reachable forever, and superseded chunk files accumulated
+    # in the prefix indefinitely. Done after the upload rather than before so
+    # the site is never a 404 window; the objects removed here are by
+    # definition ones the new build does not reference.
+    try:
+        stale = [k for k in _iter_r2_keys(client, prefix) if k not in uploaded_keys]
+        for i in range(0, len(stale), 1000):  # delete_objects caps at 1000
+            client.delete_objects(
+                Bucket=R2_BUCKET,
+                Delete={"Objects": [{"Key": k} for k in stale[i : i + 1000]], "Quiet": True},
+            )
+        if stale:
+            log.append(f"removed {len(stale)} stale files left by the previous build")
+    except Exception as exc:  # noqa: BLE001 — a failed sweep must not fail the build
+        log.append(f"stale-file sweep failed (non-fatal): {exc}")
 
 
 def _run(

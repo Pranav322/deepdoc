@@ -157,13 +157,27 @@ export function tryPageHtml(): string {
      mousemove math, the same effect a framer-motion card gives you, no
      React/framer-motion dependency needed for it. */
   .gallery-heading { font-size: 15px; font-weight: 500; color: var(--ink-muted); letter-spacing: -0.01em; margin: 0; }
+  .gallery-head { padding: 8px 0 26px; max-width: 620px; }
+  .gallery-title { font-size: clamp(24px, 3.2vw, 33px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.15; color: var(--ink); margin: 0; }
+  .gallery-sub { font-size: 14px; line-height: 1.6; color: var(--ink-muted); margin: 11px 0 0; }
+  /* The page used to just stop under the grid with ~1000px of empty surface
+     below it and no closing edge. */
+  .cloud-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin-top: 56px; padding: 22px 0 40px; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink-faint); }
+  .cloud-footer strong { color: var(--ink-muted); font-weight: 500; }
+  .cloud-footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
+  .cloud-footer-links a { color: var(--ink-faint); text-decoration: none; transition: color 0.12s; }
+  .cloud-footer-links a:hover { color: var(--ink); }
   /* Matches .appbar-inner's max-width (1152px) — .wrap's own 880px is meant
      for narrower list/detail pages, and using it here made the gallery
      visibly narrower than the header above it, like a different page
      bolted on rather than part of the same site. */
   .wrap-wide { width: 100%; max-width: 1152px; margin: 0 auto; padding: 0 28px; }
   .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
-  .gallery-card { position: relative; display: flex; border-radius: 14px; cursor: pointer; transition: transform 0.08s ease-out; will-change: transform; }
+  .gallery-card { position: relative; display: flex; border-radius: 14px; cursor: pointer; transition: transform 0.08s ease-out; will-change: transform; text-decoration: none; color: inherit; }
+  /* It's a real <a> now, so it must show a focus ring for keyboard users. */
+  .gallery-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   /* Border beam — a light trail that travels around the card's edge on
      hover. Not a mask trick (mask-composite: exclude turned out to be too
      fragile across browsers to get right) — instead the classic, robust
@@ -198,15 +212,23 @@ export function tryPageHtml(): string {
      grid-row height it was already getting. */
   .gallery-card-surface { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; margin: 1.5px; border: 1px solid var(--line-strong); border-radius: 12.5px; background: var(--surface-raised); overflow: hidden; transition: border-color 0.12s; }
   .gallery-card:hover .gallery-card-surface { border-color: transparent; }
-  .gallery-preview { position: relative; height: 180px; flex-shrink: 0; overflow: hidden; background: var(--surface-high); pointer-events: none; }
-  .gallery-preview-inner { width: 400%; height: 400%; transform: scale(0.25); transform-origin: top left; }
-  .gallery-preview-inner iframe { width: 100%; height: 100%; border: none; display: block; opacity: 0; transition: opacity 0.35s ease; }
-  .gallery-preview-inner iframe.loaded { opacity: 1; }
-  .gallery-avatar-fallback { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--font-sans); font-weight: 700; font-size: 28px; color: rgba(255,255,255,0.9); }
-  .gallery-body { display: flex; flex-direction: column; flex: 1; padding: 14px 16px 16px; min-width: 0; }
-  .gallery-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Screenshot, not a scaled iframe. aspect-ratio + explicit img dimensions
+     mean the grid is laid out before any image arrives, so cards never
+     reflow as thumbnails stream in. */
+  .gallery-preview { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden; background: var(--surface-high); border-bottom: 1px solid var(--line); }
+  .gallery-shot { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  /* A hairline of light along the top edge — reads as a screen rather than a
+     flat colour swatch, and stops the image sitting flush against the border. */
+  .gallery-preview::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }
+  .gallery-body { display: flex; flex-direction: column; flex: 1; padding: 13px 15px 14px; min-width: 0; }
+  .gallery-name { font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
+  /* De-emphasise the owner so the repo name is what you actually scan. */
+  .gallery-name .g-owner { color: var(--ink-faint); font-weight: 400; }
   .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .gallery-lang { font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); margin-top: auto; padding-top: 8px; }
+  .gallery-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); }
+  .g-lang { display: inline-flex; align-items: center; gap: 5px; }
+  .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.75; }
+  .g-date { margin-left: auto; }
 
   /* ── /projects — click-through rows, no per-row buttons ──────────── */
   .proj-row { display: flex; align-items: center; gap: 14px; padding: 17px 14px; margin: 0 -14px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 8px; transition: background 0.12s; }
@@ -548,59 +570,66 @@ export function tryPageHtml(): string {
       // public repo whose description contained markup a stored-XSS vector
       // against every visitor, and an apostrophe in the URL used to break out
       // of the onclick attribute and make the card silently unclickable.
-      const cards = examples.map(e => {
-        const hue = fallbackHue(e.owner);
-        const initial = escapeHtml((String(e.owner || '?')[0] || '?').toUpperCase());
+      const cards = examples.map((e, i) => {
         const siteUrl = '/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo) + '/';
         const safeUrl = escapeHtml(siteUrl);
         const safeName = escapeHtml(e.owner + '/' + e.repo);
+        const safeOwner = escapeHtml(e.owner);
+        const safeRepo = escapeHtml(e.repo);
+        // Real screenshot, captured once and cached in R2. Replaces a live
+        // <iframe> of the whole docs site scaled 400% -> 25%: up to 60 of
+        // those on one page was the single biggest source of jank, and the
+        // result was blurry besides. ?v pins the generation timestamp so a
+        // regenerate busts the URL. Width/height are set so the grid never
+        // reflows as images arrive.
+        const thumbUrl = '/api/thumb/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo)
+          + '?v=' + encodeURIComponent(String(e.createdAt || 0));
+        // Only the first row is worth fetching eagerly; the rest are almost
+        // always below the fold.
+        const loading = i < 3 ? 'eager' : 'lazy';
+        const dateStr = e.createdAt
+          ? new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+          : '';
         return \`
-        <div class="gallery-card" role="link" tabindex="0" data-href="\${safeUrl}">
+        <a class="gallery-card" href="\${safeUrl}" data-href="\${safeUrl}">
           <div class="gallery-card-surface">
-            <div class="gallery-preview" style="background: hsl(\${Number(hue) || 0}, 55%, 32%);">
-              <div class="gallery-avatar-fallback">\${initial}</div>
-              <div class="gallery-preview-inner">
-                <iframe src="\${safeUrl}" loading="lazy" tabindex="-1" title="Preview of \${safeName} docs" onload="this.classList.add('loaded')"></iframe>
-              </div>
+            <div class="gallery-preview">
+              <img class="gallery-shot" src="\${escapeHtml(thumbUrl)}" alt="Documentation generated for \${safeName}"
+                   width="1280" height="800" loading="\${loading}" decoding="async" />
             </div>
             <div class="gallery-body">
-              <div class="gallery-name">\${safeName}</div>
+              <div class="gallery-name"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
               \${e.description ? '<div class="gallery-desc">' + escapeHtml(e.description) + '</div>' : ''}
-              \${e.language ? '<div class="gallery-lang">' + escapeHtml(e.language) + '</div>' : ''}
+              <div class="gallery-meta">
+                \${e.language ? '<span class="g-lang"><span class="g-dot"></span>' + escapeHtml(e.language) + '</span>' : ''}
+                \${dateStr ? '<span class="g-date">' + escapeHtml(dateStr) + '</span>' : ''}
+              </div>
             </div>
           </div>
-        </div>\`;
+        </a>\`;
       }).join('');
+      // The old heading was a bare 15px muted line reading "Previously
+      // generated by others" over a wall of cards, with ~1000px of dead space
+      // below and no footer — the page just stopped. Give it a real title, a
+      // line of context, and a closing edge.
       document.getElementById('content').innerHTML = \`
         <div class="wrap-wide">
-          <div class="page-head">
-            <h1 class="gallery-heading">Previously generated by others</h1>
+          <div class="gallery-head">
+            <h1 class="gallery-title">Documentation, generated from real repositories</h1>
+            <p class="gallery-sub">Every site below was produced by DeepDoc from source. Open any of them, or point it at your own repo.</p>
           </div>
           <div class="gallery-grid">\${cards}</div>
+          <footer class="cloud-footer">
+            <span>Generated by <strong>DeepDoc</strong></span>
+            <nav class="cloud-footer-links">
+              <a href="https://deepdoc.tech">Home</a>
+              <a href="https://deepdoc.tech/docs">Docs</a>
+              <a href="https://github.com/tss-pranavkumar/deepdoc" target="_blank" rel="noreferrer">GitHub</a>
+              <a href="https://pypi.org/project/deepdoc/" target="_blank" rel="noreferrer">PyPI</a>
+            </nav>
+          </footer>
         </div>\`;
-      attachGalleryNav();
       attachTilt();
-    }
-
-    // Cards navigate from a data-href via one delegated listener rather than
-    // an inline onclick, so nothing from GitHub is ever parsed as code.
-    // role="link" + tabindex on the card means keyboard users get it too,
-    // which the old onclick-only version didn't offer.
-    function attachGalleryNav() {
-      const grid = document.querySelector('.gallery-grid');
-      if (!grid) return;
-      const go = (el) => {
-        const href = el && el.getAttribute('data-href');
-        if (href) window.location.href = href;
-      };
-      grid.addEventListener('click', (e) => go(e.target.closest('.gallery-card')));
-      grid.addEventListener('keydown', (e) => {
-        if (e.key !== 'Enter' && e.key !== ' ') return;
-        const card = e.target.closest('.gallery-card');
-        if (!card) return;
-        e.preventDefault();
-        go(card);
-      });
     }
 
     // Subtle 3D tilt on mousemove — plain CSS transform + a bit of math,

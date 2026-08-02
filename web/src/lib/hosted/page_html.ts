@@ -217,14 +217,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   /* ── Section headers (shared across authed views) ──────────────── */
   .page-head { display: flex; align-items: baseline; justify-content: space-between; padding: 40px 0 24px; flex-wrap: wrap; gap: 12px; }
   .page-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-  .empty-state { text-align: center; padding: 64px 20px 80px; }
-  /* Three ghost cards hinting at what will fill this space, so the empty
-     dashboard suggests its own shape instead of being a blank page. */
-  .empty-art { display: flex; justify-content: center; gap: 10px; margin-bottom: 26px; }
-  .empty-card { width: 74px; height: 46px; border-radius: 7px; border: 1px dashed var(--line-strong); background: var(--surface-raised); }
-  .empty-card:nth-child(2) { opacity: 0.66; }
-  .empty-card:nth-child(3) { opacity: 0.33; }
-  .empty-state p { max-width: 420px; margin: 8px auto 22px; }
+  /* Left deliberately bare — no artwork, no explanatory paragraph. An empty
+     list should read as empty, not as a placeholder that needs decorating. */
+  .empty-state { text-align: center; padding: 72px 20px; }
   .empty-state h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
   .empty-state p { font-size: 13.5px; color: var(--ink-muted); margin: 0 0 24px; }
   .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-muted); text-decoration: none; margin: 28px 0 4px; cursor: pointer; }
@@ -312,7 +307,30 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.75; }
   .g-date { margin-left: auto; }
 
-  /* ── /projects — cards carrying the data the API already returns ── */
+  /* ── /projects — name, state, age. Nothing else. ─────────────────── */
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+  .proj-list-min { display: flex; flex-direction: column; margin-top: 8px; }
+  /* No borders or card surfaces — the hairline between rows is the only
+     structure needed, and it disappears on the last row. */
+  .proj-row-min { display: flex; align-items: center; gap: 12px; padding: 15px 8px; margin: 0 -8px;
+    border-radius: 7px; border-bottom: 1px solid var(--line); text-decoration: none; color: inherit;
+    transition: background 0.1s; }
+  .proj-row-min:last-child { border-bottom: none; }
+  .proj-row-min:hover { background: var(--surface-raised); }
+  .proj-row-min:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* The dot is the whole status indicator. Colour carries it; the label is
+     present for screen readers and as a title on hover. */
+  .pr-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--line-strong); }
+  .pr-dot.done { background: var(--accent); }
+  .pr-dot.failed { background: var(--danger); }
+  .pr-dot.building { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
+  .pr-name { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13.5px; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pr-name .g-owner { color: var(--ink-faint); }
+  .pr-age { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); flex-shrink: 0; }
+
+  /* ── legacy card list, retained for reference ─────────────────────── */
   .page-sub { font-size: 13px; color: var(--ink-muted); margin: 6px 0 0; }
   .proj-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
   .proj-card { display: flex; align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--line);
@@ -367,12 +385,16 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .detail-preview img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
   .detail-preview.is-empty { display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
   .detail-preview.is-empty p { font-size: 13px; color: var(--ink-muted); margin: 0; max-width: 320px; line-height: 1.6; }
-  .detail-preview-hint { position: absolute; right: 12px; bottom: 12px; padding: 5px 10px; border-radius: 6px;
-    background: color-mix(in oklab, var(--surface) 82%, transparent); backdrop-filter: blur(8px);
-    border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: 10.5px; color: var(--ink);
-    opacity: 0; transition: opacity 0.15s; }
-  .detail-preview:hover .detail-preview-hint { opacity: 1; }
-  .detail-desc { font-size: 13.5px; line-height: 1.6; color: var(--ink-muted); margin: 8px 0 0; }
+  /* Visibility toggle and delete sit on one quiet line under the preview,
+     rather than in two labelled sections. */
+  .detail-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    flex-wrap: wrap; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
+  .link-danger, .link-quiet { background: none; border: none; padding: 0; cursor: pointer;
+    font-family: var(--font-sans); font-size: 12.5px; }
+  .link-danger { color: var(--danger); }
+  .link-quiet { color: var(--ink-muted); }
+  .link-danger:hover, .link-quiet:hover { text-decoration: underline; }
+  .danger-confirm { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--ink-muted); }
   .title-block h1 .g-owner { color: var(--ink-faint); font-weight: 400; }
 
   /* ── /projects/:owner/:repo — the only place project actions live ── */
@@ -427,15 +449,12 @@ export function tryPageHtml(theme: Theme = "dark"): string {
      This screen is watched for minutes, so it has to look deliberate. */
   .gen-card { width: 100%; max-width: 480px; border: 1px solid var(--line); border-radius: 14px;
     background: var(--surface-raised); padding: 20px 22px 22px; box-shadow: var(--shadow-lift); }
-  .gen-repo { display: flex; align-items: center; gap: 11px; padding-bottom: 16px; margin-bottom: 4px;
-    border-bottom: 1px solid var(--line); }
-  .gen-repo img { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; }
-  .gen-repo-text { min-width: 0; flex: 1; }
+  /* Repo and clock, nothing else. The avatar and language badge were
+     decoration on a screen whose only job is to say "still working". */
+  .gen-repo { display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+    padding-bottom: 16px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
   .gen-repo-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gen-repo-name .g-owner { color: var(--ink-faint); font-weight: 400; }
-  .gen-repo-lang { display: flex; align-items: center; gap: 5px; margin-top: 4px;
-    font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-muted); }
+    min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   /* Tabular figures so the seconds ticking doesn't shift the layout. */
   .gen-elapsed { font-family: var(--font-mono); font-size: 19px; font-weight: 500; color: var(--ink);
     font-variant-numeric: tabular-nums; letter-spacing: -0.02em; flex-shrink: 0; }
@@ -951,69 +970,47 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="wrap">
             <div class="page-head"><h1>Projects</h1></div>
             \${errorBoxHtml("Couldn't load your projects. They're still there — this is a connection problem.", 'reloadProjects()')}
-            \${cloudFooterHtml()}
           </div>\`;
         return;
       }
 
       if (!state.projects.length) {
         document.getElementById('content').innerHTML = \`
-          <div class="wrap">
+          <div class="wrap-narrow" style="max-width:560px;">
             <div class="page-head"><h1>Projects</h1></div>
             <div class="empty-state">
-              <div class="empty-art" aria-hidden="true">
-                <span class="empty-card"></span><span class="empty-card"></span><span class="empty-card"></span>
-              </div>
               <h2>No projects yet</h2>
-              <p>Point DeepDoc at a GitHub repository and it'll read the source, work out the architecture, and build you a browsable documentation site.</p>
               \${genBtn}
             </div>
-            \${cloudFooterHtml()}
           </div>\`;
         return;
       }
-      // Rows used to carry owner/repo plus two micro-labels and nothing else —
-      // no description, language, date or preview — so you couldn't tell which
-      // project was which, or which was recent. Same data the API already
-      // returns, actually shown.
+      // Name, state, age. Everything else — visibility, language, description,
+      // the preview — lives on the detail page, where it is actionable. An
+      // earlier pass put all of it in the row and ten elements per line read as
+      // a dashboard, not a list.
       const rows = state.projects.map(p => {
-        const done = p.status === 'done';
-        const safeOwner = escapeHtml(p.owner);
-        const safeRepo = escapeHtml(p.repo);
+        const meta = STATUS_META[p.status] || { label: p.status, cls: '' };
+        // The owner is almost always you, so showing it on every row is noise.
+        // Surface it only when it isn't, which is exactly when it disambiguates.
+        const mine = state.me && state.me.login
+          && p.owner.toLowerCase() === state.me.login.toLowerCase();
         return \`
-        <a class="proj-card" href="/projects/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}"
+        <a class="proj-row-min" href="/projects/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}"
            onclick="return nav(event,'/projects/\${escapeHtml(p.owner)}/\${escapeHtml(p.repo)}')">
-          <div class="proj-thumb">
-            \${done && p.visibility === 'public'
-              ? \`<img src="\${escapeHtml(thumbUrlFor(p.owner, p.repo, p.createdAt, currentTheme()))}" alt=""
-                      data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(p.createdAt || 0))}"
-                      class="gallery-shot" width="1280" height="800" loading="lazy" decoding="async" />\`
-              : \`<div class="proj-thumb-empty">\${statusGlyph(p.status)}</div>\`}
-          </div>
-          <div class="proj-main">
-            <div class="proj-title"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
-            \${p.description ? '<p class="proj-desc">' + escapeHtml(p.description) + '</p>' : ''}
-            <div class="proj-meta">
-              \${statusPill(p.status)}
-              <span class="vis-badge">\${p.visibility === 'public' ? 'Public' : 'Private'}</span>
-              \${p.language ? '<span class="g-lang"><span class="g-dot"></span>' + escapeHtml(p.language) + '</span>' : ''}
-              \${p.createdAt ? '<span class="proj-date">' + escapeHtml(relativeDate(p.createdAt)) + '</span>' : ''}
-            </div>
-          </div>
-          <span class="row-chev" aria-hidden="true">›</span>
+          <span class="pr-dot \${meta.cls}" title="\${escapeHtml(meta.label)}" aria-hidden="true"></span>
+          <span class="pr-name">\${mine ? '' : '<span class="g-owner">' + escapeHtml(p.owner) + '/</span>'}\${escapeHtml(p.repo)}</span>
+          <span class="sr-only">\${escapeHtml(meta.label)}</span>
+          <span class="pr-age">\${p.createdAt ? escapeHtml(shortAge(p.createdAt)) : ''}</span>
         </a>\`;
       }).join('');
       document.getElementById('content').innerHTML = \`
-        <div class="wrap">
+        <div class="wrap-narrow" style="max-width:560px;">
           <div class="page-head">
-            <div>
-              <h1>Projects</h1>
-              <p class="page-sub">\${state.projects.length} of \${q && q.maxSavedProjects != null ? q.maxSavedProjects : '∞'} slots used\${atQuota ? ' — delete one to generate another' : ''}</p>
-            </div>
+            <h1>Projects</h1>
             \${genBtn}
           </div>
-          <div class="proj-list">\${rows}</div>
-          \${cloudFooterHtml()}
+          <div class="proj-list-min">\${rows}</div>
         </div>\`;
     }
 
@@ -1037,6 +1034,19 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       if (m.cls === 'building') return '<span class="thumb-glyph building"><span class="sdot"></span></span>';
       return '<span class="thumb-glyph">◱</span>';
     }
+    // Terse age for the list: "3d", "now". The long form stays on the detail
+    // page, where there is room for a sentence.
+    function shortAge(ts) {
+      const mins = Math.floor((Date.now() - ts) / 60000);
+      if (mins < 2) return 'now';
+      if (mins < 60) return mins + 'm';
+      const hrs = Math.floor(mins / 60);
+      if (hrs < 24) return hrs + 'h';
+      const days = Math.floor(hrs / 24);
+      if (days < 365) return days + 'd';
+      return Math.floor(days / 365) + 'y';
+    }
+
     // "3 days ago" beats "Jul 30, 2026" for deciding what you were last working
     // on, which is the actual question on this screen.
     function relativeDate(ts) {
@@ -1049,17 +1059,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       return new Date(ts).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
     }
 
-    function cloudFooterHtml() {
-      return \`
-        <footer class="cloud-footer">
-          <span>Generated by <strong>DeepDoc</strong></span>
-          <nav class="cloud-footer-links">
-            <a href="https://deepdoc.tech">Home</a>
-            <a href="https://deepdoc.tech/docs">Docs</a>
-            <a href="https://github.com/tss-pranavkumar/deepdoc" target="_blank" rel="noreferrer">GitHub</a>
-          </nav>
-        </footer>\`;
-    }
+    // No footer on the signed-in screens. It was added to fill dead space,
+    // which is the wrong reason — this is a tool, and empty space is allowed
+    // to stay empty. The public gallery keeps its own, since that page is a
+    // marketing surface and does need a way onward.
 
     // ── /projects/:owner/:repo — the only place project actions live ─
     function renderProjectDetail(owner, repo) {
@@ -1094,7 +1097,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                   alt="Preview of the documentation generated for \${escapeHtml(p.owner + '/' + p.repo)}"
                   data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(p.createdAt || 0))}"
                   width="1280" height="800" loading="eager" decoding="async" />
-             <span class="detail-preview-hint">Open site ↗</span>
            </a>\`
         : \`<div class="detail-preview is-empty">\${
              isDone
@@ -1110,11 +1112,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="proj-head" style="margin-top:10px;">
             <div class="title-block">
               <h1><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</h1>
-              \${p.description ? '<p class="detail-desc">' + escapeHtml(p.description) + '</p>' : ''}
               <div class="proj-meta-row">
                 \${statusPill(p.status)}
-                \${p.language ? '<span class="g-lang"><span class="g-dot"></span>' + escapeHtml(p.language) + '</span>' : ''}
-                \${createdStr ? '<span>generated ' + escapeHtml(createdStr) + '</span>' : ''}
+                \${createdStr ? '<span>' + escapeHtml(createdStr) + '</span>' : ''}
               </div>
             </div>
             <div style="display:flex; gap:8px;">
@@ -1125,18 +1125,17 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
           \${previewHtml}
 
-          <div class="section-title">Visibility</div>
-          <div class="vis-group">
-            <span class="vis-label">Who can see this</span>
-            <button type="button" class="vis-pill \${p.visibility !== 'public' ? 'active' : ''}" onclick="setProjectVisibility('\${p.owner}','\${p.repo}','private')">🔒 Private</button>
-            <button type="button" class="vis-pill \${p.visibility === 'public' ? 'active' : ''}" onclick="setProjectVisibility('\${p.owner}','\${p.repo}','public')">🌐 Public</button>
+          <!-- Two labelled sections, a redundant "who can see this", an
+               explanatory sentence and a boxed danger zone were four pieces of
+               chrome around two controls. The pills state their own meaning. -->
+          <div class="detail-actions">
+            <div class="vis-group">
+              <button type="button" class="vis-pill \${p.visibility !== 'public' ? 'active' : ''}" onclick="setProjectVisibility('\${safeOwner}','\${safeRepo}','private')">Private</button>
+              <button type="button" class="vis-pill \${p.visibility === 'public' ? 'active' : ''}" onclick="setProjectVisibility('\${safeOwner}','\${safeRepo}','public')">Public</button>
+            </div>
+            <div id="danger-slot">\${dangerBoxHtml(p.owner, p.repo)}</div>
           </div>
-          <div class="vis-hint">\${p.visibility === 'public' ? 'Public — anyone with the link can view the generated docs.' : 'Private — only you can view them. You can make it public anytime.'}</div>
-
-          <div class="section-title">Danger zone</div>
-          <div id="danger-slot">\${dangerBoxHtml(p.owner, p.repo)}</div>
           <div id="error-slot"></div>
-          \${cloudFooterHtml()}
         </div>\`;
     }
 
@@ -1149,21 +1148,18 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       });
     }
 
+    // A plain destructive link rather than a bordered "danger zone" panel with
+    // a heading and a caption. The two-step confirm is what actually prevents
+    // the accident; the box was decoration around it.
     function dangerBoxHtml(owner, repo) {
-      return \`
-        <div class="danger-box">
-          <div class="lbl"><strong>Delete this project</strong>Removes it from your dashboard. This can't be undone.</div>
-          <button class="btn danger-outline" onclick="confirmDeleteStep('\${owner}','\${repo}')">Delete</button>
-        </div>\`;
+      return \`<button class="link-danger" onclick="confirmDeleteStep('\${owner}','\${repo}')">Delete project</button>\`;
     }
     function confirmDeleteStep(owner, repo) {
       document.getElementById('danger-slot').innerHTML = \`
-        <div class="danger-box">
-          <div class="lbl"><strong>Delete this project</strong>This can't be undone.</div>
-          <div style="display:flex; gap:8px;">
-            <button class="btn ghost small" onclick="document.getElementById('danger-slot').innerHTML=dangerBoxHtml('\${owner}','\${repo}')">Cancel</button>
-            <button class="btn danger-outline" onclick="deleteProject('\${owner}','\${repo}')">Confirm delete?</button>
-          </div>
+        <div class="danger-confirm">
+          <span>Delete permanently?</span>
+          <button class="link-quiet" onclick="document.getElementById('danger-slot').innerHTML=dangerBoxHtml('\${owner}','\${repo}')">Cancel</button>
+          <button class="link-danger" onclick="deleteProject('\${owner}','\${repo}')">Delete</button>
         </div>\`;
     }
 
@@ -1509,11 +1505,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         <div class="gen-wrap">
           <div class="gen-card">
             <div class="gen-repo">
-              \${info.avatarUrl ? \`<img src="\${escapeHtml(info.avatarUrl)}" alt="" />\` : ''}
-              <div class="gen-repo-text">
-                <div class="gen-repo-name"><span class="g-owner">\${escapeHtml(info.owner)}/</span>\${escapeHtml(info.repo)}</div>
-                \${info.language ? '<div class="gen-repo-lang"><span class="g-dot"></span>' + escapeHtml(info.language) + '</div>' : ''}
-              </div>
+              <div class="gen-repo-name">\${escapeHtml(info.repo)}</div>
               <div class="gen-elapsed" id="gen-elapsed">0:00</div>
             </div>
           <div class="gen-col">
@@ -1526,7 +1518,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                  starts, so the retry usually 429s. -->
             <div id="error-slot"></div>
           </div>
-            <p class="gen-note">Most repositories finish in two to five minutes. You can close this tab — the build keeps running, and it'll be in your projects when it's done.</p>
+            <p class="gen-note">Usually 2–5 minutes. Safe to close this tab.</p>
           </div>
         </div>\`;
       renderStageList('cloning');

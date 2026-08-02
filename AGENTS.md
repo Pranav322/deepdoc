@@ -365,6 +365,32 @@ Marketing copy is **outcome-led, not implementation-led** — say "your docs sta
 - Meta descriptions must stay ≤160 chars and titles ≤60, or they truncate in the SERP.
 - Every page needs exactly one `<h1>`. `docs.astro` has a compact one at the top of its main column (it has no hero); don't remove it when reworking that page.
 
+### Gallery thumbnails (`lib/hosted/thumb.ts`, `api/thumb/[owner]/[repo].ts`)
+
+The public gallery serves real screenshots, captured once via the Cloudflare
+Browser Rendering REST API and cached in R2 under
+`thumbs/{owner}/{repo}/{createdAt}.jpg`. The timestamp in the key makes the served
+URL immutable — a regenerate writes a new key and the old one is simply orphaned.
+
+Only ever captures sites that are **public and `done`**, re-checked immediately before
+the write; a private site would capture its own 403 page, and a mid-generation one
+would pin a picture of the progress screen for a year.
+
+Requires two Pages secrets: `CF_ACCOUNT_ID` and `CF_BROWSER_TOKEN` (an API token with
+**Browser Run → Edit**; the dashboard renamed Browser Rendering to Browser Run, but the
+REST path is still `/browser-rendering/screenshot`). Without them the endpoint serves a
+designed SVG placeholder rather than failing.
+
+**Gotcha: Pages binds secrets at deploy time.** `wrangler pages secret put` alone does
+*not* reach the running deployment — you must redeploy afterwards or the Worker keeps
+seeing `undefined`. Symptom: the endpoint still returns `image/svg+xml` while the token
+works fine against the API directly.
+
+Capture is rate-limited by design (free tier allows 6 REST calls/min): a per-repo R2 lock
+stops several viewers racing the same cold card, and `thumbs/_budget.json` caps real
+captures at 4/min account-wide. Everything over the cap takes the placeholder, so a cold
+gallery warms over a few minutes of traffic rather than stampeding.
+
 ### Hosted app client JS — no compiler covers it
 
 The hosted app's ~720 lines of client JS live inside a template string in

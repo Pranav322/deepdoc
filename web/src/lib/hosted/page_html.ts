@@ -330,38 +330,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .pr-name .g-owner { color: var(--ink-faint); }
   .pr-age { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); flex-shrink: 0; }
 
-  /* ── legacy card list, retained for reference ─────────────────────── */
-  .page-sub { font-size: 13px; color: var(--ink-muted); margin: 6px 0 0; }
-  .proj-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
-  .proj-card { display: flex; align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--line);
-    border-radius: 12px; background: var(--surface-raised); text-decoration: none; color: inherit;
-    transition: border-color 0.12s, background 0.12s, transform 0.08s ease-out; }
-  .proj-card:hover { border-color: var(--line-strong); background: var(--surface-high); transform: translateY(-1px); }
-  .proj-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
-  /* Fixed 16:10 so a row's height never depends on whether its thumbnail
-     loaded — the list must not reflow as images stream in. */
-  .proj-thumb { flex-shrink: 0; width: 132px; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden;
-    background: var(--surface-high); border: 1px solid var(--line); }
-  .proj-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
-  .proj-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
-  .thumb-glyph { font-size: 20px; color: var(--ink-muted); line-height: 1; }
-  .thumb-glyph.failed { color: var(--danger); font-weight: 700; }
-  .thumb-glyph.building .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
-    display: block; animation: pulse 1.2s ease-in-out infinite; }
-  .proj-main { flex: 1; min-width: 0; }
-  .proj-title { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .proj-title .g-owner { color: var(--ink-faint); font-weight: 400; }
-  .proj-desc { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); margin: 5px 0 0;
-    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
-  .proj-meta { display: flex; align-items: center; gap: 12px; margin-top: 9px; flex-wrap: wrap;
-    font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-muted); }
-  .proj-date { margin-left: auto; }
-  @media (max-width: 560px) {
-    .proj-thumb { display: none; }
-    .proj-date { margin-left: 0; }
-  }
-
   /* ── legacy row style, still used nowhere else ───────────────────── */
   .proj-row { display: flex; align-items: center; gap: 14px; padding: 17px 14px; margin: 0 -14px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 8px; transition: background 0.12s; }
   .proj-row:hover { background: var(--surface-raised); }
@@ -402,9 +370,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .proj-head .title-block h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 6px; font-family: var(--font-mono); }
   .proj-meta-row { font-size: 12.5px; color: var(--ink-faint); display: flex; gap: 14px; }
   .section-title { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin: 36px 0 14px; }
-  .danger-box { border: 1px solid rgba(255,107,107,0.28); border-radius: 10px; padding: 16px 18px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-  .danger-box .lbl { font-size: 13px; color: var(--ink-muted); }
-  .danger-box .lbl strong { color: var(--ink); display: block; font-size: 13.5px; margin-bottom: 2px; }
 
   /* ── /generate — the only post-login home ─────────────────────────── */
   .step-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin: 8px 0 12px; }
@@ -426,11 +391,14 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .repo-item .desc { color: var(--ink-muted); font-size: 11.5px; margin-top: 3px; }
   .divider { display: flex; align-items: center; gap: 12px; color: var(--ink-faint); font-size: 11.5px; font-family: var(--font-mono); margin: 24px 0; }
   .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
+  /* Still rendered on /generate, where the choice needs a label and a line of
+     explanation before you commit. The project-detail page dropped both — you
+     are changing an existing setting there, not making a first decision. */
+  .vis-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); margin-right: 2px; }
+  .vis-hint { font-size: 11.5px; color: var(--ink-muted); margin-top: 8px; line-height: 1.5; }
   .vis-group { display: flex; align-items: center; gap: 8px; }
-  .vis-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-faint); margin-right: 2px; }
   .vis-pill { height: auto; padding: 6px 13px; font-size: 12px; border-radius: 999px; background: transparent; border: 1px solid var(--line-strong); color: var(--ink-muted); font-family: var(--font-mono); cursor: pointer; }
   .vis-pill.active { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
-  .vis-hint { font-size: 11.5px; color: var(--ink-faint); margin-top: 8px; line-height: 1.5; }
   /* An elevated card right where you picked a repo/URL — not pinned to the
      viewport edge (that just made it read as further away on a tall screen),
      just a clear lift off the page surface with a quick rise-in. */
@@ -1028,12 +996,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       const m = STATUS_META[status] || { label: status || 'unknown', cls: '' };
       return \`<span class="status-text \${m.cls}"><span class="sdot"></span>\${escapeHtml(m.label)}</span>\`;
     }
-    function statusGlyph(status) {
-      const m = STATUS_META[status] || { cls: '' };
-      if (m.cls === 'failed') return '<span class="thumb-glyph failed">!</span>';
-      if (m.cls === 'building') return '<span class="thumb-glyph building"><span class="sdot"></span></span>';
-      return '<span class="thumb-glyph">◱</span>';
-    }
     // Terse age for the list: "3d", "now". The long form stays on the detail
     // page, where there is room for a sentence.
     function shortAge(ts) {
@@ -1047,17 +1009,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       return Math.floor(days / 365) + 'y';
     }
 
-    // "3 days ago" beats "Jul 30, 2026" for deciding what you were last working
-    // on, which is the actual question on this screen.
-    function relativeDate(ts) {
-      const days = Math.floor((Date.now() - ts) / 86400000);
-      if (days <= 0) return 'today';
-      if (days === 1) return 'yesterday';
-      if (days < 30) return days + ' days ago';
-      const months = Math.floor(days / 30);
-      if (months < 12) return months === 1 ? 'a month ago' : months + ' months ago';
-      return new Date(ts).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
-    }
 
     // No footer on the signed-in screens. It was added to fill dead space,
     // which is the wrong reason — this is a tool, and empty space is allowed

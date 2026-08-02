@@ -217,7 +217,14 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   /* ── Section headers (shared across authed views) ──────────────── */
   .page-head { display: flex; align-items: baseline; justify-content: space-between; padding: 40px 0 24px; flex-wrap: wrap; gap: 12px; }
   .page-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-  .empty-state { text-align: center; padding: 80px 20px; }
+  .empty-state { text-align: center; padding: 64px 20px 80px; }
+  /* Three ghost cards hinting at what will fill this space, so the empty
+     dashboard suggests its own shape instead of being a blank page. */
+  .empty-art { display: flex; justify-content: center; gap: 10px; margin-bottom: 26px; }
+  .empty-card { width: 74px; height: 46px; border-radius: 7px; border: 1px dashed var(--line-strong); background: var(--surface-raised); }
+  .empty-card:nth-child(2) { opacity: 0.66; }
+  .empty-card:nth-child(3) { opacity: 0.33; }
+  .empty-state p { max-width: 420px; margin: 8px auto 22px; }
   .empty-state h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
   .empty-state p { font-size: 13.5px; color: var(--ink-muted); margin: 0 0 24px; }
   .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-muted); text-decoration: none; margin: 28px 0 4px; cursor: pointer; }
@@ -300,23 +307,73 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   /* De-emphasise the owner so the repo name is what you actually scan. */
   .gallery-name .g-owner { color: var(--ink-faint); font-weight: 400; }
   .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .gallery-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-faint); }
+  .gallery-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-muted); }
   .g-lang { display: inline-flex; align-items: center; gap: 5px; }
   .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.75; }
   .g-date { margin-left: auto; }
 
-  /* ── /projects — click-through rows, no per-row buttons ──────────── */
+  /* ── /projects — cards carrying the data the API already returns ── */
+  .page-sub { font-size: 13px; color: var(--ink-muted); margin: 6px 0 0; }
+  .proj-list { display: flex; flex-direction: column; gap: 10px; margin-top: 4px; }
+  .proj-card { display: flex; align-items: center; gap: 16px; padding: 14px; border: 1px solid var(--line);
+    border-radius: 12px; background: var(--surface-raised); text-decoration: none; color: inherit;
+    transition: border-color 0.12s, background 0.12s, transform 0.08s ease-out; }
+  .proj-card:hover { border-color: var(--line-strong); background: var(--surface-high); transform: translateY(-1px); }
+  .proj-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* Fixed 16:10 so a row's height never depends on whether its thumbnail
+     loaded — the list must not reflow as images stream in. */
+  .proj-thumb { flex-shrink: 0; width: 132px; aspect-ratio: 16 / 10; border-radius: 8px; overflow: hidden;
+    background: var(--surface-high); border: 1px solid var(--line); }
+  .proj-thumb img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  .proj-thumb-empty { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; }
+  .thumb-glyph { font-size: 20px; color: var(--ink-muted); line-height: 1; }
+  .thumb-glyph.failed { color: var(--danger); font-weight: 700; }
+  .thumb-glyph.building .sdot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent);
+    display: block; animation: pulse 1.2s ease-in-out infinite; }
+  .proj-main { flex: 1; min-width: 0; }
+  .proj-title { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-title .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .proj-desc { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); margin: 5px 0 0;
+    display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+  .proj-meta { display: flex; align-items: center; gap: 12px; margin-top: 9px; flex-wrap: wrap;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-muted); }
+  .proj-date { margin-left: auto; }
+  @media (max-width: 560px) {
+    .proj-thumb { display: none; }
+    .proj-date { margin-left: 0; }
+  }
+
+  /* ── legacy row style, still used nowhere else ───────────────────── */
   .proj-row { display: flex; align-items: center; gap: 14px; padding: 17px 14px; margin: 0 -14px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 8px; transition: background 0.12s; }
   .proj-row:hover { background: var(--surface-raised); }
   .proj-row:last-child { border-bottom: none; }
   .proj-row .name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .vis-badge { font-size: 11px; color: var(--ink-faint); font-family: var(--font-mono); }
+  .vis-badge { font-size: 11px; color: inherit; font-family: var(--font-mono); }
   .row-chev { color: var(--ink-faint); font-size: 14px; }
   .status-text { font-size: 12px; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
   .status-text .sdot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-faint); }
   .status-text.done { color: var(--ink-muted); } .status-text.done .sdot { background: var(--accent); }
   .status-text.building .sdot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
   .status-text.failed { color: var(--danger); } .status-text.failed .sdot { background: var(--danger); }
+
+  /* Detail page preview — the generated site is the whole point of the
+     project, so show it and make it the primary way in. */
+  .detail-preview { position: relative; display: block; margin: 22px 0 4px; border: 1px solid var(--line-strong);
+    border-radius: 12px; overflow: hidden; background: var(--surface-high); aspect-ratio: 16 / 10;
+    text-decoration: none; transition: border-color 0.12s; }
+  .detail-preview:hover { border-color: var(--accent-line); }
+  .detail-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .detail-preview img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  .detail-preview.is-empty { display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
+  .detail-preview.is-empty p { font-size: 13px; color: var(--ink-muted); margin: 0; max-width: 320px; line-height: 1.6; }
+  .detail-preview-hint { position: absolute; right: 12px; bottom: 12px; padding: 5px 10px; border-radius: 6px;
+    background: color-mix(in oklab, var(--surface) 82%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: 10.5px; color: var(--ink);
+    opacity: 0; transition: opacity 0.15s; }
+  .detail-preview:hover .detail-preview-hint { opacity: 1; }
+  .detail-desc { font-size: 13.5px; line-height: 1.6; color: var(--ink-muted); margin: 8px 0 0; }
+  .title-block h1 .g-owner { color: var(--ink-faint); font-weight: 400; }
 
   /* ── /projects/:owner/:repo — the only place project actions live ── */
   .proj-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0 8px; flex-wrap: wrap; }
@@ -365,19 +422,40 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .error-box { color: var(--danger); font-size: 13px; background: var(--danger-dim); border: 1px solid rgba(255,107,107,0.25); border-radius: 10px; padding: 13px; margin-top: 16px; white-space: pre-wrap; }
 
   /* ── Generating screen — honest stage list, no fake percentage ────── */
-  .gen-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 60px 24px 70px; text-align: center; }
-  .gen-repo { font-family: var(--font-mono); font-size: 13px; color: var(--ink-muted); margin-bottom: 26px; display: flex; align-items: center; gap: 10px; }
-  .gen-repo img { width: 22px; height: 22px; border-radius: 50%; }
-  .gen-elapsed { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink-faint); margin-bottom: 24px; }
-  .gen-col { width: 100%; max-width: 420px; text-align: left; }
-  .stage-row { border-bottom: 1px solid var(--line); padding: 14px 2px; }
-  .stage-row:last-child { border-bottom: none; }
-  .stage-head { display: flex; align-items: center; gap: 11px; }
-  .stage-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--line-strong); flex-shrink: 0; }
-  .stage-row.active .stage-dot { background: var(--accent); box-shadow: 0 0 8px rgba(194,255,77,0.5); animation: pulse 1.2s ease-in-out infinite; }
-  .stage-row.done .stage-dot { background: var(--accent); }
-  .stage-label { font-size: 14px; color: var(--ink-muted); flex: 1; }
-  .stage-row.active .stage-label, .stage-row.done .stage-label { color: var(--ink); font-weight: 500; }
+  .gen-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px 70px; }
+  /* A contained card rather than text floating in the middle of a black page.
+     This screen is watched for minutes, so it has to look deliberate. */
+  .gen-card { width: 100%; max-width: 480px; border: 1px solid var(--line); border-radius: 14px;
+    background: var(--surface-raised); padding: 20px 22px 22px; box-shadow: var(--shadow-lift); }
+  .gen-repo { display: flex; align-items: center; gap: 11px; padding-bottom: 16px; margin-bottom: 4px;
+    border-bottom: 1px solid var(--line); }
+  .gen-repo img { width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0; }
+  .gen-repo-text { min-width: 0; flex: 1; }
+  .gen-repo-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gen-repo-name .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .gen-repo-lang { display: flex; align-items: center; gap: 5px; margin-top: 4px;
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-muted); }
+  /* Tabular figures so the seconds ticking doesn't shift the layout. */
+  .gen-elapsed { font-family: var(--font-mono); font-size: 19px; font-weight: 500; color: var(--ink);
+    font-variant-numeric: tabular-nums; letter-spacing: -0.02em; flex-shrink: 0; }
+  .gen-col { width: 100%; text-align: left; }
+  .gen-note { font-size: 12px; line-height: 1.6; color: var(--ink-muted); margin: 16px 0 0;
+    padding-top: 15px; border-top: 1px solid var(--line); }
+  .stage-row { padding: 12px 2px; }
+  .stage-head { display: flex; align-items: center; gap: 12px; }
+  /* A ring rather than a bare dot, so a finished stage can hold a tick and a
+     pending one reads as an empty slot instead of just a dimmer dot. */
+  .stage-dot { width: 17px; height: 17px; border-radius: 50%; border: 1.5px solid var(--line-strong);
+    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 9px; line-height: 1; color: var(--accent-ink); transition: background 0.2s, border-color 0.2s; }
+  .stage-row.active .stage-dot { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); animation: pulse 1.4s ease-in-out infinite; }
+  .stage-row.active .stage-dot::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+  .stage-row.done .stage-dot { background: var(--accent); border-color: var(--accent); }
+  .stage-row.done .stage-dot::after { content: '✓'; font-weight: 700; }
+  .stage-label { font-size: 13.5px; color: var(--ink-muted); flex: 1; }
+  .stage-row.active .stage-label { color: var(--ink); font-weight: 500; }
+  .stage-row.done .stage-label { color: var(--ink-muted); }
   .gen-result { margin-top: 26px; }
 
   .sub { color: var(--ink-muted); font-size: 13.5px; line-height: 1.7; }
@@ -873,6 +951,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="wrap">
             <div class="page-head"><h1>Projects</h1></div>
             \${errorBoxHtml("Couldn't load your projects. They're still there — this is a connection problem.", 'reloadProjects()')}
+            \${cloudFooterHtml()}
           </div>\`;
         return;
       }
@@ -882,25 +961,104 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="wrap">
             <div class="page-head"><h1>Projects</h1></div>
             <div class="empty-state">
+              <div class="empty-art" aria-hidden="true">
+                <span class="empty-card"></span><span class="empty-card"></span><span class="empty-card"></span>
+              </div>
               <h2>No projects yet</h2>
-              <p>Generate documentation from any GitHub repo in under a minute.</p>
+              <p>Point DeepDoc at a GitHub repository and it'll read the source, work out the architecture, and build you a browsable documentation site.</p>
               \${genBtn}
             </div>
+            \${cloudFooterHtml()}
           </div>\`;
         return;
       }
-      const rows = state.projects.map(p => \`
-        <div class="proj-row" onclick="nav(event,'/projects/\${p.owner}/\${p.repo}')">
-          <span class="name">\${p.owner}/\${p.repo}</span>
-          <span class="vis-badge">\${p.visibility === 'public' ? 'public' : 'private'}</span>
-          <span class="status-text \${p.status === 'done' ? 'done' : p.status === 'building' || p.status === 'generating' || p.status === 'cloning' || p.status === 'queued' ? 'building' : p.status === 'failed' ? 'failed' : ''}"><span class="sdot"></span>\${p.status}</span>
-          <span class="row-chev">›</span>
-        </div>\`).join('');
+      // Rows used to carry owner/repo plus two micro-labels and nothing else —
+      // no description, language, date or preview — so you couldn't tell which
+      // project was which, or which was recent. Same data the API already
+      // returns, actually shown.
+      const rows = state.projects.map(p => {
+        const done = p.status === 'done';
+        const safeOwner = escapeHtml(p.owner);
+        const safeRepo = escapeHtml(p.repo);
+        return \`
+        <a class="proj-card" href="/projects/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}"
+           onclick="return nav(event,'/projects/\${escapeHtml(p.owner)}/\${escapeHtml(p.repo)}')">
+          <div class="proj-thumb">
+            \${done && p.visibility === 'public'
+              ? \`<img src="\${escapeHtml(thumbUrlFor(p.owner, p.repo, p.createdAt, currentTheme()))}" alt=""
+                      data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(p.createdAt || 0))}"
+                      class="gallery-shot" width="1280" height="800" loading="lazy" decoding="async" />\`
+              : \`<div class="proj-thumb-empty">\${statusGlyph(p.status)}</div>\`}
+          </div>
+          <div class="proj-main">
+            <div class="proj-title"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
+            \${p.description ? '<p class="proj-desc">' + escapeHtml(p.description) + '</p>' : ''}
+            <div class="proj-meta">
+              \${statusPill(p.status)}
+              <span class="vis-badge">\${p.visibility === 'public' ? 'Public' : 'Private'}</span>
+              \${p.language ? '<span class="g-lang"><span class="g-dot"></span>' + escapeHtml(p.language) + '</span>' : ''}
+              \${p.createdAt ? '<span class="proj-date">' + escapeHtml(relativeDate(p.createdAt)) + '</span>' : ''}
+            </div>
+          </div>
+          <span class="row-chev" aria-hidden="true">›</span>
+        </a>\`;
+      }).join('');
       document.getElementById('content').innerHTML = \`
         <div class="wrap">
-          <div class="page-head"><h1>Projects</h1>\${genBtn}</div>
-          <div>\${rows}</div>
+          <div class="page-head">
+            <div>
+              <h1>Projects</h1>
+              <p class="page-sub">\${state.projects.length} of \${q && q.maxSavedProjects != null ? q.maxSavedProjects : '∞'} slots used\${atQuota ? ' — delete one to generate another' : ''}</p>
+            </div>
+            \${genBtn}
+          </div>
+          <div class="proj-list">\${rows}</div>
+          \${cloudFooterHtml()}
         </div>\`;
+    }
+
+    // One owner for status -> label/class, so the list, the detail page and any
+    // future surface can't disagree about what "building" looks like.
+    const STATUS_META = {
+      done:       { label: 'Ready',    cls: 'done' },
+      failed:     { label: 'Failed',   cls: 'failed' },
+      queued:     { label: 'Queued',   cls: 'building' },
+      cloning:    { label: 'Cloning',  cls: 'building' },
+      generating: { label: 'Generating', cls: 'building' },
+      building:   { label: 'Building', cls: 'building' },
+    };
+    function statusPill(status) {
+      const m = STATUS_META[status] || { label: status || 'unknown', cls: '' };
+      return \`<span class="status-text \${m.cls}"><span class="sdot"></span>\${escapeHtml(m.label)}</span>\`;
+    }
+    function statusGlyph(status) {
+      const m = STATUS_META[status] || { cls: '' };
+      if (m.cls === 'failed') return '<span class="thumb-glyph failed">!</span>';
+      if (m.cls === 'building') return '<span class="thumb-glyph building"><span class="sdot"></span></span>';
+      return '<span class="thumb-glyph">◱</span>';
+    }
+    // "3 days ago" beats "Jul 30, 2026" for deciding what you were last working
+    // on, which is the actual question on this screen.
+    function relativeDate(ts) {
+      const days = Math.floor((Date.now() - ts) / 86400000);
+      if (days <= 0) return 'today';
+      if (days === 1) return 'yesterday';
+      if (days < 30) return days + ' days ago';
+      const months = Math.floor(days / 30);
+      if (months < 12) return months === 1 ? 'a month ago' : months + ' months ago';
+      return new Date(ts).toLocaleDateString(undefined, { month: 'short', year: 'numeric' });
+    }
+
+    function cloudFooterHtml() {
+      return \`
+        <footer class="cloud-footer">
+          <span>Generated by <strong>DeepDoc</strong></span>
+          <nav class="cloud-footer-links">
+            <a href="https://deepdoc.tech">Home</a>
+            <a href="https://deepdoc.tech/docs">Docs</a>
+            <a href="https://github.com/tss-pranavkumar/deepdoc" target="_blank" rel="noreferrer">GitHub</a>
+          </nav>
+        </footer>\`;
     }
 
     // ── /projects/:owner/:repo — the only place project actions live ─
@@ -925,20 +1083,47 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       }
       const isDone = p.status === 'done';
       const createdStr = p.createdAt ? new Date(p.createdAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+      const safeOwner = escapeHtml(p.owner);
+      const safeRepo = escapeHtml(p.repo);
+      // The page used to be a mono h1 over two tiny labels, then whitespace —
+      // nothing about the docs it had actually produced. Now that thumbnails
+      // exist, show the thing the project *is*, and make it the way in.
+      const previewHtml = isDone && p.visibility === 'public'
+        ? \`<a class="detail-preview" href="/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}/" target="_blank" rel="noreferrer">
+             <img class="gallery-shot" src="\${escapeHtml(thumbUrlFor(p.owner, p.repo, p.createdAt, currentTheme()))}"
+                  alt="Preview of the documentation generated for \${escapeHtml(p.owner + '/' + p.repo)}"
+                  data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(p.createdAt || 0))}"
+                  width="1280" height="800" loading="eager" decoding="async" />
+             <span class="detail-preview-hint">Open site ↗</span>
+           </a>\`
+        : \`<div class="detail-preview is-empty">\${
+             isDone
+               ? '<p>This site is private, so there is no shared preview. Open it to view.</p>'
+               : p.status === 'failed'
+                 ? '<p>The last build failed, so there is nothing to preview yet.</p>'
+                 : '<p>Building — the preview appears once this finishes.</p>'
+           }</div>\`;
       document.getElementById('content').innerHTML = \`
-        <div class="wrap-narrow" style="max-width:600px;">
+        <div class="wrap-narrow" style="max-width:640px;">
           <a class="back-link" onclick="nav(event,'/projects')">← Back to projects</a>
           <div id="detail-error-slot"></div>
           <div class="proj-head" style="margin-top:10px;">
             <div class="title-block">
-              <h1>\${p.owner}/\${p.repo}</h1>
-              <div class="proj-meta-row"><span class="status-text \${p.status === 'done' ? 'done' : p.status === 'failed' ? 'failed' : 'building'}"><span class="sdot"></span>\${p.status}</span>\${createdStr ? '<span>generated ' + createdStr + '</span>' : ''}</div>
+              <h1><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</h1>
+              \${p.description ? '<p class="detail-desc">' + escapeHtml(p.description) + '</p>' : ''}
+              <div class="proj-meta-row">
+                \${statusPill(p.status)}
+                \${p.language ? '<span class="g-lang"><span class="g-dot"></span>' + escapeHtml(p.language) + '</span>' : ''}
+                \${createdStr ? '<span>generated ' + escapeHtml(createdStr) + '</span>' : ''}
+              </div>
             </div>
             <div style="display:flex; gap:8px;">
-              <button id="regenerate-btn" class="btn secondary" onclick="regenerateProject('\${p.owner}','\${p.repo}')">Regenerate</button>
-              <button class="btn" \${isDone ? '' : 'disabled'} onclick="window.open('/\${p.owner}/\${p.repo}/', '_blank')">Visit site ↗</button>
+              <button id="regenerate-btn" class="btn secondary" onclick="regenerateProject('\${safeOwner}','\${safeRepo}')">Regenerate</button>
+              <button class="btn" \${isDone ? '' : 'disabled'} onclick="window.open('/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}/', '_blank')">Visit site ↗</button>
             </div>
           </div>
+
+          \${previewHtml}
 
           <div class="section-title">Visibility</div>
           <div class="vis-group">
@@ -951,6 +1136,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="section-title">Danger zone</div>
           <div id="danger-slot">\${dangerBoxHtml(p.owner, p.repo)}</div>
           <div id="error-slot"></div>
+          \${cloudFooterHtml()}
         </div>\`;
     }
 
@@ -1314,14 +1500,23 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // elapsed timer survives a page refresh instead of resetting to 0:00.
       state.genStart = info.createdAt || Date.now();
       stopGenTimer();
+      // This is the longest-dwell screen in the product and it used to be a
+      // 13px mono repo name floating in the middle of an empty page, with a
+      // left-aligned timer that didn't line up with anything. Given there is
+      // deliberately no percentage (the backend has no honest completion
+      // signal), the job here is to look alive and set expectations.
       document.getElementById('content').innerHTML = \`
         <div class="gen-wrap">
-          <div class="gen-repo">
-            <img src="\${info.avatarUrl}" alt="" />
-            <span>\${info.owner}/\${info.repo}</span>
-          </div>
+          <div class="gen-card">
+            <div class="gen-repo">
+              \${info.avatarUrl ? \`<img src="\${escapeHtml(info.avatarUrl)}" alt="" />\` : ''}
+              <div class="gen-repo-text">
+                <div class="gen-repo-name"><span class="g-owner">\${escapeHtml(info.owner)}/</span>\${escapeHtml(info.repo)}</div>
+                \${info.language ? '<div class="gen-repo-lang"><span class="g-dot"></span>' + escapeHtml(info.language) + '</div>' : ''}
+              </div>
+              <div class="gen-elapsed" id="gen-elapsed">0:00</div>
+            </div>
           <div class="gen-col">
-            <div class="gen-elapsed" id="gen-elapsed">0:00 elapsed</div>
             <div id="stage-list"></div>
             <div id="result-slot"></div>
             <!-- startJob() writes failures into #error-slot. This screen used
@@ -1330,6 +1525,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                  because a failed start still consumes one of the two daily
                  starts, so the retry usually 429s. -->
             <div id="error-slot"></div>
+          </div>
+            <p class="gen-note">Most repositories finish in two to five minutes. You can close this tab — the build keeps running, and it'll be in your projects when it's done.</p>
           </div>
         </div>\`;
       renderStageList('cloning');
@@ -1341,9 +1538,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       const el = document.getElementById('gen-elapsed');
       if (!el || !state.genStart) return;
       const s = Math.floor((Date.now() - state.genStart) / 1000);
+      // The word "elapsed" moved into the label beneath the number.
       const m = Math.floor(s / 60);
       const rem = String(s % 60).padStart(2, '0');
-      el.textContent = m + ':' + rem + ' elapsed';
+      el.textContent = m + ':' + rem;
     }
 
     // Consecutive poll failures. Lives outside poll() so a manual retry can

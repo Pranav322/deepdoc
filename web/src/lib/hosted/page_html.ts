@@ -577,6 +577,20 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     function currentTheme() {
       return document.documentElement.getAttribute('data-theme') === 'light' ? 'light' : 'dark';
     }
+    function thumbUrlFor(owner, repo, createdAt, theme) {
+      return '/api/thumb/' + encodeURIComponent(owner) + '/' + encodeURIComponent(repo)
+        + '?v=' + encodeURIComponent(String(createdAt || 0)) + '&t=' + theme;
+    }
+    // Swap every gallery thumbnail to the other theme's variant in place. The
+    // screenshots are of real docs sites, which have their own light and dark
+    // renderings — showing a blazing white preview inside a dark gallery was
+    // the thing that looked wrong. data-owner/-repo/-created carry what the
+    // URL needs so this doesn't have to re-fetch /api/examples.
+    function retintGalleryThumbs(theme) {
+      document.querySelectorAll('.gallery-shot[data-owner]').forEach((img) => {
+        img.src = thumbUrlFor(img.dataset.owner, img.dataset.repo, img.dataset.created, theme);
+      });
+    }
     function themeToggleHtml() {
       const isLight = currentTheme() === 'light';
       return \`<button class="theme-toggle" type="button" onclick="toggleTheme()"
@@ -593,6 +607,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         const btn = document.querySelector('.theme-toggle');
         if (btn) btn.outerHTML = themeToggleHtml();
       }
+      // Screenshots aren't CSS — they need the other variant fetched.
+      retintGalleryThumbs(next);
     }
 
     // Brand mark — duplicated from web/src/components/Logo.astro (the Worker
@@ -692,8 +708,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         // result was blurry besides. ?v pins the generation timestamp so a
         // regenerate busts the URL. Width/height are set so the grid never
         // reflows as images arrive.
-        const thumbUrl = '/api/thumb/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo)
-          + '?v=' + encodeURIComponent(String(e.createdAt || 0));
+        // Theme is in the URL, not read from the cookie server-side, so each
+        // variant has its own immutable cacheable address. Swapped in place by
+        // toggleTheme() rather than re-fetching the gallery.
+        const thumbUrl = thumbUrlFor(e.owner, e.repo, e.createdAt, currentTheme());
         // Only the first row is worth fetching eagerly; the rest are almost
         // always below the fold.
         const loading = i < 3 ? 'eager' : 'lazy';
@@ -705,6 +723,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="gallery-card-surface">
             <div class="gallery-preview">
               <img class="gallery-shot" src="\${escapeHtml(thumbUrl)}" alt="Documentation generated for \${safeName}"
+                   data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(e.createdAt || 0))}"
                    width="1280" height="800" loading="\${loading}" decoding="async" />
             </div>
             <div class="gallery-body">

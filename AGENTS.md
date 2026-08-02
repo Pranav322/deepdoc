@@ -402,6 +402,18 @@ Requires two Pages secrets: `CF_ACCOUNT_ID` and `CF_BROWSER_TOKEN` (an API token
 REST path is still `/browser-rendering/screenshot`). Without them the endpoint serves a
 designed SVG placeholder rather than failing.
 
+**Two variants per site, light and dark.** Generated docs sites use `next-themes`, which
+falls back to `prefers-color-scheme` and applies the result as a *class* on `<html>`. A
+headless browser reports no preference, so every capture came out light — glaring inside a
+dark gallery. Browser Rendering has no colour-scheme emulation, but `addScriptTag` can set
+the class directly, and the site's dark styling is plain CSS keyed off it (verified: mean
+luma 236 → 27). Light needs no forcing; it's the default render.
+
+Theme is part of both the R2 key and the request URL (`?t=dark|light`) rather than read
+from the cookie, so each variant keeps its own immutable, independently cacheable address —
+a cookie-varying image URL would defeat the CDN and the `immutable` Cache-Control. The
+gallery swaps `img.src` in place on toggle via `data-owner`/`-repo`/`-created`.
+
 **Gotcha: Pages binds secrets at deploy time.** `wrangler pages secret put` alone does
 *not* reach the running deployment — you must redeploy afterwards or the Worker keeps
 seeing `undefined`. Symptom: the endpoint still returns `image/svg+xml` while the token

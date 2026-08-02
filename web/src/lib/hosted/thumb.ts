@@ -24,6 +24,12 @@ export interface ThumbEnv {
 export const THUMB_W = 1280;
 export const THUMB_H = 800;
 
+export type ThumbTheme = "dark" | "light";
+
+export function parseTheme(v: string | null): ThumbTheme {
+  return v === "light" ? "light" : "dark";
+}
+
 /** Deterministic hue per owner — the same one the old iframe fallback used. */
 export function fallbackHue(owner: string): number {
   let hash = 0;
@@ -36,21 +42,27 @@ export function fallbackHue(owner: string): number {
  * rather than a broken image, so a half-warm gallery reads as intentional.
  * Short max-age so cards upgrade to the real thing on a later visit.
  */
-export function fallbackSvg(owner: string, repo: string): Response {
+export function fallbackSvg(owner: string, repo: string, theme: ThumbTheme = "dark"): Response {
   const hue = fallbackHue(owner);
   const initial = (owner[0] || "?").toUpperCase()
     .replace(/[<>&"']/g, "");
+  // The placeholder has to suit the surface it sits on, or a light-mode
+  // gallery gets a row of near-black rectangles.
+  const stops = theme === "light"
+    ? [`hsl(${hue} 34% 82%)`, `hsl(${(hue + 40) % 360} 30% 72%)`]
+    : [`hsl(${hue} 42% 26%)`, `hsl(${(hue + 40) % 360} 38% 15%)`];
+  const ink = theme === "light" ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.86)";
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${THUMB_W}" height="${THUMB_H}" viewBox="0 0 ${THUMB_W} ${THUMB_H}" role="img" aria-label="${owner}/${repo}">
   <defs>
     <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="hsl(${hue} 42% 26%)"/>
-      <stop offset="100%" stop-color="hsl(${(hue + 40) % 360} 38% 15%)"/>
+      <stop offset="0%" stop-color="${stops[0]}"/>
+      <stop offset="100%" stop-color="${stops[1]}"/>
     </linearGradient>
   </defs>
   <rect width="${THUMB_W}" height="${THUMB_H}" fill="url(#g)"/>
   <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central"
         font-family="DM Sans, ui-sans-serif, system-ui, sans-serif"
-        font-size="220" font-weight="700" fill="rgba(255,255,255,0.86)">${initial}</text>
+        font-size="220" font-weight="700" fill="${ink}">${initial}</text>
 </svg>`;
   return new Response(svg, {
     headers: {
@@ -62,10 +74,12 @@ export function fallbackSvg(owner: string, repo: string): Response {
   });
 }
 
-export function thumbKey(owner: string, repo: string, createdAt: number): string {
+export function thumbKey(owner: string, repo: string, createdAt: number, theme: ThumbTheme): string {
   // Version in the key: a regenerate writes a new object, the old one is
   // simply orphaned, and the served URL can be immutable with no invalidation.
-  return `thumbs/${owner.toLowerCase()}/${repo.toLowerCase()}/${createdAt}.jpg`;
+  // Theme is in the key too, so light and dark are independent objects that
+  // each warm on demand rather than one overwriting the other.
+  return `thumbs/${owner.toLowerCase()}/${repo.toLowerCase()}/${createdAt}-${theme}.jpg`;
 }
 
 /**
@@ -105,8 +119,8 @@ async function tryClaimBudget(env: ThumbEnv, maxPerMinute: number): Promise<bool
  * Stops several concurrent requests for the same cold card all triggering
  * their own screenshot. Benign race: worst case two captures of one page.
  */
-async function tryClaimLock(env: ThumbEnv, owner: string, repo: string): Promise<boolean> {
-  const key = `thumbs/_locks/${owner.toLowerCase()}/${repo.toLowerCase()}`;
+async function tryClaimLock(env: ThumbEnv, owner: string, repo: string, theme: ThumbTheme): Promise<boolean> {
+  const key = `thumbs/_locks/${owner.toLowerCase()}/${repo.toLowerCase()}-${theme}`;
   try {
     const existing = await env.SITES.get(key);
     if (existing) {
@@ -120,18 +134,35 @@ async function tryClaimLock(env: ThumbEnv, owner: string, repo: string): Promise
   }
 }
 
-async function releaseLock(env: ThumbEnv, owner: string, repo: string): Promise<void> {
+async function releaseLock(env: ThumbEnv, owner: string, repo: string, theme: ThumbTheme): Promise<void> {
   try {
-    await env.SITES.delete(`thumbs/_locks/${owner.toLowerCase()}/${repo.toLowerCase()}`);
+    await env.SITES.delete(`thumbs/_locks/${owner.toLowerCase()}/${repo.toLowerCase()}-${theme}`);
   } catch {
     /* best effort — the 120s staleness window covers a leaked lock */
   }
 }
 
+// Generated docs sites use next-themes: it reads localStorage, falls back to
+// prefers-color-scheme, and applies the result as a class on <html>. A headless
+// browser reports no preference, so every capture came out light — which looked
+// wrong sitting in a dark gallery.
+//
+// Browser Rendering has no colour-scheme emulation, but it does support
+// addScriptTag. Setting the class directly is enough, because the site's dark
+// styling is plain CSS keyed off that class; next-themes has already mounted by
+// then and won't overwrite it. localStorage is set too for any component that
+// re-reads it. Verified against a real site: mean luma 236 -> 27.
+const FORCE_DARK_JS =
+  'try{localStorage.setItem("theme","dark")}catch(e){};' +
+  'document.documentElement.classList.remove("light");' +
+  'document.documentElement.classList.add("dark");' +
+  'document.documentElement.style.colorScheme="dark";';
+
 /** Captures the public site. Returns null on any failure; callers fall back. */
 export async function captureScreenshot(
   env: ThumbEnv,
   siteUrl: string,
+  theme: ThumbTheme = "dark",
 ): Promise<ArrayBuffer | null> {
   if (!env.CF_ACCOUNT_ID || !env.CF_BROWSER_TOKEN) return null;
   try {
@@ -150,6 +181,9 @@ export async function captureScreenshot(
           // whitespace at card size.
           screenshotOptions: { fullPage: false, type: "jpeg", quality: 72 },
           gotoOptions: { waitUntil: "networkidle0", timeout: 20000 },
+          // Light needs no forcing: it's what a headless browser renders by
+          // default, and injecting nothing keeps that path identical to before.
+          ...(theme === "dark" ? { addScriptTag: [{ content: FORCE_DARK_JS }] } : {}),
         }),
       },
     );

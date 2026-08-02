@@ -4,6 +4,7 @@ import {
   captureScreenshot,
   fallbackSvg,
   releaseLock,
+  parseTheme,
   thumbKey,
   tryClaimBudget,
   tryClaimLock,
@@ -21,11 +22,16 @@ import {
 // Browser Rendering REST allows 6/min on the free plan; leave headroom.
 const MAX_CAPTURES_PER_MINUTE = 4;
 
-export const GET: APIRoute = async ({ params, locals, request }) => {
+export const GET: APIRoute = async ({ params, locals, request, url }) => {
   const env = locals.runtime.env as unknown as ThumbEnv;
+  // Theme lives in the URL rather than being read from the cookie, so each
+  // variant keeps its own immutable, independently cacheable address — a
+  // cookie-varying image URL would defeat both the CDN and the immutable
+  // Cache-Control below.
+  const theme = parseTheme(url.searchParams.get("t"));
   const owner = params.owner ?? "";
   const repo = (params.repo ?? "").replace(/\.jpg$/i, "");
-  if (!owner || !repo) return fallbackSvg(owner || "?", repo || "?");
+  if (!owner || !repo) return fallbackSvg(owner || "?", repo || "?", theme);
 
   // Public + finished, from the same authority the gallery itself uses:
   // visibility is canonical on owner_repo_jobs, status on the owner's row.
@@ -41,9 +47,9 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     .bind(owner, repo)
     .first<{ createdAt: number; status: string }>();
 
-  if (!row || row.status !== "done") return fallbackSvg(owner, repo);
+  if (!row || row.status !== "done") return fallbackSvg(owner, repo, theme);
 
-  const key = thumbKey(owner, repo, row.createdAt);
+  const key = thumbKey(owner, repo, row.createdAt, theme);
 
   // 1. Cached screenshot.
   const cached = await env.SITES.get(key);
@@ -63,15 +69,15 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
 
   // 2. Cold. Only one request per repo should attempt a capture, and only a
   //    few per minute overall — everyone else gets the placeholder.
-  if (!(await tryClaimLock(env, owner, repo))) return fallbackSvg(owner, repo);
+  if (!(await tryClaimLock(env, owner, repo, theme))) return fallbackSvg(owner, repo, theme);
   try {
     if (!(await tryClaimBudget(env, MAX_CAPTURES_PER_MINUTE))) {
-      return fallbackSvg(owner, repo);
+      return fallbackSvg(owner, repo, theme);
     }
 
     const siteUrl = `https://cloud.deepdoc.tech/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/`;
-    const shot = await captureScreenshot(env, siteUrl);
-    if (!shot) return fallbackSvg(owner, repo);
+    const shot = await captureScreenshot(env, siteUrl, theme);
+    if (!shot) return fallbackSvg(owner, repo, theme);
 
     // Re-check state right before storing: a job that flipped away from 'done'
     // mid-request must not get a stale image pinned under an immutable URL.
@@ -81,7 +87,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     )
       .bind(owner, repo, row.createdAt)
       .first<{ status: string }>();
-    if (!still || still.status !== "done") return fallbackSvg(owner, repo);
+    if (!still || still.status !== "done") return fallbackSvg(owner, repo, theme);
 
     await env.SITES.put(key, shot, { httpMetadata: { contentType: "image/jpeg" } });
     return new Response(shot, {
@@ -91,6 +97,6 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
       },
     });
   } finally {
-    await releaseLock(env, owner, repo);
+    await releaseLock(env, owner, repo, theme);
   }
 };

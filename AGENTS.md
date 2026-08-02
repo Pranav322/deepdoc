@@ -365,6 +365,27 @@ Marketing copy is **outcome-led, not implementation-led** — say "your docs sta
 - Meta descriptions must stay ≤160 chars and titles ≤60, or they truncate in the SERP.
 - Every page needs exactly one `<h1>`. `docs.astro` has a compact one at the top of its main column (it has no hero); don't remove it when reworking that page.
 
+### Design tokens are shared with the marketing site
+
+`page_html.ts` can't import `src/styles/global.css` — it's an HTML string built in a
+Worker, not an Astro page — so its `:root` is a hand-copy of the marketing palette.
+**`npm run test:tokens` fails if the two drift**, for both themes and for the
+`MINI_PAGE_CSS` subset used by the standalone 403/stale pages. Run it after touching
+either file. The hosted app keeps the short names (`--ink`, `--surface`) rather than
+`--color-*`; renaming buys nothing until these become real `.astro` pages.
+
+Two tokens are intentionally *not* mirrored: `--accent-ink` (text on an accent-filled
+button — must be the light surface on light mode's `#4C8B00`) and `--danger` (needs
+darkening for light). Marketing has neither.
+
+**Theme crosses the subdomain via a `dd_theme` cookie on `.deepdoc.tech`.** localStorage
+is per-hostname and can never reach `cloud.`. The hosted app reads the cookie
+server-side, so its theme is correct in the first byte with no no-flash script.
+`Header.astro` writes the cookie alongside localStorage; `Layout.astro`'s inline script
+prefers cookie over localStorage (marketing pages are prerendered so they can't read it
+server-side). **Omit the `domain=` attribute on localhost** or the browser silently drops
+the cookie.
+
 ### Gallery thumbnails (`lib/hosted/thumb.ts`, `api/thumb/[owner]/[repo].ts`)
 
 The public gallery serves real screenshots, captured once via the Cloudflare

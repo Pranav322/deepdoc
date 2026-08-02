@@ -1,0 +1,11 @@
+WEBVTT
+
+NOTE
+The demo is a silent screen recording of `deepdoc generate`. Its only audio is
+the background music track from deepdoc/video (public/audio/bg-music.mp3) —
+there is no speech, so this track identifies non-speech audio rather than
+transcribing dialogue. Regenerate the duration if the video is re-rendered.
+
+1
+00:00:00.000 --> 00:00:40.500
+[background music — no narration]

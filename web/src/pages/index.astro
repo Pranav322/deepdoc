@@ -42,23 +42,14 @@ const pipeline = [
 
 const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAPI"];
 
-const chatMessages = [
-  {
-    role: "You",
-    text: "Where does billing verification happen?",
-    refs: [],
-  },
-  {
-    role: "DeepDoc",
-    text: "Payment verification is handled in the Razorpay billing flow, then persisted through the usage and project records.",
-    refs: ["billing/routes.py:41-88", "services/usage.py:12-57"],
-  },
-];
-
 ---
 
 <Layout>
   <Header />
+
+  <!-- Sections stay at this indent level so adding the landmark doesn't
+       reflow ~400 lines of markup. -->
+  <main>
 
   <!-- ── Hero ─────────────────────────────────────────────────────── -->
   <section
@@ -131,19 +122,34 @@ const chatMessages = [
               <span class="dot red"></span>
               <span class="dot yellow"></span>
               <span class="dot green"></span>
-              <span class="proof-url">deepdoc.local/docs/contextly-platform-overview</span>
+              <span class="proof-url">https://cloud.deepdoc.tech/pranav322/codewiki</span>
             </div>
             <div class="hero-image-wrap">
+              {/* ponytail: both theme variants are fetched even though CSS hides one
+                  — display:none doesn't cancel an <img> download. Kept because the
+                  theme is a data-attribute set by the header toggle, so a
+                  prefers-color-scheme <picture> would desync from a manual switch.
+                  At 48/125 KB each that's cheaper than JS-driven src injection.
+                  Files come from `npm run images`. */}
               <img
-                src="/proof-docs-dark.png"
-                alt="Generated DeepDoc documentation site for the Contextly platform, showing structured navigation and source-grounded content"
+                src="/proof-docs-dark-2208.webp"
+                srcset="/proof-docs-dark-1104.webp 1104w, /proof-docs-dark-2208.webp 2208w"
+                sizes="(max-width: 1152px) 100vw, 1104px"
+                width="2208"
+                height="1231"
+                alt="Generated DeepDoc documentation site for the codewiki repository, showing domain-grouped sidebar navigation, an architecture diagram, and the built-in chatbot bar."
                 class="proof-image-dark"
                 loading="eager"
+                fetchpriority="high"
                 decoding="async"
               />
               <img
-                src="/proof-docs.png"
-                alt="Generated DeepDoc documentation site for the Contextly platform, showing structured navigation and source-grounded content"
+                src="/proof-docs-2208.webp"
+                srcset="/proof-docs-1104.webp 1104w, /proof-docs-2208.webp 2208w"
+                sizes="(max-width: 1152px) 100vw, 1104px"
+                width="2208"
+                height="1231"
+                alt="Generated DeepDoc documentation site for the codewiki repository, showing domain-grouped sidebar navigation, an architecture diagram, and the built-in chatbot bar."
                 class="proof-image-light"
                 loading="eager"
                 decoding="async"
@@ -157,27 +163,7 @@ const chatMessages = [
             <div><strong>Focused updates</strong><span>only changed pages regenerate</span></div>
           </div>
 
-          <div class="chat-proof-card">
-            <div class="chat-proof-header">
-              <span class="chat-pulse"></span>
-              DeepDoc Chatbot
-            </div>
-            {
-              chatMessages.map((message) => (
-                <div class={`chat-bubble ${message.role === "You" ? "user" : "assistant"}`}>
-                  <div class="chat-role">{message.role}</div>
-                  <div>{message.text}</div>
-                  {message.refs ? (
-                    <div class="chat-refs">
-                      {message.refs.map((ref) => (
-                        <span>{ref}</span>
-                      ))}
-                    </div>
-                  ) : null}
-                </div>
-              ))
-            }
-          </div>
+         
         </div>
     </div>
   </section>
@@ -242,8 +228,14 @@ const chatMessages = [
           muted
           preload="metadata"
           playsinline
+          aria-label="Screen recording of deepdoc generate running all five pipeline phases against a repository, 41 seconds"
           style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;"
-        ></video>
+        >
+          {/* The recording has no narration — its only audio is the background
+              music from deepdoc/video. The track identifies that non-speech
+              audio; not `default`, so it stays off unless a viewer turns it on. */}
+          <track kind="captions" src="/demo-captions.vtt" srclang="en" label="English" />
+        </video>
         <!-- Shown only if video fails to load -->
         <noscript>
           <div
@@ -470,6 +462,7 @@ $ deepdoc serve
       </button>
     </div>
   </section>
+  </main>
 
   <Footer />
 

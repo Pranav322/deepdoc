@@ -263,7 +263,7 @@ const modules = [
 ---
 
 <Layout
-  title="Docs — DeepDoc"
+  title="DeepDoc Docs — Codebase Documentation Generator Reference"
   description="Full engineering reference for DeepDoc — architecture, topology-driven planner, evidence system, CLI, chatbot, and deployment."
 >
   <Header />
@@ -289,6 +289,12 @@ const modules = [
 
       <!-- Main content -->
       <main class="min-w-0 flex-1">
+        <h1
+          class="mb-14 text-2xl font-semibold tracking-tight text-[var(--color-ink)] md:text-3xl"
+        >
+          DeepDoc Documentation
+        </h1>
+
         <div class="flex flex-col gap-20">
 
           <!-- ── QUICK START ───────────────────────────────────────── -->
@@ -691,7 +697,7 @@ deepdoc serve
                     {step.num}
                   </span>
                   <div>
-                    <h4 class="mb-1 text-sm font-semibold text-[var(--color-ink)]">{step.title}</h4>
+                    <h3 class="mb-1 text-sm font-semibold text-[var(--color-ink)]">{step.title}</h3>
                     <p class="text-sm leading-relaxed text-[var(--color-ink-muted)]">{step.desc}</p>
                   </div>
                 </div>
@@ -732,7 +738,7 @@ deepdoc serve
             </div>
 
             <div class="mt-6 rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-6">
-              <h4 class="mb-3 text-sm font-semibold text-[var(--color-ink)]">Additional evidence contexts</h4>
+              <h3 class="mb-3 text-sm font-semibold text-[var(--color-ink)]">Additional evidence contexts</h3>
               <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 {[
                   { label: "Flow context", desc: "Execution path traces and entry points for buckets with flow_id generation hints." },
@@ -1209,7 +1215,7 @@ deepdoc update --since main</pre>
 
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
-                <h4 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">When a targeted replan triggers</h4>
+                <h3 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">When a targeted replan triggers</h3>
                 <ul class="flex flex-col gap-1.5 text-xs leading-relaxed text-[var(--color-ink-muted)]">
                   {["New HTTP endpoint detected", "New third-party integration import", "New database model found", "A bucket's owned files are deleted", "Significant endpoint structure changes", "Engine fingerprint mismatch"].map((item) => (
                     <li class="flex items-start gap-2">
@@ -1220,7 +1226,7 @@ deepdoc update --since main</pre>
                 </ul>
               </div>
               <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
-                <h4 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">State files that power updates</h4>
+                <h3 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">State files that power updates</h3>
                 <ul class="flex flex-col gap-2 text-xs leading-relaxed">
                   {[
                     { f: ".deepdoc/sync_state.json", d: "Last-generated commit hash + engine fingerprint" },
@@ -1412,7 +1418,7 @@ jobs:
 
             <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
-                <h4 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">Features</h4>
+                <h3 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">Features</h3>
                 <ul class="flex flex-col gap-1.5 text-xs leading-relaxed text-[var(--color-ink-muted)]">
                   {[
                     "Explain selected code in Fast or Deep mode",
@@ -1429,7 +1435,7 @@ jobs:
                 </ul>
               </div>
               <div class="rounded-2xl border border-[var(--color-line)] bg-[var(--color-surface-raised)]/40 p-5">
-                <h4 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">Install</h4>
+                <h3 class="mb-2 text-sm font-semibold text-[var(--color-ink)]">Install</h3>
                 <div class="terminal-block">
                   <div class="terminal-header">
                     <div class="flex gap-1.5"><span class="dot red"></span><span class="dot yellow"></span><span class="dot green"></span></div>

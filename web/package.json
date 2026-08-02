@@ -8,6 +8,7 @@
     "dev": "astro dev",
     "start": "astro dev",
     "build": "astro build",
+    "images": "node scripts/build-images.mjs",
     "preview": "astro preview",
     "astro": "astro"
   },
@@ -21,6 +22,7 @@
     "typescript": "^5.6.3"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "^5.20260724.1"
+    "@cloudflare/workers-types": "^5.20260724.1",
+    "sharp": "^0.34.0"
   }
 }

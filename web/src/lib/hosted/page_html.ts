@@ -28,6 +28,7 @@ const MINI_PAGE_CSS = `
     --ink: #F0EFEA; --ink-muted: #9E9D96;
     --line-strong: rgba(255,255,255,0.11); --accent: #C2FF4D; --accent-ink: #09090D;
     --shadow: 0 24px 60px -20px rgba(0,0,0,0.6);
+    --solid: #F0EFEA; --solid-ink: #09090D;
     --font-sans: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   }
   html[data-theme="light"] {
@@ -35,14 +36,23 @@ const MINI_PAGE_CSS = `
     --ink: #111110; --ink-muted: #6B6B63;
     --line-strong: rgba(0,0,0,0.13); --accent: #4C8B00; --accent-ink: #F5F4F0;
     --shadow: 0 24px 60px -20px rgba(0,0,0,0.18);
+    --solid: #111110; --solid-ink: #F5F4F0;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; min-height: 100vh; background: var(--surface); color: var(--ink); font-family: var(--font-sans); display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
-  .card { width: 100%; max-width: 460px; border: 1px solid var(--line-strong); border-radius: 16px; background: var(--surface-raised); padding: 32px; box-shadow: var(--shadow); }
-  h1 { font-size: 18px; font-weight: 700; margin: 0 0 10px; letter-spacing: -0.01em; }
-  p { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0 0 22px; }
-  code { font-family: var(--font-mono); color: var(--ink); }
-  .btn { height: 40px; border-radius: 8px; border: none; cursor: pointer; padding: 0 16px; background: var(--accent); color: var(--accent-ink); font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; }
+  body { margin: 0; min-height: 100vh; background: var(--surface); color: var(--ink);
+    font-family: var(--font-sans); font-feature-settings: "ss01"; -webkit-font-smoothing: antialiased;
+    display: flex; align-items: center; justify-content: center; padding: 40px 24px; }
+  .card { width: 100%; max-width: 420px; border: 1px solid var(--line-strong); border-radius: 18px;
+    background: var(--surface-raised); padding: 32px 30px 30px; box-shadow: var(--shadow); }
+  h1 { font-size: 21px; font-weight: 600; letter-spacing: -0.024em; line-height: 1.2; margin: 0 0 10px; }
+  p { font-size: 13.5px; line-height: 1.65; color: var(--ink-muted); margin: 0 0 24px; max-width: 44ch; }
+  code { font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; height: 36px;
+    border-radius: 8px; border: none; cursor: pointer; padding: 0 15px; background: var(--solid);
+    color: var(--solid-ink); font-family: var(--font-sans); font-size: 13.5px; font-weight: 600;
+    letter-spacing: -0.008em; transition: opacity 0.15s cubic-bezier(0.22, 1, 0.36, 1); }
+  .btn:hover { opacity: 0.86; }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 `;
 
 /**
@@ -69,16 +79,21 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
-  /* Palette is the marketing site's, value for value — see
-     src/styles/global.css. It used to be an independent set of blue-tinted
-     oklch neutrals, so deepdoc.tech and cloud.deepdoc.tech rendered visibly
-     different greys side by side and read as two products.
+  /* ── Tokens ──────────────────────────────────────────────────────────
+     The palette block is a hand-copy of the marketing site's
+     (src/styles/global.css); web/scripts/test-hosted-tokens.mjs fails the
+     build if any shared value drifts, so both domains stay one product.
 
-     The short names (--ink, --surface) are kept rather than renamed to
-     --color-*: ~250 lines of CSS below reference them, and the rename buys
-     nothing until this file becomes real .astro pages. tests/... no:
-     web/scripts/test-hosted-tokens.mjs fails the build if these values ever
-     drift from global.css, so "keep in sync by hand" is now enforced. */
+     Everything after the palette is this app's own vocabulary: a type ramp,
+     a radius scale, one easing curve, and semantic tokens for the solid
+     button. The short names (--ink, --surface) are kept rather than renamed
+     to --color-*; the rename buys nothing until this file becomes real
+     .astro pages.
+
+     Accent discipline: #C2FF4D is a state colour here, not a fill. It marks
+     selection, focus, and live/ready status, and nothing else. Primary
+     buttons are ink-filled (near-white on dark, near-black on light) — a
+     lime slab under every action was the loudest thing on these screens. */
   :root {
     --surface: #09090D; --surface-raised: #10101A; --surface-high: #181820;
     --ink: #F0EFEA; --ink-muted: #9E9D96; --ink-faint: #5E5D56;
@@ -88,15 +103,18 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
     --shadow-lift: 0 24px 60px -20px rgba(0,0,0,0.6);
+    --solid: #F0EFEA; --solid-ink: #09090D;
+    --hover: rgba(255,255,255,0.045); --press: rgba(255,255,255,0.075);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
+    --shadow-pop: 0 18px 44px -14px rgba(0,0,0,0.72);
+    --seg-track: #101019; --seg-thumb: #24242F;
+    --r-xs: 6px; --r-sm: 8px; --r-md: 11px; --r-lg: 14px; --r-xl: 18px;
+    --ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
-  /* Light theme. The app was hard-locked to dark: data-theme was hardcoded and
-     nothing read it, so anyone who picked light on deepdoc.tech got slammed
-     back into dark on clicking through. Mirrors global.css's light palette.
-
-     Two values can't simply mirror it: --accent-ink is the text colour on an
-     accent-filled button, and on light's #4C8B00 accent that has to be the
-     light surface rather than near-black; and --danger needs darkening to stay
-     legible on a light background. */
+  /* Light theme mirrors global.css. Three values can't simply mirror it:
+     --accent-ink is the text on an accent surface and must be the light
+     surface against #4C8B00; --danger needs darkening to stay legible; and
+     --solid inverts, since the solid button is ink-on-surface either way. */
   html[data-theme="light"] {
     --surface: #F5F4F0; --surface-raised: #ECEAE4; --surface-high: #E2E0DA;
     --ink: #111110; --ink-muted: #6B6B63; --ink-faint: #A8A89E;
@@ -104,93 +122,195 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     --accent: #4C8B00; --accent-ink: #F5F4F0; --accent-dim: rgba(76,139,0,0.09); --accent-line: rgba(76,139,0,0.3);
     --danger: #C0392B; --danger-dim: rgba(192,57,43,0.08);
     --shadow-lift: 0 24px 60px -20px rgba(0,0,0,0.18);
+    --solid: #111110; --solid-ink: #F5F4F0;
+    --hover: rgba(0,0,0,0.035); --press: rgba(0,0,0,0.06);
+    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+    --shadow-pop: 0 18px 44px -14px rgba(0,0,0,0.16);
+    --seg-track: #E4E2DC; --seg-thumb: #FCFBF8;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
     min-height: 100vh; background: var(--surface); color: var(--ink);
-    font-family: var(--font-sans); display: flex; flex-direction: column;
-    -webkit-font-smoothing: antialiased;
+    font-family: var(--font-sans); font-feature-settings: "ss01";
+    font-size: 14px; line-height: 1.5;
+    display: flex; flex-direction: column;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
   a { color: inherit; }
-  #content { flex: 1; display: flex; flex-direction: column; }
-  .wrap { width: 100%; max-width: 880px; margin: 0 auto; padding: 0 28px; }
-  .wrap-narrow { width: 100%; max-width: 560px; margin: 0 auto; padding: 0 28px 40px; }
-  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+  h1, h2, h3, p { margin: 0; }
+  ::selection { background: var(--accent-dim); color: var(--ink); }
+  #content { flex: 1; display: flex; flex-direction: column; min-height: 60vh; }
 
-  /* ── App bar — byte-for-byte the same recipe as deepdoc.tech's
-     Header.astro/Logo.astro (same container width, same brand-mark sizing/
-     spacing, same font-size) so switching domains reads as one product, not
-     two. Duplicated here (not imported) since these are plain .ts endpoints,
-     not .astro components — keep in sync with Header.astro/Logo.astro by
-     hand if either changes. ───────────────────────────────────────────── */
-  /* Reserve the bar's height and the main column before any JS runs. Both
-     slots ship empty and are filled only after /api/me resolves — without
-     these the whole page jumped 52px downward on boot and the page height
-     popped again when content arrived. */
-  /* Matches deepdoc.tech's Header.astro toggle: 8x8 hit area, muted until hover. */
-  .theme-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
-    border-radius: 6px; border: 1px solid transparent; background: transparent; cursor: pointer;
-    color: var(--ink-muted); transition: color 0.12s, background 0.12s; }
-  .theme-toggle:hover { color: var(--ink); background: var(--surface-raised); }
-  .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* One page width, read by both the app bar and the content column, so the
+     brand mark sits directly above the page title instead of floating in a
+     wider bar. The signed-in screens are a reading column; the public
+     gallery is a grid and needs the full width. route() sets the attribute. */
+  body { --w-page: 1152px; }
+  body[data-view="app"] { --w-page: 736px; }
+  .page { width: 100%; max-width: var(--w-page); margin: 0 auto; padding: 0 24px 96px; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+  @keyframes rise { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+  @keyframes shimmer { to { transform: translateX(100%); } }
+
+  /* ── Type ramp — fixed steps, ratio ~1.2. Negative tracking above 18px is
+     what stops large text looking like scaled-up body copy. Mono is reserved
+     for things that are literally code (a pasted URL); repo names render in
+     the sans, which is the single biggest change on these screens. ────── */
+  .t-display { font-size: 28px; font-weight: 600; letter-spacing: -0.025em; line-height: 1.15; }
+  .t-sub { font-size: 13.5px; line-height: 1.6; color: var(--ink-muted); max-width: 62ch; }
+  .sub { color: var(--ink-muted); font-size: 13.5px; line-height: 1.6; }
+  code, .mono { font-family: var(--font-mono); }
+  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
+    clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+
+  /* ── App bar — same 52px sticky/blurred recipe and brand sizing as
+     deepdoc.tech's Header.astro/Logo.astro, so switching domains reads as
+     one product. Duplicated (not imported) because these are plain .ts
+     endpoints; keep in sync by hand if either changes. ──────────────── */
+  /* Both slots ship empty and fill only after /api/me resolves. Reserving
+     the height here keeps the page from jumping 52px on boot. */
   #appbar-slot { min-height: 52px; border-bottom: 1px solid var(--line); }
   #appbar-slot:has(.appbar) { border-bottom: none; }
-  #content { min-height: 60vh; }
-  .appbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line); background: color-mix(in oklab, var(--surface) 86%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); flex-shrink: 0; }
-  .appbar-inner { max-width: 1152px; margin: 0 auto; height: 52px; padding: 0 24px; display: flex; align-items: center; justify-content: space-between; }
-  .brand { font-family: var(--font-sans); font-weight: 600; font-size: 1.2rem; text-decoration: none; letter-spacing: -0.015em; color: var(--ink); display: flex; align-items: center; cursor: pointer; }
+  .appbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line);
+    background: color-mix(in oklab, var(--surface) 82%, transparent);
+    backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); flex-shrink: 0; }
+  .appbar-inner { max-width: var(--w-page); margin: 0 auto; height: 52px; padding: 0 24px;
+    display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+  .brand { font-family: var(--font-sans); font-weight: 600; font-size: 1.2rem; text-decoration: none;
+    letter-spacing: -0.015em; color: var(--ink); display: flex; align-items: center; cursor: pointer;
+    border-radius: var(--r-xs); transition: opacity 0.15s var(--ease); }
+  .brand:hover { opacity: 0.82; }
+  .brand:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
   .dd-mark { display: block; flex-shrink: 0; width: 1.16em; height: 1.16em; margin-left: -0.33em; margin-right: 0.04em; transform: translateY(-0.05em); }
   .dd-mark .dd-front { fill: var(--accent); }
   .dd-mark .dd-echo { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
   .dd-mark .dd-echo-1 { opacity: 0.4; } .dd-mark .dd-echo-2 { opacity: 0.18; }
-  .account-chip { display: flex; align-items: center; gap: 8px; background: transparent; border: 1px solid var(--line-strong); border-radius: 999px; padding: 4px 12px 4px 4px; color: var(--ink); font-family: var(--font-sans); font-size: 13px; font-weight: 500; height: auto; cursor: pointer; transition: border-color 0.15s; }
-  .account-chip:hover { border-color: var(--ink-faint); }
-  .account-chip img { width: 24px; height: 24px; border-radius: 50%; }
+  .bar-tools { display: flex; align-items: center; gap: 4px; }
+  /* 32px hit area, muted until hover — matches Header.astro's toggle. */
+  .theme-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
+    border-radius: var(--r-sm); border: 1px solid transparent; background: transparent; cursor: pointer;
+    color: var(--ink-muted); transition: color 0.15s var(--ease), background 0.15s var(--ease); }
+  .theme-toggle:hover { color: var(--ink); background: var(--hover); }
+  .theme-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .account-wrap { position: relative; }
+  .account-chip { display: flex; align-items: center; gap: 7px; background: transparent;
+    border: 1px solid transparent; border-radius: 999px; padding: 3px 10px 3px 3px; color: var(--ink);
+    font-family: var(--font-sans); font-size: 13px; font-weight: 500; letter-spacing: -0.005em;
+    height: 32px; cursor: pointer; transition: background 0.15s var(--ease), border-color 0.15s var(--ease); }
+  .account-chip:hover { background: var(--hover); border-color: var(--line); }
+  .account-chip[aria-expanded="true"] { background: var(--hover); border-color: var(--line-strong); }
+  .account-chip:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .account-chip img { width: 24px; height: 24px; border-radius: 50%; }
 
-  /* ── Profile dropdown — identity + nav only, no project rows ──────── */
-  .profile-dd { position: absolute; right: 0; top: 44px; width: 230px; background: var(--surface-high); border: 1px solid var(--line-strong); border-radius: 12px; padding: 14px; box-shadow: var(--shadow-lift); z-index: 15; }
-  .profile-dd-head { display: flex; align-items: center; gap: 10px; padding-bottom: 12px; margin-bottom: 10px; border-bottom: 1px solid var(--line); }
-  .profile-dd-head img { width: 34px; height: 34px; border-radius: 50%; }
-  .profile-dd-head .nm { font-size: 13.5px; font-weight: 600; }
-  .profile-dd-head .qt { font-size: 10.5px; color: var(--ink-faint); font-family: var(--font-mono); }
-  .profile-dd-link { display: flex; align-items: center; justify-content: space-between; padding: 9px 2px; font-size: 13px; color: var(--ink); text-decoration: none; cursor: pointer; border-radius: 6px; background: none; border: none; width: 100%; text-align: left; font-family: var(--font-sans); }
-  .profile-dd-link:hover { background: var(--surface); }
-  .profile-dd-link .count { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-faint); }
-  .profile-dd-link.muted { color: var(--ink-muted); }
+  /* ── Profile dropdown — identity and navigation only. Project rows and
+     project actions deliberately never appear here; they live on /projects
+     and the detail page. ───────────────────────────────────────────── */
+  .profile-dd { position: absolute; right: 0; top: 42px; width: 240px; background: var(--surface-raised);
+    border: 1px solid var(--line-strong); border-radius: var(--r-lg); padding: 6px;
+    box-shadow: var(--shadow-pop); z-index: 15; transform-origin: top right;
+    animation: rise 0.16s var(--ease); }
+  .profile-dd-head { display: flex; align-items: center; gap: 10px; padding: 10px 10px 12px;
+    margin-bottom: 6px; border-bottom: 1px solid var(--line); }
+  .profile-dd-head img { width: 36px; height: 36px; border-radius: 50%; }
+  .profile-dd-head .nm { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; }
+  .profile-dd-head .qt { font-size: 12px; color: var(--ink-faint); margin-top: 1px; }
+  .profile-dd-link { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    padding: 9px 10px; font-size: 13.5px; color: var(--ink); text-decoration: none; cursor: pointer;
+    border-radius: var(--r-sm); background: none; border: none; width: 100%; text-align: left;
+    font-family: var(--font-sans); transition: background 0.12s var(--ease); }
+  .profile-dd-link:hover { background: var(--hover); }
+  .profile-dd-link:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .profile-dd-link .count { font-size: 12.5px; color: var(--ink-faint); }
+  .profile-dd-sep { height: 1px; background: var(--line); margin: 6px 0; }
 
-  /* ── Buttons / inputs (shared) ───────────────────────────────────── */
+  /* ── Buttons — one shape, four intents, three sizes. Every interactive
+     control on these screens is built from this and nothing else. ───── */
   button { font-family: var(--font-sans); }
-  .btn { height: 42px; border-radius: 8px; border: none; cursor: pointer; padding: 0 18px; background: var(--accent); color: var(--accent-ink); font-size: 14px; font-weight: 600; transition: opacity 0.15s, transform 0.1s; }
-  .btn:hover:not(:disabled) { opacity: 0.88; }
-  .btn:active:not(:disabled) { transform: scale(0.98); }
-  .btn:disabled { opacity: 0.35; cursor: not-allowed; }
-  .btn-spinner { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
-  .btn.secondary { background: var(--surface-high); color: var(--ink); border: 1px solid var(--line-strong); }
-  .btn.ghost { background: transparent; color: var(--ink-muted); border: 1px solid var(--line-strong); }
+  .btn { display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+    height: 36px; padding: 0 15px; border-radius: var(--r-sm); border: 1px solid transparent;
+    background: var(--solid); color: var(--solid-ink);
+    font-size: 13.5px; font-weight: 600; letter-spacing: -0.008em; cursor: pointer; white-space: nowrap;
+    transition: opacity 0.15s var(--ease), background 0.15s var(--ease), border-color 0.15s var(--ease), transform 0.1s var(--ease); }
+  .btn:hover:not(:disabled) { opacity: 0.86; }
+  .btn:active:not(:disabled) { transform: scale(0.985); }
+  .btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .btn:disabled { opacity: 0.32; cursor: not-allowed; }
+  .btn.secondary { background: var(--surface-high); color: var(--ink); border-color: var(--line-strong); }
+  .btn.secondary:hover:not(:disabled) { opacity: 1; border-color: var(--ink-faint); }
+  .btn.ghost { background: transparent; color: var(--ink-muted); border-color: var(--line-strong); }
+  .btn.ghost:hover:not(:disabled) { opacity: 1; color: var(--ink); background: var(--hover); }
   .btn.full { width: 100%; }
-  .btn.small { height: 34px; padding: 0 13px; font-size: 12.5px; }
-  .btn.danger-outline { background: transparent; border: 1px solid rgba(255,107,107,0.4); color: var(--danger); height: 36px; padding: 0 14px; font-size: 12.5px; }
-  input {
-    width: 100%; padding: 12px 14px; border-radius: 8px; border: 1px solid var(--line-strong);
-    background: var(--surface); color: var(--ink); font-family: var(--font-mono); font-size: 13px;
-    outline: none; transition: border-color 0.15s;
-  }
-  input::placeholder { color: var(--ink-faint); }
-  input:focus { border-color: var(--accent); }
-  code, .mono { font-family: var(--font-mono); }
+  .btn.small { height: 30px; padding: 0 11px; font-size: 12.5px; }
+  .btn.large { height: 46px; padding: 0 20px; font-size: 14.5px; border-radius: var(--r-md); }
+  .btn-spinner { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+    background: currentColor; animation: pulse 1.2s ease-in-out infinite; }
+  /* Destructive and tertiary actions are text, not filled controls. A
+     delete button styled like a primary action is a trap. */
+  .link-danger, .link-quiet { background: none; border: none; padding: 4px 2px; cursor: pointer;
+    font-family: var(--font-sans); font-size: 13px; border-radius: var(--r-xs);
+    transition: color 0.12s var(--ease); }
+  .link-danger { color: var(--ink-muted); }
+  .link-danger:hover { color: var(--danger); }
+  .link-quiet { color: var(--ink-muted); }
+  .link-quiet:hover { color: var(--ink); }
+  .link-danger:focus-visible, .link-quiet:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .danger-confirm { display: flex; align-items: center; gap: 14px; font-size: 13px; color: var(--ink-muted); }
+  .danger-confirm .link-danger { color: var(--danger); font-weight: 600; }
 
-  /* ── Sign-in popup (unauthenticated root) ────────────────────────────
-     Not a full pitch page — deepdoc.tech's own landing page already sells
-     the product. This pops up over a quiet, mostly-empty backdrop (same
-     header, no marketing copy) and can't be dismissed without signing in —
-     there's nothing else to do on this domain unauthenticated. */
-  .modal-veil { position: fixed; inset: 0; background: rgba(6,6,9,0.7); backdrop-filter: blur(3px); display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 20; }
-  .modal { width: 100%; max-width: 440px; background: var(--surface-raised); border: 1px solid var(--line-strong); border-radius: 20px; padding: 36px 32px 32px; box-shadow: var(--shadow-lift); text-align: center; animation: confirm-rise 0.18s ease-out; }
-  .modal h1 { font-size: 25px; font-weight: 800; letter-spacing: -0.02em; margin: 0 0 10px; }
-  .modal p.modal-sub { font-size: 13.5px; line-height: 1.7; color: var(--ink-muted); margin: 0; }
-  .modal-icon-wrap { position: relative; height: 104px; display: flex; align-items: center; justify-content: center; margin-bottom: 6px; }
+  /* ── Inputs ─────────────────────────────────────────────────────────── */
+  input {
+    width: 100%; height: 40px; padding: 0 13px; border-radius: var(--r-sm);
+    border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink);
+    font-family: var(--font-sans); font-size: 13.5px; letter-spacing: -0.005em;
+    outline: none; transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  }
+  input.mono { font-family: var(--font-mono); font-size: 13px; }
+  input::placeholder { color: var(--ink-faint); }
+  input:hover { border-color: color-mix(in oklab, var(--line-strong) 100%, var(--ink) 12%); }
+  input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); }
+  /* Search field with a leading glyph. The icon is decorative; the input
+     keeps its own accessible name. */
+  .field-search { position: relative; }
+  .field-search svg { position: absolute; left: 13px; top: 50%; transform: translateY(-50%);
+    width: 15px; height: 15px; color: var(--ink-faint); pointer-events: none; }
+  .field-search input { padding-left: 36px; }
+
+  /* ── Page furniture ─────────────────────────────────────────────────── */
+  .page-head { display: flex; align-items: flex-end; justify-content: space-between;
+    gap: 20px; flex-wrap: wrap; padding: 52px 0 28px; }
+  .page-head .t-sub { margin-top: 7px; }
+  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px;
+    color: var(--ink-muted); text-decoration: none; margin: 32px 0 0; cursor: pointer;
+    border-radius: var(--r-xs); transition: color 0.12s var(--ease); }
+  .back-link:hover { color: var(--ink); }
+  .back-link:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  /* Empty states teach the next action; they don't decorate the absence. */
+  .empty-state { text-align: center; padding: 68px 20px; }
+  .empty-state h2 { font-size: 16px; font-weight: 600; letter-spacing: -0.01em; margin: 0 0 7px; }
+  .empty-state p { font-size: 13.5px; color: var(--ink-muted); margin: 0 auto 22px; max-width: 44ch; line-height: 1.6; }
+  .error-box { color: var(--danger); font-size: 13px; line-height: 1.6; background: var(--danger-dim);
+    border: 1px solid color-mix(in oklab, var(--danger) 30%, transparent); border-radius: var(--r-md);
+    padding: 13px 15px; margin-top: 16px; white-space: pre-wrap; }
+  /* Loading placeholders shaped like the content they replace, so the page
+     doesn't reflow when data lands. */
+  .skel { position: relative; overflow: hidden; border-radius: var(--r-xs); background: var(--surface-high); }
+  .skel::after { content: ''; position: absolute; inset: 0; transform: translateX(-100%);
+    background: linear-gradient(90deg, transparent, var(--hover), transparent); animation: shimmer 1.5s infinite; }
+  @media (prefers-reduced-motion: reduce) { .skel::after { animation: none; } }
+
+  /* ── Sign-in (unauthenticated) ───────────────────────────────────────
+     Not a pitch page: deepdoc.tech's landing already sells the product.
+     This is the gate, over a quiet backdrop. */
+  .modal-veil { position: fixed; inset: 0; background: color-mix(in oklab, var(--surface) 72%, transparent);
+    backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+    display: flex; align-items: center; justify-content: center; padding: 24px; z-index: 20; }
+  .modal { width: 100%; max-width: 420px; background: var(--surface-raised); border: 1px solid var(--line-strong);
+    border-radius: var(--r-xl); padding: 34px 30px 30px; box-shadow: var(--shadow-lift); text-align: center;
+    animation: rise 0.2s var(--ease); }
+  .modal h1 { font-size: 23px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 9px; }
+  .modal p.modal-sub { font-size: 13.5px; line-height: 1.65; color: var(--ink-muted); margin: 0 auto; max-width: 34ch; }
+  .modal-icon-wrap { position: relative; height: 96px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
   .modal-dot-grid {
     position: absolute; inset: 0;
     background-image: radial-gradient(circle, var(--line-strong) 1.5px, transparent 1.5px);
@@ -199,253 +319,231 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     mask-image: radial-gradient(ellipse 65% 70% at 50% 50%, black 15%, transparent 78%);
   }
   .modal-icon-badge {
-    position: relative; width: 76px; height: 76px; border-radius: 50%;
-    background: #0d1117; display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 0 0 1px var(--line-strong), 0 0 30px 6px rgba(194,255,77,0.32);
+    position: relative; width: 68px; height: 68px; border-radius: 50%;
+    background: var(--surface-high); display: flex; align-items: center; justify-content: center;
+    color: var(--ink); box-shadow: 0 0 0 1px var(--line-strong), var(--shadow-pop);
   }
-  .modal-icon-badge svg { width: 38px; height: 38px; color: #fff; }
-  .modal-divider { height: 1px; background: var(--line); margin: 24px 0 6px; }
-  .modal-features { display: flex; flex-direction: column; margin: 0 0 24px; text-align: left; }
-  .modal-feature { display: flex; align-items: flex-start; gap: 14px; padding: 16px 0; border-bottom: 1px solid var(--line); }
-  .modal-feature:last-child { border-bottom: none; }
-  .modal-feature-icon { flex-shrink: 0; width: 40px; height: 40px; border-radius: 10px; background: var(--accent-dim); border: 1px solid var(--accent-line); display: flex; align-items: center; justify-content: center; color: var(--accent); }
-  .modal-feature-icon svg { width: 20px; height: 20px; }
-  .modal-feature-title { font-size: 14.5px; font-weight: 700; color: var(--ink); margin: 0 0 3px; }
+  .modal-icon-badge svg { width: 32px; height: 32px; }
+  .modal-features { display: flex; flex-direction: column; gap: 2px; margin: 26px 0 24px; text-align: left; }
+  .modal-feature { display: flex; align-items: flex-start; gap: 12px; padding: 10px 0; }
+  .modal-feature-icon { flex-shrink: 0; width: 30px; height: 30px; border-radius: var(--r-sm);
+    background: var(--accent-dim); display: flex; align-items: center; justify-content: center; color: var(--accent); }
+  .modal-feature-icon svg { width: 16px; height: 16px; }
+  .modal-feature-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); margin: 0 0 2px; }
   .modal-feature-desc { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; margin: 0; }
-  .modal .btn.full { height: 54px; font-size: 15px; font-weight: 700; border-radius: 12px; }
 
-  /* ── Section headers (shared across authed views) ──────────────── */
-  .page-head { display: flex; align-items: baseline; justify-content: space-between; padding: 40px 0 24px; flex-wrap: wrap; gap: 12px; }
-  .page-head h1 { font-size: 22px; font-weight: 700; letter-spacing: -0.02em; margin: 0; }
-  /* Left deliberately bare — no artwork, no explanatory paragraph. An empty
-     list should read as empty, not as a placeholder that needs decorating. */
-  .empty-state { text-align: center; padding: 72px 20px; }
-  .empty-state h2 { font-size: 17px; font-weight: 600; margin: 0 0 8px; }
-  .empty-state p { font-size: 13.5px; color: var(--ink-muted); margin: 0 0 24px; }
-  .back-link { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; color: var(--ink-muted); text-decoration: none; margin: 28px 0 4px; cursor: pointer; }
-  .back-link:hover { color: var(--ink); }
-
-  /* ── Public gallery (logged-out root) — grid of real generated docs,
-     shown instead of an immediate sign-in wall. The card's main visual is a
-     LIVE preview of the real generated site's homepage (an iframe pointed
-     at the same /{owner}/{repo}/ this app already serves, scaled down —
-     no separate screenshot pipeline needed, and it's always current), not
-     an avatar. A subtle 3D tilt on mousemove — plain CSS transform +
-     mousemove math, the same effect a framer-motion card gives you, no
-     React/framer-motion dependency needed for it. */
-  .gallery-heading { font-size: 15px; font-weight: 500; color: var(--ink-muted); letter-spacing: -0.01em; margin: 0; }
-  .gallery-head { padding: 8px 0 26px; max-width: 620px; }
-  .gallery-title { font-size: clamp(24px, 3.2vw, 33px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.15; color: var(--ink); margin: 0; }
-  .gallery-sub { font-size: 14px; line-height: 1.6; color: var(--ink-muted); margin: 11px 0 0; }
-  /* The page used to just stop under the grid with ~1000px of empty surface
-     below it and no closing edge. */
-  .cloud-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
-    margin-top: 56px; padding: 22px 0 40px; border-top: 1px solid var(--line);
-    font-size: 12.5px; color: var(--ink-faint); }
-  .cloud-footer strong { color: var(--ink-muted); font-weight: 500; }
-  .cloud-footer-links { display: flex; gap: 18px; flex-wrap: wrap; }
-  .cloud-footer-links a { color: var(--ink-faint); text-decoration: none; transition: color 0.12s; }
-  .cloud-footer-links a:hover { color: var(--ink); }
-  /* Matches .appbar-inner's max-width (1152px) — .wrap's own 880px is meant
-     for narrower list/detail pages, and using it here made the gallery
-     visibly narrower than the header above it, like a different page
-     bolted on rather than part of the same site. */
-  .wrap-wide { width: 100%; max-width: 1152px; margin: 0 auto; padding: 0 28px; }
-  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 18px; }
-  .gallery-card { position: relative; display: flex; border-radius: 14px; cursor: pointer; transition: transform 0.08s ease-out; will-change: transform; text-decoration: none; color: inherit; }
-  /* It's a real <a> now, so it must show a focus ring for keyboard users. */
-  .gallery-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-  /* Border beam — a light trail that travels around the card's edge on
-     hover. Not a mask trick (mask-composite: exclude turned out to be too
-     fragile across browsers to get right) — instead the classic, robust
-     version: a full-bleed rotating conic-gradient sits behind the card
-     (::before), and the real content lives in an inner box
-     (.gallery-card-surface) inset by exactly the border's thickness via
-     margin, so only that thin margin gap reveals the gradient underneath.
-     No mask/clip-path involved. */
-  .gallery-card::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    background: conic-gradient(from var(--beam-angle, 0deg), transparent 0%, transparent 78%, var(--accent) 90%, transparent 100%);
-    opacity: 0;
-    transition: opacity 0.2s;
-  }
-  .gallery-card:hover::before { opacity: 1; animation: gallery-beam 2.2s linear infinite; }
-  @property --beam-angle {
-    syntax: '<angle>';
-    inherits: false;
-    initial-value: 0deg;
-  }
-  @keyframes gallery-beam { to { --beam-angle: 360deg; } }
-  @media (prefers-reduced-motion: reduce) {
-    .gallery-card:hover::before { animation: none; opacity: 0.6; }
-  }
-  /* flex: 1 (not just position/margin) is what makes every card in a row
-     the same height regardless of how much text it has — previously a
-     card with a language badge (one extra line) grew taller than its
-     row-mates because nothing told the surface to fill the stretched
-     grid-row height it was already getting. */
-  .gallery-card-surface { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; margin: 1.5px; border: 1px solid var(--line-strong); border-radius: 12.5px; background: var(--surface-raised); overflow: hidden; transition: border-color 0.12s; }
-  .gallery-card:hover .gallery-card-surface { border-color: transparent; }
-  /* Screenshot, not a scaled iframe. aspect-ratio + explicit img dimensions
-     mean the grid is laid out before any image arrives, so cards never
-     reflow as thumbnails stream in. */
-  .gallery-preview { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden; background: var(--surface-high); border-bottom: 1px solid var(--line); }
-  .gallery-shot { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
-  /* A hairline of light along the top edge — reads as a screen rather than a
-     flat colour swatch, and stops the image sitting flush against the border. */
-  .gallery-preview::after { content: ''; position: absolute; inset: 0; pointer-events: none; box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }
-  .gallery-body { display: flex; flex-direction: column; flex: 1; padding: 13px 15px 14px; min-width: 0; }
-  .gallery-name { font-family: var(--font-mono); font-size: 13px; font-weight: 500; color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; letter-spacing: -0.01em; }
-  /* De-emphasise the owner so the repo name is what you actually scan. */
-  .gallery-name .g-owner { color: var(--ink-faint); font-weight: 400; }
-  .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .gallery-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 10px; font-family: var(--font-mono); font-size: 10.5px; color: var(--ink-muted); }
-  .g-lang { display: inline-flex; align-items: center; gap: 5px; }
-  .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.75; }
-  .g-date { margin-left: auto; }
-
-  /* ── /projects — name, state, age. Nothing else. ─────────────────── */
-  .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden;
-    clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
-  .proj-list-min { display: flex; flex-direction: column; margin-top: 8px; }
-  /* No borders or card surfaces — the hairline between rows is the only
-     structure needed, and it disappears on the last row. */
-  .proj-row-min { display: flex; align-items: center; gap: 12px; padding: 15px 8px; margin: 0 -8px;
-    border-radius: 7px; border-bottom: 1px solid var(--line); text-decoration: none; color: inherit;
-    transition: background 0.1s; }
-  .proj-row-min:last-child { border-bottom: none; }
-  .proj-row-min:hover { background: var(--surface-raised); }
+  /* ── /projects — name, state, age. Nothing else; everything actionable
+     lives one click deeper on the detail page. ─────────────────────── */
+  .proj-list-min { display: flex; flex-direction: column; margin: 0 -12px; }
+  .proj-row-min { display: flex; align-items: center; gap: 12px; padding: 13px 12px;
+    border-radius: var(--r-md); text-decoration: none; color: inherit; position: relative;
+    transition: background 0.12s var(--ease); }
+  /* An inset hairline rather than a border, so it stops short of the row's
+     rounded hover surface instead of cutting across it. */
+  .proj-row-min::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 0;
+    height: 1px; background: var(--line); }
+  .proj-row-min:last-child::after { display: none; }
+  .proj-row-min:hover { background: var(--hover); }
+  .proj-row-min:hover::after, .proj-row-min:hover + .proj-row-min::after { opacity: 0; }
   .proj-row-min:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  /* The dot is the whole status indicator. Colour carries it; the label is
-     present for screen readers and as a title on hover. */
-  .pr-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--line-strong); }
+  /* Colour is the whole status indicator; the label is there for screen
+     readers and on hover. */
+  .pr-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--ink-faint); }
   .pr-dot.done { background: var(--accent); }
   .pr-dot.failed { background: var(--danger); }
   .pr-dot.building { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
-  .pr-name { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 13.5px; color: var(--ink);
-    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pr-name .g-owner { color: var(--ink-faint); }
-  .pr-age { font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted); flex-shrink: 0; }
+  .pr-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; letter-spacing: -0.01em;
+    color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .pr-name .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .pr-age { font-size: 12.5px; color: var(--ink-faint); flex-shrink: 0; font-variant-numeric: tabular-nums; }
+  .pr-chev { color: var(--ink-faint); flex-shrink: 0; opacity: 0; transform: translateX(-3px);
+    transition: opacity 0.15s var(--ease), transform 0.15s var(--ease); }
+  .proj-row-min:hover .pr-chev, .proj-row-min:focus-visible .pr-chev { opacity: 1; transform: translateX(0); }
 
-  /* ── legacy row style, still used nowhere else ───────────────────── */
-  .proj-row { display: flex; align-items: center; gap: 14px; padding: 17px 14px; margin: 0 -14px; border-bottom: 1px solid var(--line); cursor: pointer; border-radius: 8px; transition: background 0.12s; }
-  .proj-row:hover { background: var(--surface-raised); }
-  .proj-row:last-child { border-bottom: none; }
-  .proj-row .name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .vis-badge { font-size: 11px; color: inherit; font-family: var(--font-mono); }
-  .row-chev { color: var(--ink-faint); font-size: 14px; }
-  .status-text { font-size: 12px; color: var(--ink-faint); display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+  /* ── /projects/:owner/:repo ─────────────────────────────────────────── */
+  .proj-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
+    padding: 20px 0 0; flex-wrap: wrap; }
+  .proj-head .title-block h1 { font-size: 24px; font-weight: 600; letter-spacing: -0.024em; margin: 0 0 8px; }
+  .title-block h1 .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .proj-meta-row { display: flex; align-items: center; gap: 14px; font-size: 12.5px; color: var(--ink-faint); }
+  .status-text { display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+    color: var(--ink-muted); white-space: nowrap; }
   .status-text .sdot { width: 6px; height: 6px; border-radius: 50%; background: var(--ink-faint); }
-  .status-text.done { color: var(--ink-muted); } .status-text.done .sdot { background: var(--accent); }
+  .status-text.done .sdot { background: var(--accent); }
   .status-text.building .sdot { background: var(--accent); animation: pulse 1.2s ease-in-out infinite; }
   .status-text.failed { color: var(--danger); } .status-text.failed .sdot { background: var(--danger); }
-
-  /* Detail page preview — the generated site is the whole point of the
-     project, so show it and make it the primary way in. */
-  .detail-preview { position: relative; display: block; margin: 22px 0 4px; border: 1px solid var(--line-strong);
-    border-radius: 12px; overflow: hidden; background: var(--surface-high); aspect-ratio: 16 / 10;
-    text-decoration: none; transition: border-color 0.12s; }
-  .detail-preview:hover { border-color: var(--accent-line); }
-  .detail-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  /* The generated site is what the project *is*, so show it and make it the
+     way in. */
+  .detail-preview { position: relative; display: block; margin: 28px 0 0; border: 1px solid var(--line);
+    border-radius: var(--r-lg); overflow: hidden; background: var(--surface-high); aspect-ratio: 16 / 10;
+    text-decoration: none; transition: border-color 0.15s var(--ease), transform 0.2s var(--ease); }
+  .detail-preview:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+  .detail-preview:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   .detail-preview img { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
-  .detail-preview.is-empty { display: flex; align-items: center; justify-content: center; text-align: center; padding: 24px; }
-  .detail-preview.is-empty p { font-size: 13px; color: var(--ink-muted); margin: 0; max-width: 320px; line-height: 1.6; }
-  /* Visibility toggle and delete sit on one quiet line under the preview,
-     rather than in two labelled sections. */
+  .detail-preview.is-empty { display: flex; align-items: center; justify-content: center; text-align: center;
+    padding: 24px; aspect-ratio: 16 / 7; background: none; border-style: dashed; }
+  .detail-preview.is-empty:hover { transform: none; border-color: var(--line); }
+  .detail-preview.is-empty p { font-size: 13px; color: var(--ink-muted); margin: 0; max-width: 34ch; line-height: 1.6; }
+  /* Both project settings on one quiet line rather than two labelled
+     sections with a bordered danger zone. The two-step confirm is what
+     prevents the accident; the box around it was decoration. */
   .detail-actions { display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    flex-wrap: wrap; margin-top: 20px; padding-top: 18px; border-top: 1px solid var(--line); }
-  .link-danger, .link-quiet { background: none; border: none; padding: 0; cursor: pointer;
-    font-family: var(--font-sans); font-size: 12.5px; }
-  .link-danger { color: var(--danger); }
-  .link-quiet { color: var(--ink-muted); }
-  .link-danger:hover, .link-quiet:hover { text-decoration: underline; }
-  .danger-confirm { display: flex; align-items: center; gap: 12px; font-size: 12.5px; color: var(--ink-muted); }
-  .title-block h1 .g-owner { color: var(--ink-faint); font-weight: 400; }
+    flex-wrap: wrap; margin-top: 24px; padding-top: 20px; border-top: 1px solid var(--line); }
 
-  /* ── /projects/:owner/:repo — the only place project actions live ── */
-  .proj-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 8px 0 8px; flex-wrap: wrap; }
-  .proj-head .title-block h1 { font-size: 21px; font-weight: 700; letter-spacing: -0.02em; margin: 0 0 6px; font-family: var(--font-mono); }
-  .proj-meta-row { font-size: 12.5px; color: var(--ink-faint); display: flex; gap: 14px; }
-  .section-title { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin: 36px 0 14px; }
+  /* ── Visibility — a real segmented control, not two loose pills ────── */
+  .vis-group { display: inline-flex; align-items: center; gap: 2px; padding: 3px;
+    border-radius: var(--r-md); background: var(--seg-track); border: 1px solid var(--line); }
+  .vis-pill { appearance: none; height: 28px; padding: 0 14px; border-radius: var(--r-xs);
+    border: 1px solid transparent; background: transparent; color: var(--ink-muted);
+    font-family: var(--font-sans); font-size: 12.5px; font-weight: 500; letter-spacing: -0.005em;
+    cursor: pointer; transition: color 0.15s var(--ease), background 0.15s var(--ease); }
+  .vis-pill:hover:not(.active) { color: var(--ink); }
+  .vis-pill.active { background: var(--seg-thumb); color: var(--ink);
+    border-color: var(--line-strong); box-shadow: var(--shadow-sm); }
+  .vis-pill:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .vis-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  .vis-hint { font-size: 12.5px; color: var(--ink-muted); margin-top: 10px; line-height: 1.55; }
 
-  /* ── /generate — the only post-login home ─────────────────────────── */
-  .step-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--ink-faint); margin: 8px 0 12px; }
-  .repo-list { max-height: 280px; overflow-y: auto; border: 1px solid var(--line-strong); border-radius: 10px; margin-top: 10px; }
-  /* Shown when /api/repos fails or returns nothing — previously this state
-     was bare unstyled text, or no text at all. */
-  .repo-empty { padding: 16px; font-size: 13px; color: var(--ink-muted); line-height: 1.5; }
-  .repo-item { padding: 12px 14px; cursor: pointer; border-bottom: 1px solid var(--line); transition: background 0.1s; }
-  .repo-item:hover { background: var(--surface-high); }
-  .repo-item:last-child { border-bottom: none; }
-  .repo-item.selected { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
-  .repo-item .top-line { display: flex; align-items: center; gap: 8px; font-family: var(--font-mono); font-size: 12.5px; }
-  .repo-item .priv { color: var(--ink-faint); font-size: 10px; }
-  .repo-item .lang { font-family: var(--font-mono); font-size: 10px; color: var(--ink-faint); }
-  .proj-tag { font-family: var(--font-mono); font-size: 10px; padding: 2px 7px; border-radius: 999px; border: 1px solid var(--line-strong); margin-left: auto; }
+  /* ── /generate — the only post-login home ───────────────────────────── */
+  /* A picker, not a scrollbox of raw rows: padded track, rounded rows, hover
+     surface, and a tinted ring on the selection. */
+  .repo-list { max-height: 340px; overflow-y: auto; overscroll-behavior: contain;
+    border: 1px solid var(--line); border-radius: var(--r-md); background: var(--surface-raised);
+    padding: 5px; margin-top: 10px; scrollbar-width: thin; scrollbar-color: var(--line-strong) transparent; }
+  .repo-empty { padding: 18px 14px; font-size: 13px; color: var(--ink-muted); line-height: 1.6; }
+  /* Real <button> elements, not clickable divs: keyboard focus, Enter/Space
+     activation and a focus ring all come for free. */
+  .repo-item { display: block; width: 100%; text-align: left; border: none; background: transparent;
+    font-family: var(--font-sans); color: inherit; padding: 10px 12px; border-radius: var(--r-sm);
+    cursor: pointer; transition: background 0.1s var(--ease), box-shadow 0.12s var(--ease); }
+  .repo-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  /* filterRepos() toggles the the hidden property, and the author-level
+     display: block above outranks the UA's [hidden] rule. Without this the
+     search box stops filtering. */
+  .repo-item[hidden] { display: none; }
+  .repo-item:hover { background: var(--hover); }
+  .repo-item.selected { background: var(--accent-dim); box-shadow: inset 0 0 0 1px var(--accent-line); }
+  .repo-item .top-line { display: flex; align-items: center; gap: 8px; font-size: 13.5px;
+    font-weight: 500; letter-spacing: -0.008em; }
+  .repo-item .rname, .repo-item .desc { display: block; }
+  .repo-item .rname { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .repo-item .rname .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .repo-item .priv, .repo-item .lang { font-size: 11.5px; font-weight: 400; color: var(--ink-faint); flex-shrink: 0; }
+  .repo-item .desc { display: block; color: var(--ink-muted); font-size: 12.5px; margin-top: 3px;
+    line-height: 1.45; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .proj-tag { font-size: 11px; font-weight: 500; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line-strong); color: var(--ink-muted); margin-left: auto; flex-shrink: 0; }
   .proj-tag.done { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
-  .proj-tag.failed { color: var(--danger); border-color: rgba(255,107,107,0.3); background: var(--danger-dim); }
-  .proj-tag.building { color: var(--ink-muted); }
-  .repo-item .desc { color: var(--ink-muted); font-size: 11.5px; margin-top: 3px; }
-  .divider { display: flex; align-items: center; gap: 12px; color: var(--ink-faint); font-size: 11.5px; font-family: var(--font-mono); margin: 24px 0; }
+  .proj-tag.failed { color: var(--danger); border-color: color-mix(in oklab, var(--danger) 30%, transparent); background: var(--danger-dim); }
+  .divider { display: flex; align-items: center; gap: 14px; color: var(--ink-faint); font-size: 12.5px; margin: 28px 0 16px; }
   .divider::before, .divider::after { content: ''; flex: 1; height: 1px; background: var(--line); }
-  /* Still rendered on /generate, where the choice needs a label and a line of
-     explanation before you commit. The project-detail page dropped both — you
-     are changing an existing setting there, not making a first decision. */
-  .vis-label { font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--ink-muted); margin-right: 2px; }
-  .vis-hint { font-size: 11.5px; color: var(--ink-muted); margin-top: 8px; line-height: 1.5; }
-  .vis-group { display: flex; align-items: center; gap: 8px; }
-  .vis-pill { height: auto; padding: 6px 13px; font-size: 12px; border-radius: 999px; background: transparent; border: 1px solid var(--line-strong); color: var(--ink-muted); font-family: var(--font-mono); cursor: pointer; }
-  .vis-pill.active { background: var(--accent-dim); border-color: var(--accent-line); color: var(--accent); }
-  /* An elevated card right where you picked a repo/URL — not pinned to the
-     viewport edge (that just made it read as further away on a tall screen),
-     just a clear lift off the page surface with a quick rise-in. */
-  .confirm-panel {
-    margin-top: 14px; border: 1px solid var(--line-strong); border-radius: 14px; padding: 20px;
-    background: var(--surface-raised); box-shadow: var(--shadow-lift);
-    animation: confirm-rise 0.16s ease-out;
-  }
-  @keyframes confirm-rise { from { transform: translateY(8px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-  .confirm-panel .who { font-family: var(--font-mono); font-size: 13px; margin-bottom: 14px; }
-  .error-box { color: var(--danger); font-size: 13px; background: var(--danger-dim); border: 1px solid rgba(255,107,107,0.25); border-radius: 10px; padding: 13px; margin-top: 16px; white-space: pre-wrap; }
+  /* Lifts off the page right where you made the choice. Not pinned to the
+     viewport, which just reads as further away on a tall screen. */
+  .confirm-panel { margin-top: 16px; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+    padding: 18px; background: var(--surface-raised); box-shadow: var(--shadow-pop);
+    animation: rise 0.18s var(--ease); }
+  .confirm-panel .who { font-size: 14px; font-weight: 500; letter-spacing: -0.01em; margin-bottom: 16px; }
+  .confirm-panel .who strong { font-weight: 600; }
 
-  /* ── Generating screen — honest stage list, no fake percentage ────── */
-  .gen-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 48px 24px 70px; }
-  /* A contained card rather than text floating in the middle of a black page.
-     This screen is watched for minutes, so it has to look deliberate. */
-  .gen-card { width: 100%; max-width: 480px; border: 1px solid var(--line); border-radius: 14px;
-    background: var(--surface-raised); padding: 20px 22px 22px; box-shadow: var(--shadow-lift); }
-  /* Repo and clock, nothing else. The avatar and language badge were
-     decoration on a screen whose only job is to say "still working". */
-  .gen-repo { display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
-    padding-bottom: 16px; margin-bottom: 4px; border-bottom: 1px solid var(--line); }
-  .gen-repo-name { font-family: var(--font-mono); font-size: 13.5px; font-weight: 500; color: var(--ink);
+  /* ── Generating — the longest-dwell screen in the product. No fake
+     percentage: the backend has no honest completion signal inside a
+     stage, so the job here is to look alive and set expectations. ──── */
+  .gen-wrap { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 24px 88px; }
+  .gen-card { width: 100%; max-width: 440px; border: 1px solid var(--line); border-radius: var(--r-xl);
+    background: var(--surface-raised); padding: 22px 24px 24px; box-shadow: var(--shadow-pop); }
+  .gen-repo { display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+    padding-bottom: 18px; border-bottom: 1px solid var(--line); }
+  .gen-repo-name { font-size: 14px; font-weight: 600; letter-spacing: -0.012em; color: var(--ink);
     min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Tabular figures so the seconds ticking doesn't shift the layout. */
-  .gen-elapsed { font-family: var(--font-mono); font-size: 19px; font-weight: 500; color: var(--ink);
-    font-variant-numeric: tabular-nums; letter-spacing: -0.02em; flex-shrink: 0; }
-  .gen-col { width: 100%; text-align: left; }
-  .gen-note { font-size: 12px; line-height: 1.6; color: var(--ink-muted); margin: 16px 0 0;
-    padding-top: 15px; border-top: 1px solid var(--line); }
-  .stage-row { padding: 12px 2px; }
-  .stage-head { display: flex; align-items: center; gap: 12px; }
+  /* Tabular figures so ticking seconds don't shift the layout. */
+  .gen-elapsed { font-size: 22px; font-weight: 500; color: var(--ink); font-variant-numeric: tabular-nums;
+    letter-spacing: -0.03em; flex-shrink: 0; }
+  .gen-col { width: 100%; text-align: left; padding-top: 8px; }
+  .gen-note { font-size: 12.5px; line-height: 1.6; color: var(--ink-muted); margin: 16px 0 0;
+    padding-top: 16px; border-top: 1px solid var(--line); }
+  .stage-row { position: relative; padding: 10px 0; }
+  /* A rail joining the dots, so three stages read as one sequence. */
+  .stage-row:not(:last-child)::before { content: ''; position: absolute; left: 8px; top: 28px; bottom: -10px;
+    width: 1px; background: var(--line-strong); }
+  .stage-row.done:not(:last-child)::before { background: var(--accent); opacity: 0.45; }
+  .stage-head { display: flex; align-items: center; gap: 13px; }
   /* A ring rather than a bare dot, so a finished stage can hold a tick and a
-     pending one reads as an empty slot instead of just a dimmer dot. */
-  .stage-dot { width: 17px; height: 17px; border-radius: 50%; border: 1.5px solid var(--line-strong);
-    flex-shrink: 0; display: flex; align-items: center; justify-content: center;
-    font-size: 9px; line-height: 1; color: var(--accent-ink); transition: background 0.2s, border-color 0.2s; }
-  .stage-row.active .stage-dot { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-dim); animation: pulse 1.4s ease-in-out infinite; }
+     pending one reads as an empty slot instead of a dimmer dot. */
+  .stage-dot { position: relative; z-index: 1; width: 17px; height: 17px; border-radius: 50%;
+    border: 1.5px solid var(--line-strong); background: var(--surface-raised); flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; font-size: 9px; line-height: 1;
+    color: var(--accent-ink); transition: background 0.25s var(--ease), border-color 0.25s var(--ease); }
+  .stage-row.active .stage-dot { border-color: var(--accent); box-shadow: 0 0 0 4px var(--accent-dim); animation: pulse 1.5s ease-in-out infinite; }
   .stage-row.active .stage-dot::after { content: ''; width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
   .stage-row.done .stage-dot { background: var(--accent); border-color: var(--accent); }
   .stage-row.done .stage-dot::after { content: '✓'; font-weight: 700; }
-  .stage-label { font-size: 13.5px; color: var(--ink-muted); flex: 1; }
+  .stage-label { font-size: 13.5px; color: var(--ink-faint); flex: 1; transition: color 0.25s var(--ease); }
   .stage-row.active .stage-label { color: var(--ink); font-weight: 500; }
   .stage-row.done .stage-label { color: var(--ink-muted); }
-  .gen-result { margin-top: 26px; }
+  .gen-actions { display: flex; gap: 8px; margin-top: 14px; }
 
-  .sub { color: var(--ink-muted); font-size: 13.5px; line-height: 1.7; }
+  /* ── Public gallery (logged-out root) — a grid of real generated docs,
+     shown before ever asking for GitHub access. The card's visual is a real
+     screenshot of the generated site, cached in R2. ─────────────────── */
+  .gallery-head { padding: 44px 0 30px; max-width: 620px; }
+  .gallery-title { font-size: clamp(26px, 3.4vw, 36px); font-weight: 600; letter-spacing: -0.03em;
+    line-height: 1.12; color: var(--ink); margin: 0; }
+  .gallery-sub { font-size: 14.5px; line-height: 1.6; color: var(--ink-muted); margin: 12px 0 0; max-width: 56ch; }
+  .gallery-heading { font-size: 15px; font-weight: 500; color: var(--ink-muted); letter-spacing: -0.01em; margin: 0; }
+  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 20px; }
+  .gallery-card { position: relative; display: flex; border-radius: var(--r-lg); cursor: pointer;
+    transition: transform 0.1s ease-out; will-change: transform; text-decoration: none; color: inherit; }
+  .gallery-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  /* Border beam: a rotating conic-gradient sits behind the card and an inner
+     surface inset by the border's thickness reveals only that hairline gap.
+     No mask-composite, which was too fragile across browsers. */
+  .gallery-card::before {
+    content: ''; position: absolute; inset: 0; border-radius: inherit;
+    background: conic-gradient(from var(--beam-angle, 0deg), transparent 0%, transparent 78%, var(--accent) 90%, transparent 100%);
+    opacity: 0; transition: opacity 0.2s var(--ease);
+  }
+  .gallery-card:hover::before { opacity: 1; animation: gallery-beam 2.2s linear infinite; }
+  @property --beam-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
+  @keyframes gallery-beam { to { --beam-angle: 360deg; } }
+  @media (prefers-reduced-motion: reduce) { .gallery-card:hover::before { animation: none; opacity: 0.6; } }
+  /* flex: 1 is what keeps every card in a row the same height regardless of
+     how much text it carries. */
+  .gallery-card-surface { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1;
+    margin: 1.5px; border: 1px solid var(--line); border-radius: 12.5px; background: var(--surface-raised);
+    overflow: hidden; transition: border-color 0.12s var(--ease); }
+  .gallery-card:hover .gallery-card-surface { border-color: transparent; }
+  .gallery-preview { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
+    background: var(--surface-high); border-bottom: 1px solid var(--line); }
+  .gallery-shot { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+  /* A hairline of light along the top edge, so it reads as a screen rather
+     than a flat colour swatch. */
+  .gallery-preview::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }
+  .gallery-body { display: flex; flex-direction: column; flex: 1; padding: 14px 16px 15px; min-width: 0; }
+  .gallery-name { font-size: 13.5px; font-weight: 600; letter-spacing: -0.012em; color: var(--ink);
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .gallery-name .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .gallery-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px;
+    font-size: 11.5px; color: var(--ink-faint); }
+  .g-lang { display: inline-flex; align-items: center; gap: 5px; }
+  .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.75; }
+  .g-date { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .cloud-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
+    margin-top: 64px; padding: 24px 0 8px; border-top: 1px solid var(--line);
+    font-size: 12.5px; color: var(--ink-faint); }
+  .cloud-footer strong { color: var(--ink-muted); font-weight: 500; }
+  .cloud-footer-links { display: flex; gap: 20px; flex-wrap: wrap; }
+  .cloud-footer-links a { color: var(--ink-faint); text-decoration: none; transition: color 0.12s var(--ease); }
+  .cloud-footer-links a:hover { color: var(--ink); }
+
+  @media (max-width: 640px) {
+    .page-head { padding: 36px 0 22px; }
+    .t-display { font-size: 24px; }
+    .proj-head .title-block h1 { font-size: 20px; }
+    .gallery-head { padding: 32px 0 24px; }
+  }
 </style>
 </head>
 <body>
@@ -472,6 +570,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // Reset on every route change and whenever a build reaches a terminal
     // state, or the guard would outlive the submit and disable Retry.
     let startInFlight = false;
+
+    const CHEVRON_ICON = '<svg class="pr-chev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+    const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>';
 
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
@@ -555,6 +656,11 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // Retry after a failed build and the Generate button after "Back to
       // generate" would both silently do nothing.
       startInFlight = false;
+      // Drives --w-page. The signed-in screens are a 736px reading column;
+      // the public gallery is a full-width grid. Set before renderAppBar so
+      // the bar and the content beneath it resolve to the same width and the
+      // brand mark lines up with the page title.
+      document.body.dataset.view = 'app';
       renderAppBar();
       const path = window.location.pathname;
       const projMatch = path.match(/^\\/projects\\/([\\w.-]+)\\/([\\w.-]+)\\/?$/);
@@ -583,16 +689,15 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     function renderAppBar() {
       const slot = document.getElementById('appbar-slot');
       if (!state.me || !state.me.authenticated) { slot.innerHTML = ''; return; }
-      const q = state.quota || {};
-      const quotaLine = q.unlimited ? 'unlimited' : \`\${q.savedProjects ?? 0}\${q.maxSavedProjects != null ? '/' + q.maxSavedProjects : ''} saved\`;
       slot.innerHTML = \`
         <header class="appbar">
           <div class="appbar-inner">
-            <a class="brand" onclick="return nav(event,'/')">\${brandMarkHtml()}</a>
-            <div style="display:flex; align-items:center; gap:6px;">
+            <a class="brand" href="/" onclick="return nav(event,'/')">\${brandMarkHtml()}</a>
+            <div class="bar-tools">
               \${themeToggleHtml()}
               <div class="account-wrap">
-                <button class="account-chip" onclick="event.stopPropagation(); toggleDropdown()">
+                <button class="account-chip" aria-haspopup="menu" aria-expanded="\${state.ddOpen ? 'true' : 'false'}"
+                        onclick="event.stopPropagation(); toggleDropdown()">
                   <img src="\${escapeHtml(state.me.avatarUrl || '')}" alt="" /><span>\${escapeHtml(state.me.login || '')}</span>
                 </button>
                 <div id="profile-dd"></div>
@@ -607,24 +712,35 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       const q = state.quota || {};
       const projCount = state.projects.length;
       document.getElementById('profile-dd').innerHTML = \`
-        <div class="profile-dd" onclick="event.stopPropagation()">
+        <div class="profile-dd" role="menu" onclick="event.stopPropagation()">
           <div class="profile-dd-head">
-            <img src="\${state.me.avatarUrl}" alt="" />
-            <div><div class="nm">\${state.me.login}</div><div class="qt">\${q.unlimited ? 'unlimited' : (q.savedProjects ?? 0) + '/' + (q.maxSavedProjects ?? '?') + ' saved'}</div></div>
+            <img src="\${escapeHtml(state.me.avatarUrl || '')}" alt="" />
+            <div>
+              <div class="nm">\${escapeHtml(state.me.login || '')}</div>
+              <div class="qt">\${q.unlimited ? 'Unlimited projects' : (q.savedProjects ?? 0) + ' of ' + (q.maxSavedProjects ?? '?') + ' saved'}</div>
+            </div>
           </div>
-          <a class="profile-dd-link" onclick="nav(event,'/projects')"><span>Projects</span><span class="count">\${projCount} ›</span></a>
-          <button class="btn ghost full" style="height:34px;font-size:12.5px;margin-top:10px;" onclick="logout()">Log out</button>
+          <a class="profile-dd-link" role="menuitem" href="/projects" onclick="nav(event,'/projects')"><span>Projects</span><span class="count">\${projCount}</span></a>
+          <a class="profile-dd-link" role="menuitem" href="/generate" onclick="nav(event,'/generate')"><span>Generate new</span></a>
+          <div class="profile-dd-sep"></div>
+          <button class="profile-dd-link" role="menuitem" onclick="logout()">Log out</button>
         </div>\`;
+    }
+    function syncChipExpanded() {
+      const chip = document.querySelector('.account-chip');
+      if (chip) chip.setAttribute('aria-expanded', state.ddOpen ? 'true' : 'false');
     }
     function toggleDropdown() {
       state.ddOpen = !state.ddOpen;
       if (state.ddOpen) { renderDropdown(); document.addEventListener('click', closeDropdownOnce); document.addEventListener('keydown', closeDropdownOnEscape); }
       else closeDropdown();
+      syncChipExpanded();
     }
     function closeDropdown() {
       state.ddOpen = false;
       const el = document.getElementById('profile-dd');
       if (el) el.innerHTML = '';
+      syncChipExpanded();
       document.removeEventListener('click', closeDropdownOnce);
       document.removeEventListener('keydown', closeDropdownOnEscape);
     }
@@ -693,6 +809,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // sign-in modal. The modal only appears once someone actually clicks
     // "Generate your own" — see renderPublicGallery below.
     async function renderLoggedOut() {
+      document.body.dataset.view = 'gallery';
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
@@ -714,6 +831,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // is a static message with a manual refresh rather than new plumbing
     // for what's a fairly rare thing to land on directly.
     function renderPublicInProgress(owner, repo) {
+      document.body.dataset.view = 'gallery';
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
@@ -721,9 +839,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         </div></header>\`;
       document.getElementById('modal-slot').innerHTML = '';
       document.getElementById('content').innerHTML = \`
-        <div class="wrap-wide">
+        <div class="page">
           <div class="empty-state">
-            <h2>\${owner}/\${repo} is still being generated</h2>
+            <h2>\${escapeHtml(owner)}/\${escapeHtml(repo)} is still being generated</h2>
             <p>Larger repos can take a few minutes. Check back shortly.</p>
             <button class="btn" onclick="location.reload()">Refresh</button>
           </div>
@@ -746,7 +864,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     function renderPublicGallery(examples) {
       if (!examples.length) {
         document.getElementById('content').innerHTML = \`
-          <div class="wrap-wide">
+          <div class="page">
             <div class="page-head"><h1 class="gallery-heading">Previously generated by others</h1></div>
             <div class="empty-state">
               <h2>No public docs yet</h2>
@@ -807,7 +925,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // below and no footer — the page just stopped. Give it a real title, a
       // line of context, and a closing edge.
       document.getElementById('content').innerHTML = \`
-        <div class="wrap-wide">
+        <div class="page">
           <div class="gallery-head">
             <h1 class="gallery-title">Documentation, generated from real repositories</h1>
             <p class="gallery-sub">Every site below was produced by DeepDoc from source. Open any of them, or point it at your own repo.</p>
@@ -856,7 +974,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
               <div class="modal-icon-badge">\${GITHUB_ICON_SVG}</div>
             </div>
             <h1>Sign in with GitHub</h1>
-            <p class="modal-sub">DeepDoc needs read access to clone the repo you pick and generate its docs. We only use it for that.</p>
+            <p class="modal-sub">DeepDoc needs read access to clone the repository you pick and generate its documentation. That is all it is used for.</p>
             <div class="modal-divider"></div>
             <div class="modal-features">
               <div class="modal-feature">
@@ -881,7 +999,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                 </div>
               </div>
             </div>
-            <button class="btn full" style="display:flex;align-items:center;justify-content:center;gap:10px;" onclick="startGithubAuth(this,'\${authHref}')">\${GITHUB_ICON_SVG}Continue with GitHub</button>
+            <button class="btn full large" onclick="startGithubAuth(this,'\${authHref}')">\${GITHUB_ICON_SVG}Continue with GitHub</button>
           </div>
         </div>\`;
     }
@@ -935,19 +1053,20 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // telling the user their work was gone when it was a network error.
       if (state.projectsError) {
         document.getElementById('content').innerHTML = \`
-          <div class="wrap">
-            <div class="page-head"><h1>Projects</h1></div>
-            \${errorBoxHtml("Couldn't load your projects. They're still there — this is a connection problem.", 'reloadProjects()')}
+          <div class="page">
+            <div class="page-head"><h1 class="t-display">Projects</h1></div>
+            \${errorBoxHtml("We couldn't load your projects. They are still there; this is a connection problem.", 'reloadProjects()')}
           </div>\`;
         return;
       }
 
       if (!state.projects.length) {
         document.getElementById('content').innerHTML = \`
-          <div class="wrap-narrow" style="max-width:560px;">
-            <div class="page-head"><h1>Projects</h1></div>
+          <div class="page">
+            <div class="page-head"><h1 class="t-display">Projects</h1></div>
             <div class="empty-state">
               <h2>No projects yet</h2>
+              <p>Point DeepDoc at a GitHub repository and it builds a documentation site from the source.</p>
               \${genBtn}
             </div>
           </div>\`;
@@ -970,12 +1089,17 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <span class="pr-name">\${mine ? '' : '<span class="g-owner">' + escapeHtml(p.owner) + '/</span>'}\${escapeHtml(p.repo)}</span>
           <span class="sr-only">\${escapeHtml(meta.label)}</span>
           <span class="pr-age">\${p.createdAt ? escapeHtml(shortAge(p.createdAt)) : ''}</span>
+          \${CHEVRON_ICON}
         </a>\`;
       }).join('');
+      const n = state.projects.length;
       document.getElementById('content').innerHTML = \`
-        <div class="wrap-narrow" style="max-width:560px;">
+        <div class="page">
           <div class="page-head">
-            <h1>Projects</h1>
+            <div>
+              <h1 class="t-display">Projects</h1>
+              <p class="t-sub">\${n} documentation \${n === 1 ? 'site' : 'sites'} generated from your repositories.</p>
+            </div>
             \${genBtn}
           </div>
           <div class="proj-list-min">\${rows}</div>
@@ -1023,13 +1147,13 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // which of the two actually happened.
       if (!p) {
         document.getElementById('content').innerHTML = \`
-          <div class="wrap-narrow" style="max-width:600px;">
-            <a class="back-link" onclick="nav(event,'/projects')">← Back to projects</a>
+          <div class="page">
+            <a class="back-link" href="/projects" onclick="return nav(event,'/projects')">← Back to projects</a>
             \${state.projectsError
               ? errorBoxHtml("Couldn't load your projects, so we can't show this one. It hasn't gone anywhere.", 'reloadProjects()')
               : \`<div class="empty-state">
                    <h2>Project not found</h2>
-                   <p><span style="font-family:var(--font-mono)">\${escapeHtml(owner + '/' + repo)}</span> isn't in your projects.</p>
+                   <p><span class="mono">\${escapeHtml(owner + '/' + repo)}</span> is not in your projects.</p>
                    <button class="btn" onclick="nav(event,'/projects')">See your projects</button>
                  </div>\`}
           </div>\`;
@@ -1057,10 +1181,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                  : '<p>Building — the preview appears once this finishes.</p>'
            }</div>\`;
       document.getElementById('content').innerHTML = \`
-        <div class="wrap-narrow" style="max-width:640px;">
-          <a class="back-link" onclick="nav(event,'/projects')">← Back to projects</a>
+        <div class="page">
+          <a class="back-link" href="/projects" onclick="return nav(event,'/projects')">← Back to projects</a>
           <div id="detail-error-slot"></div>
-          <div class="proj-head" style="margin-top:10px;">
+          <div class="proj-head">
             <div class="title-block">
               <h1><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</h1>
               <div class="proj-meta-row">
@@ -1080,9 +1204,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                explanatory sentence and a boxed danger zone were four pieces of
                chrome around two controls. The pills state their own meaning. -->
           <div class="detail-actions">
-            <div class="vis-group">
-              <button type="button" class="vis-pill \${p.visibility !== 'public' ? 'active' : ''}" onclick="setProjectVisibility('\${safeOwner}','\${safeRepo}','private')">Private</button>
-              <button type="button" class="vis-pill \${p.visibility === 'public' ? 'active' : ''}" onclick="setProjectVisibility('\${safeOwner}','\${safeRepo}','public')">Public</button>
+            <div class="vis-group" role="group" aria-label="Site visibility">
+              <button type="button" class="vis-pill \${p.visibility !== 'public' ? 'active' : ''}" aria-pressed="\${p.visibility !== 'public'}" onclick="setProjectVisibility('\${safeOwner}','\${safeRepo}','private')">Private</button>
+              <button type="button" class="vis-pill \${p.visibility === 'public' ? 'active' : ''}" aria-pressed="\${p.visibility === 'public'}" onclick="setProjectVisibility('\${safeOwner}','\${safeRepo}','public')">Public</button>
             </div>
             <div id="danger-slot">\${dangerBoxHtml(p.owner, p.repo)}</div>
           </div>
@@ -1162,39 +1286,63 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
       if (atQuota) {
         document.getElementById('content').innerHTML = \`
-          <div class="wrap-narrow">
-            <div class="page-head"><h1>Generate a doc site</h1></div>
-            <p class="sub">You're at your project limit. Delete one from <a onclick="nav(event,'/projects')" style="color:var(--accent);cursor:pointer;">Projects</a> first, then come back here.</p>
+          <div class="page">
+            <div class="page-head"><h1 class="t-display">Generate a doc site</h1></div>
+            <div class="empty-state">
+              <h2>You are at your project limit</h2>
+              <p>Delete a project to free a slot, then come back here.</p>
+              <button class="btn" onclick="nav(event,'/projects')">Go to projects</button>
+            </div>
           </div>\`;
         return;
       }
 
       document.getElementById('content').innerHTML = \`
-        <div class="wrap-narrow">
-          <div class="page-head"><h1>Generate a doc site</h1></div>
-          <div class="step-label">Pick a repo</div>
-          <input id="repo-filter" placeholder="Search your repos…" oninput="filterRepos(this.value)" />
-          <div class="repo-list" id="repo-list">Loading your repos…</div>
+        <div class="page">
+          <div class="page-head">
+            <div>
+              <h1 class="t-display">Generate a doc site</h1>
+              <p class="t-sub">Pick a repository. DeepDoc reads the source and builds a site you can share.</p>
+            </div>
+          </div>
+          <div class="field-search">
+            \${SEARCH_ICON}
+            <input id="repo-filter" placeholder="Search your repositories" aria-label="Search your repositories" oninput="filterRepos(this.value)" />
+          </div>
+          <div class="repo-list" id="repo-list" role="listbox" aria-label="Your repositories">\${repoSkeletonHtml()}</div>
           <div id="confirm-slot"></div>
-          <div class="divider">or paste a public repo URL</div>
-          <input id="paste-url" placeholder="https://github.com/owner/repo" oninput="onPasteInput()" />
+          <div class="divider">or paste a public repository URL</div>
+          <input id="paste-url" class="mono" placeholder="https://github.com/owner/repo" aria-label="Public repository URL" oninput="onPasteInput()" />
           <div id="paste-confirm-slot"></div>
           <div id="error-slot"></div>
         </div>\`;
       loadRepos();
     }
 
+    function repoSkeletonHtml() {
+      let out = '';
+      for (let i = 0; i < 6; i++) {
+        const w = [58, 44, 66, 39, 52, 47][i];
+        out += '<div style="padding:11px 12px;">'
+          + '<div class="skel" style="height:11px;width:' + w + '%;"></div>'
+          + '<div class="skel" style="height:9px;width:' + (w + 18) + '%;margin-top:7px;opacity:0.55;"></div>'
+          + '</div>';
+      }
+      return out;
+    }
+
     function visHintText(v) {
       return v === 'public'
-        ? 'Public — anyone with the link can view the generated docs.'
-        : 'Private — only you can view them. You can make it public anytime.';
+        ? 'Anyone with the link can view the generated documentation.'
+        : 'Only you can view it. You can make it public at any time.';
     }
     function visChoiceHtml() {
       return \`
-        <div class="vis-group">
-          <span class="vis-label">Visibility</span>
-          <button type="button" class="vis-pill \${state.visibility === 'private' ? 'active' : ''}" onclick="pickVis('private')">🔒 Private</button>
-          <button type="button" class="vis-pill \${state.visibility === 'public' ? 'active' : ''}" onclick="pickVis('public')">🌐 Public</button>
+        <div class="vis-row">
+          <div class="vis-group" role="group" aria-label="Visibility">
+            <button type="button" class="vis-pill \${state.visibility === 'private' ? 'active' : ''}" aria-pressed="\${state.visibility === 'private'}" onclick="pickVis('private')">Private</button>
+            <button type="button" class="vis-pill \${state.visibility === 'public' ? 'active' : ''}" aria-pressed="\${state.visibility === 'public'}" onclick="pickVis('public')">Public</button>
+          </div>
         </div>
         <div class="vis-hint">\${visHintText(state.visibility)}</div>\`;
     }
@@ -1219,7 +1367,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       } catch (err) {
         state.repos = [];
         if (list) {
-          list.innerHTML = \`<div class="repo-empty">Couldn't load your repositories. <a onclick="loadRepos()" style="color:var(--accent);cursor:pointer;">Retry</a>, or paste a public repo URL below.</div>\`;
+          list.innerHTML = \`<div class="repo-empty">We couldn't load your repositories. <a onclick="loadRepos()" style="color:var(--accent);cursor:pointer;">Retry</a>, or paste a public repository URL below.</div>\`;
         }
       }
     }
@@ -1245,7 +1393,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       if (!existing) return '';
       if (existing.status === 'done') return '<span class="proj-tag done">Generated</span>';
       if (existing.status === 'failed') return '<span class="proj-tag failed">Failed</span>';
-      return '<span class="proj-tag building">Generating…</span>';
+      return '<span class="proj-tag">Generating</span>';
     }
     // The confirm panel's action depends on whether this repo already has a
     // project: done → go view it (never re-offer "Generate"), in-progress →
@@ -1255,7 +1403,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         return \`
           <div class="confirm-panel">
             <div class="who">\${titleHtml}</div>
-            <p class="sub" style="margin:0 0 16px;">You've already generated docs for this repo.</p>
+            <p class="sub" style="margin:0 0 16px;">You have already generated documentation for this repository.</p>
             <button class="btn full" onclick="nav(event,'/projects/\${existing.owner}/\${existing.repo}')">View project →</button>
           </div>\`;
       }
@@ -1263,7 +1411,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         return \`
           <div class="confirm-panel">
             <div class="who">\${titleHtml}</div>
-            <p class="sub" style="margin:0 0 16px;">This one's already generating.</p>
+            <p class="sub" style="margin:0 0 16px;">This one is already generating.</p>
             <button class="btn full" onclick="location.href='/\${existing.owner}/\${existing.repo}/'">View progress →</button>
           </div>\`;
       }
@@ -1283,16 +1431,20 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       list.innerHTML = repos.map(r => {
         const isSelected = state.selected && state.selected.owner === r.owner && state.selected.repo === r.repo;
         const existing = findProject(r.owner, r.repo);
+        // /api/repos is owner-affiliation only, so the owner is almost always
+        // you. Surface it only when it isn't, which is when it disambiguates.
+        const mineRepo = state.me && state.me.login
+          && String(r.owner).toLowerCase() === String(state.me.login).toLowerCase();
         return \`
-          <div class="repo-item\${isSelected ? ' selected' : ''}" data-name="\${escapeHtml(String(r.fullName || '').toLowerCase())}" onclick="selectRepoByName('\${escapeHtml(r.owner)}','\${escapeHtml(r.repo)}')">
-            <div class="top-line">
-              \${escapeHtml(r.fullName)}
-              \${r.private ? '<span class="priv">private</span>' : ''}
+          <button type="button" role="option" aria-selected="\${isSelected}" class="repo-item\${isSelected ? ' selected' : ''}" data-name="\${escapeHtml(String(r.fullName || '').toLowerCase())}" onclick="selectRepoByName('\${escapeHtml(r.owner)}','\${escapeHtml(r.repo)}')">
+            <span class="top-line">
+              <span class="rname">\${mineRepo ? '' : '<span class="g-owner">' + escapeHtml(r.owner) + '/</span>'}\${escapeHtml(r.repo)}</span>
+              \${r.private ? '<span class="priv">Private</span>' : ''}
               \${r.language ? '<span class="lang">' + escapeHtml(r.language) + '</span>' : ''}
               \${projectTagHtml(existing)}
-            </div>
-            \${r.description ? '<div class="desc">' + escapeHtml(r.description) + '</div>' : ''}
-          </div>\`;
+            </span>
+            \${r.description ? '<span class="desc">' + escapeHtml(r.description) + '</span>' : ''}
+          </button>\`;
       }).join('');
     }
 
@@ -1439,6 +1591,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     }
 
     function renderGenerating(info) {
+      document.body.dataset.view = 'app';
       renderAppBar();
       state.currentGenInfo = info;
       state.currentStage = 'cloning';
@@ -1469,7 +1622,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                  starts, so the retry usually 429s. -->
             <div id="error-slot"></div>
           </div>
-            <p class="gen-note">Usually 2–5 minutes. Safe to close this tab.</p>
+            <p class="gen-note">Usually 2 to 5 minutes. Safe to close this tab.</p>
           </div>
         </div>\`;
       renderStageList('cloning');
@@ -1504,7 +1657,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       if (!slot) return;
       slot.innerHTML = \`
         <div class="error-box">\${escapeHtml(message)}</div>
-        <div style="display:flex; gap:8px; margin-top:12px;">
+        <div class="gen-actions">
           <button class="btn" onclick="resumePoll('\${owner}','\${repo}','\${jobId}')">Try again</button>
           <button class="btn ghost" onclick="backToGenerate()">Back to generate</button>
         </div>\`;
@@ -1570,7 +1723,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         startInFlight = false;
         document.getElementById('result-slot').innerHTML = \`
           <div class="error-box">Generation failed.\\n\${escapeHtml(data.error || '')}</div>
-          <div style="display:flex; gap:8px; margin-top:12px;">
+          <div class="gen-actions">
             <button class="btn" onclick="retryJob('\${owner}','\${repo}')">Retry</button>
             <button class="btn ghost" onclick="backToGenerate()">Back to generate</button>
           </div>
@@ -1654,7 +1807,7 @@ export function stalePageHtml(owner: string, repo: string, theme: Theme = "dark"
 <body>
   <div class="card">
     <h1>This site is no longer available</h1>
-    <p><code>${owner}/${repo}</code> was generated successfully, but the underlying files are gone — this happens after a backend restart on an older build. Regenerating will fix it for good going forward.</p>
+    <p><code>${owner}/${repo}</code> was generated successfully, but the underlying files are gone. This happens after a backend restart on an older build; regenerating fixes it for good.</p>
     <button class="btn" onclick="location.href='/projects/${owner}/${repo}'">Regenerate</button>
   </div>
 </body>

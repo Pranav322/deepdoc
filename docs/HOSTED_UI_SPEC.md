@@ -205,15 +205,30 @@ schema; changing them is a backend task, not a frontend one.
 
 ## 5. Current visual identity
 
-Dark-only (`data-theme="dark"` hardcoded, no light theme — a deliberate
-choice, not an omission). Brand-consistent lime-green accent (`#C2FF4D`,
-same as `deepdoc.tech`) on OKLCH-tinted neutrals (not flat `#000`/`#fff`) —
-`--surface`/`--surface-raised`/`--surface-high`/`--ink`/`--ink-muted` etc. in
-`try_page.ts`'s `:root`. The accent is used with restraint (primary buttons,
-active/done state dots, the public-visibility indicator) rather than
-sprinkled across every badge, which was the prior version's main visual
-complaint. DM Sans for UI/body text, JetBrains Mono reserved for code-like
-things only (repo names, stage labels) — not decorative.
+**Both themes**, driven by the shared `dd_theme` cookie on `.deepdoc.tech` and read
+server-side so the first byte is already correct (the earlier dark-only hardcoding is
+gone). The palette is a hand-copy of the marketing tokens, enforced by
+`npm run test:tokens`.
+
+Reworked 2026-08-03 into a real design system (see AGENTS.md, "The hosted app's design
+system", for the full rule list and the traps). The four rules that define the look:
+
+1. **The accent is a state colour, not a fill.** `#C2FF4D` marks selection, focus,
+   live/ready status and the brand mark. Primary buttons are ink-filled (near-white on
+   dark, near-black on light) via `--solid`/`--solid-ink`. Restraint here is what makes
+   the app read as expensive rather than as a neon startup dashboard.
+2. **DM Sans carries everything; JetBrains Mono is for code only** (a pasted repo URL,
+   inline `code`). Repo names and page titles are sans. Mono-as-UI-text was the main
+   reason the signed-in screens read as a terminal toy.
+3. **One page width** (`--w-page`, 736px signed-in / 1152px gallery) shared by the app
+   bar and the content column, so the brand mark sits above the page title.
+4. **One button shape, one type ramp, one segmented control.** No second vocabulary for
+   the same job on a different screen.
+
+Emoji (the old `🔒 Private` / `🌐 Public` pills), uppercase letterspaced mono
+micro-labels, and the bordered "danger zone" panel were all removed in that pass. The
+visibility choice is a segmented control; delete is a quiet text button that still
+requires the two-step confirm (rule 13 below).
 
 ---
 

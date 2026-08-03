@@ -386,6 +386,46 @@ prefers cookie over localStorage (marketing pages are prerendered so they can't 
 server-side). **Omit the `domain=` attribute on localhost** or the browser silently drops
 the cookie.
 
+### The hosted app's design system (`lib/hosted/page_html.ts`)
+
+Everything below the palette in that `<style>` block is the app's own vocabulary and is
+load-bearing for how the signed-in screens read. Reworked 2026-08-03 (the "minimal and
+expensive" pass); the rules that pass established:
+
+- **Accent is a state colour, not a fill.** `#C2FF4D` marks selection, focus rings,
+  live/ready status dots, and the brand mark. Nothing else. **Primary buttons are
+  ink-filled** via `--solid`/`--solid-ink` (near-white on dark, near-black on light).
+  A lime slab under every action was the single loudest thing on these screens; do not
+  put it back.
+- **Mono is for code only.** `--font-mono` is reserved for a pasted repo URL and inline
+  `code`. Repo names, page titles, labels and status text all render in `--font-sans`.
+  Mono-as-UI-text was what made the app read as a terminal toy rather than a product.
+- **One page width.** `--w-page` is set from `document.body.dataset.view`
+  (`'app'` → 736px, `'gallery'` → 1152px) and read by BOTH `.appbar-inner` and `.page`,
+  so the brand mark sits directly above the page title. `route()`, `renderGenerating()`,
+  `renderLoggedOut()` and `renderPublicInProgress()` each set it; a render path that
+  forgets leaves the bar at gallery width while the content is a narrow column.
+- **One button shape.** `.btn` plus `secondary`/`ghost`, `small`/`large`, and text-only
+  `.link-danger`/`.link-quiet` for destructive and tertiary actions. Do not add a sixth
+  button shape.
+- **Type ramp** is the fixed `.t-display`/`.t-title`/`.t-body`/`.t-sub`/`.t-meta` classes.
+  Negative tracking above 18px is what stops large text reading as scaled-up body copy.
+- **`--seg-track`/`--seg-thumb` exist because the neutral ramp only runs one direction.**
+  The visibility segmented control's active thumb must read as *raised* in both themes,
+  which means lighter than its track on dark and lighter than the page on light. Deriving
+  it from `--surface-*` gives a thumb that looks recessed on dark. These two are the only
+  hard-coded colours outside the mirrored palette.
+- **`.repo-item` is a real `<button>`** (keyboard focus and Enter/Space for free), which
+  means it carries an author-level `display: block` that outranks the UA's `[hidden]`
+  rule — hence the explicit `.repo-item[hidden] { display: none }`. Delete that and
+  `filterRepos()` silently stops filtering.
+- **No backticks or `${` inside the CSS**, comments included. The whole stylesheet is
+  inside a JS template literal; a backtick in a comment ends the string and the Astro
+  build fails with a bare `Expected ";"`.
+
+Verify a change here with all three: `npm run test:tokens`, `npm run build`, and
+`npm run test:hosted` (the last one is the only thing that parses the client JS).
+
 ### Gallery thumbnails (`lib/hosted/thumb.ts`, `api/thumb/[owner]/[repo].ts`)
 
 The public gallery serves real screenshots, captured once via the Cloudflare

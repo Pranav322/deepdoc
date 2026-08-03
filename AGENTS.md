@@ -400,11 +400,36 @@ expensive" pass); the rules that pass established:
 - **Mono is for code only.** `--font-mono` is reserved for a pasted repo URL and inline
   `code`. Repo names, page titles, labels and status text all render in `--font-sans`.
   Mono-as-UI-text was what made the app read as a terminal toy rather than a product.
-- **One page width.** `--w-page` is set from `document.body.dataset.view`
-  (`'app'` → 736px, `'gallery'` → 1152px) and read by BOTH `.appbar-inner` and `.page`,
-  so the brand mark sits directly above the page title. `route()`, `renderGenerating()`,
-  `renderLoggedOut()` and `renderPublicInProgress()` each set it; a render path that
-  forgets leaves the bar at gallery width while the content is a narrow column.
+- **One page width, owned by the render functions.** `--w-page` is set from
+  `document.body.dataset.view` (`'app'` → 736px, anything else → 1152px) and read by BOTH
+  `.appbar-inner` and `.page`, so the brand mark sits directly above the page title.
+  **`route()` deliberately does NOT set it** — `/projects` is a wide grid while
+  `/generate` and the detail page are narrow columns, so each of `renderProjects`,
+  `renderProjectDetail`, `renderGenerate`, `renderGenerating`, `renderPublicGallery`,
+  `renderLoggedOut` and `renderPublicInProgress` sets it as its first statement. A new
+  render path that forgets inherits the previous screen's width.
+- **One card grid, two configurations** (`.card-grid`/`.card`, 2026-08-03, modelled on
+  DeepWiki's layout). The public gallery's cards carry a real screenshot
+  (`.card-shot` + `.gallery-shot`); **`/projects` cards deliberately carry none** — on
+  your own list the name and build state are what you scan for, and a wall of thumbnails
+  of sites you already know is noise. Both grids lead with a single `.card-new` (accent
+  gradient, `+` glyph) which is the primary CTA; that replaced the header "Generate new"
+  button, so don't re-add one. `grid-auto-rows: minmax(150px, auto)` is what stops a row
+  of description-less cards coming out shorter than the row above it.
+- **`.card[hidden]` and `.repo-item[hidden]` both need explicit `display: none`** — both
+  carry an author-level `display` that outranks the UA's `[hidden]` rule, and both are
+  filtered by toggling `hidden`. Drop either rule and the matching search box silently
+  stops filtering.
+- **The gallery's search field does two jobs**: substring-filters the example cards
+  (against a `data-name` haystack of owner/repo + description + language) and recognises
+  a pasted GitHub link, offering to generate it. Because generating needs auth, the URL
+  is stashed in `localStorage.dd_pending_repo` and `renderGenerate()` consumes it exactly
+  once via `consumePendingRepo()` — that handoff is what stops the visitor having to find
+  and paste the link again after OAuth.
+- **Removed 2026-08-03, on purpose:** the gallery cards' rotating conic-gradient "border
+  beam" and the `attachTilt()` mousemove 3D tilt. The DeepWiki-style grid is calm and
+  flat; both effects fought it. `fallbackHue()` went with them (dead since the live-iframe
+  previews were replaced by screenshots).
 - **One button shape.** `.btn` plus `secondary`/`ghost`, `small`/`large`, and text-only
   `.link-danger`/`.link-quiet` for destructive and tertiary actions. Do not add a sixth
   button shape.
@@ -424,7 +449,9 @@ expensive" pass); the rules that pass established:
   build fails with a bare `Expected ";"`.
 
 Verify a change here with all three: `npm run test:tokens`, `npm run build`, and
-`npm run test:hosted` (the last one is the only thing that parses the client JS).
+`npm run test:hosted` (the last one is the only thing that parses the client JS — it now
+also covers the gallery filter, the pasted-link detection and its escaping, and the
+`dd_pending_repo` handoff).
 
 ### Gallery thumbnails (`lib/hosted/thumb.ts`, `api/thumb/[owner]/[repo].ts`)
 

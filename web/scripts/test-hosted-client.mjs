@@ -38,20 +38,26 @@ function makeEl(id) {
   };
 }
 
-function harness({ fetchImpl, present = ["stage-list", "result-slot", "gen-elapsed", "content"] }) {
+function harness({ fetchImpl, present = ["stage-list", "result-slot", "gen-elapsed", "content"], cards = [], store = {} }) {
   const els = new Map(present.map((id) => [id, makeEl(id)]));
+  const cardEls = cards.map((name) => ({ ...makeEl("card"), hidden: false, dataset: { name } }));
   const scheduled = [];
   const ctx = {
     document: {
       getElementById: (id) => els.get(id) || null,
       createElement: (t) => makeEl(t),
       addEventListener() {}, removeEventListener() {},
-      querySelectorAll: () => [], querySelector: () => null,
+      querySelectorAll: (sel) => (String(sel).includes(".card[data-name]") ? cardEls : []),
+      querySelector: () => null,
     },
     window: { location: { pathname: "/", href: "" }, addEventListener() {}, matchMedia: () => ({ matches: false }) },
     location: { pathname: "/", href: "" },
     history: { pushState() {}, replaceState() {} },
-    localStorage: { getItem: () => null, setItem() {} },
+    localStorage: {
+      getItem: (k) => (k in store ? store[k] : null),
+      setItem(k, v) { store[k] = String(v); },
+      removeItem(k) { delete store[k]; },
+    },
     fetch: fetchImpl,
     setTimeout: (fn, ms) => { scheduled.push({ fn, ms }); return scheduled.length; },
     clearTimeout() {}, setInterval: () => 1, clearInterval() {},
@@ -59,9 +65,10 @@ function harness({ fetchImpl, present = ["stage-list", "result-slot", "gen-elaps
   };
   const fn = new Function(...Object.keys(ctx), src +
     "\n;return { poll, escapeHtml, pollDelayMs, selectRepoByName, state, route," +
+    " onGallerySearch, parseGithubUrlClient, startFromGallery, consumePendingRepo," +
     " getStartInFlight: () => startInFlight, setStartInFlight: (v) => { startInFlight = v; } };");
   const api = fn(...Object.values(ctx));
-  return { api, els, scheduled };
+  return { api, els, scheduled, cardEls, store };
 }
 
 let passed = 0;
@@ -175,6 +182,58 @@ const check = (name, cond) => { assert.ok(cond, "FAILED: " + name); console.log(
   api.state.projects = [];
   try { api.route(); } catch { /* rendering needs DOM we don't stub; the reset is what matters */ }
   check("navigating releases the submit guard", api.getStartInFlight() === false);
+}
+
+// ── 8. The gallery's one field: filter + "paste a link" detection ───────
+{
+  const { api, els, cardEls } = harness({
+    fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+    present: ["content", "ask-slot"],
+    cards: ["microsoft/vscode visual studio code typescript", "karpathy/nanochat the best chatgpt python"],
+  });
+
+  api.onGallerySearch("nanochat");
+  check("filter hides cards that do not match", cardEls[0].hidden === true);
+  check("filter keeps cards that match", cardEls[1].hidden === false);
+
+  api.onGallerySearch("");
+  check("an empty query restores every card", cardEls.every((c) => c.hidden === false));
+
+  // Matching on description text, not just the name.
+  api.onGallerySearch("typescript");
+  check("filter also matches the description", cardEls[0].hidden === false && cardEls[1].hidden === true);
+
+  api.onGallerySearch("zzzz-no-such-repo");
+  check("a query matching nothing explains the next step", /paste a github link/i.test(els.get("ask-slot").innerHTML));
+
+  api.onGallerySearch("https://github.com/acme/widgets");
+  const hit = els.get("ask-slot").innerHTML;
+  check("a pasted GitHub link offers to generate it", /startFromGallery/.test(hit) && /acme\/widgets/.test(hit));
+  check("a pasted link does not leave a stale no-match note", !/matches that/i.test(hit));
+
+  // The raw value lands inside a single-quoted onclick attribute.
+  api.onGallerySearch("https://github.com/a/b'+alert(1)+'");
+  check("a quote in the pasted URL cannot break out of the onclick",
+    !/'\+alert\(1\)\+'/.test(els.get("ask-slot").innerHTML));
+}
+
+// ── 9. A link pasted before sign-in survives the OAuth round trip ───────
+{
+  const { api, els, store } = harness({
+    fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
+    present: ["content", "ask-slot", "modal-slot", "paste-url", "paste-confirm-slot", "confirm-slot", "repo-list"],
+  });
+  api.startFromGallery("https://github.com/acme/widgets");
+  check("the pasted repo is stored before the OAuth redirect", store.dd_pending_repo === "https://github.com/acme/widgets");
+
+  api.state.projects = [];
+  api.consumePendingRepo();
+  check("after sign-in the paste field is prefilled", els.get("paste-url").value === "https://github.com/acme/widgets");
+  check("the pending repo is consumed exactly once", store.dd_pending_repo === undefined);
+
+  els.get("paste-url").value = "";
+  api.consumePendingRepo();
+  check("a second visit does not resurrect it", els.get("paste-url").value === "");
 }
 
 console.log(`\n${passed} checks passed`);

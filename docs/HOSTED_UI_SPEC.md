@@ -220,8 +220,9 @@ system", for the full rule list and the traps). The four rules that define the l
 2. **DM Sans carries everything; JetBrains Mono is for code only** (a pasted repo URL,
    inline `code`). Repo names and page titles are sans. Mono-as-UI-text was the main
    reason the signed-in screens read as a terminal toy.
-3. **One page width** (`--w-page`, 736px signed-in / 1152px gallery) shared by the app
-   bar and the content column, so the brand mark sits above the page title.
+3. **One page width** (`--w-page`, 736px for `/generate` + detail + progress, 1152px for
+   the two grids) shared by the app bar and the content column, so the brand mark sits
+   above the page title. Each render function sets it; `route()` does not.
 4. **One button shape, one type ramp, one segmented control.** No second vocabulary for
    the same job on a different screen.
 
@@ -229,6 +230,17 @@ Emoji (the old `🔒 Private` / `🌐 Public` pills), uppercase letterspaced mon
 micro-labels, and the bordered "danger zone" panel were all removed in that pass. The
 visibility choice is a segmented control; delete is a quiet text button that still
 requires the two-step confirm (rule 13 below).
+
+**Layout (2026-08-03, second pass — modelled on DeepWiki):** the public gallery and
+`/projects` are the same `.card-grid`, each led by one accent-gradient `.card-new` that is
+the primary CTA (it replaced `/projects`'s header "Generate new" button — don't re-add
+one). Gallery cards carry a real screenshot of the generated site; **project cards
+deliberately carry none**, because on your own list the name and build state are what you
+scan for. The gallery gained a centered "Which repository would you like documented?" ask
+plus one field that both filters the examples and recognises a pasted GitHub link, handing
+it to `/generate` through `localStorage.dd_pending_repo` so it survives the OAuth round
+trip. The rotating "border beam" and the mousemove 3D card tilt were removed: the grid is
+calm and flat, and both fought it.
 
 ---
 

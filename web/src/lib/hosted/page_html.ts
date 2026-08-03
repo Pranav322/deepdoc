@@ -332,33 +332,12 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .modal-feature-title { font-size: 13.5px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); margin: 0 0 2px; }
   .modal-feature-desc { font-size: 12.5px; color: var(--ink-muted); line-height: 1.5; margin: 0; }
 
-  /* ── /projects — name, state, age. Nothing else; everything actionable
-     lives one click deeper on the detail page. ─────────────────────── */
-  .proj-list-min { display: flex; flex-direction: column; margin: 0 -12px; }
-  .proj-row-min { display: flex; align-items: center; gap: 12px; padding: 13px 12px;
-    border-radius: var(--r-md); text-decoration: none; color: inherit; position: relative;
-    transition: background 0.12s var(--ease); }
-  /* An inset hairline rather than a border, so it stops short of the row's
-     rounded hover surface instead of cutting across it. */
-  .proj-row-min::after { content: ''; position: absolute; left: 12px; right: 12px; bottom: 0;
-    height: 1px; background: var(--line); }
-  .proj-row-min:last-child::after { display: none; }
-  .proj-row-min:hover { background: var(--hover); }
-  .proj-row-min:hover::after, .proj-row-min:hover + .proj-row-min::after { opacity: 0; }
-  .proj-row-min:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
-  /* Colour is the whole status indicator; the label is there for screen
-     readers and on hover. */
+  /* Status dot, shared by the project cards and the detail page. Colour is
+     the whole indicator; the text label sits beside it. */
   .pr-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; background: var(--ink-faint); }
   .pr-dot.done { background: var(--accent); }
   .pr-dot.failed { background: var(--danger); }
   .pr-dot.building { background: var(--accent); animation: pulse 1.4s ease-in-out infinite; }
-  .pr-name { flex: 1; min-width: 0; font-size: 14px; font-weight: 500; letter-spacing: -0.01em;
-    color: var(--ink); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .pr-name .g-owner { color: var(--ink-faint); font-weight: 400; }
-  .pr-age { font-size: 12.5px; color: var(--ink-faint); flex-shrink: 0; font-variant-numeric: tabular-nums; }
-  .pr-chev { color: var(--ink-faint); flex-shrink: 0; opacity: 0; transform: translateX(-3px);
-    transition: opacity 0.15s var(--ease), transform 0.15s var(--ease); }
-  .proj-row-min:hover .pr-chev, .proj-row-min:focus-visible .pr-chev { opacity: 1; transform: translateX(0); }
 
   /* ── /projects/:owner/:repo ─────────────────────────────────────────── */
   .proj-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px;
@@ -482,54 +461,92 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .stage-row.done .stage-label { color: var(--ink-muted); }
   .gen-actions { display: flex; gap: 8px; margin-top: 14px; }
 
-  /* ── Public gallery (logged-out root) — a grid of real generated docs,
-     shown before ever asking for GitHub access. The card's visual is a real
-     screenshot of the generated site, cached in R2. ─────────────────── */
-  .gallery-head { padding: 44px 0 30px; max-width: 620px; }
-  .gallery-title { font-size: clamp(26px, 3.4vw, 36px); font-weight: 600; letter-spacing: -0.03em;
-    line-height: 1.12; color: var(--ink); margin: 0; }
-  .gallery-sub { font-size: 14.5px; line-height: 1.6; color: var(--ink-muted); margin: 12px 0 0; max-width: 56ch; }
-  .gallery-heading { font-size: 15px; font-weight: 500; color: var(--ink-muted); letter-spacing: -0.01em; margin: 0; }
-  .gallery-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(290px, 1fr)); gap: 20px; }
-  .gallery-card { position: relative; display: flex; border-radius: var(--r-lg); cursor: pointer;
-    transition: transform 0.1s ease-out; will-change: transform; text-decoration: none; color: inherit; }
-  .gallery-card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
-  /* Border beam: a rotating conic-gradient sits behind the card and an inner
-     surface inset by the border's thickness reveals only that hairline gap.
-     No mask-composite, which was too fragile across browsers. */
-  .gallery-card::before {
-    content: ''; position: absolute; inset: 0; border-radius: inherit;
-    background: conic-gradient(from var(--beam-angle, 0deg), transparent 0%, transparent 78%, var(--accent) 90%, transparent 100%);
-    opacity: 0; transition: opacity 0.2s var(--ease);
-  }
-  .gallery-card:hover::before { opacity: 1; animation: gallery-beam 2.2s linear infinite; }
-  @property --beam-angle { syntax: '<angle>'; inherits: false; initial-value: 0deg; }
-  @keyframes gallery-beam { to { --beam-angle: 360deg; } }
-  @media (prefers-reduced-motion: reduce) { .gallery-card:hover::before { animation: none; opacity: 0.6; } }
-  /* flex: 1 is what keeps every card in a row the same height regardless of
-     how much text it carries. */
-  .gallery-card-surface { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1;
-    margin: 1.5px; border: 1px solid var(--line); border-radius: 12.5px; background: var(--surface-raised);
-    overflow: hidden; transition: border-color 0.12s var(--ease); }
-  .gallery-card:hover .gallery-card-surface { border-color: transparent; }
-  .gallery-preview { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
+  /* ── The ask — a centered question and one field, the whole hero of the
+     public gallery. The field both filters the examples below and accepts a
+     pasted GitHub link. ──────────────────────────────────────────────── */
+  .ask { padding: 54px 0 32px; text-align: center; }
+  .ask h1 { font-size: clamp(23px, 2.7vw, 31px); font-weight: 600; letter-spacing: -0.028em; line-height: 1.2; }
+  .ask-field { position: relative; max-width: 470px; margin: 22px auto 0; }
+  .ask-field svg { position: absolute; left: 15px; top: 50%; transform: translateY(-50%);
+    width: 16px; height: 16px; color: var(--ink-faint); pointer-events: none; }
+  .ask-field input { height: 46px; padding-left: 42px; border-radius: var(--r-md);
+    background: var(--surface-raised); font-size: 14px; }
+  .ask-note { max-width: 470px; margin: 12px auto 0; font-size: 12.5px; color: var(--ink-muted); }
+  .ask-hit { display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    max-width: 470px; margin: 14px auto 0; padding: 11px 12px 11px 15px; text-align: left;
+    border: 1px solid var(--accent-line); background: var(--accent-dim);
+    border-radius: var(--r-md); animation: rise 0.16s var(--ease); }
+  .ask-hit span { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; min-width: 0;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+  /* ── Card grid — the public gallery and /projects are the same grid. The
+     gallery's cards carry a real screenshot of the generated site (captured
+     once, cached in R2); the project cards deliberately do not, because on
+     your own list the name and state are what you scan for, and a wall of
+     thumbnails of your own sites is noise. ──────────────────────────── */
+  /* grid-auto-rows keeps every row the same minimum height, so a row of
+     description-less cards doesn't come out visibly shorter than the row
+     above it. Image cards exceed it and are unaffected. */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    grid-auto-rows: minmax(150px, auto); gap: 16px; }
+  .card { display: flex; flex-direction: column; border: 1px solid var(--line);
+    border-radius: var(--r-lg); background: var(--surface-raised); overflow: hidden;
+    text-decoration: none; color: inherit; cursor: pointer;
+    transition: border-color 0.16s var(--ease), transform 0.16s var(--ease); }
+  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+  /* The grid filter toggles the hidden property, and the author-level display
+     above outranks the UA's [hidden] rule. */
+  .card[hidden] { display: none; }
+  .card-shot { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
     background: var(--surface-high); border-bottom: 1px solid var(--line); }
   .gallery-shot { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
   /* A hairline of light along the top edge, so it reads as a screen rather
      than a flat colour swatch. */
-  .gallery-preview::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+  .card-shot::after { content: ''; position: absolute; inset: 0; pointer-events: none;
     box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }
-  .gallery-body { display: flex; flex-direction: column; flex: 1; padding: 14px 16px 15px; min-width: 0; }
-  .gallery-name { font-size: 13.5px; font-weight: 600; letter-spacing: -0.012em; color: var(--ink);
+  .card-body { display: flex; flex-direction: column; flex: 1; padding: 16px 17px 0; min-width: 0; }
+  .card-title { font-size: 14px; font-weight: 600; letter-spacing: -0.014em; color: var(--ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .gallery-name .g-owner { color: var(--ink-faint); font-weight: 400; }
-  .gallery-desc { font-size: 12.5px; color: var(--ink-muted); margin-top: 6px; line-height: 1.5;
+  .card-title .g-owner { color: var(--ink-faint); font-weight: 400; }
+  .card-desc { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); margin-top: 7px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .gallery-meta { display: flex; align-items: center; gap: 10px; margin-top: auto; padding-top: 12px;
-    font-size: 11.5px; color: var(--ink-faint); }
-  .g-lang { display: inline-flex; align-items: center; gap: 5px; }
-  .g-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); opacity: 0.75; }
-  .g-date { margin-left: auto; font-variant-numeric: tabular-nums; }
+  .card-foot { display: flex; align-items: center; gap: 12px; padding: 15px 17px 16px; margin-top: auto; }
+  .card-metric { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+    color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  /* The affordance that says "this opens". Fills with ink on card hover. */
+  .card-go { margin-left: auto; width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    display: flex; align-items: center; justify-content: center; background: var(--surface-high);
+    color: var(--ink-muted); transition: background 0.16s var(--ease), color 0.16s var(--ease); }
+  .card:hover .card-go { background: var(--solid); color: var(--solid-ink); }
+  /* The one card that starts something rather than opening something. Accent
+     stays a state colour: it marks this card as the distinguished one. */
+  .card-new { background: linear-gradient(155deg, var(--accent-dim), var(--surface-raised) 62%);
+    border-color: var(--accent-line); min-height: 150px; }
+  .card-new:hover { border-color: var(--accent); }
+  /* In the gallery this card stretches to match cards carrying a 16:10
+     screenshot, so top-aligned content would leave a void down the middle.
+     Centering makes the height read as deliberate in both grids. */
+  .card-new .card-body { justify-content: center; }
+  .card-plus { width: 27px; height: 27px; border-radius: 50%; display: flex; align-items: center;
+    justify-content: center; background: var(--accent-dim); border: 1px solid var(--accent-line);
+    color: var(--accent); margin-bottom: 13px; }
+  .card-new .card-go { background: var(--accent-dim); color: var(--accent); }
+  .card-new:hover .card-go { background: var(--accent); color: var(--accent-ink); }
+  /* At quota there is nothing to start, so the lead card states why instead of
+     offering an action that would only be refused. */
+  .card-new.is-blocked { background: none; border-style: dashed; border-color: var(--line-strong); cursor: default; }
+  .card-new.is-blocked:hover { transform: none; border-color: var(--line-strong); }
+  .card-new.is-blocked .card-plus { background: none; border-color: var(--line-strong); color: var(--ink-faint); }
+
+  /* Dashed rules framing the wide grid — an editorial edge so the page has a
+     boundary instead of bleeding into the viewport. */
+  .page-ruled { position: relative; }
+  .page-ruled::before, .page-ruled::after { content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
+    background: repeating-linear-gradient(to bottom, var(--line) 0 4px, transparent 4px 9px); }
+  .page-ruled::before { left: 0; } .page-ruled::after { right: 0; }
+  @media (max-width: 900px) { .page-ruled::before, .page-ruled::after { display: none; } }
+
   .cloud-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
     margin-top: 64px; padding: 24px 0 8px; border-top: 1px solid var(--line);
     font-size: 12.5px; color: var(--ink-faint); }
@@ -542,7 +559,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     .page-head { padding: 36px 0 22px; }
     .t-display { font-size: 24px; }
     .proj-head .title-block h1 { font-size: 20px; }
-    .gallery-head { padding: 32px 0 24px; }
+    .ask { padding: 34px 0 24px; }
   }
 </style>
 </head>
@@ -571,7 +588,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // state, or the guard would outlive the submit and disable Retry.
     let startInFlight = false;
 
-    const CHEVRON_ICON = '<svg class="pr-chev" viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m9 18 6-6-6-6"/></svg>';
+    const ARROW_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
+    const PLUS_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
     const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>';
 
     const STAGES = ['cloning', 'generating', 'building'];
@@ -656,11 +674,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // Retry after a failed build and the Generate button after "Back to
       // generate" would both silently do nothing.
       startInFlight = false;
-      // Drives --w-page. The signed-in screens are a 736px reading column;
-      // the public gallery is a full-width grid. Set before renderAppBar so
-      // the bar and the content beneath it resolve to the same width and the
-      // brand mark lines up with the page title.
-      document.body.dataset.view = 'app';
       renderAppBar();
       const path = window.location.pathname;
       const projMatch = path.match(/^\\/projects\\/([\\w.-]+)\\/([\\w.-]+)\\/?$/);
@@ -809,7 +822,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // sign-in modal. The modal only appears once someone actually clicks
     // "Generate your own" — see renderPublicGallery below.
     async function renderLoggedOut() {
-      document.body.dataset.view = 'gallery';
+      document.body.dataset.view = 'wide';
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
@@ -831,7 +844,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // is a static message with a manual refresh rather than new plumbing
     // for what's a fairly rare thing to land on directly.
     function renderPublicInProgress(owner, repo) {
-      document.body.dataset.view = 'gallery';
+      document.body.dataset.view = 'wide';
       document.getElementById('appbar-slot').innerHTML = \`
         <header class="appbar"><div class="appbar-inner">
           <span class="brand">\${brandMarkHtml()}</span>
@@ -852,85 +865,125 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       document.getElementById('modal-slot').innerHTML = signInModalHtml('/auth/github', true);
     }
 
-    // Deterministic hue + initial, shown behind the live preview iframe as
-    // a backdrop (in case the iframe is slow, still building, or fails) —
-    // never a flat blank box while the real preview loads.
-    function fallbackHue(owner) {
-      let hash = 0;
-      for (let i = 0; i < owner.length; i++) hash = (hash * 31 + owner.charCodeAt(i)) | 0;
-      return Math.abs(hash) % 360;
+    // The one card in either grid that starts something instead of opening
+    // something. Title/desc are literals from call sites, not user data.
+    function newCardHtml(title, desc, onclickExpr, href) {
+      return \`
+        <a class="card card-new" href="\${href}" onclick="\${onclickExpr}">
+          <div class="card-body">
+            <div class="card-plus">\${PLUS_ICON}</div>
+            <div class="card-title">\${title}</div>
+            <div class="card-desc">\${desc}</div>
+          </div>
+          <div class="card-foot"><span class="card-go">\${ARROW_ICON}</span></div>
+        </a>\`;
+    }
+
+    // Carry a URL pasted before sign-in through OAuth, so the visitor doesn't
+    // have to find and paste it again. renderGenerate() consumes it once.
+    function startFromGallery(url) {
+      try { localStorage.setItem('dd_pending_repo', url); } catch (err) {}
+      openSignInFromGallery();
+    }
+    function consumePendingRepo() {
+      let pending = null;
+      try {
+        pending = localStorage.getItem('dd_pending_repo');
+        if (pending) localStorage.removeItem('dd_pending_repo');
+      } catch (err) { return; }
+      if (!pending) return;
+      const el = document.getElementById('paste-url');
+      if (!el) return;
+      el.value = pending;
+      onPasteInput();
+    }
+
+    // One field does both jobs: filter the examples, and recognise a pasted
+    // GitHub link as "generate this one instead".
+    function onGallerySearch(value) {
+      const raw = String(value || '').trim();
+      const needle = raw.toLowerCase();
+      let shown = 0;
+      document.querySelectorAll('#gallery-grid .card[data-name]').forEach((el) => {
+        const match = !needle || (el.dataset.name || '').includes(needle);
+        el.hidden = !match;
+        if (match) shown++;
+      });
+      const slot = document.getElementById('ask-slot');
+      if (!slot) return;
+      const parsed = parseGithubUrlClient(raw);
+      if (parsed) {
+        slot.innerHTML = \`
+          <div class="ask-hit">
+            <span>\${escapeHtml(parsed.owner + '/' + parsed.repo)}</span>
+            <button class="btn small" onclick="startFromGallery('\${escapeHtml(raw)}')">Generate docs</button>
+          </div>\`;
+      } else if (needle && shown === 0) {
+        slot.innerHTML = '<p class="ask-note">Nothing here matches that. Paste a GitHub link to generate it.</p>';
+      } else {
+        slot.innerHTML = '';
+      }
     }
 
     function renderPublicGallery(examples) {
-      if (!examples.length) {
-        document.getElementById('content').innerHTML = \`
-          <div class="page">
-            <div class="page-head"><h1 class="gallery-heading">Previously generated by others</h1></div>
-            <div class="empty-state">
-              <h2>No public docs yet</h2>
-              <p>Nothing's been shared publicly so far — check back soon, or be the first.</p>
-              <button class="btn" onclick="openSignInFromGallery()">Generate your own</button>
-            </div>
-          </div>\`;
-        return;
-      }
-      // This grid is served to unauthenticated visitors, and description /
-      // owner / repo all come from GitHub. Interpolating them raw made any
-      // public repo whose description contained markup a stored-XSS vector
-      // against every visitor, and an apostrophe in the URL used to break out
-      // of the onclick attribute and make the card silently unclickable.
+      document.body.dataset.view = 'wide';
+      // Description / owner / repo all come from GitHub and this grid is served
+      // to unauthenticated visitors, so every one of them is escaped: a public
+      // repo whose description contained markup was a stored-XSS vector, and an
+      // apostrophe in the URL used to break out of the old onclick attribute.
       const cards = examples.map((e, i) => {
         const siteUrl = '/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo) + '/';
-        const safeUrl = escapeHtml(siteUrl);
         const safeName = escapeHtml(e.owner + '/' + e.repo);
         const safeOwner = escapeHtml(e.owner);
         const safeRepo = escapeHtml(e.repo);
-        // Real screenshot, captured once and cached in R2. Replaces a live
-        // <iframe> of the whole docs site scaled 400% -> 25%: up to 60 of
-        // those on one page was the single biggest source of jank, and the
-        // result was blurry besides. ?v pins the generation timestamp so a
-        // regenerate busts the URL. Width/height are set so the grid never
-        // reflows as images arrive.
-        // Theme is in the URL, not read from the cookie server-side, so each
-        // variant has its own immutable cacheable address. Swapped in place by
-        // toggleTheme() rather than re-fetching the gallery.
+        // Theme is in the URL rather than read from the cookie server-side, so
+        // each variant has its own immutable cacheable address. Swapped in
+        // place by toggleTheme() instead of re-fetching the gallery.
         const thumbUrl = thumbUrlFor(e.owner, e.repo, e.createdAt, currentTheme());
-        // Only the first row is worth fetching eagerly; the rest are almost
-        // always below the fold.
+        // Only the first row is worth fetching eagerly.
         const loading = i < 3 ? 'eager' : 'lazy';
         const dateStr = e.createdAt
           ? new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
           : '';
+        const haystack = escapeHtml(
+          (e.owner + '/' + e.repo + ' ' + (e.description || '') + ' ' + (e.language || '')).toLowerCase()
+        );
         return \`
-        <a class="gallery-card" href="\${safeUrl}" data-href="\${safeUrl}">
-          <div class="gallery-card-surface">
-            <div class="gallery-preview">
-              <img class="gallery-shot" src="\${escapeHtml(thumbUrl)}" alt="Documentation generated for \${safeName}"
-                   data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(e.createdAt || 0))}"
-                   width="1280" height="800" loading="\${loading}" decoding="async" />
-            </div>
-            <div class="gallery-body">
-              <div class="gallery-name"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
-              \${e.description ? '<div class="gallery-desc">' + escapeHtml(e.description) + '</div>' : ''}
-              <div class="gallery-meta">
-                \${e.language ? '<span class="g-lang"><span class="g-dot"></span>' + escapeHtml(e.language) + '</span>' : ''}
-                \${dateStr ? '<span class="g-date">' + escapeHtml(dateStr) + '</span>' : ''}
-              </div>
-            </div>
+        <a class="card" href="\${escapeHtml(siteUrl)}" data-name="\${haystack}">
+          <div class="card-shot">
+            <img class="gallery-shot" src="\${escapeHtml(thumbUrl)}" alt="Documentation generated for \${safeName}"
+                 data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(e.createdAt || 0))}"
+                 width="1280" height="800" loading="\${loading}" decoding="async" />
+          </div>
+          <div class="card-body">
+            <div class="card-title"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
+            \${e.description ? '<div class="card-desc">' + escapeHtml(e.description) + '</div>' : ''}
+          </div>
+          <div class="card-foot">
+            \${e.language ? '<span class="card-metric">' + escapeHtml(e.language) + '</span>' : ''}
+            \${dateStr ? '<span class="card-metric">' + escapeHtml(dateStr) + '</span>' : ''}
+            <span class="card-go">\${ARROW_ICON}</span>
           </div>
         </a>\`;
       }).join('');
-      // The old heading was a bare 15px muted line reading "Previously
-      // generated by others" over a wall of cards, with ~1000px of dead space
-      // below and no footer — the page just stopped. Give it a real title, a
-      // line of context, and a closing edge.
       document.getElementById('content').innerHTML = \`
-        <div class="page">
-          <div class="gallery-head">
-            <h1 class="gallery-title">Documentation, generated from real repositories</h1>
-            <p class="gallery-sub">Every site below was produced by DeepDoc from source. Open any of them, or point it at your own repo.</p>
+        <div class="page page-ruled">
+          <div class="ask">
+            <h1>Which repository would you like documented?</h1>
+            <div class="ask-field">
+              \${SEARCH_ICON}
+              <input id="gallery-search" placeholder="Search these, or paste a GitHub link"
+                     aria-label="Search the examples, or paste a GitHub repository link"
+                     oninput="onGallerySearch(this.value)" />
+            </div>
+            <div id="ask-slot">\${examples.length ? '' :
+              '<p class="ask-note">Nothing has been shared publicly yet. Be the first.</p>'}</div>
           </div>
-          <div class="gallery-grid">\${cards}</div>
+          <div class="card-grid" id="gallery-grid">
+            \${newCardHtml('Generate your own', 'Point DeepDoc at any public GitHub repository.',
+                          'openSignInFromGallery(); return false;', '#')}
+            \${cards}
+          </div>
           <footer class="cloud-footer">
             <span>Generated by <strong>DeepDoc</strong></span>
             <nav class="cloud-footer-links">
@@ -941,23 +994,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
             </nav>
           </footer>
         </div>\`;
-      attachTilt();
-    }
-
-    // Subtle 3D tilt on mousemove — plain CSS transform + a bit of math,
-    // the same effect a framer-motion card gives you without needing
-    // React/framer-motion in this codebase.
-    function attachTilt() {
-      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
-      document.querySelectorAll('.gallery-card').forEach((card) => {
-        card.addEventListener('mousemove', (e) => {
-          const rect = card.getBoundingClientRect();
-          const x = (e.clientX - rect.left) / rect.width - 0.5;
-          const y = (e.clientY - rect.top) / rect.height - 0.5;
-          card.style.transform = 'perspective(700px) rotateX(' + (-y * 7).toFixed(2) + 'deg) rotateY(' + (x * 7).toFixed(2) + 'deg) translateY(-2px)';
-        });
-        card.addEventListener('mouseleave', () => { card.style.transform = ''; });
-      });
     }
 
     // Shared between the auto-popup here and (in spirit — index.astro keeps
@@ -1045,9 +1081,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
     // ── /projects — click-through list, no per-row buttons ───────────
     function renderProjects() {
+      document.body.dataset.view = 'wide';
       const q = state.quota;
       const atQuota = q && q.maxSavedProjects != null && q.savedProjects >= q.maxSavedProjects;
-      const genBtn = \`<button class="btn" \${atQuota ? 'disabled title="At your project limit — delete one to free a slot"' : ''} onclick="nav(event,'/generate')">Generate new</button>\`;
 
       // A failed /api/projects used to fall through to "No projects yet",
       // telling the user their work was gone when it was a network error.
@@ -1060,49 +1096,59 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         return;
       }
 
-      if (!state.projects.length) {
-        document.getElementById('content').innerHTML = \`
-          <div class="page">
-            <div class="page-head"><h1 class="t-display">Projects</h1></div>
-            <div class="empty-state">
-              <h2>No projects yet</h2>
-              <p>Point DeepDoc at a GitHub repository and it builds a documentation site from the source.</p>
-              \${genBtn}
-            </div>
-          </div>\`;
-        return;
-      }
-      // Name, state, age. Everything else — visibility, language, description,
-      // the preview — lives on the detail page, where it is actionable. An
-      // earlier pass put all of it in the row and ten elements per line read as
-      // a dashboard, not a list.
-      const rows = state.projects.map(p => {
+      // No thumbnails here, deliberately: on your own list the name and the
+      // build state are what you scan for, and a wall of screenshots of sites
+      // you already know is noise. The public gallery is the opposite case,
+      // where the screenshot IS the pitch.
+      const cards = state.projects.map(p => {
         const meta = STATUS_META[p.status] || { label: p.status, cls: '' };
-        // The owner is almost always you, so showing it on every row is noise.
-        // Surface it only when it isn't, which is exactly when it disambiguates.
+        // The owner is almost always you, so showing it on every card is noise.
+        // Surface it only when it isn't, which is when it disambiguates.
         const mine = state.me && state.me.login
           && p.owner.toLowerCase() === state.me.login.toLowerCase();
         return \`
-        <a class="proj-row-min" href="/projects/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}"
+        <a class="card" href="/projects/\${encodeURIComponent(p.owner)}/\${encodeURIComponent(p.repo)}"
            onclick="return nav(event,'/projects/\${escapeHtml(p.owner)}/\${escapeHtml(p.repo)}')">
-          <span class="pr-dot \${meta.cls}" title="\${escapeHtml(meta.label)}" aria-hidden="true"></span>
-          <span class="pr-name">\${mine ? '' : '<span class="g-owner">' + escapeHtml(p.owner) + '/</span>'}\${escapeHtml(p.repo)}</span>
-          <span class="sr-only">\${escapeHtml(meta.label)}</span>
-          <span class="pr-age">\${p.createdAt ? escapeHtml(shortAge(p.createdAt)) : ''}</span>
-          \${CHEVRON_ICON}
+          <div class="card-body">
+            <div class="card-title">\${mine ? '' : '<span class="g-owner">' + escapeHtml(p.owner) + '/</span>'}\${escapeHtml(p.repo)}</div>
+            \${p.description ? '<div class="card-desc">' + escapeHtml(p.description) + '</div>' : ''}
+          </div>
+          <div class="card-foot">
+            <span class="card-metric"><span class="pr-dot \${meta.cls}" aria-hidden="true"></span>\${escapeHtml(meta.label)}</span>
+            \${p.createdAt ? '<span class="card-metric">' + escapeHtml(shortAge(p.createdAt)) + '</span>' : ''}
+            <span class="card-go">\${ARROW_ICON}</span>
+          </div>
         </a>\`;
       }).join('');
+
+      // At quota the lead card states why rather than offering an action that
+      // would only be refused on arrival.
+      const lead = atQuota
+        ? \`<div class="card card-new is-blocked">
+             <div class="card-body">
+               <div class="card-plus">\${PLUS_ICON}</div>
+               <div class="card-title">At your project limit</div>
+               <div class="card-desc">Delete one of the projects here to free a slot.</div>
+             </div>
+             <div class="card-foot">
+               <span class="card-metric">\${q.savedProjects} of \${q.maxSavedProjects} used</span>
+             </div>
+           </div>\`
+        : newCardHtml('Generate a new site', 'Point DeepDoc at one of your repositories.',
+                      "return nav(event,'/generate')", '/generate');
+
       const n = state.projects.length;
       document.getElementById('content').innerHTML = \`
-        <div class="page">
+        <div class="page page-ruled">
           <div class="page-head">
             <div>
               <h1 class="t-display">Projects</h1>
-              <p class="t-sub">\${n} documentation \${n === 1 ? 'site' : 'sites'} generated from your repositories.</p>
+              <p class="t-sub">\${n
+                ? n + ' documentation ' + (n === 1 ? 'site' : 'sites') + ' generated from your repositories.'
+                : 'Nothing generated yet. Start with the card below.'}</p>
             </div>
-            \${genBtn}
           </div>
-          <div class="proj-list-min">\${rows}</div>
+          <div class="card-grid">\${lead}\${cards}</div>
         </div>\`;
     }
 
@@ -1141,6 +1187,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
     // ── /projects/:owner/:repo — the only place project actions live ─
     function renderProjectDetail(owner, repo) {
+      document.body.dataset.view = 'app';
       const p = state.projects.find(x => x.owner.toLowerCase() === owner.toLowerCase() && x.repo.toLowerCase() === repo.toLowerCase());
       // Deep-linking here used to bounce silently to /projects. If the list
       // simply failed to load that reads as "my project vanished", so say
@@ -1279,6 +1326,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
     // ── /generate — the only post-login home ─────────────────────────
     function renderGenerate() {
+      document.body.dataset.view = 'app';
       state.selected = null;
       state.visibility = 'private';
       const q = state.quota;
@@ -1317,6 +1365,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div id="error-slot"></div>
         </div>\`;
       loadRepos();
+      // A link pasted on the public gallery before signing in.
+      consumePendingRepo();
     }
 
     function repoSkeletonHtml() {

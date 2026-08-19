@@ -17,7 +17,11 @@ import json
 import hashlib
 from pathlib import Path
 import time
-from typing import Any
+from typing import Any, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from .persistence_v2 import DocPage
+    from .v2_models import DocPlan, RepoScan
 
 from rich.console import Console
 from rich.panel import Panel
@@ -392,7 +396,7 @@ class PipelineV2:
         # ── Glossary auto-link pass ───────────────────────────────────
         try:
             with self.telemetry.span("pipeline.glossary"):
-                self._apply_glossary_links(plan)
+                self._apply_glossary_links()
         except Exception as exc:
             console.print(f"[dim]Glossary auto-link skipped: {exc}[/dim]")
 
@@ -633,12 +637,12 @@ class PipelineV2:
     # Phase 4: API Playground
     # ──────────────────────────────────────────────────────────────────────
 
-    def _apply_glossary_links(self, plan: DocPlan) -> None:
+    def _apply_glossary_links(self) -> None:
         """Auto-link domain-glossary terms across all generated pages.
 
         Single pass: parse `### term` headings from the glossary page, then for
         every other generated .md, replace the first occurrence of each term
-        with a link to /domain-glossary#<slug>. Skips code blocks, headings,
+        with a link to domain-glossary.md#<slug>. Skips code blocks, headings,
         existing links, and the glossary page itself.
         """
         from .generator.post_processors import (
@@ -667,7 +671,7 @@ class PipelineV2:
                 continue
             updated = link_glossary_terms(original, terms)
             if updated != original:
-                md_path.write_text(updated, encoding="utf-8")
+                atomic_write_text(md_path, updated)
                 rewritten += 1
         if rewritten:
             console.print(

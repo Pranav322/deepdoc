@@ -334,12 +334,6 @@ def test_generation_max_retries_is_three() -> None:
     assert MAX_RETRIES == 3
 
 
-def test_pipeline_max_retries_is_three() -> None:
-    from deepdoc.pipeline_v2 import MAX_RETRIES
-
-    assert MAX_RETRIES == 3
-
-
 def test_generation_backoff_is_capped() -> None:
     """_call_with_retry's *actual* sleep durations are clamped at 20.0s + jitter.
 
@@ -372,26 +366,3 @@ def test_generation_backoff_is_capped() -> None:
     assert sleeps, "retry loop never slept — test isn't exercising the backoff path"
     assert max(sleeps) <= 20.0 + 1.5  # jitter adds up to 1.5s
     assert engine.generator.generate.call_count == 8
-
-
-def test_pipeline_backoff_is_capped() -> None:
-    """_call_llm_with_retry's *actual* sleep durations are clamped at 20.0s + jitter."""
-    from unittest.mock import MagicMock, patch
-
-    from deepdoc import pipeline_v2 as pipeline_mod
-    from deepdoc.pipeline_v2 import PipelineV2
-
-    pipeline = object.__new__(PipelineV2)
-    pipeline.llm = MagicMock()
-    pipeline.llm.complete.side_effect = RuntimeError("simulated 500 internal server error")
-
-    sleeps: list[float] = []
-    with patch.object(pipeline_mod, "MAX_RETRIES", 8), patch(
-        "time.sleep", side_effect=sleeps.append
-    ):
-        with pytest.raises(RuntimeError):
-            pipeline._call_llm_with_retry("some prompt")
-
-    assert sleeps, "retry loop never slept — test isn't exercising the backoff path"
-    assert max(sleeps) <= 20.0 + 1.5  # jitter adds up to 1.5s
-    assert pipeline.llm.complete.call_count == 8

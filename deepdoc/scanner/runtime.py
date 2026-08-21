@@ -475,6 +475,105 @@ def _discover_js_runtime(
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 
 
+def _discover_nestjs_runtime(file_contents: dict[str, str]) -> list[RuntimeTask]:
+    tasks: list[RuntimeTask] = []
+    cron_pattern = re.compile(
+        r"""@Cron\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*\{[^}]*\})?\s*\)\s*\n\s*(?:async\s+)?(\w+)\s*\(""",
+    )
+    interval_pattern = re.compile(
+        r"""@Interval\s*\(\s*(\d+)\s*\)\s*\n\s*(?:async\s+)?(\w+)\s*\(""",
+    )
+    timeout_pattern = re.compile(
+        r"""@Timeout\s*\(\s*(\d+)\s*\)\s*\n\s*(?:async\s+)?(\w+)\s*\(""",
+    )
+    bull_inject_pattern = re.compile(
+        r"""@InjectQueue\s*\(\s*['"]([^'"]+)['"]?\s*\)"""
+    )
+    bull_processor_pattern = re.compile(
+        r"""@Processor\s*\(\s*['"]([^'"]+)['"]?\s*\)"""
+    )
+    bull_process_pattern = re.compile(
+        r"""@Process\s*\(\s*(?:['"]([^'"]+)['"]?\s*)?\)\s*\n\s*(?:async\s+)?(\w+)\s*\(""",
+    )
+
+    for file_path, content in file_contents.items():
+        if Path(file_path).suffix.lower() not in {".ts", ".js"}:
+            continue
+        is_nestjs = (
+            "@nestjs" in content
+            or "@Cron(" in content
+            or "@InjectQueue(" in content
+            or "@Processor(" in content
+        )
+        if not is_nestjs:
+            continue
+
+        for cron_expr, handler in cron_pattern.findall(content):
+            tasks.append(
+                RuntimeTask(
+                    name=handler,
+                    file_path=file_path,
+                    runtime_kind="nestjs_cron",
+                    triggers=[cron_expr],
+                )
+            )
+
+        for interval_ms, handler in interval_pattern.findall(content):
+            tasks.append(
+                RuntimeTask(
+                    name=handler,
+                    file_path=file_path,
+                    runtime_kind="nestjs_interval",
+                    triggers=[f"every_{interval_ms}ms"],
+                )
+            )
+
+        for timeout_ms, handler in timeout_pattern.findall(content):
+            tasks.append(
+                RuntimeTask(
+                    name=handler,
+                    file_path=file_path,
+                    runtime_kind="nestjs_timeout",
+                    triggers=[f"after_{timeout_ms}ms"],
+                )
+            )
+
+        for queue_name in bull_inject_pattern.findall(content):
+            tasks.append(
+                RuntimeTask(
+                    name=f"bull_queue_{queue_name}",
+                    file_path=file_path,
+                    runtime_kind="nestjs_bull_producer",
+                    queue=queue_name,
+                    triggers=["injected"],
+                )
+            )
+
+        for queue_name in bull_processor_pattern.findall(content):
+            tasks.append(
+                RuntimeTask(
+                    name=f"bull_processor_{queue_name}",
+                    file_path=file_path,
+                    runtime_kind="nestjs_bull_consumer",
+                    queue=queue_name,
+                    triggers=["queue_message"],
+                )
+            )
+
+        for job_name, handler in bull_process_pattern.findall(content):
+            name = job_name or handler or "unknown"
+            tasks.append(
+                RuntimeTask(
+                    name=handler or name,
+                    file_path=file_path,
+                    runtime_kind="nestjs_bull_handler",
+                    triggers=[f"job:{name}"],
+                )
+            )
+
+    return _dedupe_runtime_tasks(tasks)
+
+
 def _discover_go_runtime(
     file_contents: dict[str, str],
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:

@@ -12,6 +12,7 @@ interface Project {
   language?: string | null;
   avatarUrl?: string | null;
   visibility?: string;
+  stars?: number | null;
 }
 
 // Ported from handleProjects in web/hosted/src/index.ts.
@@ -21,7 +22,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
   if (!user) return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
 
   const { results } = await env.DB.prepare(
-    "SELECT owner, repo, job_id, status, created_at, description, language, avatar_url, visibility FROM projects WHERE user_login = ? ORDER BY created_at DESC",
+    "SELECT owner, repo, job_id, status, created_at, description, language, avatar_url, visibility, stars FROM projects WHERE user_login = ? ORDER BY created_at DESC",
   )
     .bind(user.login)
     .all<{
@@ -34,6 +35,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
       language: string | null;
       avatar_url: string | null;
       visibility: string;
+      stars: number | null;
     }>();
 
   const projects: Project[] = [];
@@ -58,6 +60,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
       language: row.language,
       avatarUrl: row.avatar_url,
       visibility: row.visibility,
+      stars: row.stars,
     });
   }
 

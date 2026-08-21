@@ -955,3 +955,45 @@ app.add_api_route("/health", common_handler, methods=["GET", "POST"])
     
     assert ("GET", "/health", "common_handler") in method_paths
     assert ("POST", "/health", "common_handler") in method_paths
+
+
+def test_entry_points_detect_all_language_extensions(tmp_path):
+    from deepdoc.config import DEFAULT_CONFIG
+    from deepdoc.planner import scan_repo
+
+    repo = tmp_path / "repo"
+    repo.mkdir()
+
+    (repo / "main.py").write_text("", encoding="utf-8")
+    (repo / "app.ts").write_text("", encoding="utf-8")
+    (repo / "server.js").write_text("", encoding="utf-8")
+    (repo / "index.go").write_text("", encoding="utf-8")
+    (repo / "main.php").write_text("", encoding="utf-8")
+    (repo / "app.go").write_text("", encoding="utf-8")
+
+    scan = scan_repo(repo, DEFAULT_CONFIG)
+    entry_set = set(scan.entry_points)
+
+    assert "main.py" in entry_set
+    assert "app.ts" in entry_set
+    assert "server.js" in entry_set
+    assert "index.go" in entry_set
+    assert "main.php" in entry_set
+    assert "app.go" in entry_set
+
+
+def test_fastapi_rejects_mock_patch_decorators():
+    content = """
+from unittest.mock import patch, Mock
+import pytest
+
+@patch("services.billing.charge")
+def test_billing(mock_charge):
+    pass
+
+@pytest.fixture
+def mock_client():
+    return Mock()
+"""
+    endpoints = detect_endpoints(Path("test_billing.py"), content, "python")
+    assert len(endpoints) == 0, f"Mock/patch decorators should not produce endpoints: {endpoints}"

@@ -1,0 +1,358 @@
+diff --git a/web/src/env.d.ts b/web/src/env.d.ts
+index 0dafc3f..196a6b9 100644
+--- a/web/src/env.d.ts
++++ b/web/src/env.d.ts
+@@ -8,6 +8,10 @@ type CloudEnv = {
+   GITHUB_CLIENT_ID: string;
+   GITHUB_SECRET_ID: string;
+   QUEUE_MESSAGES_URL: string;
++  AZURE_TENANT_ID: string;
++  AZURE_CLIENT_ID: string;
++  AZURE_CLIENT_SECRET: string;
++  AZURE_SUBSCRIPTION_ID: string;
+ };
+ 
+ declare global {
+diff --git a/web/src/lib/hosted/page_html.ts b/web/src/lib/hosted/page_html.ts
+index 0dc11dd..2077ec6 100644
+--- a/web/src/lib/hosted/page_html.ts
++++ b/web/src/lib/hosted/page_html.ts
+@@ -479,41 +479,35 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+   .ask-hit span { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; min-width: 0;
+     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+ 
+-  /* ── Card grid — the public gallery and /projects are the same grid. The
+-     gallery's cards carry a real screenshot of the generated site (captured
+-     once, cached in R2); the project cards deliberately do not, because on
+-     your own list the name and state are what you scan for, and a wall of
+-     thumbnails of your own sites is noise. ──────────────────────────── */
+-  /* grid-auto-rows keeps every row the same minimum height, so a row of
+-     description-less cards doesn't come out visibly shorter than the row
+-     above it. Image cards exceed it and are unaffected. */
+-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+-    grid-auto-rows: minmax(150px, auto); gap: 16px; }
++  /* ── Card grid — the public gallery and /projects are the same grid and,
++     since neither carries a screenshot any more, the same uniform card
++     shape: name, description, a metrics footer. Removing the gallery's
++     thumbnail (previously a live iframe-captured screenshot) traded a
++     noisy wall of mismatched preview art for one calm, text-led grid that
++     reads the same signed-out as signed-in. ─────────────────────────── */
++  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 14px; }
+   .card { display: flex; flex-direction: column; border: 1px solid var(--line);
+-    border-radius: var(--r-lg); background: var(--surface-raised); overflow: hidden;
++    border-radius: var(--r-lg); background: var(--surface-raised);
+     text-decoration: none; color: inherit; cursor: pointer;
+-    transition: border-color 0.16s var(--ease), transform 0.16s var(--ease); }
+-  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
++    padding: 17px 18px 15px;
++    transition: border-color 0.16s var(--ease), transform 0.16s var(--ease), box-shadow 0.16s var(--ease); }
++  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+   .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
+   /* The grid filter toggles the hidden property, and the author-level display
+      above outranks the UA's [hidden] rule. */
+   .card[hidden] { display: none; }
+-  .card-shot { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
+-    background: var(--surface-high); border-bottom: 1px solid var(--line); }
+   .gallery-shot { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
+-  /* A hairline of light along the top edge, so it reads as a screen rather
+-     than a flat colour swatch. */
+-  .card-shot::after { content: ''; position: absolute; inset: 0; pointer-events: none;
+-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }
+-  .card-body { display: flex; flex-direction: column; flex: 1; padding: 16px 17px 0; min-width: 0; }
+-  .card-title { font-size: 14px; font-weight: 600; letter-spacing: -0.014em; color: var(--ink);
++  .card-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
++  .card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; color: var(--ink);
+     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+   .card-title .g-owner { color: var(--ink-faint); font-weight: 400; }
+-  .card-desc { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); margin-top: 7px;
++  .card-desc { font-size: 12.5px; line-height: 1.55; color: var(--ink-muted); margin-top: 6px;
+     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+-  .card-foot { display: flex; align-items: center; gap: 12px; padding: 15px 17px 16px; margin-top: auto; }
+-  .card-metric { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
++  .card-foot { display: flex; align-items: center; gap: 14px; margin-top: auto; padding-top: 12px; }
++  .card-metric { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
+     color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
++  .card-metric svg { width: 12px; height: 12px; flex-shrink: 0; }
++  .card-metric.star svg { color: var(--ink-faint); }
+   /* The affordance that says "this opens". Fills with ink on card hover. */
+   .card-go { margin-left: auto; width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+     display: flex; align-items: center; justify-content: center; background: var(--surface-high);
+@@ -522,12 +516,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+   /* The one card that starts something rather than opening something. Accent
+      stays a state colour: it marks this card as the distinguished one. */
+   .card-new { background: linear-gradient(155deg, var(--accent-dim), var(--surface-raised) 62%);
+-    border-color: var(--accent-line); min-height: 150px; }
++    border-color: var(--accent-line); }
+   .card-new:hover { border-color: var(--accent); }
+-  /* In the gallery this card stretches to match cards carrying a 16:10
+-     screenshot, so top-aligned content would leave a void down the middle.
+-     Centering makes the height read as deliberate in both grids. */
+-  .card-new .card-body { justify-content: center; }
+   .card-plus { width: 27px; height: 27px; border-radius: 50%; display: flex; align-items: center;
+     justify-content: center; background: var(--accent-dim); border: 1px solid var(--accent-line);
+     color: var(--accent); margin-bottom: 13px; }
+@@ -591,6 +581,14 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+     const ARROW_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
+     const PLUS_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
+     const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>';
++    const STAR_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2 2.9 6.6 7.1.6-5.4 4.7 1.7 7-6.3-3.9-6.3 3.9 1.7-7L2 9.2l7.1-.6z"/></svg>';
++
++    // "1.2k" style compaction for star counts — the raw integer reads as
++    // noise once a repo clears four digits.
++    function formatCount(n) {
++      if (n == null) return '';
++      return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
++    }
+ 
+     const STAGES = ['cloning', 'generating', 'building'];
+     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
+@@ -931,17 +929,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+       // to unauthenticated visitors, so every one of them is escaped: a public
+       // repo whose description contained markup was a stored-XSS vector, and an
+       // apostrophe in the URL used to break out of the old onclick attribute.
+-      const cards = examples.map((e, i) => {
++      const cards = examples.map((e) => {
+         const siteUrl = '/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo) + '/';
+-        const safeName = escapeHtml(e.owner + '/' + e.repo);
+         const safeOwner = escapeHtml(e.owner);
+         const safeRepo = escapeHtml(e.repo);
+-        // Theme is in the URL rather than read from the cookie server-side, so
+-        // each variant has its own immutable cacheable address. Swapped in
+-        // place by toggleTheme() instead of re-fetching the gallery.
+-        const thumbUrl = thumbUrlFor(e.owner, e.repo, e.createdAt, currentTheme());
+-        // Only the first row is worth fetching eagerly.
+-        const loading = i < 3 ? 'eager' : 'lazy';
+         const dateStr = e.createdAt
+           ? new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
+           : '';
+@@ -950,16 +941,12 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+         );
+         return \`
+         <a class="card" href="\${escapeHtml(siteUrl)}" data-name="\${haystack}">
+-          <div class="card-shot">
+-            <img class="gallery-shot" src="\${escapeHtml(thumbUrl)}" alt="Documentation generated for \${safeName}"
+-                 data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(e.createdAt || 0))}"
+-                 width="1280" height="800" loading="\${loading}" decoding="async" />
+-          </div>
+           <div class="card-body">
+             <div class="card-title"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
+             \${e.description ? '<div class="card-desc">' + escapeHtml(e.description) + '</div>' : ''}
+           </div>
+           <div class="card-foot">
++            \${e.stars != null ? '<span class="card-metric star">' + STAR_ICON + formatCount(e.stars) + '</span>' : ''}
+             \${e.language ? '<span class="card-metric">' + escapeHtml(e.language) + '</span>' : ''}
+             \${dateStr ? '<span class="card-metric">' + escapeHtml(dateStr) + '</span>' : ''}
+             <span class="card-go">\${ARROW_ICON}</span>
+@@ -1115,6 +1102,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+           </div>
+           <div class="card-foot">
+             <span class="card-metric"><span class="pr-dot \${meta.cls}" aria-hidden="true"></span>\${escapeHtml(meta.label)}</span>
++            \${p.stars != null ? '<span class="card-metric star">' + STAR_ICON + formatCount(p.stars) + '</span>' : ''}
+             \${p.createdAt ? '<span class="card-metric">' + escapeHtml(shortAge(p.createdAt)) + '</span>' : ''}
+             <span class="card-go">\${ARROW_ICON}</span>
+           </div>
+@@ -1562,7 +1550,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
+ 
+     function confirmGenerate() {
+       const r = state.selected;
+-      startJob({ owner: r.owner, repo: r.repo, description: r.description, language: r.language, avatarUrl: r.avatarUrl, visibility: state.visibility });
++      startJob({ owner: r.owner, repo: r.repo, description: r.description, language: r.language, avatarUrl: r.avatarUrl, stars: r.stars, visibility: state.visibility });
+     }
+ 
+     function generateFromPaste() {
+diff --git a/web/src/lib/hosted/queue.ts b/web/src/lib/hosted/queue.ts
+index 3c91396..b8b8554 100644
+--- a/web/src/lib/hosted/queue.ts
++++ b/web/src/lib/hosted/queue.ts
+@@ -30,14 +30,15 @@ export async function enqueueJob(env: CloudEnv, payload: unknown): Promise<boole
+ export async function fetchJobStatus(
+   env: CloudEnv,
+   jobId: string,
+-): Promise<{ status: string | null; error: string | null; text: string }> {
++): Promise<{ status: string | null; error: string | null; text: string; executionName: string | null }> {
+   const obj = await env.SITES.get(`jobs/${jobId}/status.json`);
+-  if (!obj) return { status: null, error: null, text: JSON.stringify({ status: "queued" }) };
++  if (!obj)
++    return { status: null, error: null, text: JSON.stringify({ status: "queued" }), executionName: null };
+   const text = await obj.text();
+   try {
+-    const d = JSON.parse(text) as { status: string; error: string | null };
+-    return { status: d.status, error: d.error ?? null, text };
++    const d = JSON.parse(text) as { status: string; error: string | null; execution_name?: string | null };
++    return { status: d.status, error: d.error ?? null, text, executionName: d.execution_name ?? null };
+   } catch {
+-    return { status: null, error: null, text };
++    return { status: null, error: null, text, executionName: null };
+   }
+ }
+diff --git a/web/src/pages/cloud/api/examples.ts b/web/src/pages/cloud/api/examples.ts
+index 95cf34a..07e8dfc 100644
+--- a/web/src/pages/cloud/api/examples.ts
++++ b/web/src/pages/cloud/api/examples.ts
+@@ -7,6 +7,7 @@ interface Example {
+   language: string | null;
+   avatarUrl: string | null;
+   createdAt: number;
++  stars: number | null;
+ }
+ 
+ // Intentionally the one public, unauthenticated read in the whole app —
+@@ -22,7 +23,7 @@ export const GET: APIRoute = async ({ locals }) => {
+     // p.status = 'done' — otherwise a repo still cloning/generating shows up
+     // under "Previously generated by others" with nothing real to preview
+     // yet (its card's iframe just hits the in-progress placeholder page).
+-    `SELECT o.owner, o.repo, p.description, p.language, p.avatar_url, p.created_at
++    `SELECT o.owner, o.repo, p.description, p.language, p.avatar_url, p.created_at, p.stars
+      FROM owner_repo_jobs o
+      JOIN projects p
+        ON LOWER(p.owner) = LOWER(o.owner) AND LOWER(p.repo) = LOWER(o.repo)
+@@ -37,6 +38,7 @@ export const GET: APIRoute = async ({ locals }) => {
+     language: string | null;
+     avatar_url: string | null;
+     created_at: number;
++    stars: number | null;
+   }>();
+ 
+   const examples: Example[] = results.map((row) => ({
+@@ -46,6 +48,7 @@ export const GET: APIRoute = async ({ locals }) => {
+     language: row.language,
+     avatarUrl: row.avatar_url,
+     createdAt: row.created_at,
++    stars: row.stars,
+   }));
+ 
+   return new Response(JSON.stringify({ examples }), {
+diff --git a/web/src/pages/cloud/api/generate.ts b/web/src/pages/cloud/api/generate.ts
+index 1e0d438..22453d5 100644
+--- a/web/src/pages/cloud/api/generate.ts
++++ b/web/src/pages/cloud/api/generate.ts
+@@ -16,6 +16,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
+         description?: string | null;
+         language?: string | null;
+         avatarUrl?: string | null;
++        stars?: number | null;
+         visibility?: string;
+       }
+     | null;
+@@ -146,12 +147,12 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
+          job_id = excluded.job_id, visibility = excluded.visibility`,
+     ).bind(owner, repo, job.job_id, visibility, user.login),
+     env.DB.prepare(
+-      `INSERT INTO projects (user_login, owner, repo, job_id, status, created_at, description, language, avatar_url, visibility)
+-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
++      `INSERT INTO projects (user_login, owner, repo, job_id, status, created_at, description, language, avatar_url, visibility, stars)
++       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_login, owner, repo) DO UPDATE SET
+          job_id = excluded.job_id, status = excluded.status, created_at = excluded.created_at,
+          description = excluded.description, language = excluded.language, avatar_url = excluded.avatar_url,
+-         visibility = excluded.visibility`,
++         visibility = excluded.visibility, stars = excluded.stars`,
+     ).bind(
+       user.login,
+       owner,
+@@ -163,6 +164,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
+       body?.language ?? null,
+       body?.avatarUrl ?? null,
+       visibility,
++      body?.stars ?? null,
+     ),
+   ]);
+ 
+diff --git a/web/src/pages/cloud/api/projects/[owner]/[repo].ts b/web/src/pages/cloud/api/projects/[owner]/[repo].ts
+index 8444808..28a263e 100644
+--- a/web/src/pages/cloud/api/projects/[owner]/[repo].ts
++++ b/web/src/pages/cloud/api/projects/[owner]/[repo].ts
+@@ -1,13 +1,35 @@
+ import type { APIRoute } from "astro";
+ import { requireSession } from "../../../../../lib/hosted/session";
++import { fetchJobStatus } from "../../../../../lib/hosted/queue";
++import { stopJobExecution } from "../../../../../lib/hosted/azure";
+ 
+-// Ported from handleDeleteProject in web/hosted/src/index.ts.
++// Ported from handleDeleteProject in web/hosted/src/index.ts. Deleting a
++// project used to only remove the D1 row — the Azure Container Apps Job
++// execution kept running (and billing) for as long as it took to finish or
++// crash on its own, sometimes 12+ hours (see openclaw/openclaw). Now: if the
++// project's job hasn't reached a terminal state, ask Azure to stop that
++// execution before removing the row. Best-effort — a stop failure (job
++// already finished, execution_name not yet written) must never block the
++// delete itself.
+ export const DELETE: APIRoute = async ({ params, locals, cookies }) => {
+   const env = locals.runtime.env;
+   const user = await requireSession(env, cookies);
+   if (!user) return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
+ 
+   const { owner, repo } = params;
++  const row = await env.DB.prepare(
++    "SELECT job_id FROM projects WHERE user_login = ? AND LOWER(owner) = LOWER(?) AND LOWER(repo) = LOWER(?)",
++  )
++    .bind(user.login, owner, repo)
++    .first<{ job_id: string }>();
++
++  if (row?.job_id) {
++    const jobStatus = await fetchJobStatus(env, row.job_id);
++    if (jobStatus.status !== "done" && jobStatus.status !== "failed" && jobStatus.executionName) {
++      await stopJobExecution(env, jobStatus.executionName);
++    }
++  }
++
+   const result = await env.DB.prepare(
+     "DELETE FROM projects WHERE user_login = ? AND LOWER(owner) = LOWER(?) AND LOWER(repo) = LOWER(?)",
+   )
+diff --git a/web/src/pages/cloud/api/projects/index.ts b/web/src/pages/cloud/api/projects/index.ts
+index 4da6660..aab2c5e 100644
+--- a/web/src/pages/cloud/api/projects/index.ts
++++ b/web/src/pages/cloud/api/projects/index.ts
+@@ -12,6 +12,7 @@ interface Project {
+   language?: string | null;
+   avatarUrl?: string | null;
+   visibility?: string;
++  stars?: number | null;
+ }
+ 
+ // Ported from handleProjects in web/hosted/src/index.ts.
+@@ -21,7 +22,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
+   if (!user) return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
+ 
+   const { results } = await env.DB.prepare(
+-    "SELECT owner, repo, job_id, status, created_at, description, language, avatar_url, visibility FROM projects WHERE user_login = ? ORDER BY created_at DESC",
++    "SELECT owner, repo, job_id, status, created_at, description, language, avatar_url, visibility, stars FROM projects WHERE user_login = ? ORDER BY created_at DESC",
+   )
+     .bind(user.login)
+     .all<{
+@@ -34,6 +35,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
+       language: string | null;
+       avatar_url: string | null;
+       visibility: string;
++      stars: number | null;
+     }>();
+ 
+   const projects: Project[] = [];
+@@ -58,6 +60,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
+       language: row.language,
+       avatarUrl: row.avatar_url,
+       visibility: row.visibility,
++      stars: row.stars,
+     });
+   }
+ 
+diff --git a/web/src/pages/cloud/api/repos.ts b/web/src/pages/cloud/api/repos.ts
+index 00b38df..65fed32 100644
+--- a/web/src/pages/cloud/api/repos.ts
++++ b/web/src/pages/cloud/api/repos.ts
+@@ -23,6 +23,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
+     updated_at: string;
+     description: string | null;
+     language: string | null;
++    stargazers_count: number;
+   }>;
+   const simplified = repos.map((r) => ({
+     fullName: r.full_name,
+@@ -33,6 +34,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
+     description: r.description,
+     language: r.language,
+     avatarUrl: r.owner.avatar_url,
++    stars: r.stargazers_count,
+   }));
+   return new Response(JSON.stringify(simplified), { headers: { "Content-Type": "application/json" } });
+ };

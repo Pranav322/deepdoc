@@ -73,7 +73,7 @@ def resolve_repo_endpoints(
     required_frameworks = {e.framework.lower() for e in endpoints if e.framework}
 
     js_index = None
-    if required_frameworks & {"express", "fastify"}:
+    if required_frameworks & {"express", "fastify", "nestjs"}:
         js_index = _build_js_index(file_contents)
     py_index = None
     if required_frameworks & {"falcon", "django", "fastapi"}:
@@ -93,6 +93,8 @@ def resolve_repo_endpoints(
             resolved.extend(_resolve_express_endpoint(repo_root, endpoint, js_index))
         elif framework == "fastify" and js_index is not None:
             resolved.extend(_resolve_fastify_endpoint(repo_root, endpoint, js_index))
+        elif framework == "nestjs" and js_index is not None:
+            resolved.extend(_resolve_nestjs_endpoint(endpoint, js_index))
         elif framework == "falcon" and py_index is not None:
             resolved.extend(
                 _resolve_falcon_endpoint(repo_root, endpoint, file_contents, py_index)
@@ -105,6 +107,9 @@ def resolve_repo_endpoints(
             resolved.extend(_resolve_go_endpoint(repo_root, endpoint, go_index))
         elif framework == "django":
             has_django = True
+        elif framework == "laravel":
+            resolved.extend(_resolve_laravel_endpoints(repo_root, endpoint, file_contents))
+            continue
         else:
             resolved.append(_normalize_endpoint(repo_root, endpoint))
     if has_django and py_index is not None:
@@ -275,6 +280,23 @@ def _resolve_express_endpoint(
         ep.file = handler_file
         endpoints.append(ep)
     return endpoints
+
+
+def _resolve_nestjs_endpoint(
+    endpoint: APIEndpoint,
+    js_index: dict[str, JSImportIndex],
+) -> list[APIEndpoint]:
+    route_file = str(endpoint.route_file or endpoint.file or "")
+    info = js_index.get(route_file)
+
+    if info and endpoint.handler and endpoint.handler in info.imports:
+        handler_file = info.imports[endpoint.handler]
+        resolved = copy.deepcopy(endpoint)
+        resolved.handler_file = handler_file
+        resolved.file = handler_file
+        return [resolved]
+
+    return [endpoint]
 
 
 def _resolve_fastify_endpoint(
@@ -1543,3 +1565,61 @@ def _resolve_fastapi_handler_file(
     if qualifier in index.imports:
         return index.imports[qualifier]
     return current_file
+
+
+_IMPORT_GROUP_PATTERN = re.compile(
+    r"""import\s+(?:fn|function)?\s*\((['"][^'"]+['"])""",
+)
+
+_BASE_PATH_GROUP_PATTERN = re.compile(
+    r"""route\s*\(['"]([^'"]+)['"]\s*,\s*['"]([^'"]+)['"]""",
+    re.IGNORECASE,
+)
+
+
+def _build_laravel_child_route_map(
+    file_contents: dict[str, str],
+) -> dict[str, list[tuple[str, str]]]:
+    parent_to_children: dict[str, list[tuple[str, str]]] = {}
+
+    for rel_path, content in file_contents.items():
+        if Path(rel_path).suffix.lower() != ".php":
+            continue
+
+        for match in _BASE_PATH_GROUP_PATTERN.finditer(content):
+            child_route = match.group(1)
+            prefix = match.group(2)
+
+            if child_route.startswith("/"):
+                child_path = child_route.lstrip("/")
+            else:
+                child_path = child_route
+
+            parent_to_children.setdefault(rel_path, []).append((child_path, prefix))
+
+    return parent_to_children
+
+
+def _resolve_laravel_endpoints(
+    repo_root: Path,
+    endpoint: APIEndpoint,
+    file_contents: dict[str, str],
+) -> list[APIEndpoint]:
+    resolved = _normalize_endpoint(repo_root, endpoint)
+    route_file = resolved.route_file
+    path = resolved.path or ""
+    resolved.path = path if path.startswith("/") else f"/{path}"
+
+    child_map = _build_laravel_child_route_map(file_contents)
+    if route_file in child_map:
+        endpoints: list[APIEndpoint] = []
+        for child_path, prefix in child_map[route_file]:
+            ep = copy.deepcopy(resolved)
+            prefix = prefix.rstrip("/") if prefix else ""
+            ep.path = prefix + path if prefix else path
+            ep.provenance = ep.provenance or {}
+            ep.provenance["laravel_child_file"] = child_path
+            endpoints.append(ep)
+        return endpoints
+
+    return [resolved]

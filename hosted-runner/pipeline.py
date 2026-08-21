@@ -77,6 +77,22 @@ def _r2_client():
     )
 
 
+# Container Apps Jobs names each pod "{execution-name}-{replica-suffix}" and
+# sets HOSTNAME to that pod name (standard k8s behavior this platform runs
+# on) — confirmed against real logs ("Execution: 'deepdoc-gen-job-m4r9q',
+# Replica: 'deepdoc-gen-job-m4r9q-xv67h'"). Stripping the last dash segment
+# recovers the execution name, which the Worker needs to call the Azure
+# stop-execution API on delete.
+JOB_NAME = "deepdoc-gen-job"
+
+
+def _current_execution_name() -> str | None:
+    hostname = os.environ.get("HOSTNAME", "")
+    if hostname.startswith(JOB_NAME + "-") and "-" in hostname[len(JOB_NAME) + 1 :]:
+        return hostname.rsplit("-", 1)[0]
+    return None
+
+
 def write_status(job_id: str, status: str, error: str | None = None, log: list | None = None) -> None:
     """Best-effort publish of jobs/{job_id}/status.json to R2 — this is what the
     Worker reads to report progress, now that there's no long-lived runner to
@@ -89,6 +105,7 @@ def write_status(job_id: str, status: str, error: str | None = None, log: list |
         "status": status,
         "error": error,
         "log_tail": ("\n".join(log)[-4000:] if log else None),
+        "execution_name": _current_execution_name(),
         "updated_at": int(time.time()),
     }
     try:

@@ -27,7 +27,11 @@ FASTAPI_ADD_ROUTE = re.compile(
 
 def detect_fastapi(context: RouteResolverContext) -> list[APIEndpoint]:
     content = context.content
-    if "fastapi" not in content.lower() and "APIRouter" not in content and "@" not in content and "add_api_route" not in content:
+    if (
+        "fastapi" not in content.lower()
+        and "APIRouter" not in content
+        and "add_api_route" not in content
+    ):
         return []
 
     endpoints: list[APIEndpoint] = []

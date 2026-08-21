@@ -39,8 +39,12 @@ def main() -> int:
 
     # Long visibility timeout: the message stays invisible for the whole
     # generation so it isn't redelivered mid-run, and KEDA won't count it as
-    # still-pending and spin up a duplicate execution for the same job.
-    msgs = qc.receive_messages(max_messages=1, visibility_timeout=3600)
+    # still-pending and spin up a duplicate execution for the same job. Must
+    # match (or exceed) the Container Apps Job's replicaTimeout (86400s) —
+    # a shorter value here made the message reappear and get redelivered to
+    # a second execution while the first one was still legitimately running
+    # on a large repo, which is what happened to openclaw/openclaw.
+    msgs = qc.receive_messages(max_messages=1, visibility_timeout=86400)
     msg = next(iter(msgs), None)
     if msg is None:
         print("no message to process; exiting")

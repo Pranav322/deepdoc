@@ -23,6 +23,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
     updated_at: string;
     description: string | null;
     language: string | null;
+    stargazers_count: number;
   }>;
   const simplified = repos.map((r) => ({
     fullName: r.full_name,
@@ -33,6 +34,7 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
     description: r.description,
     language: r.language,
     avatarUrl: r.owner.avatar_url,
+    stars: r.stargazers_count,
   }));
   return new Response(JSON.stringify(simplified), { headers: { "Content-Type": "application/json" } });
 };

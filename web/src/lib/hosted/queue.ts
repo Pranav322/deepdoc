@@ -30,14 +30,15 @@ export async function enqueueJob(env: CloudEnv, payload: unknown): Promise<boole
 export async function fetchJobStatus(
   env: CloudEnv,
   jobId: string,
-): Promise<{ status: string | null; error: string | null; text: string }> {
+): Promise<{ status: string | null; error: string | null; text: string; executionName: string | null }> {
   const obj = await env.SITES.get(`jobs/${jobId}/status.json`);
-  if (!obj) return { status: null, error: null, text: JSON.stringify({ status: "queued" }) };
+  if (!obj)
+    return { status: null, error: null, text: JSON.stringify({ status: "queued" }), executionName: null };
   const text = await obj.text();
   try {
-    const d = JSON.parse(text) as { status: string; error: string | null };
-    return { status: d.status, error: d.error ?? null, text };
+    const d = JSON.parse(text) as { status: string; error: string | null; execution_name?: string | null };
+    return { status: d.status, error: d.error ?? null, text, executionName: d.execution_name ?? null };
   } catch {
-    return { status: null, error: null, text };
+    return { status: null, error: null, text, executionName: null };
   }
 }

@@ -16,6 +16,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
         description?: string | null;
         language?: string | null;
         avatarUrl?: string | null;
+        stars?: number | null;
         visibility?: string;
       }
     | null;
@@ -146,12 +147,12 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
          job_id = excluded.job_id, visibility = excluded.visibility`,
     ).bind(owner, repo, job.job_id, visibility, user.login),
     env.DB.prepare(
-      `INSERT INTO projects (user_login, owner, repo, job_id, status, created_at, description, language, avatar_url, visibility)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `INSERT INTO projects (user_login, owner, repo, job_id, status, created_at, description, language, avatar_url, visibility, stars)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
        ON CONFLICT(user_login, owner, repo) DO UPDATE SET
          job_id = excluded.job_id, status = excluded.status, created_at = excluded.created_at,
          description = excluded.description, language = excluded.language, avatar_url = excluded.avatar_url,
-         visibility = excluded.visibility`,
+         visibility = excluded.visibility, stars = excluded.stars`,
     ).bind(
       user.login,
       owner,
@@ -163,6 +164,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       body?.language ?? null,
       body?.avatarUrl ?? null,
       visibility,
+      body?.stars ?? null,
     ),
   ]);
 

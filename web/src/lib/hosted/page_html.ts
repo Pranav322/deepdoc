@@ -479,41 +479,35 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .ask-hit span { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
-  /* ── Card grid — the public gallery and /projects are the same grid. The
-     gallery's cards carry a real screenshot of the generated site (captured
-     once, cached in R2); the project cards deliberately do not, because on
-     your own list the name and state are what you scan for, and a wall of
-     thumbnails of your own sites is noise. ──────────────────────────── */
-  /* grid-auto-rows keeps every row the same minimum height, so a row of
-     description-less cards doesn't come out visibly shorter than the row
-     above it. Image cards exceed it and are unaffected. */
-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-    grid-auto-rows: minmax(150px, auto); gap: 16px; }
+  /* ── Card grid — the public gallery and /projects are the same grid and,
+     since neither carries a screenshot any more, the same uniform card
+     shape: name, description, a metrics footer. Removing the gallery's
+     thumbnail (previously a live iframe-captured screenshot) traded a
+     noisy wall of mismatched preview art for one calm, text-led grid that
+     reads the same signed-out as signed-in. ─────────────────────────── */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 14px; }
   .card { display: flex; flex-direction: column; border: 1px solid var(--line);
-    border-radius: var(--r-lg); background: var(--surface-raised); overflow: hidden;
+    border-radius: var(--r-lg); background: var(--surface-raised);
     text-decoration: none; color: inherit; cursor: pointer;
-    transition: border-color 0.16s var(--ease), transform 0.16s var(--ease); }
-  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); }
+    padding: 17px 18px 15px;
+    transition: border-color 0.16s var(--ease), transform 0.16s var(--ease), box-shadow 0.16s var(--ease); }
+  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
   .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   /* The grid filter toggles the hidden property, and the author-level display
      above outranks the UA's [hidden] rule. */
   .card[hidden] { display: none; }
-  .card-shot { position: relative; aspect-ratio: 16 / 10; flex-shrink: 0; overflow: hidden;
-    background: var(--surface-high); border-bottom: 1px solid var(--line); }
   .gallery-shot { width: 100%; height: 100%; object-fit: cover; object-position: top center; display: block; }
-  /* A hairline of light along the top edge, so it reads as a screen rather
-     than a flat colour swatch. */
-  .card-shot::after { content: ''; position: absolute; inset: 0; pointer-events: none;
-    box-shadow: inset 0 1px 0 rgba(255,255,255,0.07); }
-  .card-body { display: flex; flex-direction: column; flex: 1; padding: 16px 17px 0; min-width: 0; }
-  .card-title { font-size: 14px; font-weight: 600; letter-spacing: -0.014em; color: var(--ink);
+  .card-body { display: flex; flex-direction: column; flex: 1; min-width: 0; }
+  .card-title { font-size: 15px; font-weight: 600; letter-spacing: -0.015em; color: var(--ink);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .card-title .g-owner { color: var(--ink-faint); font-weight: 400; }
-  .card-desc { font-size: 12.5px; line-height: 1.5; color: var(--ink-muted); margin-top: 7px;
+  .card-desc { font-size: 12.5px; line-height: 1.55; color: var(--ink-muted); margin-top: 6px;
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-  .card-foot { display: flex; align-items: center; gap: 12px; padding: 15px 17px 16px; margin-top: auto; }
-  .card-metric { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px;
+  .card-foot { display: flex; align-items: center; gap: 14px; margin-top: auto; padding-top: 12px; }
+  .card-metric { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px;
     color: var(--ink-faint); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .card-metric svg { width: 12px; height: 12px; flex-shrink: 0; }
+  .card-metric.star svg { color: var(--ink-faint); }
   /* The affordance that says "this opens". Fills with ink on card hover. */
   .card-go { margin-left: auto; width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
     display: flex; align-items: center; justify-content: center; background: var(--surface-high);
@@ -522,12 +516,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   /* The one card that starts something rather than opening something. Accent
      stays a state colour: it marks this card as the distinguished one. */
   .card-new { background: linear-gradient(155deg, var(--accent-dim), var(--surface-raised) 62%);
-    border-color: var(--accent-line); min-height: 150px; }
+    border-color: var(--accent-line); }
   .card-new:hover { border-color: var(--accent); }
-  /* In the gallery this card stretches to match cards carrying a 16:10
-     screenshot, so top-aligned content would leave a void down the middle.
-     Centering makes the height read as deliberate in both grids. */
-  .card-new .card-body { justify-content: center; }
   .card-plus { width: 27px; height: 27px; border-radius: 50%; display: flex; align-items: center;
     justify-content: center; background: var(--accent-dim); border: 1px solid var(--accent-line);
     color: var(--accent); margin-bottom: 13px; }
@@ -591,6 +581,14 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     const ARROW_ICON = '<svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14"/><path d="m13 6 6 6-6 6"/></svg>';
     const PLUS_ICON = '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14"/><path d="M5 12h14"/></svg>';
     const SEARCH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.2-3.2"/></svg>';
+    const STAR_ICON = '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="m12 2 2.9 6.6 7.1.6-5.4 4.7 1.7 7-6.3-3.9-6.3 3.9 1.7-7L2 9.2l7.1-.6z"/></svg>';
+
+    // "1.2k" style compaction for star counts — the raw integer reads as
+    // noise once a repo clears four digits.
+    function formatCount(n) {
+      if (n == null) return '';
+      return n >= 1000 ? (n / 1000).toFixed(1) + 'k' : String(n);
+    }
 
     const STAGES = ['cloning', 'generating', 'building'];
     const STAGE_LABEL = { cloning: 'Cloning repository', generating: 'Generating documentation', building: 'Building your site' };
@@ -931,17 +929,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       // to unauthenticated visitors, so every one of them is escaped: a public
       // repo whose description contained markup was a stored-XSS vector, and an
       // apostrophe in the URL used to break out of the old onclick attribute.
-      const cards = examples.map((e, i) => {
+      const cards = examples.map((e) => {
         const siteUrl = '/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo) + '/';
-        const safeName = escapeHtml(e.owner + '/' + e.repo);
         const safeOwner = escapeHtml(e.owner);
         const safeRepo = escapeHtml(e.repo);
-        // Theme is in the URL rather than read from the cookie server-side, so
-        // each variant has its own immutable cacheable address. Swapped in
-        // place by toggleTheme() instead of re-fetching the gallery.
-        const thumbUrl = thumbUrlFor(e.owner, e.repo, e.createdAt, currentTheme());
-        // Only the first row is worth fetching eagerly.
-        const loading = i < 3 ? 'eager' : 'lazy';
         const dateStr = e.createdAt
           ? new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
           : '';
@@ -950,16 +941,12 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         );
         return \`
         <a class="card" href="\${escapeHtml(siteUrl)}" data-name="\${haystack}">
-          <div class="card-shot">
-            <img class="gallery-shot" src="\${escapeHtml(thumbUrl)}" alt="Documentation generated for \${safeName}"
-                 data-owner="\${safeOwner}" data-repo="\${safeRepo}" data-created="\${escapeHtml(String(e.createdAt || 0))}"
-                 width="1280" height="800" loading="\${loading}" decoding="async" />
-          </div>
           <div class="card-body">
             <div class="card-title"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
             \${e.description ? '<div class="card-desc">' + escapeHtml(e.description) + '</div>' : ''}
           </div>
           <div class="card-foot">
+            \${e.stars != null ? '<span class="card-metric star">' + STAR_ICON + formatCount(e.stars) + '</span>' : ''}
             \${e.language ? '<span class="card-metric">' + escapeHtml(e.language) + '</span>' : ''}
             \${dateStr ? '<span class="card-metric">' + escapeHtml(dateStr) + '</span>' : ''}
             <span class="card-go">\${ARROW_ICON}</span>
@@ -1115,6 +1102,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           </div>
           <div class="card-foot">
             <span class="card-metric"><span class="pr-dot \${meta.cls}" aria-hidden="true"></span>\${escapeHtml(meta.label)}</span>
+            \${p.stars != null ? '<span class="card-metric star">' + STAR_ICON + formatCount(p.stars) + '</span>' : ''}
             \${p.createdAt ? '<span class="card-metric">' + escapeHtml(shortAge(p.createdAt)) + '</span>' : ''}
             <span class="card-go">\${ARROW_ICON}</span>
           </div>
@@ -1562,7 +1550,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
     function confirmGenerate() {
       const r = state.selected;
-      startJob({ owner: r.owner, repo: r.repo, description: r.description, language: r.language, avatarUrl: r.avatarUrl, visibility: state.visibility });
+      startJob({ owner: r.owner, repo: r.repo, description: r.description, language: r.language, avatarUrl: r.avatarUrl, stars: r.stars, visibility: state.visibility });
     }
 
     function generateFromPaste() {

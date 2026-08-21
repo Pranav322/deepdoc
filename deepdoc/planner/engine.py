@@ -735,9 +735,9 @@ def scan_repo(
                 lang_counts[lang] += 1
 
             # Detect entry points
-            if fname.lower() in ENTRY_POINT_NAMES or fname.lower().rstrip(
-                ".py.ts.js.go.php"
-            ) in {"main", "app", "server", "index"}:
+            if fname.lower() in ENTRY_POINT_NAMES or Path(fname).stem.lower() in {
+                "main", "app", "server", "index"
+            }:
                 entry_points.append(rel)
 
             source_work.append((fpath, rel, lang))

@@ -241,22 +241,42 @@ def fit_prompt_sections(
     omitted: dict[str, int] = {}
     for name, records in optional_sections:
         accepted: list[str] = []
+        accepted_tokens: list[int] = []
+        running_tokens = input_tokens
         for record in records:
-            candidate = dict(sections)
-            candidate[name] = "\n".join([*accepted, record])
-            candidate_prompt = render_prompt(candidate)
-            candidate_tokens, candidate_estimated = count_message_tokens(
-                system, candidate_prompt, capabilities
-            )
-            if candidate_tokens <= maximum_input:
-                sections = candidate
-                prompt = candidate_prompt
-                input_tokens = candidate_tokens
-                estimated = estimated or candidate_estimated
+            record_tokens, record_estimated = count_text_tokens(record, capabilities)
+            tentative = running_tokens + record_tokens + (1 if accepted else 0)
+            if tentative <= maximum_input:
                 accepted.append(record)
+                accepted_tokens.append(record_tokens)
+                running_tokens = tentative
+                estimated = estimated or record_estimated
             else:
                 omitted[name] = omitted.get(name, 0) + 1
-        sections.setdefault(name, "")
+        sections[name] = "\n".join(accepted)
+        # ponytail: one exact recount per section (not per record) keeps this O(sections), not O(records)
+        prompt = render_prompt(sections)
+        input_tokens, section_estimated = count_message_tokens(system, prompt, capabilities)
+        estimated = estimated or section_estimated
+
+        # The per-record estimate above is additive; the real tokenizer used for the
+        # recount above is not guaranteed to be (separators, joiner overhead, etc.), so
+        # the accepted set can still exceed maximum_input after the exact recount. Trim
+        # from the end using the cheap per-record counts already computed (no re-render
+        # per drop), then re-verify with one more exact recount. This loop only repeats
+        # if an estimate undershot reality, so total renders stay bounded by the number
+        # of records actually dropped, not N^2.
+        while input_tokens > maximum_input and accepted:
+            estimate = input_tokens
+            while accepted and estimate > maximum_input:
+                dropped_tokens = accepted_tokens.pop()
+                accepted.pop()
+                omitted[name] = omitted.get(name, 0) + 1
+                estimate -= dropped_tokens + 1
+            sections[name] = "\n".join(accepted)
+            prompt = render_prompt(sections)
+            input_tokens, section_estimated = count_message_tokens(system, prompt, capabilities)
+            estimated = estimated or section_estimated
     return PromptFitResult(
         prompt=prompt,
         sections=sections,

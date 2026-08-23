@@ -301,7 +301,7 @@ def _partition_topology_assignment(
 
     endpoint_files = {
         file_path
-        for endpoint in scan.api_endpoints
+        for endpoint in scan.published_api_endpoints
         for file_path in endpoint_owned_files(endpoint)
     }
     excluded_files = (

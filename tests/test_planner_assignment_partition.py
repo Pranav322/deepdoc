@@ -12,11 +12,11 @@ from deepdoc.planner.topology import TopologyMap
 from deepdoc.v2_models import RepoScan
 
 
-def _scan(files: list[str], clusters: dict[str, str]) -> RepoScan:
+def _scan(files: list[str], clusters: dict[str, str], api_endpoints=None) -> RepoScan:
     return RepoScan(
         file_tree={},
         file_summaries={path: f"summary for {path}" for path in files},
-        api_endpoints=[],
+        api_endpoints=api_endpoints or [],
         languages={"python": len(files)},
         has_openapi=False,
         openapi_paths=[],
@@ -37,6 +37,39 @@ def _scan(files: list[str], clusters: dict[str, str]) -> RepoScan:
 
 def test_unique_matching_topology_candidate_is_preassigned() -> None:
     scan = _scan(["orders.py", "payments.py"], {"orders.py": "orders", "payments.py": "payments"})
+    proposal = {
+        "buckets": [
+            {"slug": "orders", "cluster_id": "orders", "candidate_files": ["orders.py"]},
+            {"slug": "payments", "cluster_id": "payments", "candidate_files": ["payments.py"]},
+        ]
+    }
+
+    deterministic, unresolved = _partition_topology_assignment(proposal, scan)
+
+    assert unresolved == []
+    assert deterministic["file_to_buckets"] == {
+        "orders.py": ["orders"],
+        "payments.py": ["payments"],
+    }
+
+
+def test_phantom_endpoint_does_not_exclude_file_from_topology_assignment() -> None:
+    # A non-publishable (phantom) endpoint attributed to orders.py must not
+    # force the file into `excluded_files` — only published endpoints should.
+    scan = _scan(
+        ["orders.py", "payments.py"],
+        {"orders.py": "orders", "payments.py": "payments"},
+        api_endpoints=[
+            {
+                "method": "PATCH",
+                "path": "myapp.services.billing.charge",
+                "file": "orders.py",
+                "handler_file": "orders.py",
+                "route_file": "orders.py",
+                "publication_ready": False,
+            }
+        ],
+    )
     proposal = {
         "buckets": [
             {"slug": "orders", "cluster_id": "orders", "candidate_files": ["orders.py"]},

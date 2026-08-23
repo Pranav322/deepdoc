@@ -752,7 +752,7 @@ class PipelineV2:
             self.repo_root,
             scan.openapi_paths,
             plan=plan,
-            scanned_endpoints=scan.api_endpoints,
+            scanned_endpoints=scan.published_api_endpoints,
         )
 
     # ──────────────────────────────────────────────────────────────────────

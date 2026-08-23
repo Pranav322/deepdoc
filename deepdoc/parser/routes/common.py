@@ -12,19 +12,22 @@ def dedupe_endpoints(endpoints: list[APIEndpoint]) -> list[APIEndpoint]:
     """Keep the first endpoint for each method/path/line combination.
 
     When two detectors claim the same physical route (same method + line +
-    file) but resolve conflicting paths, keep only the higher-priority
-    framework's claim (`FRAMEWORK_PRIORITIES`) instead of emitting both.
+    file + handler) but resolve conflicting paths, keep only the
+    higher-priority framework's claim (`FRAMEWORK_PRIORITIES`) instead of
+    emitting both. Handler is part of the grouping key so that a single
+    synthesized line (e.g. a DRF `router.register(...)` call expanding into
+    several distinct actions) isn't mistaken for a single conflicting route.
     """
     seen_exact: set[tuple[str, str, int]] = set()
-    order: list[tuple[str, int, str]] = []
-    best_by_group: dict[tuple[str, int, str], APIEndpoint] = {}
+    order: list[tuple[str, int, str, str]] = []
+    best_by_group: dict[tuple[str, int, str, str], APIEndpoint] = {}
     for ep in endpoints:
         exact_key = (ep.method, ep.path, ep.line)
         if exact_key in seen_exact:
             continue
         seen_exact.add(exact_key)
 
-        group_key = (ep.method, ep.line, ep.route_file or ep.file)
+        group_key = (ep.method, ep.line, ep.route_file or ep.file, ep.handler)
         existing = best_by_group.get(group_key)
         if existing is None:
             best_by_group[group_key] = ep

@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .persistence_v2 import DocPage
     from .v2_models import DocPlan, RepoScan
 
+import click
 from rich.console import Console
 from rich.panel import Panel
 
@@ -310,6 +311,7 @@ class PipelineV2:
             )
         phase_timings["scan"] = time.perf_counter() - phase_start
         self._print_scan(scan)
+        self._guard_supported_source_files(scan)
         stats["files_scanned"] = scan.total_files
 
         # ── Phase 2: Plan ──────────────────────────────────────────────
@@ -618,6 +620,31 @@ class PipelineV2:
     # ──────────────────────────────────────────────────────────────────────
     # Phase 1 helpers
     # ──────────────────────────────────────────────────────────────────────
+
+    _SUPPORTED_LANGUAGES = ("python", "javascript", "typescript", "go", "php", "vue")
+
+    def _guard_supported_source_files(self, scan: RepoScan) -> None:
+        """Fail clearly if the scan found no documentable source file.
+
+        Without this, an empty or unsupported-only repo reaches planning with
+        an empty inventory and dies with an opaque PlanContractError instead
+        of a message that names what DeepDoc can actually parse.
+        """
+        if scan.file_contents:
+            return
+        supported = ", ".join(self._SUPPORTED_LANGUAGES)
+        if scan.total_files == 0:
+            raise click.ClickException(
+                f"No source files found under {self.repo_root}. "
+                f"DeepDoc documents: {supported}."
+            )
+        unsupported = sorted(scan.unsupported_extensions)
+        detail = f" (found: {', '.join(unsupported)})" if unsupported else ""
+        raise click.ClickException(
+            f"No supported source files found under {self.repo_root}{detail}. "
+            f"DeepDoc documents: {supported}. See the scan summary above for "
+            f"which extensions were skipped."
+        )
 
     def _print_scan(self, scan: RepoScan) -> None:
         from rich.table import Table

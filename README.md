@@ -702,6 +702,7 @@ site:
 | `max_parallel_workers` | `6` | Generation executor size; actual hosted request concurrency is also bounded by `llm.rate_limits.max_concurrency` |
 | `batch_size` | `10` | Submission-throttle cadence retained for compatibility; generation uses one rolling executor, not batch barriers |
 | `scan.max_workers` | `8` | Bounded local workers for source reads, parsing, and per-file endpoint detection (`1` forces serial scanning) |
+| `scan.max_source_bytes` | `1000000` | Source files above this size are skipped (not read/parsed/clustered) and counted in the coverage skip report |
 | **File filters** | | |
 | `languages` | `[python, javascript, typescript, go, php, vue]` | Languages to parse |
 | `include` | `[]` | Glob patterns to include (empty = everything) |

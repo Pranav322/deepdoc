@@ -4,20 +4,37 @@ from __future__ import annotations
 
 import re
 
+from ...source_metadata import FRAMEWORK_PRIORITIES
 from .base import APIEndpoint
 
 
 def dedupe_endpoints(endpoints: list[APIEndpoint]) -> list[APIEndpoint]:
-    """Keep the first endpoint for each method/path/line combination."""
-    deduped: list[APIEndpoint] = []
-    seen: set[str] = set()
+    """Keep the first endpoint for each method/path/line combination.
+
+    When two detectors claim the same physical route (same method + line +
+    file) but resolve conflicting paths, keep only the higher-priority
+    framework's claim (`FRAMEWORK_PRIORITIES`) instead of emitting both.
+    """
+    seen_exact: set[tuple[str, str, int]] = set()
+    order: list[tuple[str, int, str]] = []
+    best_by_group: dict[tuple[str, int, str], APIEndpoint] = {}
     for ep in endpoints:
-        key = f"{ep.method}:{ep.path}:{ep.line}"
-        if key in seen:
+        exact_key = (ep.method, ep.path, ep.line)
+        if exact_key in seen_exact:
             continue
-        seen.add(key)
-        deduped.append(ep)
-    return deduped
+        seen_exact.add(exact_key)
+
+        group_key = (ep.method, ep.line, ep.route_file or ep.file)
+        existing = best_by_group.get(group_key)
+        if existing is None:
+            best_by_group[group_key] = ep
+            order.append(group_key)
+        elif FRAMEWORK_PRIORITIES.get(ep.framework, 50) > FRAMEWORK_PRIORITIES.get(
+            existing.framework, 50
+        ):
+            best_by_group[group_key] = ep
+
+    return [best_by_group[key] for key in order]
 
 
 def line_number_for_offset(content: str, offset: int) -> int:

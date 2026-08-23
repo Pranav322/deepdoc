@@ -126,12 +126,23 @@ def test_init_persists_explicit_provider_limits(tmp_path: Path, monkeypatch) -> 
     }
 
 
-def test_init_noninteractive_uses_safe_limit_defaults(tmp_path: Path, monkeypatch) -> None:
+def test_init_noninteractive_writes_default_context_for_unknown_model(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # An unknown model (LiteLLM has no metadata for ollama/llama3.2) no longer
+    # blocks init; it writes a conservative default context window into the
+    # config so a non-expert user can generate immediately, and says so.
     monkeypatch.chdir(tmp_path)
     result = CliRunner().invoke(main, ["init", "--provider", "ollama"])
 
-    assert result.exit_code != 0
-    assert "--context-window-tokens" in result.output
+    assert result.exit_code == 0, result.output
+    assert "default context window" in result.output
+
+    import yaml
+    from deepdoc.llm.token_budget import DEFAULT_FALLBACK_CONTEXT_TOKENS
+
+    cfg = yaml.safe_load((tmp_path / ".deepdoc.yaml").read_text())
+    assert cfg["llm"]["context_window_tokens"] == DEFAULT_FALLBACK_CONTEXT_TOKENS
 
 
 def test_llm_output_cap_is_clamped_to_context_reserve() -> None:

@@ -63,14 +63,31 @@ def test_base_model_resolves_unknown_deployment(monkeypatch) -> None:
     assert result.source == "litellm_base_model"
 
 
-def test_unknown_model_without_override_fails(monkeypatch) -> None:
+def test_unknown_model_falls_back_to_defaults(monkeypatch, recwarn) -> None:
+    # An unknown model alias no longer hard-fails; it assumes conservative
+    # defaults so non-expert users aren't blocked, and warns loudly instead.
     monkeypatch.setattr(
         "deepdoc.llm.token_budget.prepare_litellm",
         lambda: SimpleNamespace(get_model_info=lambda model: (_ for _ in ()).throw(Exception())),
     )
 
-    with pytest.raises(ModelCapabilityError, match="base_model"):
-        resolve_completion_capabilities("azure/private-deployment", {})
+    from deepdoc.llm.token_budget import (
+        DEFAULT_FALLBACK_CONTEXT_TOKENS,
+        DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS,
+    )
+
+    result = resolve_completion_capabilities("azure/private-deployment", {})
+    assert result.source == "fallback_default"
+    assert result.context_window_tokens == DEFAULT_FALLBACK_CONTEXT_TOKENS
+    assert result.max_output_tokens == DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS
+    assert any("context window" in str(w.message) for w in recwarn.list)
+
+    # Explicit config still wins and silences the fallback.
+    explicit = resolve_completion_capabilities(
+        "azure/private-deployment", {"context_window_tokens": 64000}
+    )
+    assert explicit.context_window_tokens == 64000
+    assert explicit.source == "explicit_context"
 
 
 def test_prompt_budget_uses_model_output_when_reserve_auto(monkeypatch) -> None:

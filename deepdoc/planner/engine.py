@@ -587,6 +587,7 @@ def scan_repo(
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
     file_frameworks: dict[str, list[str]] = {}
+    unsupported_extensions: dict[str, int] = {}
     scan_timings: dict[str, float] = {}
     step_start = time.perf_counter()
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
@@ -722,6 +723,9 @@ def scan_repo(
 
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
+                if fpath.suffix:
+                    ext = fpath.suffix.lower()
+                    unsupported_extensions[ext] = unsupported_extensions.get(ext, 0) + 1
                 progress.advance(task)
                 continue
 
@@ -895,6 +899,7 @@ def scan_repo(
         service_boundaries=service_boundaries,
         file_services=file_services,
         scan_scope=sorted(normalized_scan_paths),
+        unsupported_extensions=dict(unsupported_extensions),
     )
 
 

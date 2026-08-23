@@ -313,8 +313,8 @@ deepdoc generate --exclude "tests/**"
 
 **What happens under the hood (5-phase pipeline):**
 
-1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
-2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
+1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs. Prints a scan summary table and, if any known-but-unsupported-language files (e.g. `.java`, `.rs`, `.cs`) are present, a warning naming them and how many were found.
+2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure. Prints a coverage panel — source files scanned vs. documented vs. orphaned/skipped, and a coverage % — so a partially-invisible repo is surfaced instead of silently shipped.
 3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through Python-side Markdown repair, grounding validation, and bounded quality retries before being written to disk.
 4. **Phase 4: API Ref** — Stage OpenAPI specs and render them on a single interactive Swagger UI page when a spec exists.
 5. **Phase 5: Build** — Write the Next.js + Fumadocs site scaffold (`site/`), nav config, and brand stylesheet from the generated plan.

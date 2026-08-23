@@ -40,6 +40,33 @@ FRAMEWORK_PRIORITIES = {
     "nestjs": 10,
 }
 
+# Extensions for common languages DeepDoc does not parse. Descriptive only —
+# used to warn a user that a polyglot repo is partially invisible (Task 1
+# coverage report), never to gate or broaden scanning.
+KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS: dict[str, str] = {
+    ".java": "Java",
+    ".kt": "Kotlin",
+    ".kts": "Kotlin",
+    ".rs": "Rust",
+    ".cs": "C#",
+    ".rb": "Ruby",
+    ".swift": "Swift",
+    ".c": "C",
+    ".h": "C/C++",
+    ".cpp": "C++",
+    ".cc": "C++",
+    ".hpp": "C++",
+    ".scala": "Scala",
+    ".ex": "Elixir",
+    ".exs": "Elixir",
+    ".clj": "Clojure",
+    ".dart": "Dart",
+    ".m": "Objective-C",
+    ".mm": "Objective-C++",
+    ".groovy": "Groovy",
+    ".r": "R",
+}
+
 
 def classify_source_kind(rel_path: str) -> str:
     """Classify a repo-relative path into a coarse source kind."""

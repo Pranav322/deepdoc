@@ -21,8 +21,8 @@ Guidance for coding agents working in this repository.
 ### Core pipeline
 - `deepdoc/cli.py` — Click commands: `init`, `generate`, `update`, `clean`, `status`, `benchmark`, `serve`, `deploy`, `config show/set`
 - `deepdoc/config.py` — `.deepdoc.yaml` defaults, loading, and `_set_nested` type inference
-- `deepdoc/pipeline_v2.py` — end-to-end orchestration; `PipelineV2` class; `_spec_base_path()` and `_write_spec()` for OpenAPI rewriting; `_build_site()` must be called *after* `_record_changelog()`
-- `deepdoc/v2_models.py` — `DocBucket`, `DocPlan`, `RepoScan` (now carries `call_graph`, `topology_map`, `flow_candidates` fields), `_BucketAsPage`
+- `deepdoc/pipeline_v2.py` — end-to-end orchestration; `PipelineV2` class; `_spec_base_path()` and `_write_spec()` for OpenAPI rewriting; `_build_site()` must be called *after* `_record_changelog()`; `_print_scan()` prints the scan summary and a warning for known-but-unsupported source languages found (`scan.unsupported_extensions`); `_print_coverage()` prints a documented/orphaned/coverage-% panel right after planning, from `plan.buckets`/`plan.orphaned_files`/`plan.skipped_files` vs. `scan.file_contents` — no new scanning, just surfacing existing plan/scan data
+- `deepdoc/v2_models.py` — `DocBucket`, `DocPlan`, `RepoScan` (now carries `call_graph`, `topology_map`, `flow_candidates`, `unsupported_extensions`, `skipped_source_files` fields), `_BucketAsPage`
 - `deepdoc/smart_update_v2.py` — `SmartUpdater`, `ChangeSet`, `UpdateRunResult`, `UpdateSyncPlan`, `SemanticImpact`; `_handle_deleted_files` pre-step; `_append_changelog` must be called before `_rebuild_nav()`
 - `deepdoc/persistence_v2.py` — `.deepdoc/` state, plan, ledger, sync baseline, changelog, engine fingerprint
 
@@ -75,7 +75,7 @@ Guidance for coding agents working in this repository.
 - `deepdoc/call_graph.py` — `CallGraph`; function-level call extraction; `CALL_KIND_LOCAL`, `CALL_KIND_CELERY`, `CALL_KIND_SIGNAL`, `CALL_KIND_EVENT`; supports Python (Django/Falcon/DRF/FastAPI), JS/TS (Express/Fastify/NestJS), Go, and PHP (Laravel). Import-evidence-gated call-site resolution (never guesses): same-file → imported (alias-aware, multi-hop re-export, cycle-guarded) → unambiguous repo-wide → import-evidence-gated → external. Member calls resolve only with explicit evidence; Python self.method() walks enclosing class's base chain cross-file (transitive, cycle-guarded). NestJS `@UseGuards`/`@UseInterceptors` tracked as graph edges.
 - `deepdoc/manifest.py` — `Manifest` class; tracks file → content hash → sorted owning doc paths (legacy single `doc_path` remains readable); stored atomically at `{output_dir}/.deepdoc_manifest.json`
 - `deepdoc/openapi.py` — `find_openapi_specs()`, OpenAPI/Swagger spec parser and importer
-- `deepdoc/source_metadata.py` — `SOURCE_KIND_CORE`, `SOURCE_KIND_SUPPORTING`, `LOW_TRUST_SOURCE_KINDS`, `FRAMEWORK_PRIORITIES`
+- `deepdoc/source_metadata.py` — `SOURCE_KIND_CORE`, `SOURCE_KIND_SUPPORTING`, `LOW_TRUST_SOURCE_KINDS`, `FRAMEWORK_PRIORITIES`, `KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS` (descriptive-only map used by the CLI coverage warning, e.g. `.java`/`.rs`/`.cs` — never wired into scan gating)
 - `deepdoc/benchmark_v2.py` — `BenchmarkResult`; planner quality scorecard harness
 - `deepdoc/changelog_writer.py` — `record_and_write` appends to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.md`; generates commit metadata tables, bulleted page lists, and strategy explanation blocks; `_ensure_in_nav` injects `whats-changed` into `Start Here`
 - `deepdoc/updater_v2.py` — `UpdaterV2`; legacy V1-era file-map updater (kept for compatibility)

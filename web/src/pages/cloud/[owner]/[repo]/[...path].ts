@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { requireSession } from "../../../../lib/hosted/session";
 import { fetchJobStatus } from "../../../../lib/hosted/queue";
-import { tryPageHtml, privateSitePage, stalePageHtml, readTheme } from "../../../../lib/hosted/page_html";
+import { tryPageHtml, privateSitePage, stalePageHtml, failedPageHtml, readTheme } from "../../../../lib/hosted/page_html";
 
 const CONTENT_TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -127,9 +127,22 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
     return new Response(tryPageHtml(readTheme(cookies)), { headers: { "Content-Type": "text/html; charset=utf-8" } });
   }
 
-  // Status says done/failed but nothing's in R2 under this path — the built
-  // files are gone (or never uploaded). Say so plainly instead of silently
-  // falling back to the dashboard.
+  // A failed job has no site to serve. It used to fall through to
+  // stalePageHtml, whose "was generated successfully, but the files are gone"
+  // copy is untrue for a failure and misleadingly offered a plain Regenerate
+  // as if it had once worked. Serve an honest failure page with the runner's
+  // error (already past the visibility gate, so this is within the same trust
+  // boundary as the site content).
+  if (result.status === "failed") {
+    return new Response(failedPageHtml(owner, repo, result.error, readTheme(cookies)), {
+      status: 200,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
+
+  // Status says done but nothing's in R2 under this path — the built files are
+  // gone (or never uploaded). Say so plainly instead of silently falling back
+  // to the dashboard.
   return new Response(stalePageHtml(owner, repo, readTheme(cookies)), {
     status: 200,
     headers: { "Content-Type": "text/html; charset=utf-8" },

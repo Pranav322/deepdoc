@@ -673,7 +673,13 @@ side only.
   the message (private queue, deleted after processing). Status/serving are R2:
   the job writes `jobs/{id}/status.json` and the site `{owner}/{repo}/…`, and
   the Pages Function reads both from R2 (`fetchJobStatus`) — it never talks to
-  a container. **KEDA can occasionally spawn a duplicate no-op execution
+  a container. The site proxy (`cloud/[owner]/[repo]/[...path].ts`) serves
+  one of four terminal screens by status: served R2 bytes (`done`, files
+  present), `tryPageHtml` SPA shell (non-terminal — queued/cloning/generating/
+  building, incl. the null-status startup window), `failedPageHtml` (`failed` —
+  honest error page showing `status.json.error`), and `stalePageHtml` (**only**
+  `done` with files evicted from R2). Do not re-collapse `failed` into
+  `stalePageHtml` — its "generated successfully" copy is a lie for a failed job. **KEDA can occasionally spawn a duplicate no-op execution
   (polling race); it's harmless — only one execution can lease a message, so
   no duplicate generation. Stop a lingering one with `az containerapp job
   stop`.**

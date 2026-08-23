@@ -665,3 +665,72 @@ so this bug **directly worsens the scale limit**.
    `gate` predicate so every new framework declares an explicit, reviewable
    trigger rather than hand-rolling a substring check. This is the change that
    makes "many frameworks" safe to scale.
+
+---
+
+# Addendum 3 — Anchor case: shopware/shopware (real run)
+
+A production hosted run against `shopware/shopware` is the clearest real-world
+confirmation of this audit. Pulled from the live job on 2026-08-17.
+
+- **job_id:** `162a3e68cbe0`  ·  **owner:** `laluka-osk`  ·  **visibility:** private
+- **status: `failed`**
+- **Coverage: 416 / 8,603 source files documented — 5%.**
+- **Failure:** `deepdoc deploy` refused the build —
+  `generation has 1 failed page(s)` and `stub docs present: core`.
+
+The runner log's own coverage panel:
+
+```
+Source files: 416/8603 documented (5%)
+  Uncovered:
+    src/Administration/Resources/app/administration/eslint-rules/core-rules/*.js
+    src/Administration/.../deprecation-rules/*.js
+    ... (thousands more)
+```
+
+## What it confirms, point by point
+
+1. **Scale wall (main audit §4).** 8,603 files is far past the single-prompt
+   planning ceiling. The run did not produce a coherent plan over the whole
+   repo; it documented a 5% slice and failed the quality gate on the rest. This
+   is exactly the "VS Code-scale monorepo" failure the audit predicted, on a
+   real repository.
+
+2. **Silent-degradation is real, and extreme (§5).** 95% of the repo was
+   uncovered. Nothing in the pipeline treated 5% coverage as a problem — only
+   `deepdoc deploy`'s independent quality gate (1 failed page + a `core` stub)
+   stopped a 5%-complete site from shipping as if finished. Without that gate
+   this ships looking done. Coverage is still never surfaced as a first-class
+   signal.
+
+3. **Monorepo signal wasted (§3).** shopware is a large multi-surface repo
+   (`src/Core`, `src/Administration`, `src/Storefront`, …) — precisely the case
+   `file_services` was built for and precisely where it is ignored. Per-service
+   planning is what would let each surface fit the planning budget.
+
+4. **Polyglot dilution (§1).** The uncovered list is dominated by
+   `src/Administration/.../*.js` (JS tooling/ESLint rules) alongside the PHP
+   core. Mixed PHP + JS with no cross-language call graph fragments topology and
+   pushes most files toward the heuristic/orphan path.
+
+## Bug found and fixed while investigating this
+
+The hosted app served a **failed** job the `stalePageHtml` screen — copy that
+reads *"was generated successfully, but the underlying files are gone"* and
+offers a plain Regenerate. For `shopware/shopware` that was actively false: the
+job failed, it never generated successfully.
+
+Root cause: `cloud/[owner]/[repo]/[...path].ts` collapsed `done`-with-missing-
+files and `failed` into one terminal branch. Fixed by adding
+`failedPageHtml(owner, repo, error, theme)` (`lib/hosted/page_html.ts`) and
+routing `result.status === "failed"` to it, so a failed job now shows an honest
+failure page with the runner's error instead of a false success. `stalePageHtml`
+is now reserved for its true case (status `done`, files evicted).
+
+## Takeaway
+
+shopware/shopware is the anchor argument for the roadmap's Tier 3 item
+(hierarchical, per-service planning). It is not slow — it is structurally
+unbuildable as a single planning unit today, and it fails in exactly the way the
+static audit predicted.

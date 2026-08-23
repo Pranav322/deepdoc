@@ -1851,3 +1851,59 @@ export function stalePageHtml(owner: string, repo: string, theme: Theme = "dark"
 </body>
 </html>`;
 }
+
+// Minimal server-side HTML escaper for untrusted strings interpolated into the
+// static mini-pages below (e.g. a runner error message). The client script has
+// its own escapeHtml; this is the server-render equivalent.
+function escapeHtmlServer(v: string): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+// Shown when a repo's job actually FAILED (status.json status === "failed").
+// Previously these were served the stalePageHtml "generated successfully but
+// files are gone" screen, which is untrue for a failed job and misleadingly
+// offered a plain "Regenerate" as if it had once worked. This states the
+// failure honestly and surfaces the runner's error. Only reached after the
+// visibility gate, so showing the error is within the same trust boundary as
+// the site content itself.
+export function failedPageHtml(
+  owner: string,
+  repo: string,
+  error: string | null,
+  theme: Theme = "dark",
+): string {
+  const detail = error && error.trim()
+    ? `<pre class="err">${escapeHtmlServer(error.trim())}</pre>`
+    : `<p>The last generation run did not complete. Regenerating may fix it.</p>`;
+  return `<!doctype html>
+<html lang="en" data-theme="${theme}">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Generation failed — DeepDoc</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+<style>${MINI_PAGE_CSS}
+  .err { text-align: left; white-space: pre-wrap; word-break: break-word;
+         font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 12.5px;
+         line-height: 1.5; margin: 16px 0; padding: 12px 14px; border-radius: 8px;
+         background: var(--danger-dim, rgba(220,50,50,0.08)); color: var(--ink, inherit);
+         max-height: 260px; overflow: auto; }
+</style>
+</head>
+<body>
+  <div class="card">
+    <h1>Documentation generation failed</h1>
+    <p><code>${owner}/${repo}</code> could not be generated.</p>
+    ${detail}
+    <button class="btn" onclick="location.href='/projects/${owner}/${repo}'">Regenerate</button>
+  </div>
+</body>
+</html>`;
+}

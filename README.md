@@ -1,8 +1,15 @@
-# DeepDoc
+<div align="center">
+  <img src="./web/public/favicon.svg" alt="DeepDoc Logo" width="120" height="120" />
+  <h1>DeepDoc</h1>
+  <p><b>Auto-generate deep engineering documentation from real codebases using AI.</b></p>
+  <p>DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich Markdown pages with Mermaid diagrams, and builds a local-first Next.js + Fumadocs site with built-in search.</p>
 
-[![PyPI version](https://img.shields.io/pypi/v/deepdoc)](https://pypi.org/project/deepdoc/)
-[![Python versions](https://img.shields.io/pypi/pyversions/deepdoc)](https://pypi.org/project/deepdoc/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+  [![PyPI version](https://img.shields.io/pypi/v/deepdoc)](https://pypi.org/project/deepdoc/)
+  [![Python versions](https://img.shields.io/pypi/pyversions/deepdoc)](https://pypi.org/project/deepdoc/)
+  [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+</div>
+
+<br/>
 
 ## Repository Layout
 
@@ -13,12 +20,6 @@
 | [`vscode-extension/`](./vscode-extension/) | VS Code extension — explains selected code snippets in Fast or Deep mode and inserts AI-generated comments inline. | [`vscode-extension/README.md`](./vscode-extension/README.md) |
 | [`tests/`](./tests/) | pytest test suite for the Python package. | Run `python3 -m pytest -q` from repo root. |
 | [`scripts/`](./scripts/) | One-off release and maintenance scripts. | — |
-
----
-
-Auto-generate deep engineering documentation from real codebases using AI.
-
-DeepDoc scans your repo, builds a bucket-based documentation plan, generates rich Markdown pages with Mermaid diagrams, and builds a local-first Next.js + Fumadocs site with built-in search.
 
 ## Contents
 

@@ -651,6 +651,18 @@ class PipelineV2:
                 f"{named}[/yellow]"
             )
 
+        if scan.skipped_source_files:
+            named_reasons = ", ".join(
+                f"{reason} ({count})"
+                for reason, count in sorted(
+                    scan.skipped_source_files.items(), key=lambda x: -x[1]
+                )
+            )
+            console.print(
+                f"[dim]Skipped {sum(scan.skipped_source_files.values())} source "
+                f"file(s) without reading/parsing: {named_reasons}[/dim]"
+            )
+
     def _print_coverage(self, scan: RepoScan, plan) -> None:
         """Surface how much of the repo actually made it into documentation.
 

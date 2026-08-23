@@ -465,6 +465,39 @@ class _SourceScanResult:
     timings: dict[str, float]
 
 
+# Generated/minified/vendored path signals — skip rather than LLM-cluster.
+# node_modules and common build dirs are usually already in `exclude`, but this
+# guards files that escape user config (a stray vendored bundle, a checked-in
+# `dist/`, etc).
+_GENERATED_PATH_SEGMENTS = ("/dist/", "/build/", "/vendor/", "/node_modules/", "/.min/")
+
+
+def _skip_reason_for_source_file(
+    fpath: Path, rel_path: str, max_source_bytes: int
+) -> str | None:
+    """Return a skip reason for a file that should not be read/parsed, or None."""
+    fname_lower = fpath.name.lower()
+    if ".min." in fname_lower:
+        return "minified"
+    rel_lower = f"/{rel_path.lower()}/"
+    if any(segment in rel_lower for segment in _GENERATED_PATH_SEGMENTS):
+        return "generated_or_vendored"
+    try:
+        size = fpath.stat().st_size
+    except OSError:
+        return None
+    if size > max_source_bytes:
+        return "oversized"
+    try:
+        with open(fpath, "rb") as fh:
+            chunk = fh.read(8192)
+    except OSError:
+        return None
+    if b"\x00" in chunk:
+        return "binary"
+    return None
+
+
 def _scan_one_source_file(
     fpath: Path, rel_path: str, language: str
 ) -> _SourceScanResult:
@@ -588,6 +621,9 @@ def scan_repo(
     source_kind_by_file: dict[str, str] = {}
     file_frameworks: dict[str, list[str]] = {}
     unsupported_extensions: dict[str, int] = {}
+    skipped_source_files: dict[str, int] = {}
+    scan_cfg = cfg.get("scan", {}) or {}
+    max_source_bytes = int(scan_cfg.get("max_source_bytes", 1_000_000))
     scan_timings: dict[str, float] = {}
     step_start = time.perf_counter()
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
@@ -735,6 +771,14 @@ def scan_repo(
 
             file_tree[rel_dir].append(fname)
 
+            skip_reason = _skip_reason_for_source_file(fpath, rel, max_source_bytes)
+            if skip_reason:
+                skipped_source_files[skip_reason] = (
+                    skipped_source_files.get(skip_reason, 0) + 1
+                )
+                progress.advance(task)
+                continue
+
             lang = ext_to_lang.get(fpath.suffix.lower(), "")
             if lang:
                 lang_counts[lang] += 1
@@ -747,7 +791,6 @@ def scan_repo(
 
             source_work.append((fpath, rel, lang))
 
-        scan_cfg = cfg.get("scan", {}) or {}
         configured_workers = max(1, min(32, int(scan_cfg.get("max_workers", 8))))
         effective_workers = (
             min(configured_workers, len(source_work)) if source_work else 0
@@ -900,6 +943,7 @@ def scan_repo(
         file_services=file_services,
         scan_scope=sorted(normalized_scan_paths),
         unsupported_extensions=dict(unsupported_extensions),
+        skipped_source_files=dict(skipped_source_files),
     )
 
 

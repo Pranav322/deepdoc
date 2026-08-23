@@ -29,6 +29,12 @@ LARAVEL_GROUP = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 
+# Fluent style: Route::prefix('api')->group(function () { ... })
+LARAVEL_PREFIX_GROUP = re.compile(
+    r"""Route\s*::\s*prefix\s*\(\s*['"]([^'"]+)['"]\s*\)\s*->\s*group\s*\(""",
+    re.IGNORECASE | re.DOTALL,
+)
+
 
 def detect_laravel(context: RouteResolverContext) -> list[APIEndpoint]:
     content = context.content
@@ -107,20 +113,21 @@ def detect_laravel(context: RouteResolverContext) -> list[APIEndpoint]:
 def build_laravel_group_prefixes(content: str) -> list[tuple[int, int, str]]:
     """Build list of (start, end, prefix) for each Route::group in the file."""
     groups: list[tuple[int, int, str]] = []
-    for match in LARAVEL_GROUP.finditer(content):
-        prefix = match.group(1)
-        brace_start = content.find("{", match.end())
-        if brace_start == -1:
-            continue
-        depth = 1
-        pos = brace_start + 1
-        while pos < len(content) and depth > 0:
-            if content[pos] == "{":
-                depth += 1
-            elif content[pos] == "}":
-                depth -= 1
-            pos += 1
-        groups.append((brace_start, pos, prefix))
+    for pattern in (LARAVEL_GROUP, LARAVEL_PREFIX_GROUP):
+        for match in pattern.finditer(content):
+            prefix = match.group(1)
+            brace_start = content.find("{", match.end())
+            if brace_start == -1:
+                continue
+            depth = 1
+            pos = brace_start + 1
+            while pos < len(content) and depth > 0:
+                if content[pos] == "{":
+                    depth += 1
+                elif content[pos] == "}":
+                    depth -= 1
+                pos += 1
+            groups.append((brace_start, pos, prefix))
     return groups
 
 

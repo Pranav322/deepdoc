@@ -477,7 +477,7 @@ def _format_code_chunk_text(
 
 def _endpoint_index(scan: RepoScan) -> dict[str, list[dict[str, Any]]]:
     mapping: dict[str, list[dict[str, Any]]] = defaultdict(list)
-    for endpoint in scan.api_endpoints:
+    for endpoint in scan.published_api_endpoints:
         for key in ("file", "handler_file", "route_file"):
             rel_path = str(endpoint.get(key, "") or "").strip()
             if rel_path and endpoint not in mapping[rel_path]:

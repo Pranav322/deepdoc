@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from .persistence_v2 import DocPage
     from .v2_models import DocPlan, RepoScan
 
+import click
 from rich.console import Console
 from rich.panel import Panel
 
@@ -58,6 +59,7 @@ from .planner import (
 from .planner import (
     scan_repo as bucket_scan_repo,
 )
+from .source_metadata import KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS
 from .telemetry import RunTelemetry
 
 console = Console()
@@ -309,6 +311,7 @@ class PipelineV2:
             )
         phase_timings["scan"] = time.perf_counter() - phase_start
         self._print_scan(scan)
+        self._guard_supported_source_files(scan)
         stats["files_scanned"] = scan.total_files
 
         # ── Phase 2: Plan ──────────────────────────────────────────────
@@ -350,6 +353,7 @@ class PipelineV2:
             phase_timings["plan"] = time.perf_counter() - phase_start
 
         stats["pages_planned"] = len(plan.pages)
+        self._print_coverage(scan, plan)
 
         # ── Phase 3: Generate ──────────────────────────────────────────
         console.print(
@@ -617,6 +621,31 @@ class PipelineV2:
     # Phase 1 helpers
     # ──────────────────────────────────────────────────────────────────────
 
+    _SUPPORTED_LANGUAGES = ("python", "javascript", "typescript", "go", "php", "vue")
+
+    def _guard_supported_source_files(self, scan: RepoScan) -> None:
+        """Fail clearly if the scan found no documentable source file.
+
+        Without this, an empty or unsupported-only repo reaches planning with
+        an empty inventory and dies with an opaque PlanContractError instead
+        of a message that names what DeepDoc can actually parse.
+        """
+        if scan.file_contents:
+            return
+        supported = ", ".join(self._SUPPORTED_LANGUAGES)
+        if scan.total_files == 0:
+            raise click.ClickException(
+                f"No source files found under {self.repo_root}. "
+                f"DeepDoc documents: {supported}."
+            )
+        unsupported = sorted(scan.unsupported_extensions)
+        detail = f" (found: {', '.join(unsupported)})" if unsupported else ""
+        raise click.ClickException(
+            f"No supported source files found under {self.repo_root}{detail}. "
+            f"DeepDoc documents: {supported}. See the scan summary above for "
+            f"which extensions were skipped."
+        )
+
     def _print_scan(self, scan: RepoScan) -> None:
         from rich.table import Table
 
@@ -632,6 +661,71 @@ class PipelineV2:
         t.add_row("Entry points", str(len(scan.entry_points)))
         t.add_row("Config files", str(len(scan.config_files)))
         console.print(t)
+
+        unsupported_langs = {
+            ext: count
+            for ext, count in scan.unsupported_extensions.items()
+            if ext in KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS
+        }
+        if unsupported_langs:
+            named = ", ".join(
+                f"{KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS[ext]} ({ext}, {count} file"
+                f"{'s' if count != 1 else ''})"
+                for ext, count in sorted(unsupported_langs.items(), key=lambda x: -x[1])
+            )
+            console.print(
+                f"[yellow]⚠ Unsupported languages present, not parsed or documented: "
+                f"{named}[/yellow]"
+            )
+
+        if scan.skipped_source_files:
+            named_reasons = ", ".join(
+                f"{reason} ({count})"
+                for reason, count in sorted(
+                    scan.skipped_source_files.items(), key=lambda x: -x[1]
+                )
+            )
+            console.print(
+                f"[dim]Skipped {sum(scan.skipped_source_files.values())} source "
+                f"file(s) without reading/parsing: {named_reasons}[/dim]"
+            )
+
+    def _print_coverage(self, scan: RepoScan, plan) -> None:
+        """Surface how much of the repo actually made it into documentation.
+
+        DeepDoc can silently document a small slice of a repo and report
+        success. This reports total scanned source files vs. documented vs.
+        orphaned/skipped, so a partially-invisible repo is visible, not hidden.
+        """
+        from rich.table import Table
+
+        total_source_files = len(scan.file_contents)
+        documented_files = {
+            f for bucket in plan.buckets for f in (bucket.owned_files or [])
+        } & set(scan.file_contents)
+        orphaned_or_skipped = (set(plan.orphaned_files) | set(plan.skipped_files)) & set(
+            scan.file_contents
+        )
+        coverage_pct = (
+            (len(documented_files) / total_source_files * 100)
+            if total_source_files
+            else 0.0
+        )
+
+        t = Table(
+            title="Coverage",
+            show_header=True,
+            header_style="bold",
+        )
+        t.add_column("Metric", style="cyan")
+        t.add_column("Value", justify="right")
+        t.add_row("Source files scanned", str(total_source_files))
+        t.add_row("Documented", str(len(documented_files)))
+        t.add_row("Orphaned / skipped", str(len(orphaned_or_skipped)))
+        t.add_row("Coverage", f"{coverage_pct:.1f}%")
+        console.print(t)
+        style = "green" if coverage_pct >= 80 else "yellow" if coverage_pct >= 40 else "red"
+        console.print(f"[{style}]Coverage: {coverage_pct:.1f}%[/{style}]")
 
     # ──────────────────────────────────────────────────────────────────────
     # Phase 4: API Playground
@@ -685,7 +779,7 @@ class PipelineV2:
             self.repo_root,
             scan.openapi_paths,
             plan=plan,
-            scanned_endpoints=scan.api_endpoints,
+            scanned_endpoints=scan.published_api_endpoints,
         )
 
     # ──────────────────────────────────────────────────────────────────────

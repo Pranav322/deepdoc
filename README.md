@@ -313,8 +313,8 @@ deepdoc generate --exclude "tests/**"
 
 **What happens under the hood (5-phase pipeline):**
 
-1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs.
-2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure.
+1. **Phase 1: Scan** — Walk the repo, parse supported languages, detect endpoints, config/setup artifacts, runtime surfaces, integration signals, and OpenAPI specs. Prints a scan summary table and, if any known-but-unsupported-language files (e.g. `.java`, `.rs`, `.cs`) are present, a warning naming them and how many were found.
+2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure. Prints a coverage panel — source files scanned vs. documented vs. orphaned/skipped, and a coverage % — so a partially-invisible repo is surfaced instead of silently shipped.
 3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through Python-side Markdown repair, grounding validation, and bounded quality retries before being written to disk.
 4. **Phase 4: API Ref** — Stage OpenAPI specs and render them on a single interactive Swagger UI page when a spec exists.
 5. **Phase 5: Build** — Write the Next.js + Fumadocs site scaffold (`site/`), nav config, and brand stylesheet from the generated plan.
@@ -702,8 +702,9 @@ site:
 | `max_parallel_workers` | `6` | Generation executor size; actual hosted request concurrency is also bounded by `llm.rate_limits.max_concurrency` |
 | `batch_size` | `10` | Submission-throttle cadence retained for compatibility; generation uses one rolling executor, not batch barriers |
 | `scan.max_workers` | `8` | Bounded local workers for source reads, parsing, and per-file endpoint detection (`1` forces serial scanning) |
+| `scan.max_source_bytes` | `1000000` | Source files above this size are skipped (not read/parsed/clustered) and counted in the coverage skip report |
 | **File filters** | | |
-| `languages` | `[python, javascript, typescript, go, php, vue]` | Languages to parse |
+| `languages` | `[python, javascript, typescript, go, php, vue]` | Descriptive only — fills a sentence in generation prompts. Does not gate or broaden scanning; the scanner's supported languages are fixed |
 | `include` | `[]` | Glob patterns to include (empty = everything) |
 | `exclude` | *(see config)* | Glob patterns to exclude (node_modules, .git, dist, etc.) |
 | **GitHub Pages** | | |

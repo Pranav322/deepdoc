@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from functools import lru_cache
 import math
+import warnings
 from collections.abc import Callable
 from typing import Any
 
@@ -13,6 +14,24 @@ from .litellm_compat import prepare_litellm
 
 class ModelCapabilityError(ValueError):
     """DeepDoc cannot safely resolve a model's prompt capacity."""
+
+
+# Conservative last-resort capability defaults. Used ONLY when neither explicit
+# config nor LiteLLM metadata can resolve a model, so a non-expert user isn't
+# hard-blocked at startup by an unknown provider alias. This is a deliberate,
+# LOUD fallback (a warning is emitted) — explicit llm.context_window_tokens /
+# llm.output_reserve_tokens still win and silence it.
+DEFAULT_FALLBACK_CONTEXT_TOKENS = 128000
+DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS = 16000
+
+
+def _warn_capability_fallback(message: str) -> None:
+    """Emit a one-time, visible warning that a capability default was assumed.
+
+    Python's default warning filter shows one occurrence per call site, so a
+    long generate run does not spam this once per page.
+    """
+    warnings.warn(message, RuntimeWarning, stacklevel=3)
 
 
 @dataclass(frozen=True)
@@ -105,14 +124,30 @@ def resolve_completion_capabilities(
     )
 
     context_window = explicit_context or metadata_context
+    max_output = explicit_output or metadata_output
     if context_window is None:
-        raise ModelCapabilityError(
-            f"Could not resolve the context window for model {model!r}. "
-            f"Set {config_prefix}.base_model to a LiteLLM-known model or set "
-            f"{config_prefix}.context_window_tokens explicitly."
+        # Fail-loud-but-continue: an unknown model alias (common with custom
+        # Azure/self-hosted deployments) previously hard-failed here. Assume a
+        # conservative default so generation can proceed; explicit config still
+        # wins and silences this. Set llm.context_window_tokens /
+        # llm.base_model to remove the guess.
+        context_window = DEFAULT_FALLBACK_CONTEXT_TOKENS
+        if max_output is None:
+            max_output = DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS
+        _warn_capability_fallback(
+            f"Could not resolve the context window for model {model!r}; "
+            f"assuming {context_window:,} context / {max_output:,} output tokens. "
+            f"Set {config_prefix}.context_window_tokens or {config_prefix}.base_model "
+            "to override."
+        )
+        return ModelCapabilities(
+            model=model,
+            capability_model=metadata_model,
+            context_window_tokens=context_window,
+            max_output_tokens=min(max_output, context_window),
+            source="fallback_default",
         )
 
-    max_output = explicit_output or metadata_output
     if max_output is not None:
         max_output = min(max_output, context_window)
     if explicit_context and explicit_output:
@@ -185,9 +220,13 @@ def build_prompt_budget(
     elif capabilities.max_output_tokens is not None:
         reserve = capabilities.max_output_tokens
     else:
-        raise ModelCapabilityError(
-            f"Could not resolve an output reserve for model {capabilities.model!r}. "
-            "Set output_reserve_tokens explicitly."
+        # Same fail-loud-but-continue policy as the context window: assume a
+        # conservative reserve rather than blocking. output_reserve_tokens in
+        # config overrides and silences this.
+        reserve = DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS
+        _warn_capability_fallback(
+            f"Could not resolve an output reserve for model {capabilities.model!r}; "
+            f"assuming {reserve:,} tokens. Set output_reserve_tokens to override."
         )
     reserve = min(reserve, capabilities.context_window_tokens // 2)
     safety = max(256, int(capabilities.context_window_tokens * safety_fraction))
@@ -241,22 +280,42 @@ def fit_prompt_sections(
     omitted: dict[str, int] = {}
     for name, records in optional_sections:
         accepted: list[str] = []
+        accepted_tokens: list[int] = []
+        running_tokens = input_tokens
         for record in records:
-            candidate = dict(sections)
-            candidate[name] = "\n".join([*accepted, record])
-            candidate_prompt = render_prompt(candidate)
-            candidate_tokens, candidate_estimated = count_message_tokens(
-                system, candidate_prompt, capabilities
-            )
-            if candidate_tokens <= maximum_input:
-                sections = candidate
-                prompt = candidate_prompt
-                input_tokens = candidate_tokens
-                estimated = estimated or candidate_estimated
+            record_tokens, record_estimated = count_text_tokens(record, capabilities)
+            tentative = running_tokens + record_tokens + (1 if accepted else 0)
+            if tentative <= maximum_input:
                 accepted.append(record)
+                accepted_tokens.append(record_tokens)
+                running_tokens = tentative
+                estimated = estimated or record_estimated
             else:
                 omitted[name] = omitted.get(name, 0) + 1
-        sections.setdefault(name, "")
+        sections[name] = "\n".join(accepted)
+        # ponytail: one exact recount per section (not per record) keeps this O(sections), not O(records)
+        prompt = render_prompt(sections)
+        input_tokens, section_estimated = count_message_tokens(system, prompt, capabilities)
+        estimated = estimated or section_estimated
+
+        # The per-record estimate above is additive; the real tokenizer used for the
+        # recount above is not guaranteed to be (separators, joiner overhead, etc.), so
+        # the accepted set can still exceed maximum_input after the exact recount. Trim
+        # from the end using the cheap per-record counts already computed (no re-render
+        # per drop), then re-verify with one more exact recount. This loop only repeats
+        # if an estimate undershot reality, so total renders stay bounded by the number
+        # of records actually dropped, not N^2.
+        while input_tokens > maximum_input and accepted:
+            estimate = input_tokens
+            while accepted and estimate > maximum_input:
+                dropped_tokens = accepted_tokens.pop()
+                accepted.pop()
+                omitted[name] = omitted.get(name, 0) + 1
+                estimate -= dropped_tokens + 1
+            sections[name] = "\n".join(accepted)
+            prompt = render_prompt(sections)
+            input_tokens, section_estimated = count_message_tokens(system, prompt, capabilities)
+            estimated = estimated or section_estimated
     return PromptFitResult(
         prompt=prompt,
         sections=sections,

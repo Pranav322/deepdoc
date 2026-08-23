@@ -63,14 +63,31 @@ def test_base_model_resolves_unknown_deployment(monkeypatch) -> None:
     assert result.source == "litellm_base_model"
 
 
-def test_unknown_model_without_override_fails(monkeypatch) -> None:
+def test_unknown_model_falls_back_to_defaults(monkeypatch, recwarn) -> None:
+    # An unknown model alias no longer hard-fails; it assumes conservative
+    # defaults so non-expert users aren't blocked, and warns loudly instead.
     monkeypatch.setattr(
         "deepdoc.llm.token_budget.prepare_litellm",
         lambda: SimpleNamespace(get_model_info=lambda model: (_ for _ in ()).throw(Exception())),
     )
 
-    with pytest.raises(ModelCapabilityError, match="base_model"):
-        resolve_completion_capabilities("azure/private-deployment", {})
+    from deepdoc.llm.token_budget import (
+        DEFAULT_FALLBACK_CONTEXT_TOKENS,
+        DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS,
+    )
+
+    result = resolve_completion_capabilities("azure/private-deployment", {})
+    assert result.source == "fallback_default"
+    assert result.context_window_tokens == DEFAULT_FALLBACK_CONTEXT_TOKENS
+    assert result.max_output_tokens == DEFAULT_FALLBACK_OUTPUT_RESERVE_TOKENS
+    assert any("context window" in str(w.message) for w in recwarn.list)
+
+    # Explicit config still wins and silences the fallback.
+    explicit = resolve_completion_capabilities(
+        "azure/private-deployment", {"context_window_tokens": 64000}
+    )
+    assert explicit.context_window_tokens == 64000
+    assert explicit.source == "explicit_context"
 
 
 def test_prompt_budget_uses_model_output_when_reserve_auto(monkeypatch) -> None:
@@ -167,6 +184,54 @@ def test_prompt_fitter_rejects_required_inventory_that_cannot_fit(monkeypatch) -
             output_reserve_tokens=20,
             step_name="test",
         )
+
+
+def test_prompt_fitter_guarantees_fit_when_tokenizer_is_non_additive(monkeypatch) -> None:
+    """Real tokenizers add per-line/separator overhead that grows with the number of
+    joined records — sum-of-record estimates can undercount this. The fitter must
+    trim back down to the real budget after the exact recount, not just report it."""
+
+    def token_counter(**kwargs):
+        text = kwargs.get("text")
+        if text is not None:
+            return len(text.split())
+        joined = " ".join(m["content"] for m in kwargs["messages"])
+        # Non-additive overhead: grows with the number of newline-joined records,
+        # which per-record standalone counts (count_text_tokens) cannot see.
+        lines = joined.count("\n") + 1
+        return len(joined.split()) + lines * 50
+
+    fake = SimpleNamespace(
+        get_model_info=lambda model: {
+            "max_input_tokens": 500,
+            "max_output_tokens": 20,
+        },
+        token_counter=token_counter,
+    )
+    monkeypatch.setattr("deepdoc.llm.token_budget.prepare_litellm", lambda: fake)
+    capabilities = resolve_completion_capabilities("non-additive-model", {})
+
+    result = fit_prompt_sections(
+        capabilities,
+        system="system",
+        render_prompt=lambda sections: (
+            f"required={sections['required']}\noptional={sections.get('optional', '')}"
+        ),
+        required_sections={"required": "must keep"},
+        optional_sections=[
+            ("optional", ["word " * 30 for _ in range(10)]),
+        ],
+        output_reserve_tokens=20,
+        step_name="test",
+    )
+
+    budget = build_prompt_budget(capabilities, output_reserve_tokens=20)
+    maximum_input = (
+        budget.context_window_tokens - budget.output_reserve_tokens - budget.safety_tokens
+    )
+    assert result.input_tokens <= maximum_input
+    assert result.omitted_records["optional"] >= 1
+    assert "must keep" in result.prompt
 
 
 def test_planner_endpoint_formatter_keeps_every_endpoint() -> None:

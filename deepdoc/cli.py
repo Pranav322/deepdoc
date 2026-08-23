@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 from copy import deepcopy
 import json
 import os
@@ -247,19 +249,27 @@ def init(
         context_window_tokens = int(raw_context) if raw_context else None
 
     if context_window_tokens is None:
-        try:
-            resolve_completion_capabilities(resolved_model, {})
-        except ModelCapabilityError as exc:
+        # resolve_completion_capabilities no longer hard-fails on an unknown
+        # model — it assumes a conservative default (fail-loud-but-continue).
+        # For init we want that default written EXPLICITLY into the config so
+        # it's visible and editable, and so generation never re-warns.
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            caps = resolve_completion_capabilities(resolved_model, {})
+        if caps.source == "fallback_default":
             if interactive:
                 context_window_tokens = click.prompt(
                     "LiteLLM could not resolve this model. Context window in tokens",
                     type=click.IntRange(1024),
+                    default=caps.context_window_tokens,
                 )
             else:
-                raise click.UsageError(
-                    f"{exc}\n\nPass --context-window-tokens for this model, for example:\n"
-                    f"  deepdoc init --provider {provider} --context-window-tokens 32768"
-                ) from exc
+                context_window_tokens = caps.context_window_tokens
+                click.echo(
+                    f"Note: '{resolved_model}' is unknown to LiteLLM — wrote a default "
+                    f"context window of {caps.context_window_tokens} tokens to your config. "
+                    "Edit llm.context_window_tokens if your model's window differs."
+                )
 
     cfg = deepcopy(DEFAULT_CONFIG)
     cfg["project_name"] = name or cwd.name

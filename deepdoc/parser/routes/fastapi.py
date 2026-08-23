@@ -56,7 +56,11 @@ def detect_fastapi(context: RouteResolverContext) -> list[APIEndpoint]:
             
         path_expr = args[0].strip()
         route_path = parse_string_arg(path_expr) or path_expr.strip('"\'')
-        
+        if not route_path.startswith("/"):
+            # Not a real route path — e.g. `@mock.patch("myapp.services.charge")`
+            # matches the same `@obj.patch(...)` shape as a FastAPI decorator.
+            continue
+
         methods = [method_str]
         if method_str == "API_ROUTE":
             methods = _extract_methods_from_args(args) or ["ANY"]

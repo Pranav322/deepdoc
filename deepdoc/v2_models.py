@@ -166,6 +166,8 @@ class RepoScan:
     service_boundaries: list[dict[str, Any]] = field(default_factory=list)
     file_services: dict[str, str] = field(default_factory=dict)
     scan_scope: list[str] = field(default_factory=list)
+    unsupported_extensions: dict[str, int] = field(default_factory=dict)
+    skipped_source_files: dict[str, int] = field(default_factory=dict)
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:

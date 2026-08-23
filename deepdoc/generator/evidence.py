@@ -176,7 +176,7 @@ class EvidenceAssembler:
         self._slug_to_bucket: dict[str, DocBucket] = {b.slug: b for b in plan.buckets}
         # Pre-index: file → endpoint tuples
         self._file_to_endpoints: dict[str, list[dict[str, Any]]] = defaultdict(list)
-        for ep in scan.api_endpoints:
+        for ep in scan.published_api_endpoints:
             for key in ("file", "handler_file", "route_file"):
                 file_path = ep.get(key, "")
                 if file_path:
@@ -1260,7 +1260,7 @@ class EvidenceAssembler:
                     )
             else:
                 # Fallback: raw endpoint data matching this handler
-                for ep in self.scan.api_endpoints:
+                for ep in self.scan.published_api_endpoints:
                     ep_handler = ep.get("handler", "")
                     ep_method = ep.get("method", "").upper()
                     ep_path = ep.get("path", "")
@@ -1317,7 +1317,9 @@ class EvidenceAssembler:
         # Fallback: raw endpoint data from scan
         if not lines:
             relevant_eps = [
-                ep for ep in self.scan.api_endpoints if ep.get("file", "") in page_files
+                ep
+                for ep in self.scan.published_api_endpoints
+                if ep.get("file", "") in page_files
             ]
             for ep in relevant_eps:
                 lines.append(

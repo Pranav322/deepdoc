@@ -381,6 +381,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
 
     # ── Merge proposal + assignment into final plan ──────────────────────
     plan = _merge_plan(proposal, assignment, classification, scan)
+    plan = _deduplicate_bucket_slugs(plan)
     plan = _refine_bucket_ownership(plan, scan, classification)
 
     # ── Step 3.5: Decompose broad buckets into focused sub-topics ────────
@@ -462,6 +463,39 @@ class _SourceScanResult:
     endpoints: tuple[APIEndpoint, ...]
     source_bytes: int
     timings: dict[str, float]
+
+
+# Generated/minified/vendored path signals — skip rather than LLM-cluster.
+# node_modules and common build dirs are usually already in `exclude`, but this
+# guards files that escape user config (a stray vendored bundle, a checked-in
+# `dist/`, etc).
+_GENERATED_PATH_SEGMENTS = ("/dist/", "/build/", "/vendor/", "/node_modules/", "/.min/")
+
+
+def _skip_reason_for_source_file(
+    fpath: Path, rel_path: str, max_source_bytes: int
+) -> str | None:
+    """Return a skip reason for a file that should not be read/parsed, or None."""
+    fname_lower = fpath.name.lower()
+    if ".min." in fname_lower:
+        return "minified"
+    rel_lower = f"/{rel_path.lower()}/"
+    if any(segment in rel_lower for segment in _GENERATED_PATH_SEGMENTS):
+        return "generated_or_vendored"
+    try:
+        size = fpath.stat().st_size
+    except OSError:
+        return None
+    if size > max_source_bytes:
+        return "oversized"
+    try:
+        with open(fpath, "rb") as fh:
+            chunk = fh.read(8192)
+    except OSError:
+        return None
+    if b"\x00" in chunk:
+        return "binary"
+    return None
 
 
 def _scan_one_source_file(
@@ -586,6 +620,10 @@ def scan_repo(
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
     file_frameworks: dict[str, list[str]] = {}
+    unsupported_extensions: dict[str, int] = {}
+    skipped_source_files: dict[str, int] = {}
+    scan_cfg = cfg.get("scan", {}) or {}
+    max_source_bytes = int(scan_cfg.get("max_source_bytes", 1_000_000))
     scan_timings: dict[str, float] = {}
     step_start = time.perf_counter()
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
@@ -721,6 +759,9 @@ def scan_repo(
 
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
+                if fpath.suffix:
+                    ext = fpath.suffix.lower()
+                    unsupported_extensions[ext] = unsupported_extensions.get(ext, 0) + 1
                 progress.advance(task)
                 continue
 
@@ -729,6 +770,14 @@ def scan_repo(
                 continue
 
             file_tree[rel_dir].append(fname)
+
+            skip_reason = _skip_reason_for_source_file(fpath, rel, max_source_bytes)
+            if skip_reason:
+                skipped_source_files[skip_reason] = (
+                    skipped_source_files.get(skip_reason, 0) + 1
+                )
+                progress.advance(task)
+                continue
 
             lang = ext_to_lang.get(fpath.suffix.lower(), "")
             if lang:
@@ -742,7 +791,6 @@ def scan_repo(
 
             source_work.append((fpath, rel, lang))
 
-        scan_cfg = cfg.get("scan", {}) or {}
         configured_workers = max(1, min(32, int(scan_cfg.get("max_workers", 8))))
         effective_workers = (
             min(configured_workers, len(source_work)) if source_work else 0
@@ -894,6 +942,8 @@ def scan_repo(
         service_boundaries=service_boundaries,
         file_services=file_services,
         scan_scope=sorted(normalized_scan_paths),
+        unsupported_extensions=dict(unsupported_extensions),
+        skipped_source_files=dict(skipped_source_files),
     )
 
 
@@ -1208,6 +1258,6 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
     return False
 
 
-from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_partial_assignment, _merge_plan, _normalize_repo_profile, _partition_topology_assignment, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
+from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _deduplicate_bucket_slugs, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_partial_assignment, _merge_plan, _normalize_repo_profile, _partition_topology_assignment, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
 from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets

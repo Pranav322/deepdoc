@@ -73,8 +73,11 @@ def resolve_repo_endpoints(
     required_frameworks = {e.framework.lower() for e in endpoints if e.framework}
 
     js_index = None
+    nestjs_global_prefix = ""
     if required_frameworks & {"express", "fastify", "nestjs"}:
         js_index = _build_js_index(file_contents)
+    if "nestjs" in required_frameworks:
+        nestjs_global_prefix = _detect_nestjs_global_prefix(file_contents)
     py_index = None
     if required_frameworks & {"falcon", "django", "fastapi"}:
         py_index = _build_python_index(file_contents)
@@ -94,7 +97,9 @@ def resolve_repo_endpoints(
         elif framework == "fastify" and js_index is not None:
             resolved.extend(_resolve_fastify_endpoint(repo_root, endpoint, js_index))
         elif framework == "nestjs" and js_index is not None:
-            resolved.extend(_resolve_nestjs_endpoint(endpoint, js_index))
+            resolved.extend(
+                _resolve_nestjs_endpoint(endpoint, js_index, nestjs_global_prefix)
+            )
         elif framework == "falcon" and py_index is not None:
             resolved.extend(
                 _resolve_falcon_endpoint(repo_root, endpoint, file_contents, py_index)
@@ -282,21 +287,46 @@ def _resolve_express_endpoint(
     return endpoints
 
 
+NESTJS_GLOBAL_PREFIX = re.compile(
+    r"\.setGlobalPrefix\s*\(\s*['\"](.*?)['\"]\s*\)"
+)
+
+
+def _detect_nestjs_global_prefix(file_contents: dict[str, str]) -> str:
+    """Find a single, unambiguous `app.setGlobalPrefix('...')` across the repo.
+
+    Only composes when there is exactly one match repo-wide — multiple or
+    conditional prefixes are ambiguous, so we decline rather than guess.
+    """
+    found: set[str] = set()
+    for content in file_contents.values():
+        for match in NESTJS_GLOBAL_PREFIX.finditer(content):
+            found.add(match.group(1))
+    if len(found) == 1:
+        return next(iter(found))
+    return ""
+
+
 def _resolve_nestjs_endpoint(
     endpoint: APIEndpoint,
     js_index: dict[str, JSImportIndex],
+    global_prefix: str = "",
 ) -> list[APIEndpoint]:
     route_file = str(endpoint.route_file or endpoint.file or "")
     info = js_index.get(route_file)
 
+    resolved = endpoint
     if info and endpoint.handler and endpoint.handler in info.imports:
         handler_file = info.imports[endpoint.handler]
         resolved = copy.deepcopy(endpoint)
         resolved.handler_file = handler_file
         resolved.file = handler_file
-        return [resolved]
 
-    return [endpoint]
+    if global_prefix:
+        resolved = copy.deepcopy(resolved)
+        resolved.path = join_route_path(global_prefix, resolved.path)
+
+    return [resolved]
 
 
 def _resolve_fastify_endpoint(

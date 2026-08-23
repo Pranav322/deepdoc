@@ -704,7 +704,7 @@ site:
 | `scan.max_workers` | `8` | Bounded local workers for source reads, parsing, and per-file endpoint detection (`1` forces serial scanning) |
 | `scan.max_source_bytes` | `1000000` | Source files above this size are skipped (not read/parsed/clustered) and counted in the coverage skip report |
 | **File filters** | | |
-| `languages` | `[python, javascript, typescript, go, php, vue]` | Languages to parse |
+| `languages` | `[python, javascript, typescript, go, php, vue]` | Descriptive only — fills a sentence in generation prompts. Does not gate or broaden scanning; the scanner's supported languages are fixed |
 | `include` | `[]` | Glob patterns to include (empty = everything) |
 | `exclude` | *(see config)* | Glob patterns to exclude (node_modules, .git, dist, etc.) |
 | **GitHub Pages** | | |

@@ -62,6 +62,10 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "adaptive_backoff": True,
         },
     },
+    # Descriptive only — fills the "languages" sentence in generation prompts.
+    # Does NOT gate or broaden scanning; the scanner's supported-extension set
+    # (python/javascript/typescript/go/php/vue) is fixed and independent of
+    # this list. Adding a language here does not make DeepDoc parse it.
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
     "include": [],  # glob patterns — empty = everything
     "services": [],  # optional monorepo service roots, e.g. ["services/auth", "apps/api"]

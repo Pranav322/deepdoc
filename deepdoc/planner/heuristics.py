@@ -111,6 +111,35 @@ def _llm_step(llm: LLMClient, system: str, prompt: str, step_name: str) -> dict 
             return None
 
 
+def _unique_top_level_slug(base_slug: str, existing_slugs: set[str]) -> str:
+    """Make a top-level bucket slug unique against slugs already claimed."""
+    slug = base_slug
+    suffix = 2
+    while slug in existing_slugs:
+        slug = f"{base_slug}-{suffix}"
+        suffix += 1
+    existing_slugs.add(slug)
+    return slug
+
+
+def _deduplicate_bucket_slugs(plan: DocPlan) -> DocPlan:
+    """Globally uniquify bucket slugs, called before nav is built from the plan.
+
+    LLM-proposed top-level buckets (e.g. two monorepo modules both proposing
+    "auth") can collide on slug; _unique_slug already handles this for
+    endpoint-family buckets but nothing uniquifies the full bucket namespace,
+    so `validate_plan_contract` hard-aborts on the collision. Must run before
+    `_shape_plan_nav` so nav entries are built against already-unique slugs.
+    """
+    existing_slugs: set[str] = set()
+    for bucket in plan.buckets:
+        if bucket.slug in existing_slugs:
+            bucket.slug = _unique_top_level_slug(bucket.slug, existing_slugs)
+        else:
+            existing_slugs.add(bucket.slug)
+    return plan
+
+
 def _merge_plan(
     proposal: dict,
     assignment: dict,

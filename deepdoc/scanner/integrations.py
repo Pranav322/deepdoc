@@ -210,14 +210,15 @@ def _normalize_integrations_llm(
     repo_root: Path,
 ) -> list[IntegrationIdentity]:
     """Use LLM to group integration candidates into normalized identities."""
-    # One record per candidate, in original order — candidate_indices in the
-    # LLM's response are 0-based positions into `candidates`. fit_prompt_sections
-    # only ever accepts a *prefix* of these records (same as the old fixed
-    # `[:80]` slice it replaces), so an included record's index always still
-    # matches its real position in `candidates`.
+    # Preserve each candidate's original index in the rendered record.
+    # fit_prompt_sections may omit an oversized early record while admitting a
+    # later smaller one, so positions in the fitted prompt are not necessarily
+    # positions in ``candidates``.
     candidate_lines = [
-        f"- [{c.signal_type}] name_hint='{c.name_hint}' file={c.file_path} evidence='{c.evidence}'"
-        for c in candidates
+        f"- candidate_index={index} [{candidate.signal_type}] "
+        f"name_hint='{candidate.name_hint}' file={candidate.file_path} "
+        f"evidence='{candidate.evidence}'"
+        for index, candidate in enumerate(candidates)
     ]
 
     def _render(sections: dict[str, str]) -> str:
@@ -248,7 +249,7 @@ Return JSON:
   ]
 }}
 
-candidate_indices = which signals (by 0-based index) belong to this identity."""
+candidate_indices = the explicit candidate_index values shown beside the signals that belong to this identity."""
 
     system = "You are a code analysis expert. Normalize integration signals into identities. Respond with valid JSON only."
 

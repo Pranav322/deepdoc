@@ -163,3 +163,44 @@ def test_normalize_integrations_bounds_prompt_under_tiny_budget_and_index_mappin
     assert identities[0].files == ["services/service_000/client.py"]
     captured = capsys.readouterr()
     assert "omitted" in captured.out
+
+
+def test_normalize_integrations_preserves_original_indices_when_earlier_record_is_omitted() -> None:
+    candidates = [
+        IntegrationCandidate(
+            signal_type="sdk_import",
+            name_hint="oversized_first",
+            file_path="services/oversized/client.py",
+            evidence=" ".join(f"huge_evidence_token_{i}" for i in range(2500)),
+        ),
+        IntegrationCandidate(
+            signal_type="sdk_import",
+            name_hint="small_second",
+            file_path="services/small/client.py",
+            evidence="import small_second",
+        ),
+    ]
+    response = json.dumps(
+        {
+            "integrations": [
+                {
+                    "name": "small_second",
+                    "display_name": "Small Second",
+                    "description": "d",
+                    "is_substantial": False,
+                    "candidate_indices": [1],
+                }
+            ]
+        }
+    )
+    llm = _RecordingLLM(
+        context_window_tokens=1800,
+        output_reserve_tokens=150,
+        response=response,
+    )
+
+    identities = _normalize_integrations_llm(candidates, llm, repo_root=Path("."))
+
+    assert "candidate_index=1" in llm.calls[0][1]
+    assert "candidate_index=0" not in llm.calls[0][1]
+    assert identities[0].files == ["services/small/client.py"]

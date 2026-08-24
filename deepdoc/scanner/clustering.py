@@ -1,4 +1,5 @@
 from .common import *
+from ..llm import fit_prompt_sections
 
 def cluster_giant_file(
     file_path: str,
@@ -32,11 +33,11 @@ def cluster_giant_file(
             ],
         )
 
-    # Build structured symbol inventory for the LLM
-    symbol_inventory = _build_symbol_inventory(symbols, content)
     import_summary = "\n".join(f"- {imp}" for imp in imports[:30])
+    symbol_records = _symbol_entries(symbols)
 
-    prompt = f"""Analyze this giant file ({line_count} lines, {len(symbols)} symbols) and group
+    def _render(sections: dict[str, str]) -> str:
+        return f"""Analyze this giant file ({line_count} lines, {len(symbols)} symbols) and group
 the symbols into logical feature clusters based on business domain.
 
 ## File: {file_path}
@@ -45,7 +46,7 @@ the symbols into logical feature clusters based on business domain.
 {import_summary}
 
 ## Symbols
-{symbol_inventory}
+{sections.get("symbols") or "(none fit the model's token budget)"}
 
 ---
 
@@ -78,7 +79,22 @@ Return JSON:
     system = "You are a code analysis expert. Group code symbols into business-domain clusters. Respond with valid JSON only."
 
     try:
-        response = llm.complete(system, prompt)
+        fit = fit_prompt_sections(
+            llm.capabilities,
+            system=system,
+            render_prompt=_render,
+            required_sections={},
+            optional_sections=[("symbols", symbol_records)],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="giant file clustering",
+        )
+        omitted = fit.omitted_records.get("symbols", 0)
+        if omitted:
+            console.print(
+                f"  [dim]{omitted} symbol(s) omitted from the clustering prompt for "
+                f"{file_path} (model token budget) — they land in 'uncategorized'[/dim]"
+            )
+        response = llm.complete(system, fit.prompt)
         result = _parse_json(response)
         clusters = _build_clusters_from_llm(result, symbols)
     except Exception as e:
@@ -95,9 +111,9 @@ Return JSON:
     )
 
 
-def _build_symbol_inventory(symbols: list[Symbol], content: str) -> str:
-    """Format symbols as a structured inventory for the LLM."""
-    lines = []
+def _symbol_entries(symbols: list[Symbol]) -> list[str]:
+    """One formatted inventory record per symbol, for token-budget fitting."""
+    entries = []
     for s in symbols:
         normalized = s.normalized_range()
         if normalized:
@@ -118,8 +134,14 @@ def _build_symbol_inventory(symbols: list[Symbol], content: str) -> str:
             preview_lines = s.body_preview.strip().splitlines()[:2]
             preview = " | ".join(l.strip() for l in preview_lines)
             entry += f"\n  Preview: `{preview[:120]}`"
-        lines.append(entry)
-    return "\n".join(lines)
+        entries.append(entry)
+    return entries
+
+
+def _build_symbol_inventory(symbols: list[Symbol], content: str) -> str:
+    """Format symbols as a structured inventory string (unbounded — callers
+    that need to fit a token budget should use `_symbol_entries` instead)."""
+    return "\n".join(_symbol_entries(symbols))
 
 
 def _build_clusters_from_llm(

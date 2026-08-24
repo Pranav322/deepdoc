@@ -1,6 +1,7 @@
 from contextlib import nullcontext
 
 from .common import *
+from ..v2_models import build_bucket_semantic_id
 from .bucket_refinement import (
     _proposal_bucket_tokens, _is_low_value_utility_bucket, _is_incidental_http_bucket,
     _best_proposal_merge_target, _remove_slug_from_nav, _refine_proposal,
@@ -130,11 +131,18 @@ def _deduplicate_bucket_slugs(plan: DocPlan) -> DocPlan:
     endpoint-family buckets but nothing uniquifies the full bucket namespace,
     so `validate_plan_contract` hard-aborts on the collision. Must run before
     `_shape_plan_nav` so nav entries are built against already-unique slugs.
+
+    Recomputes `semantic_id` via the canonical `build_bucket_semantic_id`
+    whenever a slug is rewritten here — `semantic_id` falls back to
+    slug-derived when a bucket has no owned files/parent, so a stale
+    semantic_id left over from the pre-rename slug would silently persist
+    otherwise.
     """
     existing_slugs: set[str] = set()
     for bucket in plan.buckets:
         if bucket.slug in existing_slugs:
             bucket.slug = _unique_top_level_slug(bucket.slug, existing_slugs)
+            bucket.semantic_id = build_bucket_semantic_id(bucket)
         else:
             existing_slugs.add(bucket.slug)
     return plan

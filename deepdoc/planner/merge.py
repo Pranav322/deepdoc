@@ -5,8 +5,18 @@ from __future__ import annotations
 import copy
 import dataclasses
 
-from ..v2_models import DocBucket, DocPlan, RepoScan
+from ..v2_models import DocBucket, DocPlan, RepoScan, build_bucket_semantic_id
 from .heuristics import _deduplicate_bucket_slugs
+
+# Global-only bucket types (injected once, post-merge, by
+# _apply_global_plan_stage) that legitimately re-reference files also owned
+# by a normal feature bucket — e.g. Start Here links the 5 key files, the
+# glossary cites model files. A later normal feature bucket does NOT get
+# this leeway: two feature buckets both claiming `owned_files` on the same
+# file is a real duplicate-ownership bug, not intentional overview evidence.
+_OVERVIEW_BUCKET_TYPES = frozenset(
+    {"start_here_index", "start_here_setup", "domain_glossary", "debug_runbook", "coarse_oversized"}
+)
 
 
 def _namespaced(unit_slug: str, local_slug: str) -> str:
@@ -26,31 +36,51 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
     is demoted to a regular (namespaced) overview bucket so its content
     survives instead of being dropped.
 
+    The complete slug map — including the retained global introduction's
+    corrected (unprefixed) entry — is built in one pass over every unit's
+    buckets *before* any bucket reference is rewritten in a second pass.
+    Building and rewriting in a single interleaved pass (the original
+    implementation) meant a bucket processed before its own unit's
+    introduction bucket would resolve `depends_on`/`parent_slug` against the
+    not-yet-corrected namespaced slug. Every cloned bucket's `semantic_id`
+    is recomputed from its final slug/parent/depends_on via the canonical
+    `build_bucket_semantic_id`, so it never goes stale after the rewrite.
+
     Operates on clones of the input buckets — the caller's source `DocPlan`s
     (and their buckets) are never mutated, so a unit's local plan can still
     be inspected/reused after merging.
 
-    Callers must run the global bucket-injection/nav-shaping stage and
-    `validate_plan_contract` on the result themselves — this function only
-    merges; a single-unit caller should skip it entirely and use that unit's
-    plan directly (merging a single plan with itself would only add
-    unnecessary slug prefixing).
+    Callers must run the global bucket-injection/nav-shaping stage,
+    `normalize_plan_disposition`, and `validate_plan_contract` on the result
+    themselves — this function only merges; a single-unit caller should
+    skip it entirely and use that unit's plan directly (merging a single
+    plan with itself would only add unnecessary slug prefixing).
     """
     if len(unit_plans) == 1:
         return unit_plans[0][1]
 
+    # Pass 1 — decide every bucket's final slug, including which
+    # introduction (if any) is retained unprefixed as the global one, before
+    # any bucket reference is rewritten.
     slug_map: dict[tuple[str, str], str] = {}
+    has_global_intro = False
     for unit_slug, plan in unit_plans:
         for bucket in plan.buckets:
-            slug_map[(unit_slug, bucket.slug)] = _namespaced(unit_slug, bucket.slug)
+            is_intro = bool((bucket.generation_hints or {}).get("is_introduction_page"))
+            if is_intro and not has_global_intro:
+                slug_map[(unit_slug, bucket.slug)] = bucket.slug
+                has_global_intro = True
+            else:
+                slug_map[(unit_slug, bucket.slug)] = _namespaced(unit_slug, bucket.slug)
 
+    # Pass 2 — clone every bucket and rewrite slug/depends_on/parent_slug
+    # (and demote a non-retained introduction) using the now-final map.
     merged_buckets: list[DocBucket] = []
     merged_nav: dict[str, list[str]] = {}
     merged_skipped: list[str] = []
     merged_orphaned: list[str] = []
     merged_classification: dict = {}
     merged_integration: list[dict] = []
-    has_global_intro = False
 
     for unit_slug, plan in unit_plans:
         for original in plan.buckets:
@@ -67,7 +97,8 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
                 source_kind_summary=dict(original.source_kind_summary),
                 evidence_anchors=list(original.evidence_anchors),
             )
-            is_intro = bool((bucket.generation_hints or {}).get("is_introduction_page"))
+            is_intro = bool((original.generation_hints or {}).get("is_introduction_page"))
+            new_slug = slug_map[(unit_slug, original.slug)]
             bucket.depends_on = [
                 slug_map.get((unit_slug, dep), dep) for dep in bucket.depends_on
             ]
@@ -76,25 +107,15 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
                 if bucket.parent_slug
                 else bucket.parent_slug
             )
-            if is_intro:
-                if not has_global_intro:
-                    # First introduction found becomes the single global one;
-                    # keep its slug unprefixed so it still owns index.md / "/".
-                    # The pre-pass above namespaced every slug by default —
-                    # correct this one entry back to the original so nav refs
-                    # to it (still using the local slug) resolve correctly.
-                    slug_map[(unit_slug, bucket.slug)] = bucket.slug
-                    has_global_intro = True
-                else:
-                    # A later unit's introduction is demoted to a namespaced
-                    # overview page — its content is kept, just no longer
-                    # claiming to be *the* introduction.
-                    hints = dict(bucket.generation_hints)
-                    hints.pop("is_introduction_page", None)
-                    bucket.generation_hints = hints
-                    bucket.slug = slug_map[(unit_slug, bucket.slug)]
-            else:
-                bucket.slug = slug_map[(unit_slug, bucket.slug)]
+            bucket.slug = new_slug
+            if is_intro and new_slug != original.slug:
+                # This unit's introduction wasn't the one retained — demote
+                # it to a regular namespaced overview page; its content is
+                # kept, just no longer claiming to be *the* introduction.
+                hints = dict(bucket.generation_hints)
+                hints.pop("is_introduction_page", None)
+                bucket.generation_hints = hints
+            bucket.semantic_id = build_bucket_semantic_id(bucket)
             merged_buckets.append(bucket)
 
         for section, slugs in plan.nav_structure.items():
@@ -121,6 +142,86 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
     return _deduplicate_bucket_slugs(merged_plan)
 
 
+def normalize_plan_disposition(
+    plan: DocPlan, unit_files: dict[str, set[str]] | None = None
+) -> DocPlan:
+    """Enforce file-disposition invariants on a merged plan, before
+    `validate_plan_contract`:
+
+    - a file owned by any bucket is removed from `skipped_files`/
+      `orphaned_files` (ownership wins over either exclusion list);
+    - `skipped_files` and `orphaned_files` never overlap (a file in both is
+      a contradiction — `skipped_files`, an explicit exclusion, wins);
+    - the same file owned by more than one *normal* feature bucket keeps
+      only its first (bucket list order) owner — a later claim is dropped,
+      not silently duplicated;
+    - a global overview bucket (`_OVERVIEW_BUCKET_TYPES` — Start Here,
+      glossary, setup, debug runbook, coarse coverage) that lists an
+      already-owned file is demoted from `owned_files` to `artifact_refs`
+      for that file: it keeps the evidence without a second claim of page
+      ownership;
+    - if `unit_files` (unit slug -> that unit's own files) is given, a
+      bucket whose slug is namespaced `{unit}/...` can only *own* that
+      unit's own files; anything else it lists is demoted to
+      `artifact_refs` instead of silently kept as ownership it was never
+      scoped to have.
+    """
+    # Establish normal feature ownership before processing overview buckets,
+    # regardless of plan ordering. Global Start Here/glossary buckets are often
+    # inserted before feature pages; they must cite files, not steal ownership.
+    normal_owner: dict[str, str] = {}
+    for bucket in plan.buckets:
+        if bucket.bucket_type in _OVERVIEW_BUCKET_TYPES:
+            continue
+        for file_path in bucket.owned_files:
+            normal_owner.setdefault(file_path, bucket.slug)
+
+    owned_seen: set[str] = set()
+    unit_slugs = sorted(unit_files or {}, key=len, reverse=True)
+    for bucket in plan.buckets:
+        unit_slug = next(
+            (
+                slug
+                for slug in unit_slugs
+                if bucket.slug == slug or bucket.slug.startswith(slug + "/")
+            ),
+            None,
+        )
+        allowed_files = unit_files.get(unit_slug) if unit_files and unit_slug else None
+
+        kept: list[str] = []
+        artifact_additions: list[str] = []
+        for file_path in bucket.owned_files:
+            out_of_scope = allowed_files is not None and file_path not in allowed_files
+            overview_reference = (
+                bucket.bucket_type in _OVERVIEW_BUCKET_TYPES
+                and file_path in normal_owner
+            )
+            duplicate_normal_owner = (
+                bucket.bucket_type not in _OVERVIEW_BUCKET_TYPES
+                and normal_owner.get(file_path) != bucket.slug
+            )
+            if out_of_scope or overview_reference or duplicate_normal_owner:
+                if file_path not in bucket.artifact_refs and file_path not in artifact_additions:
+                    artifact_additions.append(file_path)
+                continue
+            if file_path in owned_seen:
+                continue
+            kept.append(file_path)
+            owned_seen.add(file_path)
+        bucket.owned_files = kept
+        if artifact_additions:
+            bucket.artifact_refs = [*bucket.artifact_refs, *artifact_additions]
+        # Ownership participates in semantic identity. Normalization can
+        # remove duplicate/foreign owners, so refresh the canonical identity
+        # after the final ownership set is known.
+        bucket.semantic_id = build_bucket_semantic_id(bucket)
+
+    plan.skipped_files = sorted(set(plan.skipped_files) - owned_seen)
+    plan.orphaned_files = sorted(set(plan.orphaned_files) - owned_seen - set(plan.skipped_files))
+    return plan
+
+
 def missing_files(scan: RepoScan, plan: DocPlan) -> list[str]:
     """Files in `scan.file_summaries` disposed of by neither a bucket nor skip/orphan lists."""
     owned: set[str] = set()
@@ -130,4 +231,4 @@ def missing_files(scan: RepoScan, plan: DocPlan) -> list[str]:
     return sorted(set(scan.file_summaries) - disposed)
 
 
-__all__ = ["merge_unit_plans", "missing_files"]
+__all__ = ["merge_unit_plans", "normalize_plan_disposition", "missing_files"]

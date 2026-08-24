@@ -72,6 +72,20 @@ def test_depends_on_and_parent_slug_are_rewritten() -> None:
     assert worker.parent_slug == "orders/feature"
 
 
+def test_dependency_on_retained_global_introduction_uses_final_slug_map() -> None:
+    child = _feature("worker", ["a.py"], depends_on=["start-here"])
+    plan_a = _plan(
+        [child, _intro()],
+        {"Features": ["worker"], "Start Here": ["start-here"]},
+    )
+    plan_b = _plan([_intro()], {"Start Here": ["start-here"]})
+
+    merged = merge_unit_plans([("orders", plan_a), ("payments", plan_b)])
+    merged_child = next(bucket for bucket in merged.buckets if bucket.title == "worker")
+
+    assert merged_child.depends_on == ["start-here"]
+
+
 def test_multiple_introductions_merge_to_exactly_one() -> None:
     plan_a = _plan([_intro(), _feature("feature", ["a.py"])], {"Start Here": ["start-here"], "Features": ["feature"]})
     plan_b = _plan([_intro(), _feature("feature", ["b.py"])], {"Start Here": ["start-here"], "Features": ["feature"]})
@@ -146,3 +160,48 @@ def test_missing_files_reports_undisposed_files() -> None:
     plan = _plan([_feature("feature", ["a.py"])], {"Features": ["feature"]}, skipped=["b.py"])
 
     assert missing_files(scan, plan) == ["c.py"]
+
+
+def test_normalize_disposition_keeps_feature_owner_when_overview_comes_first() -> None:
+    from deepdoc.planner.merge import normalize_plan_disposition
+    from deepdoc.v2_models import build_bucket_semantic_id
+
+    overview = _intro()
+    overview.owned_files = ["services/orders/a.py"]
+    feature = _feature("orders/feature", ["services/orders/a.py"])
+    plan = _plan(
+        [overview, feature],
+        {"Start Here": ["start-here"], "Features": ["orders/feature"]},
+        skipped=["services/orders/a.py"],
+        orphaned=["services/orders/a.py"],
+    )
+
+    normalize_plan_disposition(
+        plan,
+        {"orders": {"services/orders/a.py"}},
+    )
+
+    assert feature.owned_files == ["services/orders/a.py"]
+    assert overview.owned_files == []
+    assert overview.artifact_refs == ["services/orders/a.py"]
+    assert plan.skipped_files == []
+    assert plan.orphaned_files == []
+    assert all(b.semantic_id == build_bucket_semantic_id(b) for b in plan.buckets)
+
+
+def test_normalize_disposition_uses_full_nested_unit_slug() -> None:
+    from deepdoc.planner.merge import normalize_plan_disposition
+
+    bucket = _feature("orders/part-1/feature", ["services/orders/a.py", "services/payments/b.py"])
+    plan = _plan([bucket], {"Features": [bucket.slug]})
+
+    normalize_plan_disposition(
+        plan,
+        {
+            "orders/part-1": {"services/orders/a.py"},
+            "payments": {"services/payments/b.py"},
+        },
+    )
+
+    assert bucket.owned_files == ["services/orders/a.py"]
+    assert bucket.artifact_refs == ["services/payments/b.py"]

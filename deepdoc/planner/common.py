@@ -43,8 +43,6 @@ console = Console()
 
 TOKEN_RE = re.compile(r"[A-Za-z][A-Za-z0-9_+-]+")
 
-PROPOSAL_BUCKET_TOKEN_CACHE: dict[int, set[str]] = {}
-
 
 def _normalize_tokens(*values: str) -> set[str]:
     tokens: set[str] = set()

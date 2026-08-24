@@ -11,6 +11,7 @@ import dataclasses
 import posixpath
 import re
 
+from ..llm import ModelCapabilityError
 from ..source_metadata import classify_source_kind
 from ..v2_models import RepoScan, endpoint_owned_files
 from .topology import TopologyMap
@@ -350,24 +351,66 @@ def _deepest_path_groups(files: tuple[str, ...]) -> dict[str, list[str]]:
     return groups
 
 
+def _pack_groups(groups: dict[str, list[str]], max_files: int) -> list[list[str]]:
+    """Greedily pack directory groups into chunks of up to `max_files` each,
+    largest-fitting-first, instead of leaving every leaf directory as its
+    own singleton part. A repo where every file happens to live in its own
+    leaf directory (e.g. `module_00/component_00/handler.py` per file)
+    would otherwise explode straight to one-file units the moment any
+    directory fits under `max_files` — which is *every* directory, since
+    each one only has a single file. Packing keeps parts close to
+    `max_files` in size, only falling below that when a directory's own
+    files don't divide evenly.
+    """
+    chunks: list[list[str]] = []
+    current: list[str] = []
+    for key in sorted(groups):
+        group_files = sorted(groups[key])
+        if len(group_files) > max_files:
+            if current:
+                chunks.append(current)
+                current = []
+            for i in range(0, len(group_files), max_files):
+                chunks.append(group_files[i : i + max_files])
+            continue
+        if current and len(current) + len(group_files) > max_files:
+            chunks.append(current)
+            current = list(group_files)
+        else:
+            current.extend(group_files)
+    if current:
+        chunks.append(current)
+    return chunks
+
+
 def split_planning_unit(unit: PlanningUnit, max_files: int) -> list[PlanningUnit]:
     """Split an over-budget unit deterministically so each part fits.
 
-    First tries grouping by the deepest shared directory. If that still
-    leaves files ungrouped (e.g. everything in one flat directory), falls
-    back to stable numbered chunks. `max_files` is a cheap seed for how the
-    split is shaped — `bound_planning_unit` is what actually proves each
-    resulting part fits the real model budget.
+    Groups by the deepest shared directory, then greedily packs those
+    groups into `max_files`-sized parts (`_pack_groups`) — preferring the
+    largest parts that still fit, not exploding straight to one file per
+    leaf directory. Falls back to plain numbered chunks only when every
+    file already shares one flat directory (path grouping can't separate
+    them at all). `max_files` is a cheap seed for how the split is shaped —
+    `bound_planning_unit` (or, for a real overflow rather than the
+    preflight guess, the orchestration layer's retry loop) is what actually
+    proves each resulting part fits the real model budget.
     """
     if len(unit.files) <= max_files:
         return [unit]
 
     groups = _deepest_path_groups(unit.files)
-    if len(groups) > 1 and all(len(files) <= max_files for files in groups.values()):
-        return [
-            PlanningUnit(slug=key, label=key, files=tuple(sorted(groups[key])))
-            for key in sorted(groups)
-        ]
+    if len(groups) > 1:
+        chunks = _pack_groups(groups, max_files)
+        if len(chunks) > 1:
+            return [
+                PlanningUnit(
+                    slug=f"{unit.slug}/part-{i + 1}",
+                    label=f"{unit.label} part {i + 1}",
+                    files=tuple(chunk),
+                )
+                for i, chunk in enumerate(chunks)
+            ]
 
     # ponytail: path grouping couldn't separate a flat directory; numbered
     # chunks are a fine terminal fallback since they're still deterministic.
@@ -385,6 +428,28 @@ def split_planning_unit(unit: PlanningUnit, max_files: int) -> list[PlanningUnit
     ]
 
 
+def next_split(unit: PlanningUnit, max_files_seed_cap: int = 0) -> list[PlanningUnit]:
+    """One splitting attempt for `unit`: seed = half its files (capped by
+    `max_files_seed_cap` if set), via `split_planning_unit`; forces a plain
+    numbered bisection if that didn't actually reduce it. Shared by
+    `bound_planning_unit` (the cheap preflight-driven optimization) and the
+    orchestration layer's real retry-on-`UnitNeedsSplit` loop, so both
+    split the same way.
+    """
+    seed = max(1, len(unit.files) // 2)
+    if max_files_seed_cap > 0:
+        seed = min(seed, max_files_seed_cap)
+    parts = split_planning_unit(unit, max_files=seed)
+    if len(parts) == 1:
+        sorted_files = tuple(sorted(unit.files))
+        half = len(sorted_files) // 2
+        parts = [
+            PlanningUnit(slug=f"{unit.slug}/part-1", label=f"{unit.label} part 1", files=sorted_files[:half]),
+            PlanningUnit(slug=f"{unit.slug}/part-2", label=f"{unit.label} part 2", files=sorted_files[half:]),
+        ]
+    return parts
+
+
 def _propose_required_text(scan: RepoScan) -> str:
     # Local import: avoids a module-load-order cycle between .utils and
     # .partitioning (both are imported by engine.py, not by each other).
@@ -400,18 +465,26 @@ def _assign_required_text(scan: RepoScan) -> str:
     return "\n".join(f"- {f}" for f in files)
 
 
-def unit_fits_model_budget(scan: RepoScan, llm) -> bool:
-    """Exact-token pre-flight check for one unit's real required planner sections.
+def unit_likely_fits_budget(scan: RepoScan, llm) -> bool:
+    """Cheap, conservative PREFLIGHT GUESS — not a guarantee.
 
-    This is the acceptance gate `bound_planning_unit` uses — never `max_files`
-    alone. It renders the actual PROPOSE named-clusters representation
-    (`_build_named_clusters_str`, the same function `_plan_local` calls; with
-    no classify output yet this is exactly its graceful-degradation branch)
-    and the actual ASSIGN all-files inventory (every product-kind file — the
-    worst case before topology preassignment can shrink it), counts both
-    with the real model tokenizer (`count_message_tokens`), and pads by a
-    fixed constant for the PROPOSE/ASSIGN prompt template text that isn't
-    part of either bare required section (see `_TEMPLATE_OVERHEAD_TOKENS`).
+    This is an optimization only: it renders an approximation of the real
+    required PROPOSE (`_build_named_clusters_str`'s graceful-degradation
+    branch, since classify hasn't run yet) and ASSIGN (every product-kind
+    file — the worst case before topology preassignment can shrink it)
+    sections, counts them with the real tokenizer, and pads by a fixed
+    constant for prompt-template text this approximation doesn't render
+    (`_TEMPLATE_OVERHEAD_TOKENS`) — but the ASSIGN bucket JSON is
+    proposal-dependent and genuinely cannot be known before PROPOSE runs,
+    so this can still be wrong in both directions.
+
+    Use it to avoid obviously-oversized units ever reaching classify/
+    propose/assign. The actual guarantee — no LLM request is ever sent for
+    a required section that doesn't fit — comes from catching
+    `UnitNeedsSplit`, raised at the real `fit_prompt_sections` call sites in
+    `_plan_local`, and splitting/retrying just the failing unit. Never treat
+    a `True` result here as proof; only the real call site's success is
+    proof.
     """
     from ..llm import build_prompt_budget, count_message_tokens
     from .common import ASSIGN_SYSTEM, PROPOSE_SYSTEM
@@ -434,56 +507,74 @@ def unit_fits_model_budget(scan: RepoScan, llm) -> bool:
     return worst <= maximum_input
 
 
+# Circuit breaker against pathological fragmentation: each recursion level
+# at minimum halves the file count, so this bounds a unit to at most
+# 2**_MAX_SPLIT_DEPTH parts — far past any realistic repo — rather than
+# fragmenting indefinitely if splitting somehow stalls.
+_MAX_SPLIT_DEPTH = 16
+
+
 def bound_planning_unit(
-    unit: PlanningUnit, scan: RepoScan, llm, *, max_files_seed_cap: int = 0
+    unit: PlanningUnit, scan: RepoScan, llm, *, max_files_seed_cap: int = 0, _depth: int = 0
 ) -> list[PlanningUnit]:
-    """Recursively split `unit` until every part fits the real model budget.
+    """Recursively split `unit` until every part likely fits the model budget.
 
-    `split_planning_unit` (deepest-path grouping, falling back to numbered
-    chunks) seeds each split attempt; `unit_fits_model_budget` — the exact
-    token gate, not the seed's file count — decides whether a part is done.
-    A single indivisible file that still doesn't fit is returned with
-    `coarse=True` instead of looping forever or ever being handed to the
-    LLM: callers must plan a coarse unit as an explicit, deterministic
-    placeholder bucket rather than a normal classify/propose/assign pass.
+    This is the cheap preflight optimization (`unit_likely_fits_budget`) —
+    it avoids ever sending an obviously-oversized unit to `_plan_local` in
+    the first place, using `next_split` to shape each attempt. It is NOT
+    the real guarantee: `unit_likely_fits_budget` can still be wrong (the
+    ASSIGN bucket JSON is proposal-dependent), so callers must still catch
+    `UnitNeedsSplit` around the actual `_plan_local` call and retry — see
+    `plan_docs`/`_plan_unit_with_retry` in engine.py.
 
-    `max_files_seed_cap` (from config `planning_unit_max_files_seed`, 0 =
-    unset) only shapes the first split attempt's guess; it is never treated
-    as proof a part fits — `unit_fits_model_budget` still gates every part.
+    A single indivisible file that still doesn't likely fit is returned
+    with `coarse=True` instead of looping forever or ever being handed to
+    the LLM. `_depth` backstops pathological fragmentation (`_MAX_SPLIT_DEPTH`).
     """
-    if unit_fits_model_budget(make_sub_scan(scan, unit), llm):
+    if unit_likely_fits_budget(make_sub_scan(scan, unit), llm):
         return [unit]
-    if len(unit.files) <= 1:
+    if len(unit.files) <= 1 or _depth >= _MAX_SPLIT_DEPTH:
         return [dataclasses.replace(unit, coarse=True)]
 
-    seed = max(1, len(unit.files) // 2)
-    if max_files_seed_cap > 0:
-        seed = min(seed, max_files_seed_cap)
-    parts = split_planning_unit(unit, max_files=seed)
-    if len(parts) == 1:
-        # The seed didn't actually reduce it (e.g. a two-file unit already
-        # at max_files=1 but still grouped as one directory) — force a
-        # numbered bisection so recursion always makes progress.
-        sorted_files = tuple(sorted(unit.files))
-        half = len(sorted_files) // 2
-        parts = [
-            PlanningUnit(slug=f"{unit.slug}/part-1", label=f"{unit.label} part 1", files=sorted_files[:half]),
-            PlanningUnit(slug=f"{unit.slug}/part-2", label=f"{unit.label} part 2", files=sorted_files[half:]),
-        ]
-
+    parts = next_split(unit, max_files_seed_cap)
     result: list[PlanningUnit] = []
     for part in parts:
+        assert len(part.files) < len(unit.files), "split must make progress"
         result.extend(
-            bound_planning_unit(part, scan, llm, max_files_seed_cap=max_files_seed_cap)
+            bound_planning_unit(
+                part, scan, llm, max_files_seed_cap=max_files_seed_cap, _depth=_depth + 1
+            )
         )
     return result
 
 
+class UnitNeedsSplit(ModelCapabilityError):
+    """Raised from `_plan_local` when a specific unit's real required prompt
+    (at classify/propose/assign) exceeds the model budget.
+
+    `unit_likely_fits_budget`/`bound_planning_unit` are only a preflight
+    guess — the ASSIGN bucket JSON in particular is proposal-dependent and
+    cannot be known before PROPOSE runs, so a unit that passed the preflight
+    can still genuinely overflow. This is the real, runtime-verified
+    signal: it carries enough context (the failing unit and which step) for
+    the orchestration layer to split just that unit and retry, instead of
+    failing the whole repo. Subclasses `ModelCapabilityError` so existing
+    `except ModelCapabilityError` call sites keep working unchanged.
+    """
+
+    def __init__(self, unit: PlanningUnit, step: str, message: str = "") -> None:
+        self.unit = unit
+        self.step = step
+        super().__init__(message or f"unit '{unit.slug}' overflowed the model budget at step '{step}'")
+
+
 __all__ = [
     "PlanningUnit",
+    "UnitNeedsSplit",
     "build_planning_units",
     "make_sub_scan",
     "split_planning_unit",
-    "unit_fits_model_budget",
+    "next_split",
+    "unit_likely_fits_budget",
     "bound_planning_unit",
 ]

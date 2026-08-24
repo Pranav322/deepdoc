@@ -1,7 +1,8 @@
+import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from ..llm import fit_prompt_sections
+from ..llm import ModelCapabilityError, fit_prompt_sections
 from ..telemetry import RunTelemetry
 from ..manifest import file_hash
 from .common import *
@@ -23,17 +24,24 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
 
     Phase 2 scans (giant-file clustering, endpoint bundles, integration discovery)
     run once on the full repo scan. `build_planning_units()` then groups files by
-    `scan.file_services`; every unit is passed through `bound_planning_unit()`,
-    which recursively splits it (deepest-path grouping, falling back to numbered
-    chunks) until each part's real required PROPOSE/ASSIGN sections fit the
-    model's token budget (`unit_fits_model_budget` — exact tokenizer counts, not
-    a `max_files` guess). A repo with zero/one meaningful *and* budget-fitting
-    unit plans exactly as before — no partitioning, no slug prefixing. Otherwise
-    each unit is planned independently against a filtered sub-scan
-    (`make_sub_scan`), without running the global-only bucket injectors (Start
-    Here, glossary, database/runtime/interface — see `_apply_global_plan_stage`),
-    the unit plans are merged (`merge_unit_plans`), and the global injectors plus
-    final nav/orphan/coverage shaping run exactly once on the merged result.
+    `scan.file_services`. `unit_likely_fits_budget`/`bound_planning_unit` are a
+    cheap preflight optimization only — the ASSIGN bucket JSON is
+    proposal-dependent and genuinely cannot be known before PROPOSE runs, so a
+    unit that looks fine can still overflow for real. The actual guarantee comes
+    from `_plan_unit_with_retry`: it calls `_plan_local`, and if that raises
+    `UnitNeedsSplit` (a real `ModelCapabilityError` from an actual
+    `fit_prompt_sections` call, not the preflight guess), it splits *only* that
+    unit and retries — sibling units already planned are untouched, and an
+    indivisible unit that still overflows becomes explicit coarse coverage
+    (`_coarse_unit_plan`) instead of ever reaching the LLM over budget.
+
+    A repo with zero/one meaningful *and* budget-fitting unit plans exactly as
+    before — no partitioning, no slug prefixing. Otherwise every final unit is
+    planned against a filtered sub-scan (`make_sub_scan`) without the
+    global-only bucket injectors (Start Here, glossary, database/runtime/
+    interface — see `_apply_global_plan_stage`), the unit plans are merged
+    (`merge_unit_plans`), and the global injectors plus final nav/orphan/
+    coverage shaping run exactly once on the merged result.
     """
     phase_start = time.perf_counter()
 
@@ -46,51 +54,57 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
 
     raw_units = build_planning_units(scan)
-    if len(raw_units) <= 1 and unit_fits_model_budget(scan, llm):
-        return _plan_local(scan, cfg, llm, repo_root)
-
     max_files_seed_cap = int(cfg.get("planning_unit_max_files_seed", 0) or 0)
-    units: list[PlanningUnit] = []
+
+    if len(raw_units) == 1 and unit_likely_fits_budget(scan, llm):
+        try:
+            return _plan_local(scan, cfg, llm, repo_root, unit=raw_units[0])
+        except UnitNeedsSplit as exc:
+            console.print(
+                f"[yellow]Preflight expected this repo to fit as one unit, but the "
+                f"real required prompt overflowed at step '{exc.step}' — falling "
+                "back to bounded multi-unit planning.[/yellow]"
+            )
+            # fall through to the general multi-unit path below
+
+    # ── Bounded multi-unit planning ───────────────────────────────────────
+    seeded_units: list[PlanningUnit] = []
     for unit in raw_units:
-        units.extend(
+        seeded_units.extend(
             bound_planning_unit(unit, scan, llm, max_files_seed_cap=max_files_seed_cap)
         )
 
-    if len(units) == 1 and not units[0].coarse:
-        # The single raw unit didn't actually need splitting after all
-        # (the fast-path check above and bound_planning_unit's own gate can
-        # legitimately disagree at the margin) — plan it directly for the
-        # same parity guarantee as the true single-unit case.
-        return _plan_local(scan, cfg, llm, repo_root)
-
     console.print(
         Panel(
-            f"[bold]Partitioned repo into {len(units)} planning units[/bold]: "
+            f"[bold]Partitioned repo into {len(seeded_units)} planning unit(s)[/bold]: "
             + ", ".join(
                 f"{u.slug} ({len(u.files)} files{', coarse' if u.coarse else ''})"
-                for u in units
+                for u in seeded_units
             ),
             border_style="green",
         )
     )
+
     unit_plans: list[tuple[str, DocPlan]] = []
     unit_metadata: list[dict[str, Any]] = []
-    for unit in units:
-        sub_scan = make_sub_scan(scan, unit)
-        unit_metadata.append(
-            {"slug": unit.slug, "file_count": len(unit.files), "coarse": unit.coarse}
-        )
-        if unit.coarse:
-            console.print(f"[yellow]Unit '{unit.slug}' is coarse (over budget, indivisible)[/yellow]")
-            unit_plans.append((unit.slug, _coarse_unit_plan(unit, sub_scan)))
-            continue
-        console.print(f"[cyan]Planning unit '{unit.slug}'[/cyan]")
-        unit_plans.append(
-            (unit.slug, _plan_local(sub_scan, cfg, llm, repo_root, apply_global_stage=False))
-        )
+    unit_files_by_slug: dict[str, set[str]] = {}
+    for unit in seeded_units:
+        for final_unit, plan_for_unit in _plan_unit_with_retry(
+            unit, scan, cfg, llm, repo_root, max_files_seed_cap=max_files_seed_cap
+        ):
+            unit_plans.append((final_unit.slug, plan_for_unit))
+            unit_metadata.append(
+                {
+                    "slug": final_unit.slug,
+                    "file_count": len(final_unit.files),
+                    "coarse": final_unit.coarse,
+                }
+            )
+            unit_files_by_slug[final_unit.slug] = set(final_unit.files)
 
     plan = merge_unit_plans(unit_plans)
     plan = _apply_global_plan_stage(plan, scan, cfg, plan.classification, llm)
+    plan = normalize_plan_disposition(plan, unit_files_by_slug)
 
     leftover = missing_files(scan, plan)
     if leftover:
@@ -104,6 +118,60 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     scan.planner_timings["total"] = time.perf_counter() - phase_start
     _print_plan_summary(plan)
     return plan
+
+
+# Circuit breaker matching partitioning._MAX_SPLIT_DEPTH: bounds how many
+# times a single unit can be re-split after a genuine UnitNeedsSplit before
+# it's forced into coarse coverage, rather than retried indefinitely.
+_MAX_RETRY_SPLITS = 16
+
+
+def _plan_unit_with_retry(
+    unit: PlanningUnit,
+    scan: RepoScan,
+    cfg: dict[str, Any],
+    llm: LLMClient,
+    repo_root: Path,
+    *,
+    max_files_seed_cap: int,
+    _depth: int = 0,
+) -> list[tuple[PlanningUnit, DocPlan]]:
+    """Plan one unit; on a genuine `UnitNeedsSplit` — a real over-budget
+    prompt caught at the actual `fit_prompt_sections` call site inside
+    `_plan_local`, never the preflight guess — split only this unit and
+    retry. Sibling units the caller already planned are untouched, and no
+    LLM request is ever sent for a required section already proven to
+    overflow.
+    """
+    if unit.coarse:
+        return [(unit, _coarse_unit_plan(unit, make_sub_scan(scan, unit)))]
+
+    sub_scan = make_sub_scan(scan, unit)
+    try:
+        plan_for_unit = _plan_local(sub_scan, cfg, llm, repo_root, apply_global_stage=False, unit=unit)
+        return [(unit, plan_for_unit)]
+    except UnitNeedsSplit as exc:
+        if len(unit.files) <= 1 or _depth >= _MAX_RETRY_SPLITS:
+            console.print(
+                f"[yellow]Unit '{unit.slug}' still overflows the model budget at "
+                f"step '{exc.step}' and cannot be split further — marking coarse.[/yellow]"
+            )
+            coarse_unit = dataclasses.replace(unit, coarse=True)
+            return [(coarse_unit, _coarse_unit_plan(coarse_unit, make_sub_scan(scan, coarse_unit)))]
+
+        console.print(
+            f"[yellow]Unit '{unit.slug}' overflowed at step '{exc.step}' — splitting and retrying.[/yellow]"
+        )
+        parts = next_split(unit, max_files_seed_cap)
+        results: list[tuple[PlanningUnit, DocPlan]] = []
+        for part in parts:
+            results.extend(
+                _plan_unit_with_retry(
+                    part, scan, cfg, llm, repo_root,
+                    max_files_seed_cap=max_files_seed_cap, _depth=_depth + 1,
+                )
+            )
+        return results
 
 
 def _coarse_unit_plan(unit: PlanningUnit, sub_scan: RepoScan) -> DocPlan:
@@ -146,6 +214,7 @@ def _plan_local(
     repo_root: Path,
     *,
     apply_global_stage: bool = True,
+    unit: PlanningUnit | None = None,
 ) -> DocPlan:
     """Run classify → propose → assign → refine for one phase-2-enriched scan.
 
@@ -161,11 +230,21 @@ def _plan_local(
     merged plan, instead of once per unit — see `_apply_global_plan_stage`
     and `plan_docs`.
 
+    `unit` identifies which `PlanningUnit` this scan came from, purely so a
+    real `ModelCapabilityError` at any of the three `fit_prompt_sections`
+    calls below can be re-raised as `UnitNeedsSplit(unit, step, ...)` for
+    the orchestration layer to split and retry. If omitted, a unit is
+    synthesized from `scan.file_summaries` so the exception always carries
+    a valid, splittable unit.
+
     Step 1: CLASSIFY — categorize every file/artifact
     Step 2: PROPOSE — create bucket candidates (no cap, LLM decides freely)
     Step 3: ASSIGN — map files to buckets, produce final plan
     Step 4: attach scanned endpoints to grouped API-reference buckets
     """
+    current_unit = unit or PlanningUnit(
+        slug="__scan__", label="scan", files=tuple(sorted(scan.file_summaries))
+    )
 
     phase_start = time.perf_counter()
 
@@ -210,20 +289,23 @@ def _plan_local(
             giant_file_threshold=giant_file_threshold,
         )
 
-    classify_fit = fit_prompt_sections(
-        llm.capabilities,
-        system=CLASSIFY_SYSTEM,
-        render_prompt=_render_classify,
-        required_sections={"topology_clusters": topology_clusters_str},
-        optional_sections=[
-            ("entry_points", [f"- {path}" for path in scan.entry_points]),
-            ("config_files", [f"- {path}" for path in scan.config_files]),
-            ("file_summaries", file_summaries_str.splitlines()),
-            ("endpoints", endpoints_str.splitlines()),
-        ],
-        output_reserve_tokens=llm.output_reserve_tokens,
-        step_name="planner classify",
-    )
+    try:
+        classify_fit = fit_prompt_sections(
+            llm.capabilities,
+            system=CLASSIFY_SYSTEM,
+            render_prompt=_render_classify,
+            required_sections={"topology_clusters": topology_clusters_str},
+            optional_sections=[
+                ("entry_points", [f"- {path}" for path in scan.entry_points]),
+                ("config_files", [f"- {path}" for path in scan.config_files]),
+                ("file_summaries", file_summaries_str.splitlines()),
+                ("endpoints", endpoints_str.splitlines()),
+            ],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="planner classify",
+        )
+    except ModelCapabilityError as exc:
+        raise UnitNeedsSplit(current_unit, "classify", str(exc)) from exc
     classify_prompt = classify_fit.prompt
     if getattr(llm, "telemetry", None) is not None:
         for name, count in classify_fit.omitted_records.items():
@@ -383,19 +465,22 @@ def _plan_local(
             max_pages_instruction=max_pages_instruction,
         )
 
-    propose_fit = fit_prompt_sections(
-        llm.capabilities,
-        system=PROPOSE_SYSTEM,
-        render_prompt=_render_propose,
-        required_sections={"named_clusters": named_clusters_str},
-        optional_sections=[
-            ("endpoints", endpoints_str.splitlines()),
-            ("integration_signals", integration_records),
-            ("research_context", research_context_str.splitlines()),
-        ],
-        output_reserve_tokens=llm.output_reserve_tokens,
-        step_name="planner propose",
-    )
+    try:
+        propose_fit = fit_prompt_sections(
+            llm.capabilities,
+            system=PROPOSE_SYSTEM,
+            render_prompt=_render_propose,
+            required_sections={"named_clusters": named_clusters_str},
+            optional_sections=[
+                ("endpoints", endpoints_str.splitlines()),
+                ("integration_signals", integration_records),
+                ("research_context", research_context_str.splitlines()),
+            ],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="planner propose",
+        )
+    except ModelCapabilityError as exc:
+        raise UnitNeedsSplit(current_unit, "propose", str(exc)) from exc
     propose_prompt = propose_fit.prompt
     if getattr(llm, "telemetry", None) is not None:
         for name, count in propose_fit.omitted_records.items():
@@ -461,18 +546,21 @@ def _plan_local(
                 setup_artifacts=setup_artifacts_str,
             )
 
-        assign_fit = fit_prompt_sections(
-            llm.capabilities,
-            system=ASSIGN_SYSTEM,
-            render_prompt=_render_assign,
-            required_sections={
-                "proposed_buckets": proposed_buckets_str,
-                "all_files": all_files_str,
-            },
-            optional_sections=[("endpoints", endpoints_str.splitlines())],
-            output_reserve_tokens=llm.output_reserve_tokens,
-            step_name="planner assign",
-        )
+        try:
+            assign_fit = fit_prompt_sections(
+                llm.capabilities,
+                system=ASSIGN_SYSTEM,
+                render_prompt=_render_assign,
+                required_sections={
+                    "proposed_buckets": proposed_buckets_str,
+                    "all_files": all_files_str,
+                },
+                optional_sections=[("endpoints", endpoints_str.splitlines())],
+                output_reserve_tokens=llm.output_reserve_tokens,
+                step_name="planner assign",
+            )
+        except ModelCapabilityError as exc:
+            raise UnitNeedsSplit(current_unit, "assign", str(exc)) from exc
         assign_prompt = assign_fit.prompt
         if getattr(llm, "telemetry", None) is not None:
             for name, count in assign_fit.omitted_records.items():
@@ -1416,10 +1504,12 @@ from .utils import _build_classification_summary, _build_named_clusters_str, _fi
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets
 from .partitioning import (
     PlanningUnit,
+    UnitNeedsSplit,
     bound_planning_unit,
     build_planning_units,
     make_sub_scan,
-    unit_fits_model_budget,
+    next_split,
+    unit_likely_fits_budget,
 )
-from .merge import merge_unit_plans, missing_files
+from .merge import merge_unit_plans, missing_files, normalize_plan_disposition
 from ..plan_contract import validate_plan_contract

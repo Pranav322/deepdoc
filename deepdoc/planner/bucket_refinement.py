@@ -3,10 +3,10 @@ from ..llm import ModelCapabilityError, fit_prompt_sections
 
 
 def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
-    cache = PROPOSAL_BUCKET_TOKEN_CACHE.get(id(bucket))
-    if cache is not None:
-        return cache
-    cache = _normalize_tokens(
+    # Do not cache by ``id(bucket)``. Proposal dicts are short-lived and
+    # CPython can reuse their ids, leaking stale tokens into an unrelated
+    # later proposal. These token sets are small and cheap to recompute.
+    return _normalize_tokens(
         bucket.get("title", ""),
         bucket.get("slug", ""),
         bucket.get("section", ""),
@@ -14,8 +14,6 @@ def _proposal_bucket_tokens(bucket: dict[str, Any]) -> set[str]:
         " ".join(bucket.get("coverage_targets", [])),
         bucket.get("bucket_type", ""),
     )
-    PROPOSAL_BUCKET_TOKEN_CACHE[id(bucket)] = cache
-    return cache
 
 
 def _is_low_value_utility_bucket(bucket: dict[str, Any]) -> bool:

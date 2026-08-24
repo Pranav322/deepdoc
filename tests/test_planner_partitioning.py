@@ -10,7 +10,7 @@ from deepdoc.planner.partitioning import (
     build_planning_units,
     make_sub_scan,
     split_planning_unit,
-    unit_fits_model_budget,
+    unit_likely_fits_budget,
 )
 from deepdoc.planner.flow_candidates import EntryPoint, FlowCandidate
 from deepdoc.planner.topology import TopologyCluster, TopologyMap
@@ -379,9 +379,9 @@ def test_make_sub_scan_drops_call_graph_and_recomputes_languages() -> None:
     assert scan.languages == {"python": 2, "go": 1}
 
 
-def test_unit_fits_model_budget_true_for_small_unit_false_for_huge_unit() -> None:
+def test_unit_likely_fits_budget_true_for_small_unit_false_for_huge_unit() -> None:
     small = _scan(file_summaries={"a.py": "handler | lines=10"})
-    assert unit_fits_model_budget(small, _llm()) is True
+    assert unit_likely_fits_budget(small, _llm()) is True
 
     huge = _scan(
         file_summaries={
@@ -390,7 +390,7 @@ def test_unit_fits_model_budget_true_for_small_unit_false_for_huge_unit() -> Non
         }
     )
     tight = _llm(context_window_tokens=1200, output_reserve_tokens=100)
-    assert unit_fits_model_budget(huge, tight) is False
+    assert unit_likely_fits_budget(huge, tight) is False
 
 
 def test_bound_planning_unit_splits_an_oversized_single_service_until_it_fits() -> None:
@@ -413,7 +413,7 @@ def test_bound_planning_unit_splits_an_oversized_single_service_until_it_fits() 
     llm = _llm(context_window_tokens=3000, output_reserve_tokens=100)
     (raw_unit,) = build_planning_units(scan)
     assert raw_unit.slug == "orders"
-    assert not unit_fits_model_budget(make_sub_scan(scan, raw_unit), llm)
+    assert not unit_likely_fits_budget(make_sub_scan(scan, raw_unit), llm)
 
     parts = bound_planning_unit(raw_unit, scan, llm)
 
@@ -427,7 +427,7 @@ def test_bound_planning_unit_splits_an_oversized_single_service_until_it_fits() 
         seen.update(part.files)
     # Every part's own real required sections must fit the same tight budget.
     for part in parts:
-        assert unit_fits_model_budget(make_sub_scan(scan, part), llm)
+        assert unit_likely_fits_budget(make_sub_scan(scan, part), llm)
 
 
 def test_bound_planning_unit_marks_an_indivisible_oversized_file_as_coarse() -> None:
@@ -438,7 +438,7 @@ def test_bound_planning_unit_marks_an_indivisible_oversized_file_as_coarse() -> 
     scan = _scan(file_summaries={"giant/one_file.py": "x" * 50})
 
     with patch(
-        "deepdoc.planner.partitioning.unit_fits_model_budget", return_value=False
+        "deepdoc.planner.partitioning.unit_likely_fits_budget", return_value=False
     ):
         parts = bound_planning_unit(unit, scan, _llm())
 

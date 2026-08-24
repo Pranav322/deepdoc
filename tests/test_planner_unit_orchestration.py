@@ -111,7 +111,7 @@ def test_single_unit_repo_uses_the_original_scan_with_no_prefixing() -> None:
 
     calls: list[RepoScan] = []
 
-    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True):
+    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True, unit=None):
         calls.append(passed_scan)
         from deepdoc.v2_models import DocBucket, DocPlan
 
@@ -147,7 +147,7 @@ def test_multi_unit_repo_bounds_each_unit_to_its_own_files() -> None:
     llm = make_planner_llm()
     seen_files: list[set[str]] = []
 
-    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True):
+    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True, unit=None):
         from deepdoc.v2_models import DocBucket, DocPlan
 
         seen_files.append(set(passed_scan.file_summaries))
@@ -287,4 +287,106 @@ def test_single_oversized_service_still_splits_and_every_prompt_fits() -> None:
     assert seen_token_counts, "expected at least one _llm_step call"
     assert all(count <= maximum_input for count in seen_token_counts), (
         f"a prompt exceeded the budget: {max(seen_token_counts)} > {maximum_input}"
+    )
+
+
+def test_proposal_dependent_assign_overflow_triggers_real_split_and_retry() -> None:
+    """The preflight (unit_likely_fits_budget) only ever looks at the file
+    list — it has no way to know PROPOSE will come back with a verbose
+    bucket JSON, because that's the LLM's output, decided only after
+    PROPOSE actually runs. This crafts exactly that gap: few enough files
+    that the preflight says "fits" and the whole repo takes the single-unit
+    fast path, but a deliberately verbose PROPOSE response makes the real
+    ASSIGN prompt (which embeds the full proposed-bucket JSON) blow the
+    budget. Proves the orchestration layer catches that as UnitNeedsSplit,
+    splits only the failing unit, retries, and every actual LLM request
+    that goes out stays within budget — not that the repo fails, and not
+    that the preflight "predicted" it correctly."""
+    scan = _service_scan({"orders": 6})
+    llm = make_planner_llm()
+    llm.capabilities = ModelCapabilities(
+        model="test", capability_model="gpt-4o-mini", context_window_tokens=3000,
+        max_output_tokens=100, source="test",
+    )
+    llm.output_reserve_tokens = 100
+    cfg = _cfg()
+
+    from deepdoc.llm.token_budget import build_prompt_budget, count_message_tokens
+    from deepdoc.planner.partitioning import unit_likely_fits_budget, build_planning_units
+
+    # Confirm the gap actually exists before relying on it: the cheap
+    # preflight must say this repo fits as one unit (it only looks at file
+    # count/paths, not at what PROPOSE will invent).
+    raw_units = build_planning_units(scan)
+    assert len(raw_units) == 1
+    assert unit_likely_fits_budget(scan, llm) is True
+
+    budget = build_prompt_budget(llm.capabilities, output_reserve_tokens=llm.output_reserve_tokens)
+    maximum_input = budget.context_window_tokens - budget.output_reserve_tokens - budget.safety_tokens
+
+    def _verbose_fake_llm_step(passed_llm, system, prompt, step_name):
+        if step_name == "classify":
+            return {"repo_profile": {}, "cluster_names": {}}
+        if step_name == "propose":
+            # One bucket per file currently in scope, each padded with a
+            # large fixed-size blob — this is what makes the real ASSIGN
+            # prompt's embedded proposed-bucket JSON scale with the
+            # PROPOSAL, not with the (small, constant) file list, and it
+            # shrinks as the orchestration layer splits into smaller units.
+            files = sorted(set(_PATH_RE.findall(prompt)))
+            buckets = [
+                {
+                    "slug": f"group-{i}",
+                    "title": f"Group {i}",
+                    "bucket_type": "feature",
+                    "section": "Features",
+                    "candidate_files": [f],
+                    "description": "d",
+                    # Distinct tokens prevent BPE from compressing a repeated
+                    # character run into a tiny payload. Six buckets overflow
+                    # ASSIGN, while recursively smaller proposals fit.
+                    "generation_hints": {
+                        "padding": " ".join(
+                            f"proposal_padding_{i}_{j}" for j in range(160)
+                        )
+                    },
+                }
+                for i, f in enumerate(files)
+            ]
+            return {
+                "buckets": buckets,
+                "nav_structure": {"Features": [b["slug"] for b in buckets]},
+            }
+        if step_name == "assign":
+            files = sorted(set(_PATH_RE.findall(prompt)))
+            return {
+                "buckets": [
+                    {"slug": f"group-{i}", "owned_files": [f]} for i, f in enumerate(files)
+                ]
+            }
+        return None
+
+    seen_token_counts: list[int] = []
+
+    def _measuring_llm_step(passed_llm, system, prompt, step_name):
+        tokens, _ = count_message_tokens(system, prompt, passed_llm.capabilities)
+        seen_token_counts.append(tokens)
+        return _verbose_fake_llm_step(passed_llm, system, prompt, step_name)
+
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+         patch("deepdoc.planner.engine._llm_step", side_effect=_measuring_llm_step):
+        plan = plan_docs(scan, cfg, llm)
+
+    validate_plan_contract(plan)
+    assert missing_files(scan, plan) == []
+
+    units_meta = plan.classification.get("planning_units")
+    assert units_meta is not None, "a real overflow must fall through to the multi-unit path"
+    assert len(units_meta) > 1, "the single oversized-by-proposal unit must have been split"
+    assert sum(u["file_count"] for u in units_meta) == 6
+
+    assert seen_token_counts, "expected at least one real _llm_step call"
+    assert all(count <= maximum_input for count in seen_token_counts), (
+        f"a real LLM request exceeded the budget: {max(seen_token_counts)} > {maximum_input} "
+        "— UnitNeedsSplit must be raised before any oversized request is sent, never after"
     )

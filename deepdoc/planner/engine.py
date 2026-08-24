@@ -22,7 +22,55 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     """Run the multi-step planner.
 
     Phase 2 scans (giant-file clustering, endpoint bundles, integration discovery)
-    run first to enrich the scan, then:
+    run once on the full repo scan, then the scan is partitioned into bounded
+    `PlanningUnit`s by `build_planning_units()` (grouped from
+    `scan.file_services`). A repo with zero or one meaningful unit plans
+    exactly as before — no partitioning, no slug prefixing. A repo with more
+    than one unit is planned unit-by-unit against a filtered sub-scan
+    (`make_sub_scan`) so no single ASSIGN prompt has to hold the whole repo's
+    file inventory, then the unit plans are deterministically merged
+    (`merge_unit_plans`) into one contract-valid global `DocPlan`.
+    """
+    phase_start = time.perf_counter()
+
+    # ── Phase 2 Scans (enrich before planning; runs once, globally) ──────
+    console.print(
+        Panel("[bold]Running Phase 2 scan upgrades[/bold]", border_style="green")
+    )
+    step_start = time.perf_counter()
+    scan = run_phase2_scans(scan, cfg, llm, repo_root=repo_root)
+    scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
+
+    units = build_planning_units(scan)
+    if len(units) <= 1:
+        return _plan_local(scan, cfg, llm, repo_root)
+
+    console.print(
+        Panel(
+            f"[bold]Partitioned repo into {len(units)} planning units[/bold]: "
+            + ", ".join(f"{u.slug} ({len(u.files)} files)" for u in units),
+            border_style="green",
+        )
+    )
+    unit_plans: list[tuple[str, DocPlan]] = []
+    for unit in units:
+        console.print(f"[cyan]Planning unit '{unit.slug}'[/cyan]")
+        sub_scan = make_sub_scan(scan, unit)
+        unit_plans.append((unit.slug, _plan_local(sub_scan, cfg, llm, repo_root)))
+
+    plan = merge_unit_plans(unit_plans)
+    scan.planner_timings["total"] = time.perf_counter() - phase_start
+    _print_plan_summary(plan)
+    return plan
+
+
+def _plan_local(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path) -> DocPlan:
+    """Run classify → propose → assign → refine for one phase-2-enriched scan.
+
+    Shared by the single-unit path and by each partitioned planning unit.
+    Does not run Phase 2 scans — the caller owns that, exactly once, on the
+    global scan before any unit is planned.
+
     Step 1: CLASSIFY — categorize every file/artifact
     Step 2: PROPOSE — create bucket candidates (no cap, LLM decides freely)
     Step 3: ASSIGN — map files to buckets, produce final plan
@@ -30,14 +78,6 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     """
 
     phase_start = time.perf_counter()
-
-    # ── Phase 2 Scans (enrich before planning) ───────────────────────────
-    console.print(
-        Panel("[bold]Running Phase 2 scan upgrades[/bold]", border_style="green")
-    )
-    step_start = time.perf_counter()
-    scan = run_phase2_scans(scan, cfg, llm, repo_root=repo_root)
-    scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
 
     max_pages = cfg.get("max_pages", 0)
     giant_file_threshold = cfg.get("giant_file_lines", 2000)
@@ -1261,3 +1301,5 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
 from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _deduplicate_bucket_slugs, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_partial_assignment, _merge_plan, _normalize_repo_profile, _partition_topology_assignment, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
 from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets
+from .partitioning import build_planning_units, make_sub_scan
+from .merge import merge_unit_plans

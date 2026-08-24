@@ -99,6 +99,35 @@ def test_skipped_and_orphaned_files_union_deterministically() -> None:
     assert merged.orphaned_files == ["shared.py"]
 
 
+def test_merge_does_not_mutate_the_source_unit_plans() -> None:
+    """merge_unit_plans must clone before rewriting slugs/depends_on — the
+    caller's original per-unit DocPlan (and its buckets) has to remain
+    exactly as that unit planned it, independent of what merge does next."""
+    child = _feature("worker", ["a.py"], depends_on=["feature"])
+    child.parent_slug = "feature"
+    original_feature_hints = {"note": "unchanged"}
+    feature = _feature("feature", ["a.py"])
+    feature.generation_hints = original_feature_hints
+    plan_a = _plan(
+        [_intro(), feature, child],
+        {"Start Here": ["start-here"], "Features": ["feature", "worker"]},
+    )
+    plan_b = _plan([_intro()], {"Start Here": ["start-here"]})
+
+    merge_unit_plans([("orders", plan_a), ("payments", plan_b)])
+
+    # Every original bucket object keeps its original slug/section/hints.
+    assert [b.slug for b in plan_a.buckets] == ["start-here", "feature", "worker"]
+    assert plan_a.buckets[0].generation_hints.get("is_introduction_page") is True
+    assert plan_a.buckets[1].generation_hints is original_feature_hints
+    assert plan_a.buckets[1].generation_hints == {"note": "unchanged"}
+    assert plan_a.buckets[2].depends_on == ["feature"]
+    assert plan_a.buckets[2].parent_slug == "feature"
+    assert plan_a.nav_structure == {"Start Here": ["start-here"], "Features": ["feature", "worker"]}
+    assert plan_b.buckets[0].slug == "start-here"
+    assert plan_b.buckets[0].generation_hints.get("is_introduction_page") is True
+
+
 def test_missing_files_reports_undisposed_files() -> None:
     from deepdoc.v2_models import RepoScan
 

@@ -111,7 +111,7 @@ def test_single_unit_repo_uses_the_original_scan_with_no_prefixing() -> None:
 
     calls: list[RepoScan] = []
 
-    def _record(passed_scan, cfg, passed_llm, repo_root):
+    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True):
         calls.append(passed_scan)
         from deepdoc.v2_models import DocBucket, DocPlan
 
@@ -147,7 +147,7 @@ def test_multi_unit_repo_bounds_each_unit_to_its_own_files() -> None:
     llm = make_planner_llm()
     seen_files: list[set[str]] = []
 
-    def _record(passed_scan, cfg, passed_llm, repo_root):
+    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True):
         from deepdoc.v2_models import DocBucket, DocPlan
 
         seen_files.append(set(passed_scan.file_summaries))
@@ -178,8 +178,27 @@ def test_multi_unit_repo_bounds_each_unit_to_its_own_files() -> None:
     # No unit ever saw the other unit's files.
     assert seen_files[0].isdisjoint(seen_files[1])
 
-    slugs = sorted(b.slug for b in plan.buckets)
-    assert slugs == ["orders/start-here", "start-here"] or slugs == ["payments/start-here", "start-here"]
+    # Each mocked unit's local plan volunteered its own "start-here"
+    # introduction (a real LLM propose step can legitimately do this too);
+    # merge keeps exactly one as the global introduction and demotes the
+    # other to a namespaced overview bucket instead of duplicating it.
+    introductions = [
+        b for b in plan.buckets if (b.generation_hints or {}).get("is_introduction_page")
+    ]
+    assert [b.slug for b in introductions] == ["start-here"]
+    demoted = [b for b in plan.buckets if b.title == "Start Here" and b.slug != "start-here"]
+    assert [b.slug for b in demoted] == ["orders/start-here"] or [b.slug for b in demoted] == [
+        "payments/start-here"
+    ]
+
+    # Global-only injectors (Local Development Setup, Domain Glossary) must
+    # run exactly once on the merged plan, not once per unit — proves this
+    # is a single consolidated global bucket set, not per-service duplicates.
+    setup_buckets = [b for b in plan.buckets if b.bucket_type == "start_here_setup"]
+    glossary_buckets = [b for b in plan.buckets if b.bucket_type == "domain_glossary"]
+    assert len(setup_buckets) <= 1
+    assert len(glossary_buckets) <= 1
+
     validate_plan_contract(plan)
 
 
@@ -211,3 +230,61 @@ def test_bounded_multi_unit_planning_fits_where_one_global_inventory_would_not()
 
         with pytest.raises(ModelCapabilityError):
             _plan_local(scan, cfg, llm, Path("."))
+
+
+def test_single_oversized_service_still_splits_and_every_prompt_fits() -> None:
+    """build_planning_units() alone can return exactly one unit — a single
+    service, or `core` — that is itself too big for the model budget. The
+    old single-unit fast path took "one unit" as proof it was safe to plan
+    directly; it isn't. This drives the real plan_docs() pipeline with one
+    service of 100 files against a tight budget and proves: (1) it still
+    gets split into more than one planning unit despite file_services
+    reporting a single service, (2) every real `_llm_step` call's rendered
+    (system, prompt) pair — measured with the real tokenizer, not an
+    estimate — stays within the resolved model budget, and (3) the result
+    is still one contract-valid, fully-disposed plan."""
+    from deepdoc.llm.token_budget import build_prompt_budget, count_message_tokens
+
+    scan = _service_scan({"orders": 100})
+    llm = _tight_llm()
+    llm.capabilities = ModelCapabilities(
+        model="test",
+        capability_model="gpt-4o-mini",
+        context_window_tokens=3000,
+        max_output_tokens=100,
+        source="test",
+    )
+    llm.output_reserve_tokens = 100
+    cfg = _cfg()
+
+    budget = build_prompt_budget(llm.capabilities, output_reserve_tokens=llm.output_reserve_tokens)
+    maximum_input = budget.context_window_tokens - budget.output_reserve_tokens - budget.safety_tokens
+
+    seen_token_counts: list[int] = []
+
+    def _measuring_llm_step(passed_llm, system, prompt, step_name):
+        tokens, _ = count_message_tokens(system, prompt, passed_llm.capabilities)
+        seen_token_counts.append(tokens)
+        return _fake_llm_step(passed_llm, system, prompt, step_name)
+
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+         patch("deepdoc.planner.engine._llm_step", side_effect=_measuring_llm_step):
+        plan = plan_docs(scan, cfg, llm)
+
+    validate_plan_contract(plan)
+    assert missing_files(scan, plan) == []
+
+    # Proves the single-raw-unit repo genuinely got split, not just planned
+    # directly and gotten lucky. (build_planning_units() alone would have
+    # returned exactly one "orders" unit here — every file shares one
+    # service — so more than one entry only shows up via bound_planning_unit.)
+    units_meta = plan.classification.get("planning_units")
+    assert units_meta is not None
+    assert len(units_meta) > 1
+    assert sum(u["file_count"] for u in units_meta) == 100
+    assert not any(u["coarse"] for u in units_meta)
+
+    assert seen_token_counts, "expected at least one _llm_step call"
+    assert all(count <= maximum_input for count in seen_token_counts), (
+        f"a prompt exceeded the budget: {max(seen_token_counts)} > {maximum_input}"
+    )

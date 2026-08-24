@@ -12,7 +12,22 @@ from deepdoc.planner.partitioning import (
     split_planning_unit,
     unit_fits_model_budget,
 )
+from deepdoc.planner.flow_candidates import EntryPoint, FlowCandidate
 from deepdoc.planner.topology import TopologyCluster, TopologyMap
+from deepdoc.scanner.common import (
+    ArtifactScan,
+    ConfigImpact,
+    DatabaseGroup,
+    DatabaseScan,
+    DebugSignal,
+    EndpointBundle,
+    GraphQLInterface,
+    IntegrationIdentity,
+    KnexArtifact,
+    ModelFileInfo,
+    RuntimeScan,
+    RuntimeTask,
+)
 from deepdoc.v2_models import RepoScan
 
 
@@ -430,3 +445,151 @@ def test_bound_planning_unit_marks_an_indivisible_oversized_file_as_coarse() -> 
     assert len(parts) == 1
     assert parts[0].coarse is True
     assert parts[0].files == ("giant/one_file.py",)
+
+
+def test_make_sub_scan_isolates_every_phase2_record_between_two_services() -> None:
+    """A local unit's sub-scan must not see, and cannot claim ownership of,
+    another unit's Phase-2 evidence — endpoint bundles, integration
+    identities, artifact/database/runtime scans, graphql interfaces, knex
+    artifacts, research contexts, the semantic token cache, config impacts,
+    debug signals, flow candidates, and service boundaries."""
+    orders_file = "services/orders/app.py"
+    payments_file = "services/payments/app.py"
+
+    orders_bundle = EndpointBundle(
+        endpoint_family="orders", methods_paths=["POST /orders"], handler_file=orders_file, handler_symbols=["create_order"]
+    )
+    payments_bundle = EndpointBundle(
+        endpoint_family="payments", methods_paths=["POST /payments"], handler_file=payments_file, handler_symbols=["charge"]
+    )
+
+    orders_integration = IntegrationIdentity(
+        name="orders_gateway", display_name="Orders Gateway", description="d", files=[orders_file]
+    )
+    payments_integration = IntegrationIdentity(
+        name="payments_gateway", display_name="Payments Gateway", description="d", files=[payments_file]
+    )
+    # One identity spans both services — must be trimmed, not just kept whole.
+    shared_integration = IntegrationIdentity(
+        name="shared_sdk", display_name="Shared SDK", description="d", files=[orders_file, payments_file]
+    )
+
+    artifact_scan = ArtifactScan(
+        setup_artifacts=[orders_file, payments_file],
+        database_scan=DatabaseScan(
+            model_files=[
+                ModelFileInfo(file_path=orders_file, orm_framework="django", model_names=["Order"]),
+                ModelFileInfo(file_path=payments_file, orm_framework="django", model_names=["Payment"]),
+            ],
+            groups=[
+                DatabaseGroup(key="core", label="Core", file_paths=[orders_file, payments_file]),
+            ],
+            graphql_interfaces=[
+                GraphQLInterface(name="Order", file_path=orders_file, kind="object_type"),
+                GraphQLInterface(name="Payment", file_path=payments_file, kind="object_type"),
+            ],
+            knex_artifacts=[
+                KnexArtifact(file_path=orders_file, artifact_type="schema", table_name="orders"),
+                KnexArtifact(file_path=payments_file, artifact_type="schema", table_name="payments"),
+            ],
+        ),
+    )
+    runtime_scan = RuntimeScan(
+        tasks=[
+            RuntimeTask(name="sync_orders", file_path=orders_file, runtime_kind="celery"),
+            RuntimeTask(name="sync_payments", file_path=payments_file, runtime_kind="celery"),
+        ]
+    )
+    config_impacts = [
+        ConfigImpact(key="ORDERS_URL", kind="env_var", file_path=orders_file, related_files=[orders_file, payments_file]),
+        ConfigImpact(key="PAYMENTS_URL", kind="env_var", file_path=payments_file, related_files=[payments_file]),
+    ]
+    debug_signals = [
+        DebugSignal(signal_type="logger", name="orders_log", file_path=orders_file, description="d", files=[orders_file, payments_file]),
+        DebugSignal(signal_type="logger", name="payments_log", file_path=payments_file, description="d", files=[payments_file]),
+    ]
+    flow_candidates = [
+        FlowCandidate(
+            flow_id="checkout",
+            title="Checkout",
+            entry_kind="http",
+            entry_points=[EntryPoint(kind="http", label="checkout", handler_file=orders_file, handler_symbol="create_order")],
+            involved_files=[orders_file, payments_file],
+        ),
+        FlowCandidate(
+            flow_id="payments_only",
+            title="Payments only",
+            entry_kind="http",
+            entry_points=[EntryPoint(kind="http", label="charge", handler_file=payments_file, handler_symbol="charge")],
+            involved_files=[payments_file],
+        ),
+    ]
+    service_boundaries = [
+        {"name": "orders", "root": "services/orders", "source": "auto"},
+        {"name": "payments", "root": "services/payments", "source": "auto"},
+    ]
+
+    scan = _scan(
+        file_summaries={orders_file: "s", payments_file: "s"},
+        file_services={orders_file: "orders", payments_file: "payments"},
+        endpoint_bundles=[orders_bundle, payments_bundle],
+        integration_identities=[orders_integration, payments_integration, shared_integration],
+        artifact_scan=artifact_scan,
+        runtime_scan=runtime_scan,
+        graphql_interfaces=list(artifact_scan.database_scan.graphql_interfaces),
+        knex_artifacts=list(artifact_scan.database_scan.knex_artifacts),
+        research_contexts=[
+            {"kind": "notes", "title": "Orders", "file_path": orders_file, "summary": "s", "headings": []},
+            {"kind": "notes", "title": "Payments", "file_path": payments_file, "summary": "s", "headings": []},
+        ],
+        semantic_file_token_cache={orders_file: {"order"}, payments_file: {"payment"}},
+        config_impacts=config_impacts,
+        debug_signals=debug_signals,
+        flow_candidates=flow_candidates,
+        service_boundaries=service_boundaries,
+    )
+
+    units = {u.slug: u for u in build_planning_units(scan)}
+    orders_sub = make_sub_scan(scan, units["orders"])
+
+    assert [b.handler_file for b in orders_sub.endpoint_bundles] == [orders_file]
+
+    integration_names = {i.name for i in orders_sub.integration_identities}
+    assert integration_names == {"orders_gateway", "shared_sdk"}
+    shared = next(i for i in orders_sub.integration_identities if i.name == "shared_sdk")
+    assert shared.files == [orders_file]  # trimmed, not left spanning both services
+
+    assert orders_sub.artifact_scan.setup_artifacts == [orders_file]
+    db = orders_sub.artifact_scan.database_scan
+    assert [m.file_path for m in db.model_files] == [orders_file]
+    assert db.groups[0].file_paths == [orders_file]
+    assert [g.file_path for g in db.graphql_interfaces] == [orders_file]
+    assert [k.file_path for k in db.knex_artifacts] == [orders_file]
+
+    assert orders_sub.runtime_scan.tasks[0].file_path == orders_file
+    assert len(orders_sub.runtime_scan.tasks) == 1
+
+    assert [g.file_path for g in orders_sub.graphql_interfaces] == [orders_file]
+    assert [k.file_path for k in orders_sub.knex_artifacts] == [orders_file]
+
+    assert [c["file_path"] for c in orders_sub.research_contexts] == [orders_file]
+    assert set(orders_sub.semantic_file_token_cache) == {orders_file}
+
+    assert [c.file_path for c in orders_sub.config_impacts] == [orders_file]
+    assert orders_sub.config_impacts[0].related_files == [orders_file]  # trimmed
+
+    assert [d.file_path for d in orders_sub.debug_signals] == [orders_file]
+    assert orders_sub.debug_signals[0].files == [orders_file]  # trimmed
+
+    assert [f.flow_id for f in orders_sub.flow_candidates] == ["checkout"]
+    assert orders_sub.flow_candidates[0].involved_files == [orders_file]  # trimmed
+
+    assert [b["name"] for b in orders_sub.service_boundaries] == ["orders"]
+
+    assert orders_sub.scan_timings == {}
+    assert orders_sub.planner_timings == {}
+
+    # Global scan is completely untouched.
+    assert len(scan.endpoint_bundles) == 2
+    assert len(scan.integration_identities) == 3
+    assert scan.artifact_scan.database_scan.model_files[1].file_path == payments_file

@@ -167,15 +167,125 @@ def _languages_for_files(files: set[str]) -> dict[str, int]:
     return counts
 
 
+def _filter_by_attr(items: list, files: set[str], attr: str) -> list:
+    """Keep items whose single-file `attr` belongs to `files`."""
+    return [item for item in items if getattr(item, attr, None) in files]
+
+
+def _filter_by_list_attr(items: list, files: set[str], attr: str) -> list:
+    """Keep items with >=1 file in list-attribute `attr` inside `files`,
+    trimming that attribute to just this unit's files (a kept item never
+    keeps a reference to another unit's file)."""
+    kept = []
+    for item in items:
+        item_files = [f for f in getattr(item, attr, []) if f in files]
+        if item_files:
+            kept.append(dataclasses.replace(item, **{attr: item_files}))
+    return kept
+
+
+def _filter_debug_signals(signals: list, files: set[str]) -> list:
+    kept = []
+    for sig in signals:
+        if sig.file_path not in files:
+            continue
+        kept.append(dataclasses.replace(sig, files=[f for f in sig.files if f in files]))
+    return kept
+
+
+def _filter_config_impacts(impacts: list, files: set[str]) -> list:
+    kept = []
+    for impact in impacts:
+        if impact.file_path not in files:
+            continue
+        kept.append(
+            dataclasses.replace(
+                impact, related_files=[f for f in impact.related_files if f in files]
+            )
+        )
+    return kept
+
+
+def _filter_research_contexts(contexts: list[dict], files: set[str]) -> list[dict]:
+    return [c for c in contexts if c.get("file_path") in files]
+
+
+def _filter_service_boundaries(boundaries: list[dict], files: set[str]) -> list[dict]:
+    """Keep only the boundary stub(s) this unit's own files actually sit
+    under. A boundary entry is a `{name, root, source}` directory-root
+    record, not file-scoped evidence — it can't grant ownership of a
+    foreign file — but a unit still shouldn't see every other service's
+    root listed alongside its own.
+    """
+    kept = []
+    for boundary in boundaries:
+        root = str(boundary.get("root", "")).rstrip("/")
+        if any(f == root or f.startswith(f"{root}/") for f in files):
+            kept.append(boundary)
+    return kept
+
+
+def _filter_database_scan(db_scan, files: set[str]):
+    if db_scan is None:
+        return None
+    groups = []
+    for group in db_scan.groups:
+        trimmed = [f for f in group.file_paths if f in files]
+        if trimmed:
+            groups.append(dataclasses.replace(group, file_paths=trimmed))
+    return dataclasses.replace(
+        db_scan,
+        model_files=_filter_by_attr(db_scan.model_files, files, "file_path"),
+        migration_files=[f for f in db_scan.migration_files if f in files],
+        schema_files=[f for f in db_scan.schema_files if f in files],
+        groups=groups,
+        graphql_interfaces=_filter_by_attr(db_scan.graphql_interfaces, files, "file_path"),
+        knex_artifacts=_filter_by_attr(db_scan.knex_artifacts, files, "file_path"),
+    )
+
+
+def _filter_artifact_scan(artifact_scan, files: set[str]):
+    if artifact_scan is None:
+        return None
+    return dataclasses.replace(
+        artifact_scan,
+        setup_artifacts=[f for f in artifact_scan.setup_artifacts if f in files],
+        deploy_artifacts=[f for f in artifact_scan.deploy_artifacts if f in files],
+        test_artifacts=[f for f in artifact_scan.test_artifacts if f in files],
+        ci_artifacts=[f for f in artifact_scan.ci_artifacts if f in files],
+        ops_artifacts=[f for f in artifact_scan.ops_artifacts if f in files],
+        database_scan=_filter_database_scan(artifact_scan.database_scan, files),
+    )
+
+
+def _filter_runtime_scan(runtime_scan, files: set[str]):
+    if runtime_scan is None:
+        return None
+    return dataclasses.replace(
+        runtime_scan,
+        tasks=_filter_by_attr(runtime_scan.tasks, files, "file_path"),
+        schedulers=_filter_by_attr(runtime_scan.schedulers, files, "file_path"),
+        realtime_consumers=_filter_by_attr(runtime_scan.realtime_consumers, files, "file_path"),
+    )
+
+
 def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
     """Project a `RepoScan` down to the files owned by `unit`.
 
     Never mutates `scan`; returns a new `RepoScan` with every file-scoped
-    field filtered to `unit.files`. `call_graph` is dropped rather than
-    filtered — it's a whole-repo structure with no cheap per-unit
-    projection, and local planning never legitimately needs another unit's
-    call edges. `languages` is recomputed from this unit's own files rather
-    than carried over from the global scan.
+    field filtered to `unit.files` — including every Phase-2 enrichment
+    record (endpoint bundles, integration identities, artifact/database/
+    runtime scans, graphql interfaces, knex artifacts, research contexts,
+    the semantic token cache, config impacts, debug signals, flow
+    candidates, and service boundaries), so local planning for this unit
+    never sees, and can never claim ownership of, another unit's evidence.
+    `call_graph` is dropped rather than filtered — it's a whole-repo
+    structure with no cheap per-unit projection, and local planning never
+    legitimately needs another unit's call edges. `languages` is recomputed
+    from this unit's own files rather than carried over from the global
+    scan. `scan_timings`/`planner_timings` are reset to fresh dicts so
+    concurrent units never share (and silently clobber) the same mutable
+    timing dict.
     """
     files = set(unit.files)
     unit_dirs = _unit_dirs(files)
@@ -215,6 +325,19 @@ def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
         scan_scope=_filter_list(scan.scan_scope, files, unit_dirs) if scan.scan_scope else [],
         languages=_languages_for_files(files),
         call_graph=None,
+        endpoint_bundles=_filter_by_attr(scan.endpoint_bundles, files, "handler_file"),
+        integration_identities=_filter_by_list_attr(scan.integration_identities, files, "files"),
+        artifact_scan=_filter_artifact_scan(scan.artifact_scan, files),
+        runtime_scan=_filter_runtime_scan(scan.runtime_scan, files),
+        graphql_interfaces=_filter_by_attr(scan.graphql_interfaces, files, "file_path"),
+        knex_artifacts=_filter_by_attr(scan.knex_artifacts, files, "file_path"),
+        research_contexts=_filter_research_contexts(scan.research_contexts, files),
+        semantic_file_token_cache=_filter_dict(scan.semantic_file_token_cache, files),
+        config_impacts=_filter_config_impacts(scan.config_impacts, files),
+        debug_signals=_filter_debug_signals(scan.debug_signals, files),
+        flow_candidates=_filter_by_list_attr(scan.flow_candidates, files, "involved_files"),
+        service_boundaries=_filter_service_boundaries(scan.service_boundaries, files),
+        scan_timings={},
         planner_timings={},
     )
 

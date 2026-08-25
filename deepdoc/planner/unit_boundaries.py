@@ -8,8 +8,8 @@ evidence that already lives on `RepoScan` — no LLM calls, no GitNexus. Two res
    one unambiguous dominant affinity; ambiguous/weak files stay in `core`.
 2. `compute_boundary_stubs()` aggregates a compact, bounded summary of one
    unit's relationship to every other unit — remote slug, direction,
-   aggregate score/count, evidence kinds, and a handful of flow labels.
-   Never remote file paths, symbol names, or raw graph edges.
+   aggregate score/count, and evidence kinds. Never remote file paths,
+   symbol names, flow labels/IDs/titles, or raw graph edges.
 
 See .hermes/plans/SLICE_B_SEMANTIC_UNITS_PLAN.md for the product contract.
 """
@@ -17,7 +17,6 @@ See .hermes/plans/SLICE_B_SEMANTIC_UNITS_PLAN.md for the product contract.
 from __future__ import annotations
 
 import dataclasses
-import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -49,39 +48,29 @@ _RUNTIME_PRODUCER_WEIGHT = 3.0
 # Cross-unit boundary stub bounds — keep this compact and cheap to render in
 # a local prompt, never an unbounded inventory.
 _MAX_STUBS_PER_UNIT = 5
-_MAX_FLOW_LABELS_PER_STUB = 3
 _STUB_FLOW_WEIGHT = 3.0
-
-# A flow label reaching a local prompt must be safe *by construction*, not by
-# trusting the producer's formatting: `FlowCandidate.title` is built from
-# arbitrary upstream text (`endpoint_family` can be `POST /orders/process`) and
-# `flow_id` can be anything a caller passes. Only a short lowercase
-# alnum/dash identifier is allowed through — no separators, no dots, so no
-# path or file extension can survive.
-_SAFE_FLOW_LABEL_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
-# ...and reject a slugified path whose last segment is a source extension
-# ("services-payments-app-py"), which would still echo a remote file.
-_EXTENSION_TOKENS = frozenset(
-    "py pyi ts tsx js jsx mjs cjs go rb java kt kts php rs cs c cc cpp h hpp "
-    "swift scala m mm vue svelte sql yml yaml json toml".split()
-)
-_GENERIC_FLOW_LABEL = "flow"
 
 
 @dataclasses.dataclass(frozen=True)
 class BoundaryStub:
     """A compact, serializable summary of one unit's relationship to
-    another. Deliberately excludes remote file paths, symbol names, and raw
-    graph edges by construction — only a slug, a direction, aggregate
-    counts, and a handful of flow labels ever reach a local planning
-    prompt."""
+    another. Deliberately excludes remote file paths, symbol names, flow
+    labels/IDs/titles, and raw graph edges by construction — only a slug, a
+    direction, and aggregate counts/evidence kinds ever reach a local
+    planning prompt.
+
+    No flow-derived string is carried at all: `FlowCandidate.flow_id` is
+    frequently a slug of upstream text, so a remote path can arrive already
+    stripped of `/` and `.` ("services-payments-private-handler-py-flow")
+    and is indistinguishable from a legitimate identifier. The aggregate
+    `flow` evidence kind and its score contribution are all Slice B needs.
+    """
 
     remote_unit: str
     direction: str  # "inbound" | "outbound" | "bidirectional"
     score: float
     call_count: int
     evidence_kinds: tuple[str, ...] = ()
-    flow_labels: tuple[str, ...] = ()
 
 
 def _local_call_edges(scan: "RepoScan") -> list[tuple[str, str]]:
@@ -108,25 +97,10 @@ def _local_call_edges(scan: "RepoScan") -> list[tuple[str, str]]:
     return sorted(pairs)
 
 
-def _safe_flow_label(flow_id: str) -> str:
-    """A prompt-safe label for one flow, derived only from its stable ID.
-
-    Titles are dropped entirely — see `_SAFE_FLOW_LABEL_RE`. Anything that
-    isn't a plain short identifier degrades to a generic label rather than
-    risking a remote path in a local prompt.
-    """
-    candidate = (flow_id or "").strip().lower()
-    if not _SAFE_FLOW_LABEL_RE.fullmatch(candidate):
-        return _GENERIC_FLOW_LABEL
-    if candidate.rsplit("-", 1)[-1] in _EXTENSION_TOKENS:
-        return _GENERIC_FLOW_LABEL
-    return candidate
-
-
 def _flow_file_groups(scan: "RepoScan") -> list[tuple[str, frozenset[str]]]:
-    """(flow_id, involved_files) pairs, sorted for determinism. Titles are
-    deliberately not carried — nothing derived from a title may reach a
-    local prompt (see `_safe_flow_label`)."""
+    """(flow_id, involved_files) pairs, sorted for determinism. The flow_id
+    is used only for stable ordering and never leaves this module — see
+    `BoundaryStub`."""
     groups = [
         (flow.flow_id, frozenset(flow.involved_files))
         for flow in (scan.flow_candidates or [])
@@ -362,20 +336,19 @@ def compute_boundary_stubs(
                 if caller in files:
                     inbound[slug] += 1
 
-    flow_hits: dict[str, list[str]] = {slug: [] for slug in others}
-    for flow_id, files in flow_groups:
+    flow_hits: dict[str, int] = {slug: 0 for slug in others}
+    for _flow_id, files in flow_groups:
         if not (unit_files & files):
             continue
         for slug, other_files in others.items():
             if other_files & files:
-                flow_hits[slug].append(_safe_flow_label(flow_id))
+                flow_hits[slug] += 1
 
     stubs: list[BoundaryStub] = []
     for slug in sorted(others):
         out_count = outbound[slug]
         in_count = inbound[slug]
-        hits = sorted(set(flow_hits[slug]))
-        score = float(out_count + in_count) + len(flow_hits[slug]) * _STUB_FLOW_WEIGHT
+        score = float(out_count + in_count) + flow_hits[slug] * _STUB_FLOW_WEIGHT
         if score <= 0:
             continue
         if out_count and in_count:
@@ -401,7 +374,6 @@ def compute_boundary_stubs(
                 score=score,
                 call_count=out_count + in_count,
                 evidence_kinds=evidence_kinds,
-                flow_labels=tuple(hits[:_MAX_FLOW_LABELS_PER_STUB]),
             )
         )
 
@@ -412,7 +384,7 @@ def compute_boundary_stubs(
 def format_boundary_stubs(stubs: tuple[BoundaryStub, ...]) -> str:
     """Compact, human-readable rendering for the local planning prompt's
     optional cross-unit context section. Contains only what `BoundaryStub`
-    itself carries — no remote file paths."""
+    itself carries — no remote file paths, no flow labels."""
     if not stubs:
         return ""
     lines = []
@@ -422,8 +394,6 @@ def format_boundary_stubs(stubs: tuple[BoundaryStub, ...]) -> str:
             f"- {stub.remote_unit}: {stub.direction}, score={stub.score:.1f}, "
             f"calls={stub.call_count}, evidence=[{kinds}]"
         )
-        if stub.flow_labels:
-            line += f", flows=[{', '.join(stub.flow_labels)}]"
         lines.append(line)
     return "\n".join(lines)
 

@@ -407,7 +407,6 @@ def test_plan_local_includes_bounded_cross_unit_context_in_classify_prompt() -> 
                 score=3.0,
                 call_count=3,
                 evidence_kinds=("call",),
-                flow_labels=(),
             ),
         ),
     )

@@ -7,6 +7,8 @@ no LLM calls, no GitNexus.
 
 from __future__ import annotations
 
+import pytest
+
 from deepdoc.call_graph import CallEdge, CallGraph
 from deepdoc.planner.flow_candidates import EntryPoint, FlowCandidate
 from deepdoc.planner.partitioning import PlanningUnit, build_planning_units
@@ -255,13 +257,11 @@ def test_boundary_stub_never_carries_remote_file_paths() -> None:
 
     assert len(stubs) == 1
     stub = stubs[0]
-    for field_value in (stub.remote_unit, stub.direction, *stub.flow_labels):
-        assert "services/payments" not in str(field_value)
-        assert ".py" not in str(field_value)
+    assert "services/payments" not in repr(stub)
+    assert ".py" not in repr(stub)
     assert stub.remote_unit == "payments"
+    # Only aggregate flow evidence survives — never the flow's ID or title.
     assert "flow" in stub.evidence_kinds
-    # The label is the flow's stable ID, never its arbitrary title.
-    assert stub.flow_labels == ("checkout",)
 
 
 def test_boundary_stubs_are_bounded_and_sorted_deterministically() -> None:
@@ -292,7 +292,6 @@ def test_boundary_stub_is_immutable() -> None:
         score=1.0,
         call_count=1,
         evidence_kinds=("call",),
-        flow_labels=(),
     )
     import dataclasses
 
@@ -349,9 +348,9 @@ def test_refinement_and_stub_computation_are_deterministic_under_shuffled_input(
             entry_points=[],
             involved_files=list(involved),
         )
-        # More flows than `_MAX_FLOW_LABELS_PER_STUB` so the bounded label
-        # list is actually truncated — truncation is where a shuffled input
-        # order would otherwise show up in the output.
+        # Several co-occurring flows so the aggregate flow score is built
+        # from more than one hit — a shuffled input order would otherwise
+        # show up in the accumulated total.
         for flow_id, involved in (
             ("checkout", (orders, payments)),
             ("refund", (payments, orders)),
@@ -416,15 +415,20 @@ def test_refinement_and_stub_computation_are_deterministic_under_shuffled_input(
     orders_row = next(row for row in a if row[0] == "orders")
     assert helper in orders_row[1]
     assert [stub.remote_unit for stub in orders_row[2]] == ["payments"]
-    assert orders_row[2][0].flow_labels == ("checkout", "dispute", "refund")
+    assert "flow" in orders_row[2][0].evidence_kinds
+    # Four co-occurring flows, each weighted `_STUB_FLOW_WEIGHT`, plus the
+    # call edges — a stable aggregate regardless of input order.
+    assert orders_row[2][0].score == pytest.approx(
+        orders_row[2][0].call_count + 4 * 3.0
+    )
 
 
-def test_flow_label_never_leaks_a_remote_path_even_from_a_hostile_title() -> None:
+def test_flow_evidence_never_leaks_a_remote_path_even_from_a_hostile_title() -> None:
     """A flow title/ID is arbitrary upstream text — `endpoint_family` can be
     a route like `POST /orders/process`, and nothing stops a scanner (or a
     malicious repo) from putting a remote file path in it. No such string
-    may reach a `BoundaryStub` or the local prompt: labels must be safe by
-    construction, not by trusting the producer's formatting."""
+    may reach a `BoundaryStub` or the local prompt, so no flow-derived
+    string is carried at all."""
     scan = _scan(
         call_graph=_call_graph(
             ("services/orders/app.py", "handle", "services/payments/app.py", "charge"),
@@ -460,8 +464,8 @@ def test_flow_label_never_leaks_a_remote_path_even_from_a_hostile_title() -> Non
         assert "services/" not in haystack
         assert "\\" not in haystack
         assert ".py" not in haystack
-    # A normal, safe identifier still survives as a usable label.
-    assert "checkout" in stubs[0].flow_labels
+    # The flow co-occurrence still counts as aggregate evidence.
+    assert "flow" in stubs[0].evidence_kinds
 
 
 def _endpoint_bundle(family: str, handler_file: str, evidence_files: list[str]):
@@ -661,3 +665,50 @@ def test_topology_shared_dependency_is_never_forced_into_one_service() -> None:
 
     assert "shared/helper.py" in refined["core"]
     assert "shared/helper.py" not in refined["orders"]
+
+
+def test_boundary_stub_never_carries_a_slugified_remote_path() -> None:
+    """`FlowCandidate.flow_id` is often produced by slugifying upstream text,
+    so a remote source path can arrive already stripped of `/` and `.` —
+    `services-payments-private-handler-py-flow`. No character-level sanitizer
+    can tell that apart from a legitimate identifier, so no flow-derived
+    string may reach a `BoundaryStub` or the local prompt at all."""
+    scan = _scan(
+        call_graph=_call_graph(
+            ("services/orders/app.py", "handle", "services/payments/app.py", "charge"),
+        ),
+        flow_candidates=[
+            FlowCandidate(
+                flow_id=flow_id,
+                title=f"{flow_id} title",
+                entry_kind="http",
+                entry_points=[],
+                involved_files=["services/orders/app.py", "services/payments/app.py"],
+            )
+            for flow_id in (
+                "services-payments-private-handler-py-flow",
+                "services-payments-secret-config-flow",
+            )
+        ],
+    )
+    baseline = {
+        "orders": frozenset({"services/orders/app.py"}),
+        "payments": frozenset({"services/payments/app.py"}),
+    }
+
+    stubs = compute_boundary_stubs(scan, baseline["orders"], "orders", baseline)
+    rendered = format_boundary_stubs(stubs)
+
+    assert len(stubs) == 1
+    for haystack in (repr(stubs[0]), rendered):
+        for leaked in (
+            "services-payments-private-handler-py-flow",
+            "services-payments-secret-config-flow",
+            "private-handler",
+            "secret-config",
+            "-py-",
+            "services-",
+        ):
+            assert leaked not in haystack
+    # The aggregate flow evidence still survives — only the labels are gone.
+    assert "flow" in stubs[0].evidence_kinds

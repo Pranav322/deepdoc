@@ -510,6 +510,13 @@ def test_engine_fingerprint_records_multi_unit_planning_contract():
     assert "namespaced" in ENGINE_FINGERPRINT
 
 
+def test_engine_fingerprint_records_semantic_boundary_refinement():
+    """Slice B changes per-unit membership and routes (unclaimed files can
+    now move into a named service) — the fingerprint must invalidate plans
+    generated before semantic boundary refinement existed."""
+    assert "semantic_boundaries" in ENGINE_FINGERPRINT
+
+
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
     """Outdated sync state should trigger a one-time full replan."""
     root, plan = tmp_repo_with_plan

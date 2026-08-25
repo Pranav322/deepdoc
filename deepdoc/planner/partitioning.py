@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import posixpath
 import re
+from typing import Any
 
 from ..llm import ModelCapabilityError
 from ..source_metadata import classify_source_kind
@@ -56,6 +57,19 @@ class PlanningUnit:
     # not send a coarse unit through normal LLM planning — see
     # `bound_planning_unit`.
     coarse: bool = False
+    # Compact, bounded cross-unit relationship stubs (see
+    # `unit_boundaries.BoundaryStub`) — recomputed fresh for this unit's
+    # exact final file membership, never inherited from a parent unit.
+    # Typed as `tuple[Any, ...]` rather than importing `BoundaryStub` here
+    # to avoid a partitioning<->unit_boundaries import cycle.
+    boundary_stubs: tuple[Any, ...] = ()
+    # True when this unit holds the files no `scan.file_services` entry
+    # claimed. This flag — never the slug — is the authoritative marker:
+    # a repo whose every file is claimed and which *also* has a service
+    # literally named "core" would otherwise hand `CORE_SLUG` to that real
+    # service and let refinement redistribute its anchored files. See
+    # `unit_boundaries.refine_unit_ownership`.
+    unclaimed: bool = False
 
 
 def _slugify(name: str) -> str:
@@ -82,7 +96,7 @@ def build_planning_units(scan: RepoScan) -> list[PlanningUnit]:
         groups.setdefault(_group_key(scan, path), []).append(path)
 
     if not groups:
-        return [PlanningUnit(slug=CORE_SLUG, label=CORE_SLUG, files=())]
+        return [PlanningUnit(slug=CORE_SLUG, label=CORE_SLUG, files=(), unclaimed=True)]
 
     # Collapse to a single unit whenever there are 0 or 1 *named* services,
     # even if shared/unclaimed files form a "core" group. ``groups`` holds one
@@ -97,7 +111,7 @@ def build_planning_units(scan: RepoScan) -> list[PlanningUnit]:
         all_files = tuple(sorted(f for files in groups.values() for f in files))
         slug = _slugify(raw) if raw else CORE_SLUG
         label = raw if raw else CORE_SLUG
-        return [PlanningUnit(slug=slug, label=label, files=all_files)]
+        return [PlanningUnit(slug=slug, label=label, files=all_files, unclaimed=not raw)]
 
     slug_counts: dict[str, int] = {}
     units: list[PlanningUnit] = []
@@ -108,7 +122,14 @@ def build_planning_units(scan: RepoScan) -> list[PlanningUnit]:
         seen = slug_counts.get(base_slug, 0)
         slug_counts[base_slug] = seen + 1
         slug = base_slug if seen == 0 else f"{base_slug}-{seen + 1}"
-        units.append(PlanningUnit(slug=slug, label=label, files=tuple(sorted(groups[key]))))
+        units.append(
+            PlanningUnit(
+                slug=slug,
+                label=label,
+                files=tuple(sorted(groups[key])),
+                unclaimed=not is_named,
+            )
+        )
 
     units.sort(key=lambda u: u.slug)
     return units
@@ -268,12 +289,38 @@ def _filter_artifact_scan(artifact_scan, files: set[str]):
     )
 
 
+def _filter_endpoint_bundles(bundles: list, files: set[str]) -> list:
+    """Keep unit-owned handlers, but trim their nested evidence to this unit.
+
+    A retained bundle is never dropped for ending up with empty evidence —
+    the handler itself is still local.
+    """
+    return [
+        dataclasses.replace(
+            bundle,
+            evidence=[e for e in bundle.evidence if e.file_path in files],
+        )
+        for bundle in _filter_by_attr(bundles, files, "handler_file")
+    ]
+
+
+def _filter_runtime_tasks(tasks: list, files: set[str]) -> list:
+    """Keep locally-defined tasks, trimming nested `producer_files`."""
+    return [
+        dataclasses.replace(
+            task,
+            producer_files=[f for f in task.producer_files if f in files],
+        )
+        for task in _filter_by_attr(tasks, files, "file_path")
+    ]
+
+
 def _filter_runtime_scan(runtime_scan, files: set[str]):
     if runtime_scan is None:
         return None
     return dataclasses.replace(
         runtime_scan,
-        tasks=_filter_by_attr(runtime_scan.tasks, files, "file_path"),
+        tasks=_filter_runtime_tasks(runtime_scan.tasks, files),
         schedulers=_filter_by_attr(runtime_scan.schedulers, files, "file_path"),
         realtime_consumers=_filter_by_attr(runtime_scan.realtime_consumers, files, "file_path"),
     )
@@ -284,9 +331,10 @@ def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
 
     Never mutates `scan`; returns a new `RepoScan` with every file-scoped
     field filtered to `unit.files` — including every Phase-2 enrichment
-    record (endpoint bundles, integration identities, artifact/database/
-    runtime scans, graphql interfaces, knex artifacts, research contexts,
-    the semantic token cache, config impacts, debug signals, flow
+    record (endpoint bundles — nested `evidence` units included —
+    integration identities, artifact/database/runtime scans — runtime task
+    `producer_files` included — graphql interfaces, knex artifacts,
+    research contexts, the semantic token cache, config impacts, debug signals, flow
     candidates, and service boundaries), so local planning for this unit
     never sees, and can never claim ownership of, another unit's evidence.
     `call_graph` is dropped rather than filtered — it's a whole-repo
@@ -339,7 +387,7 @@ def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
         scan_scope=_filter_list(scan.scan_scope, files, unit_dirs) if scan.scan_scope else [],
         languages=_languages_for_files(files),
         call_graph=None,
-        endpoint_bundles=_filter_by_attr(scan.endpoint_bundles, files, "handler_file"),
+        endpoint_bundles=_filter_endpoint_bundles(scan.endpoint_bundles, files),
         integration_identities=_filter_by_list_attr(scan.integration_identities, files, "files"),
         artifact_scan=_filter_artifact_scan(scan.artifact_scan, files),
         runtime_scan=_filter_runtime_scan(scan.runtime_scan, files),
@@ -421,6 +469,7 @@ def split_planning_unit(unit: PlanningUnit, max_files: int) -> list[PlanningUnit
                     slug=f"{unit.slug}/part-{i + 1}",
                     label=f"{unit.label} part {i + 1}",
                     files=tuple(chunk),
+                    unclaimed=unit.unclaimed,
                 )
                 for i, chunk in enumerate(chunks)
             ]
@@ -436,6 +485,7 @@ def split_planning_unit(unit: PlanningUnit, max_files: int) -> list[PlanningUnit
             slug=f"{unit.slug}/part-{i + 1}",
             label=f"{unit.label} part {i + 1}",
             files=chunk,
+            unclaimed=unit.unclaimed,
         )
         for i, chunk in enumerate(chunks)
     ]
@@ -457,8 +507,8 @@ def next_split(unit: PlanningUnit, max_files_seed_cap: int = 0) -> list[Planning
         sorted_files = tuple(sorted(unit.files))
         half = len(sorted_files) // 2
         parts = [
-            PlanningUnit(slug=f"{unit.slug}/part-1", label=f"{unit.label} part 1", files=sorted_files[:half]),
-            PlanningUnit(slug=f"{unit.slug}/part-2", label=f"{unit.label} part 2", files=sorted_files[half:]),
+            PlanningUnit(slug=f"{unit.slug}/part-1", label=f"{unit.label} part 1", files=sorted_files[:half], unclaimed=unit.unclaimed),
+            PlanningUnit(slug=f"{unit.slug}/part-2", label=f"{unit.label} part 2", files=sorted_files[half:], unclaimed=unit.unclaimed),
         ]
     return parts
 

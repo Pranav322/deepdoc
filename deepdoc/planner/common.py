@@ -148,6 +148,9 @@ CLASSIFY_PROMPT = """Analyze this repository and name its topology clusters.
 ## API Endpoints
 {endpoints}
 
+## Cross-Unit Context
+{cross_unit_context}
+
 ---
 
 For each cluster give it a domain name and a nav section.

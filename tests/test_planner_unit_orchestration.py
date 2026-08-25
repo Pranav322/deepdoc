@@ -657,3 +657,148 @@ def test_proposal_dependent_assign_overflow_triggers_real_split_and_retry() -> N
         f"a real LLM request exceeded the budget: {max(seen_token_counts)} > {maximum_input} "
         "— UnitNeedsSplit must be raised before any oversized request is sent, never after"
     )
+
+
+def test_proposal_dependent_split_gives_only_the_calling_child_a_boundary_stub() -> None:
+    """The realistic overflow case combined with cross-unit boundaries: two
+    coupled services, a genuine proposal-dependent ASSIGN overflow (the
+    preflight sees a unit that fits; the verbose PROPOSE response is what
+    blows the real ASSIGN prompt), and a split of the unit that owns the
+    cross-unit call. Proves the stub recomputation is driven by a real
+    `UnitNeedsSplit` — not a mocked one — and that after the split only the
+    child that actually contains the calling file carries the stub, no
+    child carries the parent's pre-split aggregate, and no LLM request that
+    goes out exceeds the budget."""
+    from deepdoc.call_graph import CallEdge, CallGraph
+    from deepdoc.llm.token_budget import build_prompt_budget, count_message_tokens
+    from deepdoc.planner.engine import _plan_local as _real_plan_local
+    from deepdoc.planner.partitioning import (
+        build_planning_units,
+        unit_likely_fits_budget,
+    )
+
+    scan = _service_scan({"orders": 6, "payments": 1})
+    caller = "services/orders/module_00/component_00/handler.py"
+    callee = "services/payments/module_00/component_00/handler.py"
+    graph = CallGraph()
+    # Three distinct call sites from one orders file: the parent unit's
+    # aggregate is call_count=3, so a stale copy on a sibling child is
+    # visible rather than coincidentally identical.
+    for symbol in ("charge", "refund", "capture"):
+        graph.add_edge(
+            CallEdge(
+                caller_file=caller,
+                caller_symbol=f"handle_{symbol}",
+                callee_file=callee,
+                callee_symbol=symbol,
+            )
+        )
+    scan.call_graph = graph
+
+    llm = make_planner_llm()
+    llm.capabilities = ModelCapabilities(
+        model="test", capability_model="gpt-4o-mini", context_window_tokens=3000,
+        max_output_tokens=100, source="test",
+    )
+    llm.output_reserve_tokens = 100
+    cfg = _cfg()
+
+    # The two services are the raw units, and the cheap preflight has no way
+    # to know PROPOSE will come back verbose.
+    raw_units = build_planning_units(scan)
+    assert {u.slug for u in raw_units} == {"orders", "payments"}
+    assert unit_likely_fits_budget(scan, llm) is True
+
+    budget = build_prompt_budget(llm.capabilities, output_reserve_tokens=llm.output_reserve_tokens)
+    maximum_input = budget.context_window_tokens - budget.output_reserve_tokens - budget.safety_tokens
+
+    def _verbose_fake_llm_step(passed_llm, system, prompt, step_name):
+        if step_name == "propose":
+            files = sorted(set(_PATH_RE.findall(prompt)))
+            return {
+                "buckets": [
+                    {
+                        "slug": f"group-{i}",
+                        "title": f"Group {i}",
+                        "bucket_type": "feature",
+                        "section": "Features",
+                        "candidate_files": [f],
+                        "description": "d",
+                        "generation_hints": {
+                            "padding": " ".join(
+                                f"proposal_padding_{i}_{j}" for j in range(160)
+                            )
+                        },
+                    }
+                    for i, f in enumerate(files)
+                ],
+                "nav_structure": {
+                    "Features": [f"group-{i}" for i, _f in enumerate(files)]
+                },
+            }
+        if step_name == "assign":
+            files = sorted(set(_PATH_RE.findall(prompt)))
+            return {
+                "buckets": [
+                    {"slug": f"group-{i}", "owned_files": [f]}
+                    for i, f in enumerate(files)
+                ]
+            }
+        return _fake_llm_step(passed_llm, system, prompt, step_name)
+
+    seen_token_counts: list[int] = []
+    planned_units: list[PlanningUnit] = []
+
+    def _measuring_llm_step(passed_llm, system, prompt, step_name):
+        tokens, _ = count_message_tokens(system, prompt, passed_llm.capabilities)
+        seen_token_counts.append(tokens)
+        return _verbose_fake_llm_step(passed_llm, system, prompt, step_name)
+
+    def _recording_plan_local(*args, **kwargs):
+        planned_units.append(kwargs["unit"])
+        return _real_plan_local(*args, **kwargs)
+
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
+         patch("deepdoc.planner.engine._plan_local", side_effect=_recording_plan_local), \
+         patch("deepdoc.planner.engine._llm_step", side_effect=_measuring_llm_step):
+        plan = plan_docs(scan, cfg, llm)
+
+    validate_plan_contract(plan)
+    assert missing_files(scan, plan) == []
+
+    units_meta = plan.classification.get("planning_units")
+    assert units_meta is not None
+    assert len(units_meta) > 2, "the overflowing orders unit must have been split"
+    assert sum(u["file_count"] for u in units_meta) == 7
+
+    # The pre-split orders unit really did get a 3-call aggregate stub...
+    parent = next(u for u in planned_units if u.slug == "orders")
+    assert [(s.remote_unit, s.call_count) for s in parent.boundary_stubs] == [
+        ("payments", 3)
+    ]
+    # ...and every leaf child of it was recomputed from its own files only.
+    # (Splitting is recursive, so an intermediate child that overflowed again
+    # was itself planned before being split — only the leaves are final.)
+    all_slugs = {u.slug for u in planned_units}
+    leaves = [
+        u
+        for u in planned_units
+        if u.slug.startswith("orders/part-")
+        and not any(other.startswith(f"{u.slug}/part-") for other in all_slugs)
+    ]
+    assert len(leaves) > 1
+    with_stub = [u for u in leaves if u.boundary_stubs]
+    assert len(with_stub) == 1, "a stale parent aggregate would stub every child"
+    assert caller in with_stub[0].files
+    assert [(s.remote_unit, s.call_count) for s in with_stub[0].boundary_stubs] == [
+        ("payments", 3)
+    ]
+    for child in leaves:
+        if child is not with_stub[0]:
+            assert child.boundary_stubs == ()
+            assert caller not in child.files
+
+    assert seen_token_counts, "expected at least one real _llm_step call"
+    assert all(count <= maximum_input for count in seen_token_counts), (
+        f"a real LLM request exceeded the budget: {max(seen_token_counts)} > {maximum_input}"
+    )

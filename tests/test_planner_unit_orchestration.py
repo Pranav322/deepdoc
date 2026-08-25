@@ -295,6 +295,207 @@ def test_multi_unit_planner_receives_allocated_not_repository_page_cap() -> None
     assert sum(seen_caps) == 10
 
 
+def test_single_unit_repo_has_no_boundary_stubs() -> None:
+    """Slice B semantic refinement/boundary stubs must never engage on the
+    single-unit parity path — the `unit` handed to `_plan_local` carries no
+    cross-unit evidence."""
+    scan = _service_scan({"only": 3})
+    llm = make_planner_llm()
+    captured_units: list[PlanningUnit] = []
+
+    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True, unit=None):
+        from deepdoc.v2_models import DocBucket, DocPlan
+
+        captured_units.append(unit)
+        return DocPlan(
+            buckets=[
+                DocBucket(
+                    bucket_type="start_here_index",
+                    title="Start Here",
+                    slug="start-here",
+                    section="Start Here",
+                    description="d",
+                    owned_files=list(passed_scan.file_summaries),
+                    generation_hints={"is_introduction_page": True},
+                )
+            ],
+            nav_structure={"Start Here": ["start-here"]},
+            skipped_files=[],
+        )
+
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
+         patch("deepdoc.planner.engine._plan_local", side_effect=_record):
+        plan_docs(scan, _cfg(), llm)
+
+    assert len(captured_units) == 1
+    assert captured_units[0].boundary_stubs == ()
+
+
+def test_multi_unit_units_receive_recomputed_boundary_stubs() -> None:
+    """Two coupled services with real call-graph cross edges must each
+    receive a compact, reciprocal boundary stub naming the other unit — and
+    nothing from that stub payload leaks the other unit's file paths."""
+    from deepdoc.call_graph import CallEdge, CallGraph
+
+    scan = _service_scan({"orders": 2, "payments": 2})
+    orders_file = "services/orders/module_00/component_00/handler.py"
+    payments_file = "services/payments/module_00/component_00/handler.py"
+    graph = CallGraph()
+    graph.add_edge(
+        CallEdge(
+            caller_file=orders_file,
+            caller_symbol="handle",
+            callee_file=payments_file,
+            callee_symbol="charge",
+        )
+    )
+    scan.call_graph = graph
+    llm = make_planner_llm()
+    captured_units: list[PlanningUnit] = []
+
+    def _record(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True, unit=None):
+        from deepdoc.v2_models import DocBucket, DocPlan
+
+        captured_units.append(unit)
+        return DocPlan(
+            buckets=[
+                DocBucket(
+                    bucket_type="start_here_index",
+                    title="Start Here",
+                    slug="start-here",
+                    section="Start Here",
+                    description="d",
+                    owned_files=list(passed_scan.file_summaries),
+                    generation_hints={"is_introduction_page": True},
+                )
+            ],
+            nav_structure={"Start Here": ["start-here"]},
+            skipped_files=[],
+        )
+
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
+         patch("deepdoc.planner.engine._plan_local", side_effect=_record):
+        plan_docs(scan, _cfg(), llm)
+
+    by_slug = {u.slug: u for u in captured_units}
+    assert set(by_slug) == {"orders", "payments"}
+    orders_stubs = by_slug["orders"].boundary_stubs
+    payments_stubs = by_slug["payments"].boundary_stubs
+    assert [s.remote_unit for s in orders_stubs] == ["payments"]
+    assert [s.remote_unit for s in payments_stubs] == ["orders"]
+    for stub in (*orders_stubs, *payments_stubs):
+        assert orders_file not in repr(stub)
+        assert payments_file not in repr(stub)
+
+
+def test_plan_local_includes_bounded_cross_unit_context_in_classify_prompt() -> None:
+    """The compact cross-unit context Slice B attaches to a unit's
+    boundary_stubs must actually reach the rendered CLASSIFY prompt as
+    optional context — proving the wiring, not just the data structure."""
+    from deepdoc.planner.unit_boundaries import BoundaryStub
+
+    scan = _service_scan({"orders": 2})
+    llm = make_planner_llm()
+    unit = PlanningUnit(
+        slug="orders",
+        label="orders",
+        files=tuple(scan.file_summaries),
+        boundary_stubs=(
+            BoundaryStub(
+                remote_unit="payments",
+                direction="outbound",
+                score=3.0,
+                call_count=3,
+                evidence_kinds=("call",),
+                flow_labels=(),
+            ),
+        ),
+    )
+    seen_prompts: list[str] = []
+
+    def _capture(passed_llm, system, prompt, step_name):
+        if step_name == "classify":
+            seen_prompts.append(prompt)
+        return _fake_llm_step(passed_llm, system, prompt, step_name)
+
+    with patch("deepdoc.planner.engine._llm_step", side_effect=_capture):
+        _plan_local(scan, _cfg(), llm, Path("."), unit=unit)
+
+    assert seen_prompts, "expected at least one classify _llm_step call"
+    assert "payments" in seen_prompts[0]
+    assert "outbound" in seen_prompts[0]
+
+
+def test_split_retry_recomputes_boundary_stubs_without_stale_parent_leak() -> None:
+    """When a unit splits after a genuine `UnitNeedsSplit`, each resulting
+    child must get its own freshly computed boundary stubs — never a copy
+    of the parent's pre-split aggregate."""
+    from deepdoc.call_graph import CallEdge, CallGraph
+    from deepdoc.planner.engine import _plan_unit_with_retry
+
+    orders_files = tuple(f"services/orders/file_{i}.py" for i in range(4))
+    payments_file = "services/payments/app.py"
+    graph = CallGraph()
+    # Only the first orders file calls into payments.
+    graph.add_edge(
+        CallEdge(
+            caller_file=orders_files[0],
+            caller_symbol="handle",
+            callee_file=payments_file,
+            callee_symbol="charge",
+        )
+    )
+    scan = _service_scan({"orders": 0})
+    scan.file_summaries = {f: "s | lines=5" for f in orders_files}
+    scan.file_summaries[payments_file] = "s | lines=5"
+    scan.file_services = {f: "orders" for f in orders_files}
+    scan.file_services[payments_file] = "payments"
+    scan.call_graph = graph
+    scan.total_files = len(scan.file_summaries)
+
+    unit = PlanningUnit(slug="orders", label="orders", files=orders_files)
+    baseline_unit_files = {
+        "orders": frozenset(orders_files),
+        "payments": frozenset({payments_file}),
+    }
+    llm = make_planner_llm()
+
+    calls = 0
+
+    def _fail_then_split(passed_scan, cfg, passed_llm, repo_root, apply_global_stage=True, unit=None):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            from deepdoc.planner.partitioning import UnitNeedsSplit
+
+            raise UnitNeedsSplit(unit, "classify", "forced overflow for test")
+        from deepdoc.v2_models import DocPlan
+
+        return DocPlan(buckets=[], nav_structure={}, skipped_files=[])
+
+    results = []
+    with patch("deepdoc.planner.engine._plan_local", side_effect=_fail_then_split):
+        results = _plan_unit_with_retry(
+            unit,
+            scan,
+            _cfg(),
+            llm,
+            Path("."),
+            max_files_seed_cap=0,
+            page_budget=0,
+            baseline_unit_files=baseline_unit_files,
+        )
+
+    final_units = [u for u, _plan in results]
+    assert len(final_units) > 1, "the failing unit must have been split"
+    with_stub = [u for u in final_units if u.boundary_stubs]
+    without_stub = [u for u in final_units if not u.boundary_stubs]
+    assert len(with_stub) == 1, "only the child owning the calling file should get a stub"
+    assert len(without_stub) >= 1
+    assert with_stub[0].boundary_stubs[0].remote_unit == "payments"
+    assert payments_file not in repr(with_stub[0].boundary_stubs)
+
+
 def test_single_oversized_service_still_splits_and_every_prompt_fits() -> None:
     """build_planning_units() alone can return exactly one unit — a single
     service, or `core` — that is itself too big for the model budget. The

@@ -97,6 +97,36 @@ def test_zero_or_one_service_yields_single_unit() -> None:
     assert set(units[0].files) == {"a.py", "b.py"}
 
 
+def test_single_named_service_with_shared_files_stays_single_unit() -> None:
+    """A lone named service plus shared/unclaimed files must NOT enter the
+    multi-unit path. Pre-Slice-A such a repo planned as one unit; splitting it
+    into api/ + core/ would namespace every page and break every route. Only
+    2+ distinct named services should force bounded multi-unit planning."""
+    scan = _scan(
+        file_summaries={
+            "services/api/app.py": "s",
+            "services/api/db.py": "s",
+            "shared/util.py": "s",
+            "config/settings.py": "s",
+        },
+        file_services={
+            "services/api/app.py": "api",
+            "services/api/db.py": "api",
+        },
+    )
+
+    units = build_planning_units(scan)
+
+    assert len(units) == 1, f"one-service+shared repo must collapse to one unit, got {[u.slug for u in units]}"
+    assert units[0].slug == "api"
+    assert set(units[0].files) == {
+        "services/api/app.py",
+        "services/api/db.py",
+        "shared/util.py",
+        "config/settings.py",
+    }
+
+
 def test_unit_order_and_ids_are_deterministic_regardless_of_dict_order() -> None:
     scan_a = _scan(
         file_summaries={"z/a.py": "s", "a/a.py": "s", "m/a.py": "s"},

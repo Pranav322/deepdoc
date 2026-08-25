@@ -84,11 +84,20 @@ def build_planning_units(scan: RepoScan) -> list[PlanningUnit]:
     if not groups:
         return [PlanningUnit(slug=CORE_SLUG, label=CORE_SLUG, files=())]
 
-    if len(groups) == 1:
-        (is_named, raw), files = next(iter(groups.items()))
-        slug = _slugify(raw) if is_named else CORE_SLUG
-        label = raw if is_named else CORE_SLUG
-        return [PlanningUnit(slug=slug, label=label, files=tuple(sorted(files)))]
+    # Collapse to a single unit whenever there are 0 or 1 *named* services,
+    # even if shared/unclaimed files form a "core" group. ``groups`` holds one
+    # entry per distinct (is_named, service) key, so a lone service plus its
+    # shared library is two entries — but it remains a one-service repo and
+    # must keep the pre-Slice-A single-repo path (no ``api/`` + ``core/``
+    # namespacing, no route changes). Only 2+ distinct named services force the
+    # bounded multi-unit path.
+    named_services = {service for (is_named, service) in groups if is_named}
+    if len(named_services) <= 1:
+        raw = next(iter(named_services), "")
+        all_files = tuple(sorted(f for files in groups.values() for f in files))
+        slug = _slugify(raw) if raw else CORE_SLUG
+        label = raw if raw else CORE_SLUG
+        return [PlanningUnit(slug=slug, label=label, files=all_files)]
 
     slug_counts: dict[str, int] = {}
     units: list[PlanningUnit] = []

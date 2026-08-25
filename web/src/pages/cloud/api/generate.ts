@@ -2,6 +2,65 @@ import type { APIRoute } from "astro";
 import { requireSession, isUnlimited, countRecentStarts, parseGithubRepoUrl, MAX_SAVED_PROJECTS, MAX_STARTS_PER_DAY } from "../../../lib/hosted/session";
 import { enqueueJob, fetchJobStatus } from "../../../lib/hosted/queue";
 
+interface RepoMeta {
+  description: string | null;
+  language: string | null;
+  stars: number | null;
+  avatarUrl: string | null;
+}
+
+/**
+ * Repo metadata straight from GitHub, for the card the project will become.
+ *
+ * This used to be whatever the browser happened to send in the POST body.
+ * The repo-picker path sent real values (it had them from /api/repos), but
+ * the paste-a-URL path sent none — so most projects were stored with a null
+ * description, language and star count, and the public gallery rendered a
+ * wall of bare name-only cards of uneven height. Asking GitHub here covers
+ * every entry path at once, including regenerate.
+ *
+ * Returns `"missing"` only for an explicit 404, which is the one answer worth
+ * refusing on: it means the repo does not exist or this token cannot see it,
+ * and today that is discovered minutes later inside the container job. Any
+ * other failure (rate limit, GitHub outage, network) returns null so a
+ * transient problem degrades to a sparse card rather than blocking a build.
+ */
+async function fetchRepoMeta(
+  owner: string,
+  repo: string,
+  token: string,
+): Promise<RepoMeta | null | "missing"> {
+  let res: Response;
+  try {
+    res = await fetch(`https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        // GitHub rejects API requests without one.
+        "User-Agent": "deepdoc-hosted",
+      },
+    });
+  } catch {
+    return null;
+  }
+  if (res.status === 404) return "missing";
+  if (!res.ok) return null;
+  const json = (await res.json().catch(() => null)) as {
+    description?: string | null;
+    language?: string | null;
+    stargazers_count?: number | null;
+    owner?: { avatar_url?: string | null } | null;
+  } | null;
+  if (!json) return null;
+  return {
+    description: json.description ?? null,
+    language: json.language ?? null,
+    stars: json.stargazers_count ?? null,
+    avatarUrl: json.owner?.avatar_url ?? null,
+  };
+}
+
 // Ported from handleGenerate in web/hosted/src/index.ts.
 export const POST: APIRoute = async ({ request, locals, cookies }) => {
   const env = locals.runtime.env;
@@ -117,6 +176,23 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     }
   }
 
+  // Last gate before dispatch, so a repo we are going to refuse anyway
+  // (owned by someone else, over quota) never costs a GitHub call, and
+  // nothing has been written yet when we refuse here.
+  const meta = await fetchRepoMeta(owner, repo, user.token);
+  if (meta === "missing") {
+    return new Response(
+      JSON.stringify({ error: `${owner}/${repo} could not be found on GitHub, or your account can't see it` }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+  // GitHub wins where it answered; the body's values remain the fallback for
+  // a transient failure, since the repo picker does send real ones.
+  const description = meta?.description ?? body?.description ?? null;
+  const language = meta?.language ?? body?.language ?? null;
+  const avatarUrl = meta?.avatarUrl ?? body?.avatarUrl ?? null;
+  const stars = meta?.stars ?? body?.stars ?? null;
+
   // Dispatch = enqueue. This endpoint mints the job_id; a KEDA-scaled
   // Container Apps Job picks the message up and processes it in its own
   // isolated container. github_token rides in the message (private queue;
@@ -160,11 +236,11 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
       job.job_id,
       job.status,
       now,
-      body?.description ?? null,
-      body?.language ?? null,
-      body?.avatarUrl ?? null,
+      description,
+      language,
+      avatarUrl,
       visibility,
-      body?.stars ?? null,
+      stars,
     ),
   ]);
 

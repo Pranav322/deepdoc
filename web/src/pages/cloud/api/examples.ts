@@ -41,15 +41,28 @@ export const GET: APIRoute = async ({ locals }) => {
     stars: number | null;
   }>();
 
-  const examples: Example[] = results.map((row) => ({
-    owner: row.owner,
-    repo: row.repo,
-    description: row.description,
-    language: row.language,
-    avatarUrl: row.avatar_url,
-    createdAt: row.created_at,
-    stars: row.stars,
-  }));
+  // owner_repo_jobs is unique on (owner, repo) case-SENSITIVELY, so the same
+  // repository reached under a differently-cased owner gets a second row —
+  // production was serving both "Pranav322/youtube-notes" and
+  // "pranav322/youtube-notes" as separate gallery cards pointing at the same
+  // site. The rows are already ordered created_at DESC, so the first spelling
+  // seen is the newest generation; keep that one.
+  const seen = new Set<string>();
+  const examples: Example[] = [];
+  for (const row of results) {
+    const key = `${row.owner.toLowerCase()}/${row.repo.toLowerCase()}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    examples.push({
+      owner: row.owner,
+      repo: row.repo,
+      description: row.description,
+      language: row.language,
+      avatarUrl: row.avatar_url,
+      createdAt: row.created_at,
+      stars: row.stars,
+    });
+  }
 
   return new Response(JSON.stringify({ examples }), {
     headers: { "Content-Type": "application/json" },

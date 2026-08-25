@@ -671,6 +671,21 @@ side only.
     catch-all — a private site requires `session.login == owner_login` before
     serving ANY byte incl. `/_next/*` assets (real boundary: the R2 bucket
     isn't public, this endpoint is the only read path).
+- **Project card metadata is fetched server-side, not trusted from the
+  client (since 2026-08-25).** `api/generate.ts` calls GitHub's
+  `repos/{owner}/{repo}` with the session token before dispatch and stores the
+  resulting description/language/stars/avatar on the `projects` row; the POST
+  body's values are only a fallback for a transient GitHub failure. Before
+  this, metadata was whatever the browser sent, so the paste-a-URL path (which
+  sends none) left most rows null and the public gallery rendered bare cards.
+  An explicit GitHub **404 is now a 400** from this endpoint — a nonexistent
+  or invisible repo used to fail minutes later inside the container job. Any
+  other GitHub failure must keep degrading to null metadata rather than
+  blocking a build. `web/scripts/backfill-project-meta.mjs` (dry-run by
+  default, `--apply` to write) repairs pre-existing rows.
+- `api/examples.ts` dedupes by lowercased `owner/repo`: `owner_repo_jobs` is
+  unique on `(owner, repo)` case-**sensitively**, so the same repo reached
+  under a differently-cased owner produced two gallery cards for one site.
 - **Dispatch = queue + event-driven Container Apps Job (autoscaling, since
   2026-07-24).** Generation compute is NO LONGER an always-on runner — the old
   `deepdoc-runner` Container App is retired. `src/pages/cloud/api/generate.ts`

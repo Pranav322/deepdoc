@@ -15,6 +15,8 @@
 // All project management (list, visit, visibility, delete) lives under
 // /projects and /projects/:owner/:repo — never inline on /generate, never in
 // the profile dropdown (which is identity + nav links only).
+import { MAX_SAVED_PROJECTS, MAX_STARTS_PER_DAY } from "./session";
+
 export type Theme = "dark" | "light";
 
 /**
@@ -142,13 +144,28 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   ::selection { background: var(--accent-dim); color: var(--ink); }
   #content { flex: 1; display: flex; flex-direction: column; min-height: 60vh; }
 
-  /* One page width, read by both the app bar and the content column, so the
-     brand mark sits directly above the page title instead of floating in a
-     wider bar. The signed-in screens are a reading column; the public
-     gallery is a grid and needs the full width. route() sets the attribute. */
-  body { --w-page: 1152px; }
+  /* Two widths, deliberately independent.
+
+     --w-bar is the app bar's, and it is constant: it matches
+     deepdoc.tech's Header.astro (max-w-6xl + px-6) so the bar is the one
+     thing that never moves as you navigate. It used to read --w-page, which
+     meant the whole navbar visibly narrowed to 736px on /generate and the
+     project detail page while staying 1152px on /projects — the bar
+     disagreeing with itself between routes.
+
+     --w-page is the content column's, and it does change: the signed-in
+     task screens are a reading column, the gallery and project lists are
+     grids that want the full width. route() sets the attribute. */
+  body { --w-bar: 1152px; --w-page: 1152px; }
   body[data-view="app"] { --w-page: 736px; }
   .page { width: 100%; max-width: var(--w-page); margin: 0 auto; padding: 0 24px 96px; }
+  /* On the task screens the page keeps the bar's full width and the reading
+     column is left-aligned inside it, rather than the page itself shrinking
+     and re-centering. Both matter: the app bar stays put between routes, and
+     the brand mark still sits directly above the page title instead of the
+     heading floating in from the left edge of a narrower column. */
+  body[data-view="app"] .page { max-width: var(--w-bar); }
+  body[data-view="app"] .page > * { max-width: var(--w-page); }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
   @keyframes rise { from { transform: translateY(6px); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
   @keyframes shimmer { to { transform: translateX(100%); } }
@@ -175,7 +192,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .appbar { position: sticky; top: 0; z-index: 10; border-bottom: 1px solid var(--line);
     background: color-mix(in oklab, var(--surface) 82%, transparent);
     backdrop-filter: blur(20px) saturate(1.4); -webkit-backdrop-filter: blur(20px) saturate(1.4); flex-shrink: 0; }
-  .appbar-inner { max-width: var(--w-page); margin: 0 auto; height: 52px; padding: 0 24px;
+  .appbar-inner { max-width: var(--w-bar); margin: 0 auto; height: 52px; padding: 0 24px;
     display: flex; align-items: center; justify-content: space-between; gap: 16px; }
   .brand { font-family: var(--font-sans); font-weight: 600; font-size: 1.2rem; text-decoration: none;
     letter-spacing: -0.015em; color: var(--ink); display: flex; align-items: center; cursor: pointer;
@@ -310,6 +327,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     animation: rise 0.2s var(--ease); }
   .modal h1 { font-size: 23px; font-weight: 700; letter-spacing: -0.025em; margin: 0 0 9px; }
   .modal p.modal-sub { font-size: 13.5px; line-height: 1.65; color: var(--ink-muted); margin: 0 auto; max-width: 34ch; }
+  .modal p.modal-quota { font-size: 12.5px; color: var(--ink-faint); margin-top: 10px; }
   .modal-icon-wrap { position: relative; height: 96px; display: flex; align-items: center; justify-content: center; margin-bottom: 8px; }
   .modal-dot-grid {
     position: absolute; inset: 0;
@@ -464,20 +482,31 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   /* ── The ask — a centered question and one field, the whole hero of the
      public gallery. The field both filters the examples below and accepts a
      pasted GitHub link. ──────────────────────────────────────────────── */
-  .ask { padding: 54px 0 32px; text-align: center; }
-  .ask h1 { font-size: clamp(23px, 2.7vw, 31px); font-weight: 600; letter-spacing: -0.028em; line-height: 1.2; }
-  .ask-field { position: relative; max-width: 470px; margin: 22px auto 0; }
+  /* The question is the only large type on the page, and it gets the room to
+     be that. Everything below stays deliberately quiet. */
+  .ask { padding: 76px 0 44px; text-align: center; }
+  /* Wide enough that the question sits on one line on a desktop, still
+     capped so it can never run to an unreadable measure. It wraps on its own
+     once the viewport is narrow. */
+  .ask h1 { font-size: clamp(25px, 3.1vw, 35px); font-weight: 600; letter-spacing: -0.03em; line-height: 1.15;
+    max-width: 46ch; margin: 0 auto; }
+  .ask-field { position: relative; max-width: 512px; margin: 26px auto 0; }
   .ask-field svg { position: absolute; left: 15px; top: 50%; transform: translateY(-50%);
     width: 16px; height: 16px; color: var(--ink-faint); pointer-events: none; }
-  .ask-field input { height: 46px; padding-left: 42px; border-radius: var(--r-md);
+  .ask-field input { height: 48px; padding-left: 42px; border-radius: var(--r-md);
     background: var(--surface-raised); font-size: 14px; }
-  .ask-note { max-width: 470px; margin: 12px auto 0; font-size: 12.5px; color: var(--ink-muted); }
+  .ask-note { max-width: 512px; margin: 12px auto 0; font-size: 12.5px; color: var(--ink-muted); }
+  /* The answer slot under the field: either "this repo already exists, go
+     read it" or "nothing here matches, want it generated". Always carries an
+     action — the state it replaced was a sentence with nothing to click. */
   .ask-hit { display: flex; align-items: center; justify-content: space-between; gap: 14px;
-    max-width: 470px; margin: 14px auto 0; padding: 11px 12px 11px 15px; text-align: left;
+    max-width: 512px; margin: 14px auto 0; padding: 11px 12px 11px 15px; text-align: left;
     border: 1px solid var(--accent-line); background: var(--accent-dim);
     border-radius: var(--r-md); animation: rise 0.16s var(--ease); }
-  .ask-hit span { font-size: 13px; font-weight: 500; letter-spacing: -0.01em; min-width: 0;
+  .ask-hit .ask-hit-text { min-width: 0; }
+  .ask-hit span { display: block; font-size: 13px; font-weight: 500; letter-spacing: -0.01em; min-width: 0;
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ask-hit .ask-hit-why { font-weight: 400; font-size: 12px; color: var(--ink-muted); margin-top: 2px; }
 
   /* ── Card grid — the public gallery and /projects are the same grid and,
      since neither carries a screenshot any more, the same uniform card
@@ -485,8 +514,22 @@ export function tryPageHtml(theme: Theme = "dark"): string {
      thumbnail (previously a live iframe-captured screenshot) traded a
      noisy wall of mismatched preview art for one calm, text-led grid that
      reads the same signed-out as signed-in. ─────────────────────────── */
-  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(272px, 1fr)); gap: 14px; }
-  .card { display: flex; flex-direction: column; border: 1px solid var(--line);
+  /* grid-auto-rows: 1fr is what makes every card the same height. Without it
+     the rows auto-size, so a row holding a repo with a description stood
+     tall while every row of description-less repos below it collapsed — the
+     grid looked like two different card designs. .card-desc is clamped to
+     two lines, so the tallest card is bounded and one verbose description
+     can't inflate the whole grid.
+
+     330px rather than 272px: at 1152px that settles into three columns like
+     the reference, instead of four cramped ones. min(100%, …) keeps a single
+     narrow column from overflowing a phone. */
+  .card-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 330px), 1fr));
+    grid-auto-rows: 1fr; gap: 14px; }
+  /* The floor holds the grid's shape when a whole screen of repos happens to
+     have no description — grid-auto-rows equalises the cards against each
+     other, this stops them equalising short. */
+  .card { display: flex; flex-direction: column; min-height: 138px; border: 1px solid var(--line);
     border-radius: var(--r-lg); background: var(--surface-raised);
     text-decoration: none; color: inherit; cursor: pointer;
     padding: 17px 18px 15px;
@@ -514,9 +557,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     color: var(--ink-muted); transition: background 0.16s var(--ease), color 0.16s var(--ease); }
   .card:hover .card-go { background: var(--solid); color: var(--solid-ink); }
   /* The one card that starts something rather than opening something. Accent
-     stays a state colour: it marks this card as the distinguished one. */
-  .card-new { background: linear-gradient(155deg, var(--accent-dim), var(--surface-raised) 62%);
-    border-color: var(--accent-line); }
+     stays a state colour: a border and the plus glyph mark this card as the
+     distinguished one. It used to carry a lime gradient wash, which made the
+     loudest thing on the page a card that isn't the page's subject. */
+  .card-new { background: var(--surface-raised); border-color: var(--accent-line); }
   .card-new:hover { border-color: var(--accent); }
   .card-plus { width: 27px; height: 27px; border-radius: 50%; display: flex; align-items: center;
     justify-content: center; background: var(--accent-dim); border: 1px solid var(--accent-line);
@@ -528,14 +572,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .card-new.is-blocked { background: none; border-style: dashed; border-color: var(--line-strong); cursor: default; }
   .card-new.is-blocked:hover { transform: none; border-color: var(--line-strong); }
   .card-new.is-blocked .card-plus { background: none; border-color: var(--line-strong); color: var(--ink-faint); }
-
-  /* Dashed rules framing the wide grid — an editorial edge so the page has a
-     boundary instead of bleeding into the viewport. */
-  .page-ruled { position: relative; }
-  .page-ruled::before, .page-ruled::after { content: ''; position: absolute; top: 0; bottom: 0; width: 1px;
-    background: repeating-linear-gradient(to bottom, var(--line) 0 4px, transparent 4px 9px); }
-  .page-ruled::before { left: 0; } .page-ruled::after { right: 0; }
-  @media (max-width: 900px) { .page-ruled::before, .page-ruled::after { display: none; } }
 
   .cloud-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;
     margin-top: 64px; padding: 24px 0 8px; border-top: 1px solid var(--line);
@@ -549,7 +585,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     .page-head { padding: 36px 0 22px; }
     .t-display { font-size: 24px; }
     .proj-head .title-block h1 { font-size: 20px; }
-    .ask { padding: 34px 0 24px; }
+    .ask { padding: 44px 0 30px; }
   }
 </style>
 </head>
@@ -732,7 +768,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
             </div>
           </div>
           <a class="profile-dd-link" role="menuitem" href="/projects" onclick="nav(event,'/projects')"><span>Projects</span><span class="count">\${projCount}</span></a>
-          <a class="profile-dd-link" role="menuitem" href="/generate" onclick="nav(event,'/generate')"><span>Generate new</span></a>
+          <a class="profile-dd-link" role="menuitem" href="/generate" onclick="nav(event,'/generate')"><span>New docs site</span></a>
           <div class="profile-dd-sep"></div>
           <button class="profile-dd-link" role="menuitem" onclick="logout()">Log out</button>
         </div>\`;
@@ -818,7 +854,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     // signing in cold. deepdoc.tech's "Try the Demo" CTA sends people
     // straight here now (see index.astro) instead of opening its own
     // sign-in modal. The modal only appears once someone actually clicks
-    // "Generate your own" — see renderPublicGallery below.
+    // "New docs site" — see renderPublicGallery below.
     async function renderLoggedOut() {
       document.body.dataset.view = 'wide';
       document.getElementById('appbar-slot').innerHTML = \`
@@ -826,7 +862,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <span class="brand">\${brandMarkHtml()}</span>
           <div style="display:flex; align-items:center; gap:8px;">
             \${themeToggleHtml()}
-            <button class="btn" onclick="openSignInFromGallery()">Generate your own</button>
+            <button class="btn" onclick="openSignInFromGallery()">New docs site</button>
           </div>
         </div></header>\`;
       document.getElementById('modal-slot').innerHTML = '';
@@ -865,9 +901,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
     // The one card in either grid that starts something instead of opening
     // something. Title/desc are literals from call sites, not user data.
-    function newCardHtml(title, desc, onclickExpr, href) {
+    function newCardHtml(title, desc, onclickExpr, href, id) {
       return \`
-        <a class="card card-new" href="\${href}" onclick="\${onclickExpr}">
+        <a class="card card-new"\${id ? ' id="' + id + '"' : ''} href="\${href}" onclick="\${onclickExpr}">
           <div class="card-body">
             <div class="card-plus">\${PLUS_ICON}</div>
             <div class="card-title">\${title}</div>
@@ -879,8 +915,12 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 
     // Carry a URL pasted before sign-in through OAuth, so the visitor doesn't
     // have to find and paste it again. renderGenerate() consumes it once.
+    // Called with '' when there is no specific repo to carry (the "nothing
+    // matched your search" case) — store nothing rather than an empty key.
     function startFromGallery(url) {
-      try { localStorage.setItem('dd_pending_repo', url); } catch (err) {}
+      try {
+        if (url) localStorage.setItem('dd_pending_repo', url);
+      } catch (err) {}
       openSignInFromGallery();
     }
     function consumePendingRepo() {
@@ -896,11 +936,22 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       onPasteInput();
     }
 
-    // One field does both jobs: filter the examples, and recognise a pasted
-    // GitHub link as "generate this one instead".
+    // One field does both jobs: filter the examples, and recognise a named
+    // repository — a pasted github.com link or bare "owner/repo" — as
+    // "generate this one instead".
+    //
+    // Every outcome offers something to click. Typing a query that matched
+    // nothing used to end in a flat sentence, which is the one moment we know
+    // the visitor wants a repo we haven't documented — so that is exactly
+    // where the offer to generate belongs.
+    function setLeadCardHidden(hidden) {
+      const lead = document.getElementById('gallery-lead-card');
+      if (lead) lead.hidden = hidden;
+    }
     function onGallerySearch(value) {
       const raw = String(value || '').trim();
       const needle = raw.toLowerCase();
+      setLeadCardHidden(false);
       let shown = 0;
       document.querySelectorAll('#gallery-grid .card[data-name]').forEach((el) => {
         const match = !needle || (el.dataset.name || '').includes(needle);
@@ -909,15 +960,39 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       });
       const slot = document.getElementById('ask-slot');
       if (!slot) return;
-      const parsed = parseGithubUrlClient(raw);
+      const parsed = parseRepoRef(raw);
       if (parsed) {
+        const name = parsed.owner + '/' + parsed.repo;
+        // Hand the generate flow a canonical URL, never the raw shorthand:
+        // the server's own parseGithubRepoUrl requires a real github.com URL,
+        // so "owner/repo" typed here has to be expanded before it travels.
+        const canonical = 'https://github.com/' + parsed.owner + '/' + parsed.repo;
+        // No claim about whether this repo has already been documented: the
+        // gallery only holds the most recent public sites, so "not documented
+        // yet" would be a guess we never checked, and it can be wrong (the
+        // repo may belong to another user's site, which surfaces as a 409).
+        // The repo name and the button say enough.
         slot.innerHTML = \`
           <div class="ask-hit">
-            <span>\${escapeHtml(parsed.owner + '/' + parsed.repo)}</span>
-            <button class="btn small" onclick="startFromGallery('\${escapeHtml(raw)}')">Generate docs</button>
+            <div class="ask-hit-text">
+              <span>\${escapeHtml(name)}</span>
+            </div>
+            <button class="btn small" onclick="startFromGallery('\${escapeHtml(canonical)}')">Generate docs</button>
           </div>\`;
       } else if (needle && shown === 0) {
-        slot.innerHTML = '<p class="ask-note">Nothing here matches that. Paste a GitHub link to generate it.</p>';
+        // Free text, nothing matched. There is no repo to prefill, so send
+        // them to the generate flow to name one themselves. The lead card
+        // makes the same offer, so hide it while this panel is up rather than
+        // showing the visitor the same button twice in one glance.
+        setLeadCardHidden(true);
+        slot.innerHTML = \`
+          <div class="ask-hit">
+            <div class="ask-hit-text">
+              <span>No examples match "\${escapeHtml(raw)}"</span>
+              <span class="ask-hit-why">Start a new site for any repository instead.</span>
+            </div>
+            <button class="btn small" onclick="startFromGallery('')">New docs site</button>
+          </div>\`;
       } else {
         slot.innerHTML = '';
       }
@@ -933,9 +1008,6 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         const siteUrl = '/' + encodeURIComponent(e.owner) + '/' + encodeURIComponent(e.repo) + '/';
         const safeOwner = escapeHtml(e.owner);
         const safeRepo = escapeHtml(e.repo);
-        const dateStr = e.createdAt
-          ? new Date(e.createdAt).toLocaleDateString(undefined, { month: 'short', year: 'numeric' })
-          : '';
         const haystack = escapeHtml(
           (e.owner + '/' + e.repo + ' ' + (e.description || '') + ' ' + (e.language || '')).toLowerCase()
         );
@@ -945,21 +1017,23 @@ export function tryPageHtml(theme: Theme = "dark"): string {
             <div class="card-title"><span class="g-owner">\${safeOwner}/</span>\${safeRepo}</div>
             \${e.description ? '<div class="card-desc">' + escapeHtml(e.description) + '</div>' : ''}
           </div>
+          <!-- Stars and language only. The generation date was a third metric
+               that told a visitor nothing about the repository they are
+               choosing between. -->
           <div class="card-foot">
             \${e.stars != null ? '<span class="card-metric star">' + STAR_ICON + formatCount(e.stars) + '</span>' : ''}
             \${e.language ? '<span class="card-metric">' + escapeHtml(e.language) + '</span>' : ''}
-            \${dateStr ? '<span class="card-metric">' + escapeHtml(dateStr) + '</span>' : ''}
             <span class="card-go">\${ARROW_ICON}</span>
           </div>
         </a>\`;
       }).join('');
       document.getElementById('content').innerHTML = \`
-        <div class="page page-ruled">
+        <div class="page">
           <div class="ask">
             <h1>Which repository would you like documented?</h1>
             <div class="ask-field">
               \${SEARCH_ICON}
-              <input id="gallery-search" placeholder="Search these, or paste a GitHub link"
+              <input id="gallery-search" placeholder="Search repositories, or paste a GitHub link"
                      aria-label="Search the examples, or paste a GitHub repository link"
                      oninput="onGallerySearch(this.value)" />
             </div>
@@ -967,8 +1041,8 @@ export function tryPageHtml(theme: Theme = "dark"): string {
               '<p class="ask-note">Nothing has been shared publicly yet. Be the first.</p>'}</div>
           </div>
           <div class="card-grid" id="gallery-grid">
-            \${newCardHtml('Generate your own', 'Point DeepDoc at any public GitHub repository.',
-                          'openSignInFromGallery(); return false;', '#')}
+            \${newCardHtml('New docs site', 'Point DeepDoc at any public GitHub repository.',
+                          'openSignInFromGallery(); return false;', '#', 'gallery-lead-card')}
             \${cards}
           </div>
           <footer class="cloud-footer">
@@ -998,6 +1072,11 @@ export function tryPageHtml(theme: Theme = "dark"): string {
             </div>
             <h1>Sign in with GitHub</h1>
             <p class="modal-sub">DeepDoc needs read access to clone the repository you pick and generate its documentation. That is all it is used for.</p>
+            <!-- The allowance is stated here rather than discovered as a 400
+                 on someone's third repository. Numbers come from
+                 session.ts's own constants, so the copy can't drift from the
+                 limit the server actually enforces. -->
+            <p class="modal-sub modal-quota">Free accounts include ${MAX_SAVED_PROJECTS} documentation sites, and ${MAX_STARTS_PER_DAY} builds a day.</p>
             <div class="modal-divider"></div>
             <div class="modal-features">
               <div class="modal-feature">
@@ -1122,12 +1201,12 @@ export function tryPageHtml(theme: Theme = "dark"): string {
                <span class="card-metric">\${q.savedProjects} of \${q.maxSavedProjects} used</span>
              </div>
            </div>\`
-        : newCardHtml('Generate a new site', 'Point DeepDoc at one of your repositories.',
+        : newCardHtml('New docs site', 'Point DeepDoc at one of your repositories.',
                       "return nav(event,'/generate')", '/generate');
 
       const n = state.projects.length;
       document.getElementById('content').innerHTML = \`
-        <div class="page page-ruled">
+        <div class="page">
           <div class="page-head">
             <div>
               <h1 class="t-display">Projects</h1>
@@ -1323,7 +1402,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
       if (atQuota) {
         document.getElementById('content').innerHTML = \`
           <div class="page">
-            <div class="page-head"><h1 class="t-display">Generate a doc site</h1></div>
+            <div class="page-head"><h1 class="t-display">New docs site</h1></div>
             <div class="empty-state">
               <h2>You are at your project limit</h2>
               <p>Delete a project to free a slot, then come back here.</p>
@@ -1337,7 +1416,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         <div class="page">
           <div class="page-head">
             <div>
-              <h1 class="t-display">Generate a doc site</h1>
+              <h1 class="t-display">New docs site</h1>
               <p class="t-sub">Pick a repository. DeepDoc reads the source and builds a site you can share.</p>
             </div>
           </div>
@@ -1426,6 +1505,22 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         if (parts.length < 2) return null;
         return { owner: parts[0], repo: parts[1].replace(/\\.git$/, '') };
       } catch { return null; }
+    }
+    // The gallery search field accepts what people actually type, which is as
+    // often "owner/repo" as a full link. Deliberately separate from
+    // parseGithubUrlClient: that one backs /generate's paste field, whose
+    // value is POSTed verbatim as repo_url and must stay a real URL the
+    // server's parseGithubRepoUrl will accept.
+    function parseRepoRef(raw) {
+      const s = String(raw || '').trim();
+      if (!s) return null;
+      const fromUrl = parseGithubUrlClient(s);
+      if (fromUrl) return fromUrl;
+      // GitHub allows letters, digits, dot, dash and underscore in both an
+      // owner and a repo name, and nothing else — so this rejects free-text
+      // queries that merely contain a slash.
+      const m = s.match(/^([\\w.-]+)\\/([\\w.-]+?)(?:\\.git)?$/);
+      return m ? { owner: m[1], repo: m[2] } : null;
     }
     function projectTagHtml(existing) {
       if (!existing) return '';

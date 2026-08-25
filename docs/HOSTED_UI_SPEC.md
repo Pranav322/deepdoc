@@ -27,11 +27,12 @@ app).
 
 | View | Route(s) that serve it | Auth required | Purpose |
 |---|---|---|---|
-| **Sign-in prompt** | `/` (when `/api/me` says unauthenticated) | no | **Not a landing page** — deepdoc.tech's own marketing landing already sells the product and its "Try it free" CTA sends people straight to `cloud.deepdoc.tech`; this is just the gate: a short explainer (3 bullets on the GitHub repo-read grant) + "Continue with GitHub". No hero, no product mockup, no second pitch. |
+| **Public gallery** | `/` (when `/api/me` says unauthenticated) | no | The examples grid over one search field ("Which repository would you like documented?"). Real generated docs shown before anyone is asked to sign in. Superseded the old sign-in-prompt-only root; the sign-in modal is now a gate raised on demand (see below), not the whole page. |
+| **Sign-in gate** | modal over any unauthenticated view | no | Raised by "New docs site" or by a "Generate docs" offer under the search field. 3 bullets on the GitHub repo-read grant, the free allowance (from `session.ts`'s `MAX_SAVED_PROJECTS` / `MAX_STARTS_PER_DAY`, never hardcoded prose), and "Continue with GitHub". |
 | **Generate** | `/generate` (also the default at `/` once authenticated, if the user has no saved projects) | yes | Repo picker + paste-URL + visibility + confirm. Minimal, no dashboard framing, no back-link. |
 | **Projects list** | `/projects` (also the default at `/` once authenticated, if the user has ≥1 saved project) | yes | Pure index of saved projects. Click-through rows only — no buttons in the row. |
 | **Project detail** | `/projects/:owner/:repo` | yes | **The only place per-project actions live**: "Visit site ↗", Visibility toggle, Danger Zone (Delete, with an inline "Confirm delete?" step — no native `confirm()`). |
-| **Profile dropdown** | client-side overlay off the avatar chip, any authenticated view | yes | Identity + quota line, "Projects (N) ›" link, "Generate new" link, Log out. **No project rows here** — deliberately kept out, lives only on `/projects`. |
+| **Profile dropdown** | client-side overlay off the avatar chip, any authenticated view | yes | Identity + quota line, "Projects (N) ›" link, "New docs site" link, Log out. **No project rows here** — deliberately kept out, lives only on `/projects`. |
 | **Generating / progress** | any `/{owner}/{repo}/` while status ≠ done/failed (client also lands here right after POST `/api/generate`) | yes | Collapsible 3-stage list (cloning/generating/building) + elapsed-time counter. No percentage/estimate — rejected explicitly since the backend has no real completion signal within a stage. |
 | **Generated site (proxied)** | `/{owner}/{repo}/*` once status is `done` | depends on visibility | The actual static docs site, served byte-for-byte from R2 |
 | **Private-site block page** | `/{owner}/{repo}/*` when private and viewer isn't the owner | n/a (this IS the response) | Explains why they can't see it; different copy signed-in vs anon |
@@ -51,8 +52,8 @@ The app bar mirrors `deepdoc.tech`'s own `Header.astro`/`Logo.astro` recipe
 (52px sticky bar, blurred background, the same "depth D" brand mark —
 duplicated as inline SVG in `try_page.ts` since the Worker can't import an
 Astro component) so both domains read as one product. It's shown in every
-view including the unauthenticated sign-in prompt (just without the account
-chip).
+view including the unauthenticated gallery (just without the account chip),
+and it is pinned to `--w-bar` so it is identical on every route.
 
 ---
 
@@ -75,14 +76,21 @@ The whole logged-in experience is one JS state machine keyed off
 - `renderAppBar()` — brand link (→ `/`, re-runs the default-route rule) +
   avatar/login chip (toggles the profile dropdown, does not navigate).
 - `renderDropdown()` / `toggleDropdown()` / `closeDropdown()` — the profile
-  popover: identity, quota line, "Projects (N) ›", "Generate new", Log out.
+  popover: identity, quota line, "Projects (N) ›", "New docs site", Log out.
   Closes on outside-click or Escape (listeners attached only while open).
 - `brandMarkHtml()` — the inline-SVG "depth D" mark + "eepDoc" wordmark +
   small "cloud" tag, shared by `renderAppBar()` and `renderLoggedOut()` so the
   brand renders identically authed or not.
-- `renderLoggedOut()` — the sign-in prompt (see table above): 3-bullet
-  explainer + "Continue with GitHub" (`/auth/github` redirect). No modal, no
-  hero — this is the entire unauthenticated experience.
+- `renderLoggedOut()` — the public gallery (see table above): the ask field
+  over the examples grid, fed by `/api/examples`. The sign-in modal
+  (`signInModalHtml`) is raised on demand by `openSignInFromGallery()`, not
+  rendered up front.
+- `onGallerySearch(value)` / `parseRepoRef(raw)` / `setLeadCardHidden(hidden)`
+  — the one field's three jobs: filter the grid, recognise a named repository
+  (link or `owner/repo`) and offer to generate it, or offer a new site when
+  nothing matched. `startFromGallery(url)` carries the repo through OAuth via
+  `localStorage.dd_pending_repo`; it is called with `''` when there is no
+  specific repo to carry.
 - `renderGenerate()` — the post-login home:
   - "at quota" state: replaces the whole form with a message pointing at
     `/projects` to free a slot (no separate gating on the dropdown link).
@@ -232,7 +240,7 @@ visibility choice is a segmented control; delete is a quiet text button that sti
 requires the two-step confirm (rule 13 below).
 
 **Layout (2026-08-03, second pass — modelled on DeepWiki):** the public gallery and
-`/projects` are the same `.card-grid`, each led by one accent-gradient `.card-new` that is
+`/projects` are the same `.card-grid`, each led by one `.card-new` that is
 the primary CTA (it replaced `/projects`'s header "Generate new" button — don't re-add
 one). Gallery cards carry a real screenshot of the generated site; **project cards
 deliberately carry none**, because on your own list the name and build state are what you
@@ -241,6 +249,41 @@ plus one field that both filters the examples and recognises a pasted GitHub lin
 it to `/generate` through `localStorage.dd_pending_repo` so it survives the OAuth round
 trip. The rotating "border beam" and the mousemove 3D card tilt were removed: the grid is
 calm and flat, and both fought it.
+
+**Layout (2026-08-25, third pass):** four things, each fixing a specific report.
+
+1. **Two width tokens, not one.** `--w-bar` (1152px, constant, matching
+   `Header.astro`'s `max-w-6xl`) is the app bar's; `--w-page` is the content
+   column's and still narrows to 736px under `body[data-view="app"]`. The bar
+   used to read `--w-page`, so the whole navbar visibly shrank on `/generate`
+   and project detail. On the task screens `.page` now keeps the bar's width
+   and its direct children are capped at `--w-page`, left-aligned — so the
+   bar never moves *and* the brand mark still sits directly above the page
+   title. Don't collapse these back into one token.
+2. **Uniform cards.** `.card-grid` has `grid-auto-rows: 1fr` and `.card` a
+   `min-height`. Rows used to auto-size, so a row containing a repo with a
+   description towered over rows of description-less ones — the "first three
+   cards are bigger" report. Columns are `minmax(min(100%, 330px), 1fr)`:
+   three at full width, one below 330px, verified no horizontal overflow at
+   360px.
+3. **The search field always offers an action.** It filters the examples and
+   accepts a pasted link *or* bare `owner/repo` (`parseRepoRef`, deliberately
+   separate from `parseGithubUrlClient`, which backs `/generate`'s paste
+   field whose value is POSTed verbatim as `repo_url` and must stay a real
+   URL). A query matching nothing offers "New docs site" instead of the old
+   dead sentence, and hides the lead card while that panel is up so the same
+   offer isn't shown twice. The panel makes **no claim** about whether a repo
+   is already documented — there is no unauthenticated by-owner/repo lookup,
+   only the top-60 public list, so any such claim would be a guess.
+4. **One name for the action.** "New docs site", identically in the profile
+   dropdown, both lead cards, the no-match offer, the unauthenticated app-bar
+   button and the `/generate` heading. It was previously "Generate new" /
+   "Generate a new site" / "Generate your own" / "Generate a doc site" for
+   the same thing.
+
+Removed in this pass: the `.page-ruled` dashed vertical rules, the
+`.card-new` lime gradient (accent is a state colour, not a fill), and the
+generation-date metric on gallery cards.
 
 ---
 

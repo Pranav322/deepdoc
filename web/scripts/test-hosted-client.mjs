@@ -188,7 +188,7 @@ const check = (name, cond) => { assert.ok(cond, "FAILED: " + name); console.log(
 {
   const { api, els, cardEls } = harness({
     fetchImpl: async () => ({ ok: true, json: async () => ({}) }),
-    present: ["content", "ask-slot"],
+    present: ["content", "ask-slot", "gallery-lead-card"],
     cards: ["microsoft/vscode visual studio code typescript", "karpathy/nanochat the best chatgpt python"],
   });
 
@@ -203,13 +203,38 @@ const check = (name, cond) => { assert.ok(cond, "FAILED: " + name); console.log(
   api.onGallerySearch("typescript");
   check("filter also matches the description", cardEls[0].hidden === false && cardEls[1].hidden === true);
 
+  // A query that matched nothing is the one moment we know the visitor wants
+  // a repo we haven't documented, so it has to offer an action, not a
+  // sentence. The dead-end copy it replaced said "paste a GitHub link".
   api.onGallerySearch("zzzz-no-such-repo");
-  check("a query matching nothing explains the next step", /paste a github link/i.test(els.get("ask-slot").innerHTML));
+  const miss = els.get("ask-slot").innerHTML;
+  check("a query matching nothing offers to generate instead", /startFromGallery/.test(miss));
+  check("the no-match offer is a real button", /<button/.test(miss) && /new docs site/i.test(miss));
+  check("the lead card hides while the no-match panel makes the same offer",
+    els.get("gallery-lead-card").hidden === true);
+
+  api.onGallerySearch("nanochat");
+  check("the lead card comes back once the query matches again",
+    els.get("gallery-lead-card").hidden === false);
 
   api.onGallerySearch("https://github.com/acme/widgets");
   const hit = els.get("ask-slot").innerHTML;
   check("a pasted GitHub link offers to generate it", /startFromGallery/.test(hit) && /acme\/widgets/.test(hit));
-  check("a pasted link does not leave a stale no-match note", !/matches that/i.test(hit));
+  check("a pasted link does not leave a stale no-match note", !/no examples match/i.test(hit));
+
+  // What people actually type as often as a full link.
+  api.onGallerySearch("acme/widgets");
+  const short = els.get("ask-slot").innerHTML;
+  check("bare owner/repo is recognised as a repository", /acme\/widgets/.test(short) && /Generate docs/.test(short));
+  check("the shorthand is expanded to a URL the server will accept",
+    /startFromGallery\('https:\/\/github\.com\/acme\/widgets'\)/.test(short));
+
+  // Free text containing a slash is a search, not a repo reference — it must
+  // fall through to the no-match offer, not claim to have identified a repo.
+  api.onGallerySearch("react / vue comparison");
+  const slashy = els.get("ask-slot").innerHTML;
+  check("free text with a slash is not treated as a repository",
+    /no examples match/i.test(slashy) && !/Generate docs/.test(slashy));
 
   // The raw value lands inside a single-quoted onclick attribute.
   api.onGallerySearch("https://github.com/a/b'+alert(1)+'");

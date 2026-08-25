@@ -21,6 +21,7 @@ from deepdoc.scanner.common import (
     DatabaseScan,
     DebugSignal,
     EndpointBundle,
+    EvidenceUnit,
     GraphQLInterface,
     IntegrationIdentity,
     KnexArtifact,
@@ -644,3 +645,85 @@ def test_make_sub_scan_isolates_every_phase2_record_between_two_services() -> No
     assert len(scan.endpoint_bundles) == 2
     assert len(scan.integration_identities) == 3
     assert scan.artifact_scan.database_scan.model_files[1].file_path == payments_file
+
+
+def test_make_sub_scan_trims_nested_endpoint_and_runtime_evidence() -> None:
+    """A retained orders bundle/task must not smuggle payments paths in via
+    nested `EndpointBundle.evidence` / `RuntimeTask.producer_files`."""
+    orders_file = "services/orders/app.py"
+    payments_file = "services/payments/app.py"
+
+    orders_bundle = EndpointBundle(
+        endpoint_family="orders",
+        methods_paths=["POST /orders"],
+        handler_file=orders_file,
+        handler_symbols=["create_order"],
+        evidence=[
+            EvidenceUnit(file_path=orders_file, role="handler", symbols=["create_order"]),
+            EvidenceUnit(file_path=payments_file, role="service", symbols=["charge"]),
+        ],
+        integration_edges=["juspay"],
+    )
+    orders_task = RuntimeTask(
+        name="sync_orders",
+        file_path=orders_file,
+        runtime_kind="celery",
+        queue="orders",
+        producer_files=[orders_file, payments_file],
+    )
+
+    scan = _scan(
+        file_summaries={orders_file: "s", payments_file: "s"},
+        file_services={orders_file: "orders", payments_file: "payments"},
+        endpoint_bundles=[orders_bundle],
+        runtime_scan=RuntimeScan(tasks=[orders_task]),
+    )
+
+    units = {u.slug: u for u in build_planning_units(scan)}
+    orders_sub = make_sub_scan(scan, units["orders"])
+
+    (sub_bundle,) = orders_sub.endpoint_bundles
+    assert [e.file_path for e in sub_bundle.evidence] == [orders_file]
+    assert sub_bundle.integration_edges == ["juspay"]  # non-file fields preserved
+
+    (sub_task,) = orders_sub.runtime_scan.tasks
+    assert sub_task.producer_files == [orders_file]
+    assert sub_task.queue == "orders"  # metadata preserved
+
+    # Global scan untouched.
+    assert [e.file_path for e in orders_bundle.evidence] == [orders_file, payments_file]
+    assert orders_task.producer_files == [orders_file, payments_file]
+
+
+def test_make_sub_scan_keeps_handler_and_task_with_no_local_nested_evidence() -> None:
+    """Nested trimming must not drop a retained record that ends up with
+    empty nested evidence."""
+    orders_file = "services/orders/app.py"
+    payments_file = "services/payments/app.py"
+
+    bundle = EndpointBundle(
+        endpoint_family="orders",
+        methods_paths=["POST /orders"],
+        handler_file=orders_file,
+        handler_symbols=["create_order"],
+        evidence=[EvidenceUnit(file_path=payments_file, role="service")],
+    )
+    task = RuntimeTask(
+        name="sync_orders",
+        file_path=orders_file,
+        runtime_kind="celery",
+        producer_files=[payments_file],
+    )
+    scan = _scan(
+        file_summaries={orders_file: "s", payments_file: "s"},
+        file_services={orders_file: "orders", payments_file: "payments"},
+        endpoint_bundles=[bundle],
+        runtime_scan=RuntimeScan(tasks=[task]),
+    )
+    units = {u.slug: u for u in build_planning_units(scan)}
+    orders_sub = make_sub_scan(scan, units["orders"])
+
+    assert len(orders_sub.endpoint_bundles) == 1
+    assert orders_sub.endpoint_bundles[0].evidence == []
+    assert len(orders_sub.runtime_scan.tasks) == 1
+    assert orders_sub.runtime_scan.tasks[0].producer_files == []

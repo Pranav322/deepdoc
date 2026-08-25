@@ -275,12 +275,38 @@ def _filter_artifact_scan(artifact_scan, files: set[str]):
     )
 
 
+def _filter_endpoint_bundles(bundles: list, files: set[str]) -> list:
+    """Keep unit-owned handlers, but trim their nested evidence to this unit.
+
+    A retained bundle is never dropped for ending up with empty evidence —
+    the handler itself is still local.
+    """
+    return [
+        dataclasses.replace(
+            bundle,
+            evidence=[e for e in bundle.evidence if e.file_path in files],
+        )
+        for bundle in _filter_by_attr(bundles, files, "handler_file")
+    ]
+
+
+def _filter_runtime_tasks(tasks: list, files: set[str]) -> list:
+    """Keep locally-defined tasks, trimming nested `producer_files`."""
+    return [
+        dataclasses.replace(
+            task,
+            producer_files=[f for f in task.producer_files if f in files],
+        )
+        for task in _filter_by_attr(tasks, files, "file_path")
+    ]
+
+
 def _filter_runtime_scan(runtime_scan, files: set[str]):
     if runtime_scan is None:
         return None
     return dataclasses.replace(
         runtime_scan,
-        tasks=_filter_by_attr(runtime_scan.tasks, files, "file_path"),
+        tasks=_filter_runtime_tasks(runtime_scan.tasks, files),
         schedulers=_filter_by_attr(runtime_scan.schedulers, files, "file_path"),
         realtime_consumers=_filter_by_attr(runtime_scan.realtime_consumers, files, "file_path"),
     )
@@ -291,9 +317,10 @@ def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
 
     Never mutates `scan`; returns a new `RepoScan` with every file-scoped
     field filtered to `unit.files` — including every Phase-2 enrichment
-    record (endpoint bundles, integration identities, artifact/database/
-    runtime scans, graphql interfaces, knex artifacts, research contexts,
-    the semantic token cache, config impacts, debug signals, flow
+    record (endpoint bundles — nested `evidence` units included —
+    integration identities, artifact/database/runtime scans — runtime task
+    `producer_files` included — graphql interfaces, knex artifacts,
+    research contexts, the semantic token cache, config impacts, debug signals, flow
     candidates, and service boundaries), so local planning for this unit
     never sees, and can never claim ownership of, another unit's evidence.
     `call_graph` is dropped rather than filtered — it's a whole-repo
@@ -346,7 +373,7 @@ def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
         scan_scope=_filter_list(scan.scan_scope, files, unit_dirs) if scan.scan_scope else [],
         languages=_languages_for_files(files),
         call_graph=None,
-        endpoint_bundles=_filter_by_attr(scan.endpoint_bundles, files, "handler_file"),
+        endpoint_bundles=_filter_endpoint_bundles(scan.endpoint_bundles, files),
         integration_identities=_filter_by_list_attr(scan.integration_identities, files, "files"),
         artifact_scan=_filter_artifact_scan(scan.artifact_scan, files),
         runtime_scan=_filter_runtime_scan(scan.runtime_scan, files),

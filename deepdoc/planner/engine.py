@@ -1,7 +1,12 @@
+from __future__ import annotations
+
+import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
-from ..llm import fit_prompt_sections
+import click
+
+from ..llm import ModelCapabilityError, fit_prompt_sections
 from ..telemetry import RunTelemetry
 from ..manifest import file_hash
 from .common import *
@@ -22,22 +27,298 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     """Run the multi-step planner.
 
     Phase 2 scans (giant-file clustering, endpoint bundles, integration discovery)
-    run first to enrich the scan, then:
-    Step 1: CLASSIFY — categorize every file/artifact
-    Step 2: PROPOSE — create bucket candidates (no cap, LLM decides freely)
-    Step 3: ASSIGN — map files to buckets, produce final plan
-    Step 4: attach scanned endpoints to grouped API-reference buckets
-    """
+    run once on the full repo scan. `build_planning_units()` then groups files by
+    `scan.file_services`. `unit_likely_fits_budget`/`bound_planning_unit` are a
+    cheap preflight optimization only — the ASSIGN bucket JSON is
+    proposal-dependent and genuinely cannot be known before PROPOSE runs, so a
+    unit that looks fine can still overflow for real. The actual guarantee comes
+    from `_plan_unit_with_retry`: it calls `_plan_local`, and if that raises
+    `UnitNeedsSplit` (a real `ModelCapabilityError` from an actual
+    `fit_prompt_sections` call, not the preflight guess), it splits *only* that
+    unit and retries — sibling units already planned are untouched, and an
+    indivisible unit that still overflows becomes explicit coarse coverage
+    (`_coarse_unit_plan`) instead of ever reaching the LLM over budget.
 
+    A repo with zero/one meaningful *and* budget-fitting unit plans exactly as
+    before — no partitioning, no slug prefixing. Otherwise every final unit is
+    planned against a filtered sub-scan (`make_sub_scan`) without the
+    global-only bucket injectors (Start Here, glossary, database/runtime/
+    interface — see `_apply_global_plan_stage`), the unit plans are merged
+    (`merge_unit_plans`), and the global injectors plus final nav/orphan/
+    coverage shaping run exactly once on the merged result.
+    """
     phase_start = time.perf_counter()
 
-    # ── Phase 2 Scans (enrich before planning) ───────────────────────────
+    # ── Phase 2 Scans (enrich before planning; runs once, globally) ──────
     console.print(
         Panel("[bold]Running Phase 2 scan upgrades[/bold]", border_style="green")
     )
     step_start = time.perf_counter()
     scan = run_phase2_scans(scan, cfg, llm, repo_root=repo_root)
     scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
+
+    raw_units = build_planning_units(scan)
+    max_files_seed_cap = int(cfg.get("planning_unit_max_files_seed", 0) or 0)
+
+    if len(raw_units) == 1 and unit_likely_fits_budget(scan, llm):
+        try:
+            return _plan_local(scan, cfg, llm, repo_root, unit=raw_units[0])
+        except UnitNeedsSplit as exc:
+            console.print(
+                f"[yellow]Preflight expected this repo to fit as one unit, but the "
+                f"real required prompt overflowed at step '{exc.step}' — falling "
+                "back to bounded multi-unit planning.[/yellow]"
+            )
+            # fall through to the general multi-unit path below
+
+    # ── Bounded multi-unit planning ───────────────────────────────────────
+    seeded_units: list[PlanningUnit] = []
+    for unit in raw_units:
+        seeded_units.extend(
+            bound_planning_unit(unit, scan, llm, max_files_seed_cap=max_files_seed_cap)
+        )
+
+    console.print(
+        Panel(
+            f"[bold]Partitioned repo into {len(seeded_units)} planning unit(s)[/bold]: "
+            + ", ".join(
+                f"{u.slug} ({len(u.files)} files{', coarse' if u.coarse else ''})"
+                for u in seeded_units
+            ),
+            border_style="green",
+        )
+    )
+
+    unit_plans: list[tuple[str, DocPlan]] = []
+    unit_metadata: list[dict[str, Any]] = []
+    unit_files_by_slug: dict[str, set[str]] = {}
+    repository_max_pages = int(cfg.get("max_pages", 0) or 0)
+    unit_page_budgets = _allocate_page_budgets(seeded_units, repository_max_pages)
+    for unit, page_budget in zip(seeded_units, unit_page_budgets):
+        unit_cfg = dict(cfg)
+        unit_cfg["max_pages"] = page_budget
+        for final_unit, plan_for_unit in _plan_unit_with_retry(
+            unit,
+            scan,
+            unit_cfg,
+            llm,
+            repo_root,
+            max_files_seed_cap=max_files_seed_cap,
+            page_budget=page_budget,
+        ):
+            unit_plans.append((final_unit.slug, plan_for_unit))
+            unit_metadata.append(
+                {
+                    "slug": final_unit.slug,
+                    "file_count": len(final_unit.files),
+                    "coarse": final_unit.coarse,
+                }
+            )
+            unit_files_by_slug[final_unit.slug] = set(final_unit.files)
+
+    plan = merge_unit_plans(unit_plans)
+    plan = _apply_global_plan_stage(plan, scan, cfg, plan.classification, llm)
+    plan = normalize_plan_disposition(plan, unit_files_by_slug)
+
+    leftover = missing_files(scan, plan)
+    if leftover:
+        plan.orphaned_files = sorted(set(plan.orphaned_files) | set(leftover))
+
+    plan.classification = dict(plan.classification)
+    plan.classification["planning_units"] = unit_metadata
+
+    validate_plan_contract(plan)
+
+    scan.planner_timings["total"] = time.perf_counter() - phase_start
+    _print_plan_summary(plan)
+    return plan
+
+
+# Circuit breaker matching partitioning._MAX_SPLIT_DEPTH: bounds how many
+# times a single unit can be re-split after a genuine UnitNeedsSplit before
+# it's forced into coarse coverage, rather than retried indefinitely.
+_MAX_RETRY_SPLITS = 16
+
+
+def _allocate_page_budgets(
+    units: list[PlanningUnit], total_pages: int
+) -> list[int]:
+    """Allocate a finite repository page budget across units deterministically.
+
+    Every independently planned unit needs at least one page. Unlimited
+    repositories return ``0`` for each unit. Extra pages are distributed
+    by file count with stable unit-order tie breaking.
+    """
+    if total_pages <= 0:
+        return [0] * len(units)
+    if total_pages < len(units):
+        raise click.ClickException(
+            f"max_pages={total_pages} cannot cover {len(units)} planning units; "
+            "increase max_pages or use 0 for unlimited"
+        )
+
+    budgets: list[int] = [1] * len(units)
+    remaining = total_pages - len(units)
+    total_files = sum(max(1, len(unit.files)) for unit in units)
+    shares = [remaining * max(1, len(unit.files)) / total_files for unit in units]
+    for index, share in enumerate(shares):
+        budgets[index] += int(share)
+    leftover = total_pages - sum(budgets)
+    order = sorted(
+        range(len(units)),
+        key=lambda index: (-(shares[index] - int(shares[index])), units[index].slug),
+    )
+    for index in order[:leftover]:
+        budgets[index] += 1
+    return budgets
+
+
+def _plan_unit_with_retry(
+    unit: PlanningUnit,
+    scan: RepoScan,
+    cfg: dict[str, Any],
+    llm: LLMClient,
+    repo_root: Path,
+    *,
+    max_files_seed_cap: int,
+    page_budget: int | None = None,
+    _depth: int = 0,
+) -> list[tuple[PlanningUnit, DocPlan]]:
+    """Plan one unit; on a genuine `UnitNeedsSplit` — a real over-budget
+    prompt caught at the actual `fit_prompt_sections` call site inside
+    `_plan_local`, never the preflight guess — split only this unit and
+    retry. Sibling units the caller already planned are untouched, and no
+    LLM request is ever sent for a required section already proven to
+    overflow.
+    """
+    if unit.coarse:
+        return [(unit, _coarse_unit_plan(unit, make_sub_scan(scan, unit)))]
+
+    sub_scan = make_sub_scan(scan, unit)
+    local_cfg = dict(cfg)
+    local_cfg["max_pages"] = page_budget or 0
+    try:
+        plan_for_unit = _plan_local(
+            sub_scan,
+            local_cfg,
+            llm,
+            repo_root,
+            apply_global_stage=False,
+            unit=unit,
+        )
+        return [(unit, plan_for_unit)]
+    except UnitNeedsSplit as exc:
+        if len(unit.files) <= 1 or _depth >= _MAX_RETRY_SPLITS:
+            console.print(
+                f"[yellow]Unit '{unit.slug}' still overflows the model budget at "
+                f"step '{exc.step}' and cannot be split further — marking coarse.[/yellow]"
+            )
+            coarse_unit = dataclasses.replace(unit, coarse=True)
+            return [(coarse_unit, _coarse_unit_plan(coarse_unit, make_sub_scan(scan, coarse_unit)))]
+
+        console.print(
+            f"[yellow]Unit '{unit.slug}' overflowed at step '{exc.step}' — splitting and retrying.[/yellow]"
+        )
+        parts = next_split(unit, max_files_seed_cap)
+        if page_budget and page_budget < len(parts):
+            coarse_unit = dataclasses.replace(unit, coarse=True)
+            return [
+                (
+                    coarse_unit,
+                    _coarse_unit_plan(coarse_unit, make_sub_scan(scan, coarse_unit)),
+                )
+            ]
+        child_budgets = _allocate_page_budgets(parts, page_budget or 0)
+        results: list[tuple[PlanningUnit, DocPlan]] = []
+        for part, child_budget in zip(parts, child_budgets):
+            results.extend(
+                _plan_unit_with_retry(
+                    part,
+                    scan,
+                    cfg,
+                    llm,
+                    repo_root,
+                    max_files_seed_cap=max_files_seed_cap,
+                    page_budget=child_budget,
+                    _depth=_depth + 1,
+                )
+            )
+        return results
+
+
+def _coarse_unit_plan(unit: PlanningUnit, sub_scan: RepoScan) -> DocPlan:
+    """Deterministic placeholder plan for a unit too large to ever fit the
+    model budget, even after maximal splitting (a single indivisible file or
+    an unsplittable flat group).
+
+    Never runs classify/propose/assign for this unit — that would mean
+    handing the LLM a required prompt already known to exceed the budget.
+    The files are still fully accounted for (owned by this bucket), just
+    without per-file LLM planning.
+    """
+    bucket = DocBucket(
+        bucket_type="coarse_oversized",
+        title=f"{unit.label} (oversized)",
+        # Unique within this unit's own single-bucket plan; merge_unit_plans
+        # namespaces it under `{unit.slug}/` for global uniqueness.
+        slug="oversized",
+        section="Supporting Material",
+        description=(
+            f"{len(unit.files)} file(s) exceed the configured model token budget "
+            "even after maximal splitting, so they are listed here without "
+            "per-file LLM planning."
+        ),
+        owned_files=list(unit.files),
+        generation_hints={"coarse_unit": True},
+        publication_tier="supporting",
+    )
+    return DocPlan(
+        buckets=[bucket],
+        nav_structure={"Supporting Material": [bucket.slug]},
+        skipped_files=[],
+    )
+
+
+def _plan_local(
+    scan: RepoScan,
+    cfg: dict[str, Any],
+    llm: LLMClient,
+    repo_root: Path,
+    *,
+    apply_global_stage: bool = True,
+    unit: PlanningUnit | None = None,
+) -> DocPlan:
+    """Run classify → propose → assign → refine for one phase-2-enriched scan.
+
+    Shared by the single-unit path and by each partitioned planning unit.
+    Does not run Phase 2 scans — the caller owns that, exactly once, on the
+    global scan before any unit is planned.
+
+    `apply_global_stage` controls whether the global-only bucket injectors
+    (Start Here/setup/glossary/debug, database/runtime/interface) and the
+    final nav/publication/orphan/coverage shaping run here. The single-unit
+    path leaves this True (unchanged, original behavior). Each unit in a
+    multi-unit run passes False so those steps run exactly once, on the
+    merged plan, instead of once per unit — see `_apply_global_plan_stage`
+    and `plan_docs`.
+
+    `unit` identifies which `PlanningUnit` this scan came from, purely so a
+    real `ModelCapabilityError` at any of the three `fit_prompt_sections`
+    calls below can be re-raised as `UnitNeedsSplit(unit, step, ...)` for
+    the orchestration layer to split and retry. If omitted, a unit is
+    synthesized from `scan.file_summaries` so the exception always carries
+    a valid, splittable unit.
+
+    Step 1: CLASSIFY — categorize every file/artifact
+    Step 2: PROPOSE — create bucket candidates (no cap, LLM decides freely)
+    Step 3: ASSIGN — map files to buckets, produce final plan
+    Step 4: attach scanned endpoints to grouped API-reference buckets
+    """
+    current_unit = unit or PlanningUnit(
+        slug="__scan__", label="scan", files=tuple(sorted(scan.file_summaries))
+    )
+
+    phase_start = time.perf_counter()
 
     max_pages = cfg.get("max_pages", 0)
     giant_file_threshold = cfg.get("giant_file_lines", 2000)
@@ -80,20 +361,23 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             giant_file_threshold=giant_file_threshold,
         )
 
-    classify_fit = fit_prompt_sections(
-        llm.capabilities,
-        system=CLASSIFY_SYSTEM,
-        render_prompt=_render_classify,
-        required_sections={"topology_clusters": topology_clusters_str},
-        optional_sections=[
-            ("entry_points", [f"- {path}" for path in scan.entry_points]),
-            ("config_files", [f"- {path}" for path in scan.config_files]),
-            ("file_summaries", file_summaries_str.splitlines()),
-            ("endpoints", endpoints_str.splitlines()),
-        ],
-        output_reserve_tokens=llm.output_reserve_tokens,
-        step_name="planner classify",
-    )
+    try:
+        classify_fit = fit_prompt_sections(
+            llm.capabilities,
+            system=CLASSIFY_SYSTEM,
+            render_prompt=_render_classify,
+            required_sections={"topology_clusters": topology_clusters_str},
+            optional_sections=[
+                ("entry_points", [f"- {path}" for path in scan.entry_points]),
+                ("config_files", [f"- {path}" for path in scan.config_files]),
+                ("file_summaries", file_summaries_str.splitlines()),
+                ("endpoints", endpoints_str.splitlines()),
+            ],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="planner classify",
+        )
+    except ModelCapabilityError as exc:
+        raise UnitNeedsSplit(current_unit, "classify", str(exc)) from exc
     classify_prompt = classify_fit.prompt
     if getattr(llm, "telemetry", None) is not None:
         for name, count in classify_fit.omitted_records.items():
@@ -251,21 +535,39 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             research_context=sections.get("research_context") or "(none)",
             repo_profile=repo_profile_str,
             max_pages_instruction=max_pages_instruction,
+            global_bucket_instructions=(
+                "- Must include: 1 introduction/overview bucket "
+                "(is_introduction_page: true)\n"
+                "- If setup/deploy/CI artifacts listed above: include a setup/getting-started bucket\n"
+                "- If debug signals listed above (≥2 types): include a Debugging & Observability bucket\n"
+                "- Include a Domain Glossary bucket (omit only for trivial domains with <5 terms)\n"
+                "- If database models detected: include a database bucket with "
+                "include_database_context: true, prompt_style: 'database', "
+                "required_sections: ['er_diagram', 'table_definitions', "
+                "'relationships', 'migrations']"
+                if apply_global_stage
+                else "- Do NOT create repository-wide introduction, Start Here, "
+                "global glossary, setup, debug, database, runtime, or interface "
+                "buckets; the global stage creates those once from the full repository scan."
+            ),
         )
 
-    propose_fit = fit_prompt_sections(
-        llm.capabilities,
-        system=PROPOSE_SYSTEM,
-        render_prompt=_render_propose,
-        required_sections={"named_clusters": named_clusters_str},
-        optional_sections=[
-            ("endpoints", endpoints_str.splitlines()),
-            ("integration_signals", integration_records),
-            ("research_context", research_context_str.splitlines()),
-        ],
-        output_reserve_tokens=llm.output_reserve_tokens,
-        step_name="planner propose",
-    )
+    try:
+        propose_fit = fit_prompt_sections(
+            llm.capabilities,
+            system=PROPOSE_SYSTEM,
+            render_prompt=_render_propose,
+            required_sections={"named_clusters": named_clusters_str},
+            optional_sections=[
+                ("endpoints", endpoints_str.splitlines()),
+                ("integration_signals", integration_records),
+                ("research_context", research_context_str.splitlines()),
+            ],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="planner propose",
+        )
+    except ModelCapabilityError as exc:
+        raise UnitNeedsSplit(current_unit, "propose", str(exc)) from exc
     propose_prompt = propose_fit.prompt
     if getattr(llm, "telemetry", None) is not None:
         for name, count in propose_fit.omitted_records.items():
@@ -331,18 +633,21 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
                 setup_artifacts=setup_artifacts_str,
             )
 
-        assign_fit = fit_prompt_sections(
-            llm.capabilities,
-            system=ASSIGN_SYSTEM,
-            render_prompt=_render_assign,
-            required_sections={
-                "proposed_buckets": proposed_buckets_str,
-                "all_files": all_files_str,
-            },
-            optional_sections=[("endpoints", endpoints_str.splitlines())],
-            output_reserve_tokens=llm.output_reserve_tokens,
-            step_name="planner assign",
-        )
+        try:
+            assign_fit = fit_prompt_sections(
+                llm.capabilities,
+                system=ASSIGN_SYSTEM,
+                render_prompt=_render_assign,
+                required_sections={
+                    "proposed_buckets": proposed_buckets_str,
+                    "all_files": all_files_str,
+                },
+                optional_sections=[("endpoints", endpoints_str.splitlines())],
+                output_reserve_tokens=llm.output_reserve_tokens,
+                step_name="planner assign",
+            )
+        except ModelCapabilityError as exc:
+            raise UnitNeedsSplit(current_unit, "assign", str(exc)) from exc
         assign_prompt = assign_fit.prompt
         if getattr(llm, "telemetry", None) is not None:
             for name, count in assign_fit.omitted_records.items():
@@ -406,6 +711,40 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         include_endpoint_pages=cfg.get("include_endpoint_pages", True),
         cfg=cfg,
     )
+
+    if apply_global_stage:
+        plan = _apply_global_plan_stage(plan, scan, cfg, classification, llm)
+
+    scan.planner_timings["total"] = time.perf_counter() - phase_start
+    summary = ", ".join(
+        f"{name}={duration:.2f}s"
+        for name, duration in scan.planner_timings.items()
+        if duration >= 0.01
+    )
+    if summary:
+        console.print(f"[dim]Planner timings: {summary}[/dim]")
+
+    _print_plan_summary(plan)
+    return plan
+
+
+def _apply_global_plan_stage(
+    plan: DocPlan,
+    scan: RepoScan,
+    cfg: dict[str, Any],
+    classification: dict[str, Any],
+    llm: LLMClient,
+) -> DocPlan:
+    """Global-only bucket injection and final shaping — runs exactly once.
+
+    For a single-unit repo this is called from inside `_plan_local` on that
+    one scan, identical to the pre-partitioning behavior. For a multi-unit
+    repo, `plan_docs` calls this once on the merged plan and the full global
+    scan instead of once per unit — otherwise every unit would get its own
+    Start Here/setup/glossary/debug/database/runtime/interface buckets,
+    which namespacing keeps contract-valid but duplicates content that
+    should be one consolidated global set.
+    """
     plan = _ensure_database_runtime_and_interface_buckets(plan, scan, cfg)
     step_start = time.perf_counter()
     plan = _attach_flow_hints_to_cluster_buckets(plan, scan, cfg)
@@ -436,17 +775,6 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
         console.print(
             f"[yellow]⚠ {len(plan.orphaned_files)} file(s) were unassigned → auto-assigned[/yellow]"
         )
-
-    scan.planner_timings["total"] = time.perf_counter() - phase_start
-    summary = ", ".join(
-        f"{name}={duration:.2f}s"
-        for name, duration in scan.planner_timings.items()
-        if duration >= 0.01
-    )
-    if summary:
-        console.print(f"[dim]Planner timings: {summary}[/dim]")
-
-    _print_plan_summary(plan)
     return plan
 
 
@@ -1261,3 +1589,14 @@ def _matches_any(path: str, patterns: list[str]) -> bool:
 from .heuristics import _apply_page_contracts, _assign_publication_tiers, _attach_orphans_semantically, _auto_generate_endpoint_refs, _build_heuristic_assignment, _consolidate_similar_buckets, _decompose_buckets, _deduplicate_bucket_slugs, _fallback_plan, _inject_research_context_buckets, _inject_start_here_and_debug_buckets, _llm_step, _merge_partial_assignment, _merge_plan, _normalize_repo_profile, _partition_topology_assignment, _refine_bucket_ownership, _refine_proposal, _shape_plan_nav, _validate_coverage
 from .utils import _build_classification_summary, _build_named_clusters_str, _fix_slug_cluster_sections, _format_endpoints, _format_file_tree_compressed, _format_research_context, _format_summaries_compressed, _format_flow_candidates, _format_topology_clusters, _is_doc_context_candidate, _normalize_repo_rel_path, _print_classification_summary, _print_plan_summary, _print_proposal_summary, _summarize_doc_context, _summarize_notebook_context
 from .specializations import _ensure_database_runtime_and_interface_buckets, _attach_flow_hints_to_cluster_buckets
+from .partitioning import (
+    PlanningUnit,
+    UnitNeedsSplit,
+    bound_planning_unit,
+    build_planning_units,
+    make_sub_scan,
+    next_split,
+    unit_likely_fits_budget,
+)
+from .merge import merge_unit_plans, missing_files, normalize_plan_disposition
+from ..plan_contract import validate_plan_contract

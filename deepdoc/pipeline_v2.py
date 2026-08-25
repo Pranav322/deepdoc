@@ -727,6 +727,24 @@ class PipelineV2:
         style = "green" if coverage_pct >= 80 else "yellow" if coverage_pct >= 40 else "red"
         console.print(f"[{style}]Coverage: {coverage_pct:.1f}%[/{style}]")
 
+        # Only present for a repo that went through bounded multi-unit
+        # planning (deepdoc/planner/partitioning.py) — absent (and silently
+        # skipped) for the ordinary single-unit plan, so this never changes
+        # output for existing single-service repos.
+        units_meta = (plan.classification or {}).get("planning_units")
+        if units_meta:
+            ut = Table(title="Planning units", show_header=True, header_style="bold")
+            ut.add_column("Unit", style="cyan")
+            ut.add_column("Files", justify="right")
+            ut.add_column("Status", justify="right")
+            for unit in units_meta:
+                ut.add_row(
+                    str(unit.get("slug", "")),
+                    str(unit.get("file_count", 0)),
+                    "coarse" if unit.get("coarse") else "planned",
+                )
+            console.print(ut)
+
     # ──────────────────────────────────────────────────────────────────────
     # Phase 4: API Playground
     # ──────────────────────────────────────────────────────────────────────

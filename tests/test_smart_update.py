@@ -504,6 +504,12 @@ def test_artifact_only_change_is_not_noop(tmp_repo_with_plan):
     assert cs.strategy == "incremental"
 
 
+def test_engine_fingerprint_records_multi_unit_planning_contract():
+    """The fingerprint must invalidate plans created before namespaced units."""
+    assert "planning_units" in ENGINE_FINGERPRINT
+    assert "namespaced" in ENGINE_FINGERPRINT
+
+
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
     """Outdated sync state should trigger a one-time full replan."""
     root, plan = tmp_repo_with_plan

@@ -1,4 +1,5 @@
 from .common import *
+from ..llm import fit_prompt_sections
 
 def discover_integrations(
     parsed_files: dict[str, ParsedFile],
@@ -209,18 +210,22 @@ def _normalize_integrations_llm(
     repo_root: Path,
 ) -> list[IntegrationIdentity]:
     """Use LLM to group integration candidates into normalized identities."""
-    # Build candidate summary for the LLM
-    candidate_lines = []
-    for c in candidates:
-        candidate_lines.append(
-            f"- [{c.signal_type}] name_hint='{c.name_hint}' file={c.file_path} evidence='{c.evidence}'"
-        )
+    # Preserve each candidate's original index in the rendered record.
+    # fit_prompt_sections may omit an oversized early record while admitting a
+    # later smaller one, so positions in the fitted prompt are not necessarily
+    # positions in ``candidates``.
+    candidate_lines = [
+        f"- candidate_index={index} [{candidate.signal_type}] "
+        f"name_hint='{candidate.name_hint}' file={candidate.file_path} "
+        f"evidence='{candidate.evidence}'"
+        for index, candidate in enumerate(candidates)
+    ]
 
-    prompt = f"""Analyze these integration signals and group them into normalized integration identities.
+    def _render(sections: dict[str, str]) -> str:
+        return f"""Analyze these integration signals and group them into normalized integration identities.
 
 ## Raw Integration Signals ({len(candidates)} total)
-{chr(10).join(candidate_lines[:80])}
-{"... +" + str(len(candidates) - 80) + " more" if len(candidates) > 80 else ""}
+{sections.get("candidates") or "(none fit the model's token budget)"}
 
 ---
 
@@ -244,12 +249,27 @@ Return JSON:
   ]
 }}
 
-candidate_indices = which signals (by 0-based index) belong to this identity."""
+candidate_indices = the explicit candidate_index values shown beside the signals that belong to this identity."""
 
     system = "You are a code analysis expert. Normalize integration signals into identities. Respond with valid JSON only."
 
     try:
-        response = llm.complete(system, prompt)
+        fit = fit_prompt_sections(
+            llm.capabilities,
+            system=system,
+            render_prompt=_render,
+            required_sections={},
+            optional_sections=[("candidates", candidate_lines)],
+            output_reserve_tokens=llm.output_reserve_tokens,
+            step_name="integration normalization",
+        )
+        omitted = fit.omitted_records.get("candidates", 0)
+        if omitted:
+            console.print(
+                f"  [dim]{omitted} integration signal(s) omitted from the normalization "
+                "prompt (model token budget)[/dim]"
+            )
+        response = llm.complete(system, fit.prompt)
         result = _parse_json(response)
     except Exception as e:
         console.print(f"  [yellow]⚠ LLM integration normalization failed: {e}[/yellow]")

@@ -21,6 +21,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "giant_file_lines": 2000,  # files above this get LLM-based feature clustering
     "source_context_budget": 200000,  # raw-source char budget before compressed evidence cards kick in
     "decompose_threshold": 7,  # buckets with 7+ files trigger decomposition consideration
+    "planning_unit_max_files_seed": 0,  # 0 = no cap; else an advisory ceiling on the first split-seed size for an over-budget planning unit (bound_planning_unit's exact-token gate is what actually proves each part fits, this only shapes the initial guess)
     "consolidation_similarity_threshold": 0.55,  # Jaccard threshold for merging near-duplicate buckets
     "database_doc_mode": "overview_plus_groups",
     "database_group_model_cap": 12,

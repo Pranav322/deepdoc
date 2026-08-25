@@ -14,6 +14,7 @@ from deepdoc.planner.topology import TopologyCluster, TopologyMap
 from deepdoc.planner.unit_boundaries import (
     BoundaryStub,
     compute_boundary_stubs,
+    format_boundary_stubs,
     refine_unit_ownership,
 )
 from deepdoc.v2_models import RepoScan
@@ -259,7 +260,8 @@ def test_boundary_stub_never_carries_remote_file_paths() -> None:
         assert ".py" not in str(field_value)
     assert stub.remote_unit == "payments"
     assert "flow" in stub.evidence_kinds
-    assert stub.flow_labels == ("Checkout Flow",)
+    # The label is the flow's stable ID, never its arbitrary title.
+    assert stub.flow_labels == ("checkout",)
 
 
 def test_boundary_stubs_are_bounded_and_sorted_deterministically() -> None:
@@ -350,3 +352,48 @@ def test_refinement_and_stub_computation_are_deterministic_under_shuffled_input(
 
     assert [(u.slug, u.files) for u in refined_a] == [(u.slug, u.files) for u in refined_b]
     assert stubs_a == stubs_b
+
+
+def test_flow_label_never_leaks_a_remote_path_even_from_a_hostile_title() -> None:
+    """A flow title/ID is arbitrary upstream text — `endpoint_family` can be
+    a route like `POST /orders/process`, and nothing stops a scanner (or a
+    malicious repo) from putting a remote file path in it. No such string
+    may reach a `BoundaryStub` or the local prompt: labels must be safe by
+    construction, not by trusting the producer's formatting."""
+    scan = _scan(
+        call_graph=_call_graph(
+            ("services/orders/app.py", "handle", "services/payments/app.py", "charge"),
+        ),
+        flow_candidates=[
+            FlowCandidate(
+                flow_id="services/payments/app.py-flow",
+                title="Remote file services/payments/app.py",
+                entry_kind="http",
+                entry_points=[],
+                involved_files=["services/orders/app.py", "services/payments/app.py"],
+            ),
+            FlowCandidate(
+                flow_id="checkout",
+                title=r"C:\remote\payments\app.py",
+                entry_kind="http",
+                entry_points=[],
+                involved_files=["services/orders/app.py", "services/payments/app.py"],
+            ),
+        ],
+    )
+    baseline = {
+        "orders": frozenset({"services/orders/app.py"}),
+        "payments": frozenset({"services/payments/app.py"}),
+    }
+
+    stubs = compute_boundary_stubs(scan, baseline["orders"], "orders", baseline)
+    rendered = format_boundary_stubs(stubs)
+
+    assert len(stubs) == 1
+    for haystack in (repr(stubs[0]), rendered):
+        assert "payments/app" not in haystack
+        assert "services/" not in haystack
+        assert "\\" not in haystack
+        assert ".py" not in haystack
+    # A normal, safe identifier still survives as a usable label.
+    assert "checkout" in stubs[0].flow_labels

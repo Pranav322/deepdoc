@@ -17,6 +17,7 @@ See .hermes/plans/SLICE_B_SEMANTIC_UNITS_PLAN.md for the product contract.
 from __future__ import annotations
 
 import dataclasses
+import re
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
@@ -42,6 +43,21 @@ _FLOW_COOCCURRENCE_WEIGHT = 2.0
 _MAX_STUBS_PER_UNIT = 5
 _MAX_FLOW_LABELS_PER_STUB = 3
 _STUB_FLOW_WEIGHT = 3.0
+
+# A flow label reaching a local prompt must be safe *by construction*, not by
+# trusting the producer's formatting: `FlowCandidate.title` is built from
+# arbitrary upstream text (`endpoint_family` can be `POST /orders/process`) and
+# `flow_id` can be anything a caller passes. Only a short lowercase
+# alnum/dash identifier is allowed through — no separators, no dots, so no
+# path or file extension can survive.
+_SAFE_FLOW_LABEL_RE = re.compile(r"[a-z0-9][a-z0-9-]{0,47}")
+# ...and reject a slugified path whose last segment is a source extension
+# ("services-payments-app-py"), which would still echo a remote file.
+_EXTENSION_TOKENS = frozenset(
+    "py pyi ts tsx js jsx mjs cjs go rb java kt kts php rs cs c cc cpp h hpp "
+    "swift scala m mm vue svelte sql yml yaml json toml".split()
+)
+_GENERIC_FLOW_LABEL = "flow"
 
 
 @dataclasses.dataclass(frozen=True)
@@ -84,14 +100,31 @@ def _local_call_edges(scan: "RepoScan") -> list[tuple[str, str]]:
     return sorted(pairs)
 
 
-def _flow_file_groups(scan: "RepoScan") -> list[tuple[str, str, frozenset[str]]]:
-    """(flow_id, title, involved_files) triples, sorted for determinism."""
+def _safe_flow_label(flow_id: str) -> str:
+    """A prompt-safe label for one flow, derived only from its stable ID.
+
+    Titles are dropped entirely — see `_SAFE_FLOW_LABEL_RE`. Anything that
+    isn't a plain short identifier degrades to a generic label rather than
+    risking a remote path in a local prompt.
+    """
+    candidate = (flow_id or "").strip().lower()
+    if not _SAFE_FLOW_LABEL_RE.fullmatch(candidate):
+        return _GENERIC_FLOW_LABEL
+    if candidate.rsplit("-", 1)[-1] in _EXTENSION_TOKENS:
+        return _GENERIC_FLOW_LABEL
+    return candidate
+
+
+def _flow_file_groups(scan: "RepoScan") -> list[tuple[str, frozenset[str]]]:
+    """(flow_id, involved_files) pairs, sorted for determinism. Titles are
+    deliberately not carried — nothing derived from a title may reach a
+    local prompt (see `_safe_flow_label`)."""
     groups = [
-        (flow.flow_id, flow.title, frozenset(flow.involved_files))
+        (flow.flow_id, frozenset(flow.involved_files))
         for flow in (scan.flow_candidates or [])
         if flow.involved_files
     ]
-    return sorted(groups, key=lambda g: (g[0], g[1]))
+    return sorted(groups, key=lambda g: (g[0], sorted(g[1])))
 
 
 def refine_unit_ownership(
@@ -133,7 +166,7 @@ def refine_unit_ownership(
 
     # file -> {slug: flow co-occurrence count}
     flow_affinity: dict[str, dict[str, float]] = {}
-    for _flow_id, _title, files in flow_groups:
+    for _flow_id, files in flow_groups:
         for f in files:
             for slug, unit_fset in unit_files.items():
                 if unit_fset & (files - {f}):
@@ -223,13 +256,13 @@ def compute_boundary_stubs(
                 if caller in files:
                     inbound[slug] += 1
 
-    flow_hits: dict[str, list[tuple[str, str]]] = {slug: [] for slug in others}
-    for flow_id, title, files in flow_groups:
+    flow_hits: dict[str, list[str]] = {slug: [] for slug in others}
+    for flow_id, files in flow_groups:
         if not (unit_files & files):
             continue
         for slug, other_files in others.items():
             if other_files & files:
-                flow_hits[slug].append((title, flow_id))
+                flow_hits[slug].append(_safe_flow_label(flow_id))
 
     stubs: list[BoundaryStub] = []
     for slug in sorted(others):
@@ -262,7 +295,7 @@ def compute_boundary_stubs(
                 score=score,
                 call_count=out_count + in_count,
                 evidence_kinds=evidence_kinds,
-                flow_labels=tuple(title for title, _flow_id in hits[:_MAX_FLOW_LABELS_PER_STUB]),
+                flow_labels=tuple(hits[:_MAX_FLOW_LABELS_PER_STUB]),
             )
         )
 

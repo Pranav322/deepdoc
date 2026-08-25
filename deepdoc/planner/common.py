@@ -297,11 +297,7 @@ PROPOSE_PROMPT = """Based on these named topology clusters, propose documentatio
 
 ## Constraints
 {max_pages_instruction}
-- Must include: 1 introduction/overview bucket (is_introduction_page: true)
-- If setup/deploy/CI artifacts listed above: include a setup/getting-started bucket
-- If debug signals listed above (≥2 types): include a Debugging & Observability bucket
-- Include a Domain Glossary bucket (omit only for trivial domains with <5 terms)
-- If database models detected: include a database bucket with   include_database_context: true, prompt_style: "database",   required_sections: ["er_diagram", "table_definitions", "relationships", "migrations"]
+{global_bucket_instructions}
 - Endpoint-entry-point buckets MUST have required_diagrams: ["sequence_diagram"]   to embed the call flow inline -- no separate flow pages
 - Group by business workflow, NOT file directories
 - Endpoint family buckets group by resource family, NOT one-per-route

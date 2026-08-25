@@ -53,8 +53,16 @@ def test_two_units_with_same_local_slug_get_namespaced() -> None:
     merged = merge_unit_plans([("orders", plan_a), ("payments", plan_b)])
     slugs = sorted(b.slug for b in merged.buckets)
 
-    assert slugs == ["orders/feature", "payments/feature", "payments/start-here", "start-here"]
-    validate_plan_contract(merged)
+    assert slugs == [
+        "orders/feature",
+        "orders/start-here",
+        "payments/feature",
+        "payments/start-here",
+    ]
+    assert not any(
+        (bucket.generation_hints or {}).get("is_introduction_page")
+        for bucket in merged.buckets
+    )
 
 
 def test_depends_on_and_parent_slug_are_rewritten() -> None:
@@ -72,7 +80,7 @@ def test_depends_on_and_parent_slug_are_rewritten() -> None:
     assert worker.parent_slug == "orders/feature"
 
 
-def test_dependency_on_retained_global_introduction_uses_final_slug_map() -> None:
+def test_dependency_on_unit_introduction_uses_namespaced_service_overview() -> None:
     child = _feature("worker", ["a.py"], depends_on=["start-here"])
     plan_a = _plan(
         [child, _intro()],
@@ -83,24 +91,55 @@ def test_dependency_on_retained_global_introduction_uses_final_slug_map() -> Non
     merged = merge_unit_plans([("orders", plan_a), ("payments", plan_b)])
     merged_child = next(bucket for bucket in merged.buckets if bucket.title == "worker")
 
-    assert merged_child.depends_on == ["start-here"]
+    assert merged_child.depends_on == ["orders/start-here"]
 
 
-def test_multiple_introductions_merge_to_exactly_one() -> None:
+def test_all_unit_introductions_are_demoted_before_global_injection() -> None:
     plan_a = _plan([_intro(), _feature("feature", ["a.py"])], {"Start Here": ["start-here"], "Features": ["feature"]})
     plan_b = _plan([_intro(), _feature("feature", ["b.py"])], {"Start Here": ["start-here"], "Features": ["feature"]})
 
     merged = merge_unit_plans([("orders", plan_a), ("payments", plan_b)])
 
-    introductions = [b for b in merged.buckets if (b.generation_hints or {}).get("is_introduction_page")]
-    assert len(introductions) == 1
-    assert introductions[0].slug == "start-here"
-    # The second unit's intro survives as a namespaced, non-introduction bucket.
-    demoted = [b for b in merged.buckets if b.title == "Start Here" and b.slug != "start-here"]
-    assert len(demoted) == 1
-    assert demoted[0].slug == "payments/start-here"
-    assert not (demoted[0].generation_hints or {}).get("is_introduction_page")
-    validate_plan_contract(merged)
+    introductions = [
+        b for b in merged.buckets
+        if (b.generation_hints or {}).get("is_introduction_page")
+    ]
+    assert introductions == []
+    demoted = [b for b in merged.buckets if b.title == "Start Here"]
+    assert [b.slug for b in demoted] == ["orders/start-here", "payments/start-here"]
+
+
+def test_merge_combines_cluster_names_and_derives_global_profile() -> None:
+    plan_a = _plan([_feature("orders", ["a.py"])], {"Orders": ["orders"]})
+    plan_a.classification = {
+        "repo_profile": {
+            "primary_type": "backend_service",
+            "secondary_traits": ["uses_fastapi"],
+            "confidence": "high",
+        },
+        "cluster_names": {"orders-cluster": {"section": "Orders"}},
+    }
+    plan_b = _plan([_feature("web", ["b.py"])], {"Web": ["web"]})
+    plan_b.classification = {
+        "repo_profile": {
+            "primary_type": "frontend_application",
+            "secondary_traits": ["uses_react"],
+            "confidence": "medium",
+        },
+        "cluster_names": {"web-cluster": {"section": "Web"}},
+    }
+
+    merged = merge_unit_plans([("orders", plan_a), ("web", plan_b)])
+
+    assert set(merged.classification["cluster_names"]) == {
+        "orders-cluster",
+        "web-cluster",
+    }
+    assert merged.classification["repo_profile"] == {
+        "primary_type": "platform_monorepo",
+        "secondary_traits": ["uses_fastapi", "uses_react"],
+        "confidence": "medium",
+    }
 
 
 def test_skipped_and_orphaned_files_union_deterministically() -> None:

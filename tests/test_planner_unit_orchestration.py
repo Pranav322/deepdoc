@@ -17,7 +17,8 @@ import pytest
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.llm.token_budget import ModelCapabilities
 from deepdoc.planner import RepoScan
-from deepdoc.planner.engine import _plan_local, plan_docs
+from deepdoc.planner.engine import _allocate_page_budgets, _plan_local, plan_docs
+from deepdoc.planner.partitioning import PlanningUnit
 from deepdoc.planner.merge import missing_files
 from deepdoc.plan_contract import validate_plan_contract
 from .conftest import make_planner_llm
@@ -178,18 +179,19 @@ def test_multi_unit_repo_bounds_each_unit_to_its_own_files() -> None:
     # No unit ever saw the other unit's files.
     assert seen_files[0].isdisjoint(seen_files[1])
 
-    # Each mocked unit's local plan volunteered its own "start-here"
-    # introduction (a real LLM propose step can legitimately do this too);
-    # merge keeps exactly one as the global introduction and demotes the
-    # other to a namespaced overview bucket instead of duplicating it.
+    # Each mocked unit's local plan volunteered its own "start-here" page.
+    # Merge demotes both to namespaced service overviews; the global stage
+    # creates the sole repository-wide introduction from the full scan.
     introductions = [
         b for b in plan.buckets if (b.generation_hints or {}).get("is_introduction_page")
     ]
     assert [b.slug for b in introductions] == ["start-here"]
     demoted = [b for b in plan.buckets if b.title == "Start Here" and b.slug != "start-here"]
-    assert [b.slug for b in demoted] == ["orders/start-here"] or [b.slug for b in demoted] == [
-        "payments/start-here"
+    assert sorted(b.slug for b in demoted) == [
+        "orders/start-here",
+        "payments/start-here",
     ]
+    assert set(introductions[0].owned_files) == set(scan.file_summaries)
 
     # Global-only injectors (Local Development Setup, Domain Glossary) must
     # run exactly once on the merged plan, not once per unit — proves this
@@ -230,6 +232,65 @@ def test_bounded_multi_unit_planning_fits_where_one_global_inventory_would_not()
 
         with pytest.raises(ModelCapabilityError):
             _plan_local(scan, cfg, llm, Path("."))
+
+
+def test_repository_max_pages_is_allocated_across_units() -> None:
+    units = [
+        PlanningUnit(slug="a", label="a", files=("a.py",)),
+        PlanningUnit(slug="b", label="b", files=("b.py", "b2.py")),
+        PlanningUnit(slug="c", label="c", files=("c.py",)),
+    ]
+
+    budgets = _allocate_page_budgets(units, 10)
+
+    assert sum(budgets) == 10
+    assert all(budget >= 1 for budget in budgets)
+    assert budgets[1] >= budgets[0]
+
+
+def test_repository_max_pages_must_cover_every_independent_unit() -> None:
+    units = [
+        PlanningUnit(slug="a", label="a", files=("a.py",)),
+        PlanningUnit(slug="b", label="b", files=("b.py",)),
+    ]
+
+    with pytest.raises(ValueError, match="cannot cover 2 planning units"):
+        _allocate_page_budgets(units, 1)
+
+
+def test_multi_unit_planner_receives_allocated_not_repository_page_cap() -> None:
+    scan = _service_scan({"orders": 2, "payments": 2})
+    llm = make_planner_llm()
+    cfg = _cfg()
+    cfg["max_pages"] = 10
+    seen_caps: list[int] = []
+
+    def _record(passed_scan, passed_cfg, passed_llm, repo_root, apply_global_stage=True, unit=None):
+        from deepdoc.v2_models import DocBucket, DocPlan
+
+        seen_caps.append(passed_cfg["max_pages"])
+        return DocPlan(
+            buckets=[
+                DocBucket(
+                    bucket_type="feature",
+                    title="Feature",
+                    slug="feature",
+                    section="Features",
+                    description="d",
+                    owned_files=list(passed_scan.file_summaries),
+                )
+            ],
+            nav_structure={"Features": ["feature"]},
+            skipped_files=[],
+            classification={"repo_profile": {}, "cluster_names": {}},
+        )
+
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+         patch("deepdoc.planner.engine._plan_local", side_effect=_record):
+        plan_docs(scan, cfg, llm)
+
+    assert seen_caps == [5, 5]
+    assert sum(seen_caps) == 10
 
 
 def test_single_oversized_service_still_splits_and_every_prompt_fits() -> None:

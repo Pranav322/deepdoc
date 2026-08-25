@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
@@ -88,9 +90,19 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     unit_plans: list[tuple[str, DocPlan]] = []
     unit_metadata: list[dict[str, Any]] = []
     unit_files_by_slug: dict[str, set[str]] = {}
-    for unit in seeded_units:
+    repository_max_pages = int(cfg.get("max_pages", 0) or 0)
+    unit_page_budgets = _allocate_page_budgets(seeded_units, repository_max_pages)
+    for unit, page_budget in zip(seeded_units, unit_page_budgets):
+        unit_cfg = dict(cfg)
+        unit_cfg["max_pages"] = page_budget
         for final_unit, plan_for_unit in _plan_unit_with_retry(
-            unit, scan, cfg, llm, repo_root, max_files_seed_cap=max_files_seed_cap
+            unit,
+            scan,
+            unit_cfg,
+            llm,
+            repo_root,
+            max_files_seed_cap=max_files_seed_cap,
+            page_budget=page_budget,
         ):
             unit_plans.append((final_unit.slug, plan_for_unit))
             unit_metadata.append(
@@ -126,6 +138,39 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
 _MAX_RETRY_SPLITS = 16
 
 
+def _allocate_page_budgets(
+    units: list[PlanningUnit], total_pages: int
+) -> list[int]:
+    """Allocate a finite repository page budget across units deterministically.
+
+    Every independently planned unit needs at least one page. Unlimited
+    repositories return ``0`` for each unit. Extra pages are distributed
+    by file count with stable unit-order tie breaking.
+    """
+    if total_pages <= 0:
+        return [0] * len(units)
+    if total_pages < len(units):
+        raise ValueError(
+            f"max_pages={total_pages} cannot cover {len(units)} planning units; "
+            "increase max_pages or use 0 for unlimited"
+        )
+
+    budgets: list[int] = [1] * len(units)
+    remaining = total_pages - len(units)
+    total_files = sum(max(1, len(unit.files)) for unit in units)
+    shares = [remaining * max(1, len(unit.files)) / total_files for unit in units]
+    for index, share in enumerate(shares):
+        budgets[index] += int(share)
+    leftover = total_pages - sum(budgets)
+    order = sorted(
+        range(len(units)),
+        key=lambda index: (-(shares[index] - int(shares[index])), units[index].slug),
+    )
+    for index in order[:leftover]:
+        budgets[index] += 1
+    return budgets
+
+
 def _plan_unit_with_retry(
     unit: PlanningUnit,
     scan: RepoScan,
@@ -134,6 +179,7 @@ def _plan_unit_with_retry(
     repo_root: Path,
     *,
     max_files_seed_cap: int,
+    page_budget: int | None = None,
     _depth: int = 0,
 ) -> list[tuple[PlanningUnit, DocPlan]]:
     """Plan one unit; on a genuine `UnitNeedsSplit` — a real over-budget
@@ -147,8 +193,17 @@ def _plan_unit_with_retry(
         return [(unit, _coarse_unit_plan(unit, make_sub_scan(scan, unit)))]
 
     sub_scan = make_sub_scan(scan, unit)
+    local_cfg = dict(cfg)
+    local_cfg["max_pages"] = page_budget or 0
     try:
-        plan_for_unit = _plan_local(sub_scan, cfg, llm, repo_root, apply_global_stage=False, unit=unit)
+        plan_for_unit = _plan_local(
+            sub_scan,
+            local_cfg,
+            llm,
+            repo_root,
+            apply_global_stage=False,
+            unit=unit,
+        )
         return [(unit, plan_for_unit)]
     except UnitNeedsSplit as exc:
         if len(unit.files) <= 1 or _depth >= _MAX_RETRY_SPLITS:
@@ -163,12 +218,27 @@ def _plan_unit_with_retry(
             f"[yellow]Unit '{unit.slug}' overflowed at step '{exc.step}' — splitting and retrying.[/yellow]"
         )
         parts = next_split(unit, max_files_seed_cap)
+        if page_budget and page_budget < len(parts):
+            coarse_unit = dataclasses.replace(unit, coarse=True)
+            return [
+                (
+                    coarse_unit,
+                    _coarse_unit_plan(coarse_unit, make_sub_scan(scan, coarse_unit)),
+                )
+            ]
+        child_budgets = _allocate_page_budgets(parts, page_budget or 0)
         results: list[tuple[PlanningUnit, DocPlan]] = []
-        for part in parts:
+        for part, child_budget in zip(parts, child_budgets):
             results.extend(
                 _plan_unit_with_retry(
-                    part, scan, cfg, llm, repo_root,
-                    max_files_seed_cap=max_files_seed_cap, _depth=_depth + 1,
+                    part,
+                    scan,
+                    cfg,
+                    llm,
+                    repo_root,
+                    max_files_seed_cap=max_files_seed_cap,
+                    page_budget=child_budget,
+                    _depth=_depth + 1,
                 )
             )
         return results
@@ -463,6 +533,21 @@ def _plan_local(
             research_context=sections.get("research_context") or "(none)",
             repo_profile=repo_profile_str,
             max_pages_instruction=max_pages_instruction,
+            global_bucket_instructions=(
+                "- Must include: 1 introduction/overview bucket "
+                "(is_introduction_page: true)\n"
+                "- If setup/deploy/CI artifacts listed above: include a setup/getting-started bucket\n"
+                "- If debug signals listed above (≥2 types): include a Debugging & Observability bucket\n"
+                "- Include a Domain Glossary bucket (omit only for trivial domains with <5 terms)\n"
+                "- If database models detected: include a database bucket with "
+                "include_database_context: true, prompt_style: 'database', "
+                "required_sections: ['er_diagram', 'table_definitions', "
+                "'relationships', 'migrations']"
+                if apply_global_stage
+                else "- Do NOT create repository-wide introduction, Start Here, "
+                "global glossary, setup, debug, database, runtime, or interface "
+                "buckets; the global stage creates those once from the full repository scan."
+            ),
         )
 
     try:

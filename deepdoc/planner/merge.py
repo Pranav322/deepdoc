@@ -23,22 +23,76 @@ def _namespaced(unit_slug: str, local_slug: str) -> str:
     return f"{unit_slug}/{local_slug}"
 
 
+_CONFIDENCE_RANK = {"low": 0, "medium": 1, "high": 2}
+
+
+def _merge_classifications(unit_plans: list[tuple[str, DocPlan]]) -> dict:
+    """Combine unit-local classifications into one repository view.
+
+    Cluster keys are namespaced when units collide. A homogeneous set of
+    unit profiles preserves that primary type; heterogeneous units describe
+    a platform/monorepo. Traits are unioned and confidence is conservative.
+    """
+    merged: dict = {}
+    cluster_names: dict = {}
+    profiles: list[dict] = []
+
+    for unit_slug, plan in unit_plans:
+        classification = plan.classification or {}
+        for key, value in classification.items():
+            if key in {"cluster_names", "repo_profile"}:
+                continue
+            if key not in merged:
+                merged[key] = copy.deepcopy(value)
+
+        for cluster_id, info in (classification.get("cluster_names") or {}).items():
+            key = cluster_id
+            if key in cluster_names and cluster_names[key] != info:
+                key = f"{unit_slug}/{cluster_id}"
+            cluster_names[key] = copy.deepcopy(info)
+
+        profile = classification.get("repo_profile") or {}
+        if profile:
+            profiles.append(profile)
+
+    merged["cluster_names"] = cluster_names
+    if profiles:
+        primary_types = {
+            profile.get("primary_type", "other") for profile in profiles
+        }
+        confidence = min(
+            (str(profile.get("confidence", "medium")) for profile in profiles),
+            key=lambda value: _CONFIDENCE_RANK.get(value, 1),
+        )
+        merged["repo_profile"] = {
+            "primary_type": (
+                next(iter(primary_types))
+                if len(primary_types) == 1
+                else "platform_monorepo"
+            ),
+            "secondary_traits": sorted(
+                {
+                    trait
+                    for profile in profiles
+                    for trait in profile.get("secondary_traits", [])
+                }
+            ),
+            "confidence": confidence,
+        }
+    return merged
+
+
 def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
     """Merge `(unit_slug, DocPlan)` pairs produced per planning unit.
 
-    Every non-introduction bucket is namespaced under its unit slug so two
-    units can never collide on slug or output path. Introduction pages are
-    special-cased (a defensive safety net: real LLM propose output can
-    legitimately volunteer its own introduction bucket per unit, even though
-    the deterministic Start Here injector itself is deferred to the global
-    stage that runs once after this merge): the first unit's introduction
-    becomes the single global introduction; every other unit's introduction
-    is demoted to a regular (namespaced) overview bucket so its content
-    survives instead of being dropped.
+    Every bucket is namespaced under its unit slug so independently planned
+    units can never collide on slug or output path. Unit-local introduction
+    pages are demoted to ordinary namespaced service overviews. No unit-local
+    page is allowed to claim the global root: after this merge, the global
+    stage sees that no introduction exists and injects one Start Here page
+    from the full repository scan.
 
-    The complete slug map — including the retained global introduction's
-    corrected (unprefixed) entry — is built in one pass over every unit's
-    buckets *before* any bucket reference is rewritten in a second pass.
+    The complete slug map is built in one pass over every unit's buckets *before* any bucket reference is rewritten in a second pass.
     Building and rewriting in a single interleaved pass (the original
     implementation) meant a bucket processed before its own unit's
     introduction bucket would resolve `depends_on`/`parent_slug` against the
@@ -59,27 +113,21 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
     if len(unit_plans) == 1:
         return unit_plans[0][1]
 
-    # Pass 1 — decide every bucket's final slug, including which
-    # introduction (if any) is retained unprefixed as the global one, before
-    # any bucket reference is rewritten.
+    # Pass 1 — decide every bucket's final namespaced slug before any bucket
+    # reference is rewritten. Unit-local introductions are service overviews;
+    # the full-scan global stage creates the one unprefixed introduction.
     slug_map: dict[tuple[str, str], str] = {}
-    has_global_intro = False
     for unit_slug, plan in unit_plans:
         for bucket in plan.buckets:
-            is_intro = bool((bucket.generation_hints or {}).get("is_introduction_page"))
-            if is_intro and not has_global_intro:
-                slug_map[(unit_slug, bucket.slug)] = bucket.slug
-                has_global_intro = True
-            else:
-                slug_map[(unit_slug, bucket.slug)] = _namespaced(unit_slug, bucket.slug)
+            slug_map[(unit_slug, bucket.slug)] = _namespaced(unit_slug, bucket.slug)
 
     # Pass 2 — clone every bucket and rewrite slug/depends_on/parent_slug
-    # (and demote a non-retained introduction) using the now-final map.
+    # (and demote every unit-local introduction) using the now-final map.
     merged_buckets: list[DocBucket] = []
     merged_nav: dict[str, list[str]] = {}
     merged_skipped: list[str] = []
     merged_orphaned: list[str] = []
-    merged_classification: dict = {}
+    merged_classification = _merge_classifications(unit_plans)
     merged_integration: list[dict] = []
 
     for unit_slug, plan in unit_plans:
@@ -108,10 +156,11 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
                 else bucket.parent_slug
             )
             bucket.slug = new_slug
-            if is_intro and new_slug != original.slug:
-                # This unit's introduction wasn't the one retained — demote
-                # it to a regular namespaced overview page; its content is
-                # kept, just no longer claiming to be *the* introduction.
+            if is_intro:
+                # Every local introduction describes only this filtered unit.
+                # Preserve it as a namespaced service overview, but remove the
+                # global-introduction marker so the full-scan global stage can
+                # inject the sole repository-wide Start Here page.
                 hints = dict(bucket.generation_hints)
                 hints.pop("is_introduction_page", None)
                 bucket.generation_hints = hints
@@ -125,8 +174,6 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
         merged_skipped.extend(plan.skipped_files)
         merged_orphaned.extend(plan.orphaned_files)
         merged_integration.extend(copy.deepcopy(plan.integration_candidates))
-        if not merged_classification:
-            merged_classification = copy.deepcopy(plan.classification)
 
     merged_plan = DocPlan(
         buckets=merged_buckets,

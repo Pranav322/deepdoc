@@ -301,31 +301,78 @@ def test_boundary_stub_is_immutable() -> None:
 
 
 def test_refinement_and_stub_computation_are_deterministic_under_shuffled_input() -> None:
-    """Reinserting files/edges/clusters in a different order must not change
-    the refined unit membership or boundary stubs."""
+    """Every collection refinement reads is an insertion-ordered Python
+    container built by upstream scanners, whose order is not contractual.
+    Two semantically identical scans whose file summaries, service map, call
+    edges, topology clusters/cluster map, endpoint bundles, and flow
+    candidates were each independently shuffled must produce byte-identical
+    `(slug, files, boundary stubs)` output."""
+    import random
 
-    def _build(order: list[str]) -> tuple[list[PlanningUnit], tuple]:
-        file_summaries = {}
-        file_services = {}
-        for path, service in [
-            ("services/orders/app.py", "orders"),
-            ("services/payments/app.py", "payments"),
-            ("shared/orders_helper.py", None),
-        ]:
-            file_summaries[path] = "s"
-            if service:
-                file_services[path] = service
-        edges = [
-            ("services/orders/app.py", "handle", "shared/orders_helper.py", "helper"),
-            ("services/orders/app.py", "handle2", "shared/orders_helper.py", "helper2"),
-            ("services/orders/app.py", "handle3", "shared/orders_helper.py", "helper3"),
-        ]
-        ordered_edges = [edges[i] for i in (order.index("e0"), order.index("e1"), order.index("e2"))] \
-            if False else edges  # edge insertion order into CallGraph is varied below
+    orders = "services/orders/app.py"
+    payments = "services/payments/app.py"
+    helper = "shared/orders_helper.py"
+    files = [orders, payments, helper]
+    services = [(orders, "orders"), (payments, "payments")]
+    edges = [
+        (orders, "handle", helper, "helper"),
+        (orders, "handle2", helper, "helper2"),
+        (orders, "handle3", helper, "helper3"),
+        (orders, "handle", payments, "charge"),
+    ]
+    clusters = [
+        TopologyCluster(
+            cluster_id=cid,
+            entry_files=[entry],
+            entry_symbols=["handle"],
+            all_files=[entry],
+            min_depth=0,
+            max_depth=1,
+            side_effects=[],
+            external_calls=[],
+            shared_dep_files=[],
+            avg_indegree=1.0,
+            is_foundational=False,
+        )
+        for cid, entry in (("orders", orders), ("payments", payments))
+    ]
+    cluster_map = [(orders, "orders"), (payments, "payments"), (helper, "orders")]
+    bundles = [
+        _endpoint_bundle("orders", orders, [helper]),
+        _endpoint_bundle("payments", payments, []),
+    ]
+    flows = [
+        FlowCandidate(
+            flow_id=flow_id,
+            title=f"{flow_id} title",
+            entry_kind="http",
+            entry_points=[],
+            involved_files=list(involved),
+        )
+        # More flows than `_MAX_FLOW_LABELS_PER_STUB` so the bounded label
+        # list is actually truncated — truncation is where a shuffled input
+        # order would otherwise show up in the output.
+        for flow_id, involved in (
+            ("checkout", (orders, payments)),
+            ("refund", (payments, orders)),
+            ("dispute", (orders, payments)),
+            ("settlement", (payments, orders)),
+        )
+    ]
+
+    def _build(seed: int) -> list[tuple[str, tuple[str, ...], tuple]]:
+        rnd = random.Random(seed)
+
+        def rng(items):
+            """One independently shuffled copy per collection (the same RNG
+            advances between calls, so no two collections share a
+            permutation)."""
+            shuffled = list(items)
+            rnd.shuffle(shuffled)
+            return shuffled
+
         graph = CallGraph()
-        for caller_file, caller_symbol, callee_file, callee_symbol in (
-            edges if order == ["a"] else list(reversed(edges))
-        ):
+        for caller_file, caller_symbol, callee_file, callee_symbol in rng(edges):
             graph.add_edge(
                 CallEdge(
                     caller_file=caller_file,
@@ -335,23 +382,41 @@ def test_refinement_and_stub_computation_are_deterministic_under_shuffled_input(
                 )
             )
         scan = _scan(
-            file_summaries=file_summaries,
-            file_services=file_services,
+            file_summaries={f: "s" for f in rng(files)},
+            file_services=dict(rng(services)),
             call_graph=graph,
+            endpoint_bundles=rng(bundles),
+            flow_candidates=rng(flows),
+            topology_map=TopologyMap(
+                clusters=rng(clusters),
+                file_indegree={},
+                file_call_depth={},
+                file_cluster_id=dict(rng(cluster_map)),
+                foundational_files=[],
+            ),
         )
-        units = build_planning_units(scan)
-        refined = refine_unit_ownership(scan, units)
+        refined = refine_unit_ownership(scan, build_planning_units(scan))
         baseline = {u.slug: frozenset(u.files) for u in refined}
-        stubs = compute_boundary_stubs(
-            scan, baseline["orders"], "orders", baseline
-        )
-        return refined, stubs
+        return [
+            (
+                u.slug,
+                u.files,
+                compute_boundary_stubs(scan, baseline[u.slug], u.slug, baseline),
+            )
+            for u in refined
+        ]
 
-    refined_a, stubs_a = _build(["a"])
-    refined_b, stubs_b = _build(["b"])
+    # Seed pair chosen so *every* one of the seven shuffled collections
+    # genuinely lands in a different order between the two builds.
+    a, b = _build(1), _build(36)
 
-    assert [(u.slug, u.files) for u in refined_a] == [(u.slug, u.files) for u in refined_b]
-    assert stubs_a == stubs_b
+    assert a == b
+    # ...and the shuffled evidence actually drove a decision worth locking:
+    # the helper was adopted, and the two services see each other.
+    orders_row = next(row for row in a if row[0] == "orders")
+    assert helper in orders_row[1]
+    assert [stub.remote_unit for stub in orders_row[2]] == ["payments"]
+    assert orders_row[2][0].flow_labels == ("checkout", "dispute", "refund")
 
 
 def test_flow_label_never_leaks_a_remote_path_even_from_a_hostile_title() -> None:

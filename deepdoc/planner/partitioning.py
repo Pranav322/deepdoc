@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import posixpath
 import re
+from typing import Any
 
 from ..llm import ModelCapabilityError
 from ..source_metadata import classify_source_kind
@@ -56,6 +57,12 @@ class PlanningUnit:
     # not send a coarse unit through normal LLM planning — see
     # `bound_planning_unit`.
     coarse: bool = False
+    # Compact, bounded cross-unit relationship stubs (see
+    # `unit_boundaries.BoundaryStub`) — recomputed fresh for this unit's
+    # exact final file membership, never inherited from a parent unit.
+    # Typed as `tuple[Any, ...]` rather than importing `BoundaryStub` here
+    # to avoid a partitioning<->unit_boundaries import cycle.
+    boundary_stubs: tuple[Any, ...] = ()
 
 
 def _slugify(name: str) -> str:

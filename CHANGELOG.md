@@ -7,6 +7,21 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.5.4] - 2026-08-25
+
+### Added
+- **Deterministic semantic refinement of planning-unit boundaries (Slice B).** A file left in the fallback "core" unit by service-name grouping can now be conservatively adopted into the named unit it actually belongs to, using call-graph, topology-cluster, endpoint-bundle, and runtime-task affinity as independent signals against a fixed-weight/margin threshold. Files with an explicit `file_services` assignment or marked foundational (e.g. shared topology dependencies) never move, regardless of affinity score.
+- **Bounded cross-unit boundary context in planning prompts.** Each planning unit's CLASSIFY prompt can now include a `cross_unit_context` section — bounded, path-free `BoundaryStub`s (slug/direction/aggregate counts/evidence kinds only) describing related cross-service work, recomputed fresh on every retry-split, so a unit can be aware of adjacent services without any remote file path or title ever entering its local prompt.
+
+### Fixed
+- **Boundary-refinement evidence could leak a remote service's file paths into a local unit's prompt.** `EndpointBundle.evidence` and `RuntimeTask.producer_files` kept their full unfiltered lists in `make_sub_scan()`, and flow labels were derived from arbitrary upstream `FlowCandidate` titles (sometimes a slugified file path) that no character-level sanitizer could reliably distinguish from a real identifier. Nested evidence lists are now trimmed to the unit's own files, and `BoundaryStub.flow_labels` — along with its sanitizer — was removed outright; flow co-occurrence now only contributes to the aggregate "flow" evidence kind and its score.
+- **A service literally named "core" could seize the fallback unclaimed-files slot and have its own anchored files redistributed away.** The unclaimed group is now identified by a structural `PlanningUnit.unclaimed` flag (preserved across split children) instead of a slug comparison against `"core"`. An unclaimed unit that refinement resolves down to zero files is now dropped instead of still being planned (which reserved a page budget and spent three real LLM calls on an empty sub-scan).
+- **Flow-based affinity signals were always dead in production.** Flow candidates were only ever built inside the global plan stage, which runs after every unit is already planned — so `scan.flow_candidates` was empty during refinement. Flow candidates are now built once in `plan_docs()` before boundary refinement runs.
+- **Topology cluster co-membership could move a file on weak evidence.** `topology.py` assigns any leftover file to its best-guess cluster, and ties are broken by picking the single biggest cluster with no correctness signal attached. Its affinity weight is now below the minimum acceptance threshold, so it can only corroborate another signal, never justify a move on its own.
+- **The CLASSIFY prompt's bounded cross-unit context could get starved by unbounded optional sections filling the budget first.** `fit_prompt_sections` fills optional sections greedily in list order; `cross_unit_context` is now ordered first among them, since (unlike the other, in-principle-unbounded sections) it's the one section with a fixed small cap.
+- **Unit membership changes now bump `ENGINE_FINGERPRINT`**, forcing a full replan instead of reusing a plan/ledger computed under the old core-file assignment.
+- **Redundant call-graph serialization.** `CallGraph.serialize()` re-materialized a full edge/relation dict once per unit, per coarse unit, and per retry-split against the same scan. `local_call_edges` is now derived once in `plan_docs()` and threaded through instead.
+
 ## [0.5.3] - 2026-08-25
 
 ### Added

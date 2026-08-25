@@ -10,13 +10,12 @@ small inputs are unaffected, and that omitted-record counts are surfaced.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from deepdoc.llm.token_budget import ModelCapabilities, count_message_tokens
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.scanner.clustering import cluster_giant_file
 from deepdoc.scanner.common import IntegrationCandidate
-from pathlib import Path
-
 from deepdoc.scanner.integrations import _normalize_integrations_llm
 
 
@@ -24,7 +23,12 @@ class _RecordingLLM:
     """Fake LLMClient: records every (system, prompt) pair and asserts each
     one fits the real token budget before returning a canned response."""
 
-    def __init__(self, context_window_tokens: int, output_reserve_tokens: int, response: str):
+    def __init__(
+        self,
+        context_window_tokens: int,
+        output_reserve_tokens: int,
+        response: str,
+    ):
         self.capabilities = ModelCapabilities(
             model="test",
             capability_model="gpt-4o-mini",

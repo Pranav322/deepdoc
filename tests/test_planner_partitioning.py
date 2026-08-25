@@ -192,6 +192,27 @@ def test_make_sub_scan_filters_file_scoped_state_without_mutating_source() -> No
     }
 
 
+def test_make_sub_scan_preserves_root_level_file_tree_entries() -> None:
+    scan = _scan(
+        file_tree={".": ["app.py", "shared.py"], "services/api": ["handler.py"]},
+        file_summaries={
+            "app.py": "root app",
+            "shared.py": "root shared",
+            "services/api/handler.py": "api handler",
+        },
+        file_services={"app.py": "api", "services/api/handler.py": "api"},
+    )
+    unit = PlanningUnit(
+        slug="api",
+        label="api",
+        files=("app.py", "services/api/handler.py"),
+    )
+
+    sub = make_sub_scan(scan, unit)
+
+    assert sub.file_tree == {".": ["app.py"], "services/api": ["handler.py"]}
+
+
 def test_make_sub_scan_topology_map_has_no_out_of_unit_files() -> None:
     topology = TopologyMap(
         clusters=[

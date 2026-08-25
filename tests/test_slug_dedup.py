@@ -22,11 +22,18 @@ def test_deduplicate_bucket_slugs_uniquifies_top_level_collisions() -> None:
     intro = _bucket("start-here", "Start Here", introduction=True)
     auth_a = _bucket("auth", "Service A Auth")
     auth_b = _bucket("auth", "Service B Auth")
+    # Force semantic IDs to depend on the slug rather than identical owned-file
+    # hashes, so renaming auth_b to auth-2 must refresh its identity.
+    for bucket in (auth_a, auth_b):
+        bucket.owned_files = []
+        bucket.semantic_id = build_bucket_semantic_id(bucket)
+    original_auth_b_id = auth_b.semantic_id
     plan = DocPlan(buckets=[intro, auth_a, auth_b], nav_structure={}, skipped_files=[])
 
     plan = _deduplicate_bucket_slugs(plan)
 
     assert [b.slug for b in plan.buckets] == ["start-here", "auth", "auth-2"]
+    assert auth_b.semantic_id != original_auth_b_id
     assert all(bucket.semantic_id == build_bucket_semantic_id(bucket) for bucket in plan.buckets)
 
     plan.nav_structure = {

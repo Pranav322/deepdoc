@@ -4,6 +4,8 @@ import dataclasses
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 
+import click
+
 from ..llm import ModelCapabilityError, fit_prompt_sections
 from ..telemetry import RunTelemetry
 from ..manifest import file_hash
@@ -150,7 +152,7 @@ def _allocate_page_budgets(
     if total_pages <= 0:
         return [0] * len(units)
     if total_pages < len(units):
-        raise ValueError(
+        raise click.ClickException(
             f"max_pages={total_pages} cannot cover {len(units)} planning units; "
             "increase max_pages or use 0 for unlimited"
         )

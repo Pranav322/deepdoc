@@ -302,10 +302,14 @@ def make_sub_scan(scan: RepoScan, unit: PlanningUnit) -> RepoScan:
 
     file_tree: dict[str, list[str]] = {}
     for directory, names in scan.file_tree.items():
+        normalized_directory = "" if directory in {"", "."} else directory.rstrip("/")
         kept = [
             name
             for name in names
-            if f"{directory}/{name}" in files or (not directory and name in files)
+            if (
+                f"{normalized_directory}/{name}".lstrip("/") in files
+                or (not normalized_directory and name in files)
+            )
         ]
         if kept:
             file_tree[directory] = kept

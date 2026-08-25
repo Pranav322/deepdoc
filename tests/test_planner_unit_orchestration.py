@@ -12,15 +12,17 @@ import re
 from pathlib import Path
 from unittest.mock import patch
 
+import click
 import pytest
 
 from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.llm.token_budget import ModelCapabilities
+from deepdoc.plan_contract import validate_plan_contract
 from deepdoc.planner import RepoScan
 from deepdoc.planner.engine import _allocate_page_budgets, _plan_local, plan_docs
-from deepdoc.planner.partitioning import PlanningUnit
 from deepdoc.planner.merge import missing_files
-from deepdoc.plan_contract import validate_plan_contract
+from deepdoc.planner.partitioning import PlanningUnit
+
 from .conftest import make_planner_llm
 
 _PATH_RE = re.compile(r"[\w./-]+\.py")
@@ -132,7 +134,7 @@ def test_single_unit_repo_uses_the_original_scan_with_no_prefixing() -> None:
             skipped_files=[],
         )
 
-    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
          patch("deepdoc.planner.engine._plan_local", side_effect=_record) as mock_plan_local:
         plan = plan_docs(scan, _cfg(), llm)
 
@@ -168,7 +170,7 @@ def test_multi_unit_repo_bounds_each_unit_to_its_own_files() -> None:
             skipped_files=[],
         )
 
-    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
          patch("deepdoc.planner.engine._plan_local", side_effect=_record):
         plan = plan_docs(scan, _cfg(), llm)
 
@@ -214,7 +216,7 @@ def test_bounded_multi_unit_planning_fits_where_one_global_inventory_would_not()
     llm = _tight_llm()
     cfg = _cfg()
 
-    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
          patch("deepdoc.planner.engine._llm_step", side_effect=_fake_llm_step):
         plan = plan_docs(scan, cfg, llm)
 
@@ -254,7 +256,7 @@ def test_repository_max_pages_must_cover_every_independent_unit() -> None:
         PlanningUnit(slug="b", label="b", files=("b.py",)),
     ]
 
-    with pytest.raises(ValueError, match="cannot cover 2 planning units"):
+    with pytest.raises(click.ClickException, match="cannot cover 2 planning units"):
         _allocate_page_budgets(units, 1)
 
 
@@ -285,7 +287,7 @@ def test_multi_unit_planner_receives_allocated_not_repository_page_cap() -> None
             classification={"repo_profile": {}, "cluster_names": {}},
         )
 
-    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
          patch("deepdoc.planner.engine._plan_local", side_effect=_record):
         plan_docs(scan, cfg, llm)
 
@@ -328,7 +330,7 @@ def test_single_oversized_service_still_splits_and_every_prompt_fits() -> None:
         seen_token_counts.append(tokens)
         return _fake_llm_step(passed_llm, system, prompt, step_name)
 
-    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
          patch("deepdoc.planner.engine._llm_step", side_effect=_measuring_llm_step):
         plan = plan_docs(scan, cfg, llm)
 
@@ -373,7 +375,10 @@ def test_proposal_dependent_assign_overflow_triggers_real_split_and_retry() -> N
     cfg = _cfg()
 
     from deepdoc.llm.token_budget import build_prompt_budget, count_message_tokens
-    from deepdoc.planner.partitioning import unit_likely_fits_budget, build_planning_units
+    from deepdoc.planner.partitioning import (
+        build_planning_units,
+        unit_likely_fits_budget,
+    )
 
     # Confirm the gap actually exists before relying on it: the cheap
     # preflight must say this repo fits as one unit (it only looks at file
@@ -434,7 +439,7 @@ def test_proposal_dependent_assign_overflow_triggers_real_split_and_retry() -> N
         seen_token_counts.append(tokens)
         return _verbose_fake_llm_step(passed_llm, system, prompt, step_name)
 
-    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, l, repo_root: s), \
+    with patch("deepdoc.planner.engine.run_phase2_scans", side_effect=lambda s, c, llm_client, repo_root: s), \
          patch("deepdoc.planner.engine._llm_step", side_effect=_measuring_llm_step):
         plan = plan_docs(scan, cfg, llm)
 

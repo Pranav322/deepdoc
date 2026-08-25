@@ -1,7 +1,7 @@
 """Deterministic semantic refinement of Slice A planning units.
 
-Uses only in-repo call-graph, topology, and flow evidence that already lives
-on `RepoScan` — no LLM calls, no GitNexus. Two responsibilities:
+Uses only in-repo call-graph, topology, endpoint-bundle, runtime, and flow
+evidence that already lives on `RepoScan` — no LLM calls, no GitNexus. Two responsibilities:
 
 1. `refine_unit_ownership()` conservatively moves an *unclaimed* (`core`)
    file into exactly one named service unit when deterministic evidence has
@@ -37,6 +37,14 @@ _MIN_MARGIN_RATIO = 2.0
 _CALL_EDGE_WEIGHT = 1.0
 _CLUSTER_COMEMBERSHIP_WEIGHT = 5.0
 _FLOW_COOCCURRENCE_WEIGHT = 2.0
+# Endpoint/runtime evidence is an *independent* signal — flow candidates are
+# optional and may not exist yet when refinement runs, so a service's own
+# endpoint bundle or background task is the only evidence some helpers have.
+# One such vote is exactly `_MIN_AFFINITY_SCORE`: sufficient on its own, but
+# still subject to the margin rule, so two services claiming the same helper
+# stays ambiguous and keeps it in core.
+_ENDPOINT_EVIDENCE_WEIGHT = 3.0
+_RUNTIME_PRODUCER_WEIGHT = 3.0
 
 # Cross-unit boundary stub bounds — keep this compact and cheap to render in
 # a local prompt, never an unbounded inventory.
@@ -127,6 +135,100 @@ def _flow_file_groups(scan: "RepoScan") -> list[tuple[str, frozenset[str]]]:
     return sorted(groups, key=lambda g: (g[0], sorted(g[1])))
 
 
+def _sole_owner(
+    file_path: str, unit_files: dict[str, frozenset[str]]
+) -> str | None:
+    """The named unit owning `file_path`, or None when unclaimed. Units are
+    disjoint by construction, so "exactly one" needs no tie-breaking."""
+    if not file_path:
+        return None
+    for slug in sorted(unit_files):
+        if file_path in unit_files[slug]:
+            return slug
+    return None
+
+
+def _endpoint_affinity(
+    scan: "RepoScan", unit_files: dict[str, frozenset[str]]
+) -> dict[str, dict[str, float]]:
+    """Votes from `scan.endpoint_bundles`: file -> {slug: score}.
+
+    A bundle only votes when its `handler_file` is anchored to exactly one
+    named unit *and* none of its own bounded `evidence` files belong to a
+    different named unit (a bundle spanning services is ambiguous, so it
+    stays silent). Only the bundle's real `EvidenceUnit.file_path` entries
+    are used — never text inferred from `endpoint_family`/`methods_paths`.
+    """
+    affinity: dict[str, dict[str, float]] = {}
+    bundles = sorted(
+        scan.endpoint_bundles or [],
+        key=lambda b: (
+            getattr(b, "endpoint_family", "") or "",
+            getattr(b, "handler_file", "") or "",
+        ),
+    )
+    for bundle in bundles:
+        handler = getattr(bundle, "handler_file", "") or ""
+        anchor = _sole_owner(handler, unit_files)
+        if anchor is None:
+            continue
+        evidence_files = sorted(
+            {
+                getattr(unit, "file_path", "") or ""
+                for unit in (getattr(bundle, "evidence", None) or [])
+            }
+            - {"", handler}
+        )
+        owners = {_sole_owner(f, unit_files) for f in evidence_files}
+        if owners - {None, anchor}:
+            continue
+        for f in evidence_files:
+            if _sole_owner(f, unit_files) is not None:
+                continue
+            bucket = affinity.setdefault(f, {})
+            bucket[anchor] = bucket.get(anchor, 0.0) + _ENDPOINT_EVIDENCE_WEIGHT
+    return affinity
+
+
+def _runtime_affinity(
+    scan: "RepoScan", unit_files: dict[str, frozenset[str]]
+) -> dict[str, dict[str, float]]:
+    """Votes from `scan.runtime_scan`: file -> {slug: score}.
+
+    Only `RuntimeTask.producer_files` is used: it is the one bounded
+    dependent-*file* list the live runtime model carries.
+    `RuntimeScheduler.invoked_targets` holds task/symbol names (not files)
+    and `RealtimeConsumer` only names its own `file_path`, so neither can
+    identify a bounded dependent file and neither votes. `linked_endpoints`
+    is likewise endpoint names, not files.
+
+    `scan.entry_points` is a flat list of entry *files* with no dependent
+    files attached, so it can only re-state ownership that `file_services`
+    already anchors — it adds no independent evidence and is not used.
+    """
+    tasks = sorted(
+        getattr(scan.runtime_scan, "tasks", None) or [],
+        key=lambda t: (getattr(t, "name", "") or "", getattr(t, "file_path", "") or ""),
+    )
+    affinity: dict[str, dict[str, float]] = {}
+    for task in tasks:
+        anchor = _sole_owner(getattr(task, "file_path", "") or "", unit_files)
+        if anchor is None:
+            continue
+        producers = sorted(
+            {p for p in (getattr(task, "producer_files", None) or []) if p}
+        )
+        owners = {_sole_owner(p, unit_files) for p in producers}
+        if owners - {None, anchor}:
+            continue
+        for p in producers:
+            if _sole_owner(p, unit_files) is not None:
+                continue
+            bucket = affinity.setdefault(p, {})
+            bucket[anchor] = bucket.get(anchor, 0.0) + _RUNTIME_PRODUCER_WEIGHT
+    return affinity
+
+
 def refine_unit_ownership(
     scan: "RepoScan", units: list["PlanningUnit"]
 ) -> list["PlanningUnit"]:
@@ -154,6 +256,8 @@ def refine_unit_ownership(
     unit_files = {slug: frozenset(unit.files) for slug, unit in named.items()}
     call_edges = _local_call_edges(scan)
     flow_groups = _flow_file_groups(scan)
+    endpoint_affinity = _endpoint_affinity(scan, unit_files)
+    runtime_affinity = _runtime_affinity(scan, unit_files)
 
     # file -> {slug: incident local call-edge count, either direction}
     call_affinity: dict[str, dict[str, float]] = {}
@@ -181,6 +285,8 @@ def refine_unit_ownership(
         for slug in sorted(named):
             score = call_affinity.get(f, {}).get(slug, 0.0)
             score += flow_affinity.get(f, {}).get(slug, 0.0)
+            score += endpoint_affinity.get(f, {}).get(slug, 0.0)
+            score += runtime_affinity.get(f, {}).get(slug, 0.0)
             if cluster_of.get(f) and cluster_of[f] in unit_clusters.get(slug, set()):
                 score += _CLUSTER_COMEMBERSHIP_WEIGHT
             if score:

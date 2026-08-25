@@ -397,3 +397,202 @@ def test_flow_label_never_leaks_a_remote_path_even_from_a_hostile_title() -> Non
         assert ".py" not in haystack
     # A normal, safe identifier still survives as a usable label.
     assert "checkout" in stubs[0].flow_labels
+
+
+def _endpoint_bundle(family: str, handler_file: str, evidence_files: list[str]):
+    from deepdoc.scanner.common import EndpointBundle, EvidenceUnit
+
+    return EndpointBundle(
+        endpoint_family=family,
+        methods_paths=[f"POST /{family}"],
+        handler_file=handler_file,
+        handler_symbols=["handle"],
+        evidence=[
+            EvidenceUnit(file_path=f, role="service") for f in evidence_files
+        ],
+    )
+
+
+def _two_service_scan(**overrides):
+    base = dict(
+        file_summaries={
+            "services/orders/app.py": "s",
+            "services/payments/app.py": "s",
+            "shared/helper.py": "s",
+        },
+        file_services={
+            "services/orders/app.py": "orders",
+            "services/payments/app.py": "payments",
+        },
+    )
+    base.update(overrides)
+    return _scan(**base)
+
+
+def test_endpoint_bundle_evidence_alone_can_adopt_an_unclaimed_helper() -> None:
+    """Endpoint bundles are required to be an *independent* deterministic
+    signal: a helper that only ever shows up as bounded evidence for one
+    service's endpoint must join that service even with no call graph, no
+    topology, and no flow candidates at all."""
+    scan = _two_service_scan(
+        endpoint_bundles=[
+            _endpoint_bundle("orders", "services/orders/app.py", ["shared/helper.py"]),
+        ],
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/helper.py" in refined["orders"]
+    assert "shared/helper.py" not in refined.get("core", ())
+
+
+def test_endpoint_evidence_from_two_services_leaves_the_helper_in_core() -> None:
+    """Equivalent endpoint evidence from two named services is ambiguous —
+    the helper is shared infrastructure and stays unclaimed."""
+    scan = _two_service_scan(
+        endpoint_bundles=[
+            _endpoint_bundle("orders", "services/orders/app.py", ["shared/helper.py"]),
+            _endpoint_bundle(
+                "payments", "services/payments/app.py", ["shared/helper.py"]
+            ),
+        ],
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/helper.py" in refined["core"]
+    assert "shared/helper.py" not in refined["orders"]
+    assert "shared/helper.py" not in refined["payments"]
+
+
+def test_endpoint_bundle_spanning_two_named_services_never_adopts() -> None:
+    """A bundle whose own evidence already belongs to two different named
+    services is not anchored to one unit — it must not vote at all."""
+    scan = _two_service_scan(
+        endpoint_bundles=[
+            _endpoint_bundle(
+                "orders",
+                "services/orders/app.py",
+                ["services/payments/app.py", "shared/helper.py"],
+            ),
+        ],
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/helper.py" in refined["core"]
+
+
+def test_runtime_task_producer_evidence_can_adopt_an_unclaimed_file() -> None:
+    """Runtime evidence is the second independent signal: `RuntimeTask`
+    carries bounded `producer_files`, so a task anchored to exactly one
+    named unit can adopt its producer.
+
+    Schedulers (`invoked_targets`) and realtime consumers expose no bounded
+    dependent *file* list in the live model, so they intentionally
+    contribute nothing — see `_runtime_affinity`."""
+    from deepdoc.scanner.common import RuntimeScan, RuntimeTask
+
+    scan = _two_service_scan(
+        file_summaries={
+            "services/orders/app.py": "s",
+            "services/payments/app.py": "s",
+            "shared/producer.py": "s",
+        },
+        runtime_scan=RuntimeScan(
+            tasks=[
+                RuntimeTask(
+                    name="reindex",
+                    file_path="services/orders/app.py",
+                    runtime_kind="celery",
+                    producer_files=["shared/producer.py"],
+                )
+            ]
+        ),
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/producer.py" in refined["orders"]
+
+
+def test_endpoint_evidence_never_overrides_explicit_service_ownership() -> None:
+    """A file `file_services` assigns is a hard anchor — endpoint evidence
+    from another service cannot pull it across."""
+    scan = _two_service_scan(
+        endpoint_bundles=[
+            _endpoint_bundle(
+                "orders", "services/orders/app.py", ["services/payments/app.py"]
+            ),
+        ],
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert refined["payments"] == ("services/payments/app.py",)
+    assert "services/payments/app.py" not in refined["orders"]
+
+
+def test_topology_shared_dependency_is_never_forced_into_one_service() -> None:
+    """`TopologyCluster.shared_dep_files` are foundational by construction
+    (topology only records callees inside `foundational_set`). Even with
+    endpoint evidence from one service on top, a shared dependency stays
+    core."""
+    scan = _two_service_scan(
+        endpoint_bundles=[
+            _endpoint_bundle("orders", "services/orders/app.py", ["shared/helper.py"]),
+        ],
+        call_graph=_call_graph(
+            ("services/orders/app.py", "handle", "shared/helper.py", "util"),
+            ("services/payments/app.py", "charge", "shared/helper.py", "util"),
+        ),
+        topology_map=TopologyMap(
+            clusters=[
+                TopologyCluster(
+                    cluster_id="orders",
+                    entry_files=["services/orders/app.py"],
+                    entry_symbols=["handle"],
+                    all_files=["services/orders/app.py"],
+                    min_depth=0,
+                    max_depth=0,
+                    side_effects=[],
+                    external_calls=[],
+                    shared_dep_files=["shared/helper.py"],
+                    avg_indegree=0.0,
+                    is_foundational=False,
+                ),
+                TopologyCluster(
+                    cluster_id="payments",
+                    entry_files=["services/payments/app.py"],
+                    entry_symbols=["charge"],
+                    all_files=["services/payments/app.py"],
+                    min_depth=0,
+                    max_depth=0,
+                    side_effects=[],
+                    external_calls=[],
+                    shared_dep_files=["shared/helper.py"],
+                    avg_indegree=0.0,
+                    is_foundational=False,
+                ),
+            ],
+            file_indegree={"shared/helper.py": 2},
+            file_call_depth={},
+            file_cluster_id={
+                "services/orders/app.py": "orders",
+                "services/payments/app.py": "payments",
+                "shared/helper.py": "foundational",
+            },
+            foundational_files=["shared/helper.py"],
+        ),
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/helper.py" in refined["core"]
+    assert "shared/helper.py" not in refined["orders"]

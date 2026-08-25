@@ -58,12 +58,27 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
     scan.planner_timings["phase2_scans"] = time.perf_counter() - step_start
 
     raw_units = build_planning_units(scan)
+    unit_call_edges: list[tuple[str, str]] | None = None
     if len(raw_units) > 1:
+        # Flow candidates are deterministic, LLM-free computation over the raw
+        # scan, but their only other builder runs in `_apply_global_plan_stage`
+        # — after every unit is planned. Build them here so refinement and
+        # boundary stubs actually see them; the lazy guard in
+        # `_attach_flow_hints_to_cluster_buckets` then finds the field
+        # populated and becomes a no-op, so there is no double build.
+        if scan.call_graph and not scan.flow_candidates:
+            step_start = time.perf_counter()
+            scan.flow_candidates = build_flow_candidates(scan)
+            scan.planner_timings["flow_candidates"] = time.perf_counter() - step_start
+        # Serializing the call graph is O(edges) plus every graph relation, so
+        # derive the local pair list once and hand it to every consumer rather
+        # than rebuilding it per unit and per retry-split.
+        unit_call_edges = local_call_edges(scan)
         # Semantic refinement (Slice B): conservatively attach unclaimed
         # `core` files to a single named unit when deterministic call-graph/
         # topology/flow evidence has one unambiguous dominant affinity.
         # No-op for the single-unit parity path (never reached here).
-        raw_units = refine_unit_ownership(scan, raw_units)
+        raw_units = refine_unit_ownership(scan, raw_units, call_edges=unit_call_edges)
     baseline_unit_files = {u.slug: frozenset(u.files) for u in raw_units}
     max_files_seed_cap = int(cfg.get("planning_unit_max_files_seed", 0) or 0)
 
@@ -113,6 +128,7 @@ def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Pa
             max_files_seed_cap=max_files_seed_cap,
             page_budget=page_budget,
             baseline_unit_files=baseline_unit_files,
+            call_edges=unit_call_edges,
         ):
             unit_plans.append((final_unit.slug, plan_for_unit))
             unit_metadata.append(
@@ -192,6 +208,7 @@ def _plan_unit_with_retry(
     max_files_seed_cap: int,
     page_budget: int | None = None,
     baseline_unit_files: dict[str, frozenset[str]] | None = None,
+    call_edges: list[tuple[str, str]] | None = None,
     _depth: int = 0,
 ) -> list[tuple[PlanningUnit, DocPlan]]:
     """Plan one unit; on a genuine `UnitNeedsSplit` — a real over-budget
@@ -214,6 +231,7 @@ def _plan_unit_with_retry(
             frozenset(unit.files),
             unit.slug.split("/part-")[0],
             baseline_unit_files,
+            call_edges=call_edges,
         ),
     )
     if unit.coarse:
@@ -266,6 +284,7 @@ def _plan_unit_with_retry(
                     max_files_seed_cap=max_files_seed_cap,
                     page_budget=child_budget,
                     baseline_unit_files=baseline_unit_files,
+                    call_edges=call_edges,
                     _depth=_depth + 1,
                 )
             )
@@ -401,11 +420,18 @@ def _plan_local(
             render_prompt=_render_classify,
             required_sections={"topology_clusters": topology_clusters_str},
             optional_sections=[
+                # First on purpose: `fit_prompt_sections` fills optional
+                # sections greedily in list order and each one consumes the
+                # remaining budget, so a trailing section is the first thing
+                # an unbounded inventory starves. This one is capped at
+                # `_MAX_STUBS_PER_UNIT` lines, so giving it absolute priority
+                # can displace at most ~5 records of whatever follows —
+                # every other section here is unbounded in principle.
+                ("cross_unit_context", cross_unit_context_str.splitlines()),
                 ("entry_points", [f"- {path}" for path in scan.entry_points]),
                 ("config_files", [f"- {path}" for path in scan.config_files]),
                 ("file_summaries", file_summaries_str.splitlines()),
                 ("endpoints", endpoints_str.splitlines()),
-                ("cross_unit_context", cross_unit_context_str.splitlines()),
             ],
             output_reserve_tokens=llm.output_reserve_tokens,
             step_name="planner classify",
@@ -1632,6 +1658,7 @@ from .partitioning import (
     next_split,
     unit_likely_fits_budget,
 )
+from .flow_candidates import build_flow_candidates
 from .merge import merge_unit_plans, missing_files, normalize_plan_disposition
-from .unit_boundaries import compute_boundary_stubs, format_boundary_stubs, refine_unit_ownership
+from .unit_boundaries import compute_boundary_stubs, format_boundary_stubs, local_call_edges, refine_unit_ownership
 from ..plan_contract import validate_plan_contract

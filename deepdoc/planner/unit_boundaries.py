@@ -23,8 +23,6 @@ if TYPE_CHECKING:
     from ..v2_models import RepoScan
     from .partitioning import PlanningUnit
 
-CORE_SLUG = "core"
-
 # A `core` file must clear this raw affinity score before it is eligible to
 # move into a single named unit.
 _MIN_AFFINITY_SCORE = 3.0
@@ -34,10 +32,15 @@ _MIN_AFFINITY_SCORE = 3.0
 _MIN_MARGIN_RATIO = 2.0
 
 _CALL_EDGE_WEIGHT = 1.0
-_CLUSTER_COMEMBERSHIP_WEIGHT = 5.0
+# Deliberately *below* `_MIN_AFFINITY_SCORE`: cluster co-membership can only
+# corroborate real evidence, never move a file on its own. `topology.py`
+# assigns a leftover file to its best-guess cluster and, failing that, to
+# `max(proto, key=len)` — the biggest cluster, an arbitrary bucket — so a file
+# with no call/endpoint/runtime evidence can inherit a cluster id that says
+# nothing about ownership.
+_CLUSTER_COMEMBERSHIP_WEIGHT = 2.0
 _FLOW_COOCCURRENCE_WEIGHT = 2.0
-# Endpoint/runtime evidence is an *independent* signal — flow candidates are
-# optional and may not exist yet when refinement runs, so a service's own
+# Endpoint/runtime evidence is an *independent* signal — a service's own
 # endpoint bundle or background task is the only evidence some helpers have.
 # One such vote is exactly `_MIN_AFFINITY_SCORE`: sufficient on its own, but
 # still subject to the margin rule, so two services claiming the same helper
@@ -73,7 +76,7 @@ class BoundaryStub:
     evidence_kinds: tuple[str, ...] = ()
 
 
-def _local_call_edges(scan: "RepoScan") -> list[tuple[str, str]]:
+def local_call_edges(scan: "RepoScan") -> list[tuple[str, str]]:
     """(caller_file, callee_file) pairs for local, non-external call edges,
     sorted so aggregation never depends on graph insertion order.
 
@@ -82,6 +85,10 @@ def _local_call_edges(scan: "RepoScan") -> list[tuple[str, str]]:
     duplicate file pair here means multiple distinct call sites/symbols
     between the same two files — that multiplicity is real affinity signal
     strength, not noise.
+
+    `serialize()` materializes a dict per edge *and* every graph relation, so
+    callers that need this more than once per scan should compute it once and
+    pass it via the `call_edges` keyword instead of re-deriving it per unit.
     """
     if scan.call_graph is None:
         return []
@@ -204,7 +211,9 @@ def _runtime_affinity(
 
 
 def refine_unit_ownership(
-    scan: "RepoScan", units: list["PlanningUnit"]
+    scan: "RepoScan",
+    units: list["PlanningUnit"],
+    call_edges: list[tuple[str, str]] | None = None,
 ) -> list["PlanningUnit"]:
     """Conservatively attach unclaimed (`core`) files to one named unit when
     deterministic evidence has a single unambiguous dominant affinity.
@@ -215,8 +224,8 @@ def refine_unit_ownership(
     ownership is a hard anchor. Never force-assigns a topology-foundational
     file merely because it has high fan-in — those stay shared/core.
     """
-    named = {u.slug: u for u in units if u.slug != CORE_SLUG}
-    core = next((u for u in units if u.slug == CORE_SLUG), None)
+    named = {u.slug: u for u in units if not u.unclaimed}
+    core = next((u for u in units if u.unclaimed), None)
     if len(named) < 2 or core is None or not core.files:
         return units
 
@@ -228,7 +237,8 @@ def refine_unit_ownership(
         for slug, unit in named.items()
     }
     unit_files = {slug: frozenset(unit.files) for slug, unit in named.items()}
-    call_edges = _local_call_edges(scan)
+    if call_edges is None:
+        call_edges = local_call_edges(scan)
     flow_groups = _flow_file_groups(scan)
     endpoint_affinity = _endpoint_affinity(scan, unit_files)
     runtime_affinity = _runtime_affinity(scan, unit_files)
@@ -282,7 +292,13 @@ def refine_unit_ownership(
     remaining_core = sorted(set(core.files) - set(reassignments))
     refined: list["PlanningUnit"] = []
     for unit in units:
-        if unit.slug == CORE_SLUG:
+        if unit.unclaimed:
+            # Every unclaimed file found a confident owner: drop the unit
+            # rather than planning an empty one. A zero-file unit still
+            # reserves a page in `_allocate_page_budgets` and burns three
+            # real LLM calls on an empty sub-scan.
+            if not remaining_core:
+                continue
             refined.append(dataclasses.replace(unit, files=tuple(remaining_core)))
             continue
         added = sorted(f for f, slug in reassignments.items() if slug == unit.slug)
@@ -302,6 +318,7 @@ def compute_boundary_stubs(
     unit_files: frozenset[str],
     own_baseline_slug: str,
     baseline_unit_files: dict[str, frozenset[str]],
+    call_edges: list[tuple[str, str]] | None = None,
 ) -> tuple[BoundaryStub, ...]:
     """Aggregate compact, bounded cross-unit evidence for `unit_files`
     against every other baseline unit.
@@ -321,7 +338,8 @@ def compute_boundary_stubs(
     if not unit_files or not others:
         return ()
 
-    call_edges = _local_call_edges(scan)
+    if call_edges is None:
+        call_edges = local_call_edges(scan)
     flow_groups = _flow_file_groups(scan)
 
     outbound: dict[str, int] = {slug: 0 for slug in others}

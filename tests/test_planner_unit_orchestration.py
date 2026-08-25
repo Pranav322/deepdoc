@@ -19,6 +19,7 @@ from deepdoc.config import DEFAULT_CONFIG
 from deepdoc.llm.token_budget import ModelCapabilities
 from deepdoc.plan_contract import validate_plan_contract
 from deepdoc.planner import RepoScan
+from deepdoc.planner import engine as engine_module
 from deepdoc.planner.engine import _allocate_page_budgets, _plan_local, plan_docs
 from deepdoc.planner.merge import missing_files
 from deepdoc.planner.partitioning import PlanningUnit
@@ -800,4 +801,111 @@ def test_proposal_dependent_split_gives_only_the_calling_child_a_boundary_stub()
     assert seen_token_counts, "expected at least one real _llm_step call"
     assert all(count <= maximum_input for count in seen_token_counts), (
         f"a real LLM request exceeded the budget: {max(seen_token_counts)} > {maximum_input}"
+    )
+
+
+def test_flow_candidates_are_built_before_unit_refinement() -> None:
+    """The flow co-occurrence signal is only real if `scan.flow_candidates` is
+    populated *before* refinement reads it. Its other builder lives in the
+    global plan stage, which runs after every unit is planned — so without an
+    earlier build the signal is silently dead in production."""
+    from deepdoc.call_graph import CallEdge, CallGraph
+    from deepdoc.scanner.common import EndpointBundle, EvidenceUnit
+
+    scan = _service_scan({"orders": 2, "payments": 2})
+    handler = next(p for p in scan.file_summaries if "/orders/" in p)
+    other = next(p for p in scan.file_summaries if "/payments/" in p)
+    scan.file_summaries["shared/helper.py"] = "shared helper | lines=10"
+
+    # Phase 2 rebuilds the call graph from `parsed_files`, so inject it there
+    # rather than assigning `scan.call_graph` up front.
+    graph = CallGraph()
+    for caller, symbol in ((handler, "handle"), (other, "charge")):
+        graph.add_edge(
+            CallEdge(
+                caller_file=caller,
+                caller_symbol=symbol,
+                callee_file="shared/helper.py",
+                callee_symbol="util",
+            )
+        )
+    scan.endpoint_bundles = [
+        EndpointBundle(
+            endpoint_family="orders",
+            methods_paths=["POST /orders"],
+            handler_file=handler,
+            handler_symbols=["handle"],
+            evidence=[EvidenceUnit(file_path=handler, role="service")],
+        )
+    ]
+
+    seen_counts: list[int] = []
+    real_refine = engine_module.refine_unit_ownership
+
+    def _spy(spied_scan, units, **kwargs):
+        seen_counts.append(len(spied_scan.flow_candidates or []))
+        return real_refine(spied_scan, units, **kwargs)
+
+    with (
+        patch("deepdoc.planner.engine.build_call_graph", return_value=graph),
+        patch("deepdoc.planner.engine.refine_unit_ownership", side_effect=_spy),
+        patch("deepdoc.planner.engine._llm_step", side_effect=_fake_llm_step),
+    ):
+        plan_docs(scan, _cfg(), make_planner_llm(), Path("."))
+
+    assert seen_counts, "expected refine_unit_ownership to be called"
+    assert seen_counts[0] > 0, (
+        "flow candidates must already exist when refinement reads them"
+    )
+
+
+def test_cross_unit_context_is_offered_before_the_unbounded_inventories() -> None:
+    """`fit_prompt_sections` fills optional sections greedily in list order and
+    each one consumes the remaining budget, so the compact cross-unit stub
+    section must be offered *before* the unbounded `file_summaries`/`endpoints`
+    inventories — otherwise a tight budget can drop it on exactly the large
+    multi-unit repos it exists for.
+
+    Asserted on the section order rather than on a starved prompt: the additive
+    per-record estimate in `fit_prompt_sections` overshoots the exact recount,
+    so a saturating inventory usually still leaves enough slack for five lines
+    to slip in. The ordering is the actual guarantee.
+    """
+    from deepdoc.planner.unit_boundaries import BoundaryStub
+
+    scan = _service_scan({"orders": 3})
+    unit = PlanningUnit(
+        slug="orders",
+        label="orders",
+        files=tuple(scan.file_summaries),
+        boundary_stubs=(
+            BoundaryStub(
+                remote_unit="payments",
+                direction="outbound",
+                score=3.0,
+                call_count=3,
+                evidence_kinds=("call",),
+            ),
+        ),
+    )
+    real_fit = engine_module.fit_prompt_sections
+    orders: list[list[str]] = []
+
+    def _spy(*args, **kwargs):
+        optional = kwargs.get("optional_sections") or []
+        orders.append([name for name, _ in optional])
+        return real_fit(*args, **kwargs)
+
+    with (
+        patch("deepdoc.planner.engine.fit_prompt_sections", side_effect=_spy),
+        patch("deepdoc.planner.engine._llm_step", side_effect=_fake_llm_step),
+    ):
+        _plan_local(scan, _cfg(), make_planner_llm(), Path("."), unit=unit)
+
+    classify_order = next(o for o in orders if "cross_unit_context" in o)
+    assert classify_order.index("cross_unit_context") < classify_order.index(
+        "file_summaries"
+    )
+    assert classify_order.index("cross_unit_context") < classify_order.index(
+        "endpoints"
     )

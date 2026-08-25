@@ -17,6 +17,7 @@ from deepdoc.planner.unit_boundaries import (
     BoundaryStub,
     compute_boundary_stubs,
     format_boundary_stubs,
+    local_call_edges,
     refine_unit_ownership,
 )
 from deepdoc.v2_models import RepoScan
@@ -93,7 +94,9 @@ def test_dominant_unclaimed_helper_joins_exactly_one_service() -> None:
     by_slug = {u.slug: u for u in refined}
 
     assert "shared/orders_helper.py" in by_slug["orders"].files
-    assert "shared/orders_helper.py" not in by_slug["core"].files
+    # `core` held nothing but this helper, so refinement empties it and the
+    # zero-file unit is dropped rather than planned.
+    assert "core" not in by_slug
     assert "shared/orders_helper.py" not in by_slug["payments"].files
     # Every file remains in exactly one unit.
     all_files = [f for u in refined for f in u.files]
@@ -712,3 +715,167 @@ def test_boundary_stub_never_carries_a_slugified_remote_path() -> None:
             assert leaked not in haystack
     # The aggregate flow evidence still survives — only the labels are gone.
     assert "flow" in stubs[0].evidence_kinds
+
+
+def test_service_literally_named_core_keeps_its_explicit_files() -> None:
+    """A repo where every file is claimed and one service happens to be named
+    `core` must not have that service treated as the unclaimed bucket. The
+    unclaimed unit is identified by `PlanningUnit.unclaimed`, never by its
+    slug, so a `file_services` anchor stays a hard anchor."""
+    scan = _scan(
+        file_summaries={
+            "core/util.py": "s",
+            "services/orders/app.py": "s",
+            "services/payments/app.py": "s",
+        },
+        file_services={
+            "core/util.py": "core",
+            "services/orders/app.py": "orders",
+            "services/payments/app.py": "payments",
+        },
+        # Heavy one-sided affinity that would otherwise drag the file away.
+        call_graph=_call_graph(
+            ("services/orders/app.py", "handle", "core/util.py", "helper"),
+            ("services/orders/app.py", "handle2", "core/util.py", "helper2"),
+            ("services/orders/app.py", "handle3", "core/util.py", "helper3"),
+        ),
+    )
+    units = build_planning_units(scan)
+    assert not any(u.unclaimed for u in units)
+
+    refined = refine_unit_ownership(scan, units)
+    by_slug = {u.slug: u for u in refined}
+
+    assert by_slug["core"].files == ("core/util.py",)
+    assert "core/util.py" not in by_slug["orders"].files
+    assert "core/util.py" not in by_slug["payments"].files
+
+
+def test_unclaimed_unit_is_dropped_when_every_file_is_reassigned() -> None:
+    """When refinement finds a confident owner for every unclaimed file the
+    emptied unit is dropped, not planned with zero files — an empty unit still
+    reserves a page budget and burns LLM calls on an empty sub-scan."""
+    scan = _scan(
+        file_summaries={
+            "services/orders/app.py": "s",
+            "services/payments/app.py": "s",
+            "shared/orders_util.py": "s",
+            "shared/payments_util.py": "s",
+        },
+        file_services={
+            "services/orders/app.py": "orders",
+            "services/payments/app.py": "payments",
+        },
+        call_graph=_call_graph(
+            ("services/orders/app.py", "a", "shared/orders_util.py", "x"),
+            ("services/orders/app.py", "b", "shared/orders_util.py", "y"),
+            ("services/orders/app.py", "c", "shared/orders_util.py", "z"),
+            ("services/payments/app.py", "a", "shared/payments_util.py", "x"),
+            ("services/payments/app.py", "b", "shared/payments_util.py", "y"),
+            ("services/payments/app.py", "c", "shared/payments_util.py", "z"),
+        ),
+    )
+    units = build_planning_units(scan)
+    assert any(u.unclaimed for u in units)
+
+    refined = refine_unit_ownership(scan, units)
+    by_slug = {u.slug: u.files for u in refined}
+
+    assert all(u.files for u in refined)
+    assert not any(u.unclaimed for u in refined)
+    assert "shared/orders_util.py" in by_slug["orders"]
+    assert "shared/payments_util.py" in by_slug["payments"]
+
+
+def test_cluster_comembership_alone_never_moves_a_file() -> None:
+    """Topology clustering assigns leftover files by best-guess and finally to
+    the biggest cluster, so cluster co-membership can only corroborate real
+    evidence — on its own it must never move a file out of `core`."""
+    scan = _two_service_scan(
+        topology_map=TopologyMap(
+            clusters=[],
+            file_indegree={},
+            file_call_depth={},
+            file_cluster_id={
+                "services/orders/app.py": "orders",
+                # Same cluster as orders, but with zero call, endpoint or
+                # runtime evidence to back it up.
+                "shared/helper.py": "orders",
+            },
+            foundational_files=[],
+        ),
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/helper.py" in refined["core"]
+    assert "shared/helper.py" not in refined["orders"]
+
+
+def test_precomputed_call_edges_match_and_are_actually_consulted() -> None:
+    """`plan_docs` derives the local call-edge list once and threads it through
+    refinement and every boundary-stub call rather than re-serializing the whole
+    graph per unit and per retry-split. Passing it must be equivalent to letting
+    the callee derive it — and must genuinely be used, not ignored."""
+    scan = _scan(
+        file_summaries={
+            "services/orders/app.py": "s",
+            "services/payments/app.py": "s",
+            "shared/orders_helper.py": "s",
+        },
+        file_services={
+            "services/orders/app.py": "orders",
+            "services/payments/app.py": "payments",
+        },
+        call_graph=_call_graph(
+            ("services/orders/app.py", "handle", "shared/orders_helper.py", "helper"),
+            ("services/orders/app.py", "handle2", "shared/orders_helper.py", "helper2"),
+            ("services/orders/app.py", "handle3", "shared/orders_helper.py", "helper3"),
+        ),
+    )
+    units = build_planning_units(scan)
+    edges = local_call_edges(scan)
+    assert edges, "expected local call edges for this scan"
+
+    # Equivalent to deriving it internally...
+    assert refine_unit_ownership(scan, units, call_edges=edges) == refine_unit_ownership(
+        scan, units
+    )
+    # ...and genuinely consulted: with no edges the call-edge-only evidence
+    # disappears and nothing is adopted.
+    assert refine_unit_ownership(scan, units, call_edges=[]) == units
+
+    baseline = {u.slug: frozenset(u.files) for u in units}
+    own = frozenset(scan.file_services)
+    assert compute_boundary_stubs(
+        scan, own, "orders", baseline, call_edges=edges
+    ) == compute_boundary_stubs(scan, own, "orders", baseline)
+    assert compute_boundary_stubs(scan, own, "orders", baseline, call_edges=()) == ()
+
+
+def test_cluster_comembership_plus_one_call_edge_still_adopts() -> None:
+    """Guards the other direction of the corroborating-only weight: cluster
+    co-membership must still be *meaningful* evidence, so pairing it with a
+    single real call edge is enough to reach the minimum affinity score."""
+    scan = _two_service_scan(
+        call_graph=_call_graph(
+            ("services/orders/app.py", "handle", "shared/helper.py", "util"),
+        ),
+        topology_map=TopologyMap(
+            clusters=[],
+            file_indegree={},
+            file_call_depth={},
+            file_cluster_id={
+                "services/orders/app.py": "orders",
+                "shared/helper.py": "orders",
+            },
+            foundational_files=[],
+        ),
+    )
+    units = build_planning_units(scan)
+
+    refined = {u.slug: u.files for u in refine_unit_ownership(scan, units)}
+
+    assert "shared/helper.py" in refined["orders"]
+    assert "core" not in refined

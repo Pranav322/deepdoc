@@ -14,6 +14,8 @@ import shutil
 import subprocess
 import tempfile
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Callable
 
@@ -116,6 +118,42 @@ def write_status(job_id: str, status: str, error: str | None = None, log: list |
             ContentType="application/json",
         )
     except Exception:  # noqa: BLE001 — status publishing is best-effort
+        pass
+
+
+RECONCILE_URL = os.environ.get("RECONCILE_URL", "https://cloud.deepdoc.tech/api/internal/reconcile")
+
+
+def notify_completion() -> None:
+    """Tell Cloudflare a job just reached a terminal state, so `projects.status`
+    in D1 gets corrected immediately instead of staying stale until the owning
+    user happens to reload /api/projects.
+
+    Deliberately a plain "go check R2" ping, not "job {id} is {status}": the
+    reconcile endpoint already knows how to read jobs/{id}/status.json (which
+    write_status() just wrote) and it sweeps every stale row in one pass, so
+    there's no new payload contract to keep in sync between this container and
+    the Cloudflare side — one shared idea of "the truth is in R2" instead of
+    two.
+
+    Best-effort like write_status(): RECONCILE_SECRET may be unset (local dev
+    has no reason to configure it), the network call may fail, and none of
+    that should affect whether the job itself succeeded. A 15-minute-stale
+    row is a UI inconvenience; retrying a whole generation because a
+    notification ping failed would not be a fair trade.
+    """
+    secret = os.environ.get("RECONCILE_SECRET")
+    if not secret:
+        return
+    req = urllib.request.Request(
+        RECONCILE_URL,
+        data=b"{}",
+        method="POST",
+        headers={"X-Reconcile-Secret": secret, "Content-Type": "application/json"},
+    )
+    try:
+        urllib.request.urlopen(req, timeout=10).read()
+    except (urllib.error.URLError, TimeoutError, OSError):
         pass
 
 

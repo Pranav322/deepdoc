@@ -27,7 +27,7 @@ load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
 from azure.storage.queue import QueueClient, TextBase64DecodePolicy  # noqa: E402
 
-from pipeline import run_generation, write_status  # noqa: E402
+from pipeline import notify_completion, run_generation, write_status  # noqa: E402
 
 
 def main() -> int:
@@ -70,6 +70,14 @@ def main() -> int:
     write_status(job_id, "queued", None, ["picked up by worker execution"])
 
     result = run_generation(job_id, owner, repo, token, lambda s, e, log: write_status(job_id, s, e, log))
+
+    # Tell Cloudflare the moment a terminal status exists in R2, so
+    # projects.status in D1 updates now instead of whenever (if ever) the
+    # owning user next loads /api/projects. Deliberately after
+    # run_generation (result['status'] is always terminal here) and before
+    # the message delete below, so a crash between them just means the next
+    # scheduled/manual sweep catches it — never a lost or duplicated ping.
+    notify_completion()
 
     # Delete on ANY terminal state (done OR failed) so a message is never
     # retried forever. A hard crash before this line leaves the message to

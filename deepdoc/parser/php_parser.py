@@ -42,6 +42,11 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
         return ()
     parser = Parser(PHP_LANGUAGE)
     root = parser.parse(content.encode("utf8")).root_node
+    # Error-recovery syntax does not prove a PHP dispatch, even when it happens
+    # to contain a recognizable partial call subtree.
+    if root.has_error:
+        return ()
+    import_aliases = _php_import_aliases(root)
     found: list[PhpDispatch] = []
     stack = [root]
     while stack:
@@ -49,7 +54,7 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
         if node.type == "scoped_call_expression":
             name = node.child_by_field_name("name")
             target = (
-                _php_class_target(node.named_children[0])
+                _php_class_target(node.named_children[0], import_aliases)
                 if node.named_children
                 and name is not None
                 and name.text == b"dispatch"
@@ -66,31 +71,70 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
                 and arguments is not None
                 and arguments.named_children
             ):
-                target = _php_dispatch_argument_target(arguments.named_children[0])
+                target = _php_dispatch_argument_target(
+                    arguments.named_children[0], import_aliases
+                )
                 if target:
                     found.append(PhpDispatch(target))
         stack.extend(reversed(node.named_children))
     return tuple(found)
 
 
-def _php_dispatch_argument_target(node) -> str:
+def _php_import_aliases(root) -> dict[str, str]:
+    """Validated class-import aliases keyed by their local PHP spelling."""
+    aliases: dict[str, str] = {}
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type == "namespace_use_declaration":
+            declaration = node.text.decode("utf8", "replace")
+            # `use function` and `use const` do not define dispatchable classes.
+            if not re.match(r"\s*use\s+(?:function|const)\b", declaration):
+                for clause in node.named_children:
+                    if clause.type != "namespace_use_clause":
+                        continue
+                    names = [
+                        child
+                        for child in clause.named_children
+                        if child.type in {"name", "qualified_name"}
+                    ]
+                    if not names:
+                        continue
+                    target = _php_class_target(names[0], {})
+                    if not target:
+                        continue
+                    alias = (
+                        names[-1].text.decode("utf8", "replace")
+                        if len(names) > 1
+                        else target.rsplit("\\", 1)[-1]
+                    )
+                    if alias:
+                        aliases[alias] = target
+        stack.extend(reversed(node.named_children))
+    return aliases
+
+
+def _php_dispatch_argument_target(node, import_aliases: dict[str, str]) -> str:
     """Class target in a global `dispatch(...)`/`event(...)` first argument."""
     while node.type == "argument" and node.named_children:
         node = node.named_children[0]
     if node.type == "class_constant_access_expression":
         children = node.named_children
         if len(children) >= 2 and children[-1].text == b"class":
-            return _php_class_target(children[0])
+            return _php_class_target(children[0], import_aliases)
     if node.type == "object_creation_expression" and node.named_children:
-        return _php_class_target(node.named_children[0])
+        return _php_class_target(node.named_children[0], import_aliases)
     return ""
 
 
-def _php_class_target(node) -> str:
-    """A static/new class target that is a lexical PHP name, never a variable."""
+def _php_class_target(node, import_aliases: dict[str, str]) -> str:
+    """A lexical PHP class name, canonicalized through a validated `use` alias."""
     if node.type not in {"name", "qualified_name"}:
         return ""
-    return node.text.decode("utf8", "replace")
+    target = node.text.decode("utf8", "replace").strip().lstrip("\\")
+    if not target:
+        return ""
+    return import_aliases.get(target) or target
 
 
 def parse_php(path: Path, content: str, language: str) -> ParsedFile:

@@ -242,14 +242,19 @@ def _link_runtime_evidence(
     is ambiguous—not a reason to enumerate every record in that bucket.
     """
     endpoint_keys_by_file = _published_endpoint_keys_by_file(api_endpoints)
-    tasks_by_alias: dict[str, list[RuntimeTask]] = {}
-    queues_by_alias: dict[str, list[RuntimeTask]] = {}
+    # Direct, queue, and scheduler relations are one-to-one claims. Store only
+    # a unique object or an ambiguity sentinel, never a candidate bucket that a
+    # producer site could enumerate. Signals intentionally retain a list because
+    # their dispatch grammar explicitly means a broadcast to matching handlers.
+    tasks_by_alias: dict[str, Any] = {}
+    queues_by_alias: dict[str, Any] = {}
     signals_by_alias: dict[str, list[RuntimeTask]] = {}
-    schedulers_by_alias: dict[str, list[RuntimeScheduler]] = {}
-    schedulers_by_owner: dict[tuple[str, str], list[RuntimeScheduler]] = {}
+    schedulers_by_target: dict[str, Any] = {}
+    schedulers_by_terminal_target: dict[str, Any] = {}
+    schedulers_by_owner: dict[tuple[str, str], Any] = {}
     for task in runtime.tasks:
         for alias in _target_aliases(task.name):
-            tasks_by_alias.setdefault(alias, []).append(task)
+            _add_exact_candidate(tasks_by_alias, alias, task)
         for trigger in task.triggers:
             for alias in _target_aliases(trigger):
                 signals_by_alias.setdefault(alias, []).append(task)
@@ -257,27 +262,35 @@ def _link_runtime_evidence(
         # task display names are not a cross-runtime queue identity.
         if task.queue:
             for alias in _target_aliases(task.queue):
-                queues_by_alias.setdefault(alias, []).append(task)
+                _add_exact_candidate(queues_by_alias, alias, task)
     for scheduler in runtime.schedulers:
         for alias in _target_aliases(scheduler.name):
-            schedulers_by_owner.setdefault((scheduler.file_path, alias), []).append(
-                scheduler
+            _add_exact_candidate(
+                schedulers_by_owner, (scheduler.file_path, alias), scheduler
             )
         for target in scheduler.invoked_targets:
-            for alias in _invoked_target_aliases(target):
-                schedulers_by_alias.setdefault(alias, []).append(scheduler)
+            aliases = _invoked_target_aliases(target)
+            if not aliases:
+                continue
+            _add_exact_candidate(schedulers_by_target, aliases[0], scheduler)
+            if len(aliases) > 1:
+                _add_exact_candidate(
+                    schedulers_by_terminal_target, aliases[-1], scheduler
+                )
 
     task_checks = 0
     scheduler_checks = 0
     signal_broadcast_edges = 0
     ambiguous_task_targets = 0
+    index_probes = 0
     for item in evidence:
         if item.relation == "scheduler_owner":
             endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
             if endpoint_keys:
-                for scheduler in _scheduler_owner_candidates(
+                scheduler = _resolve_owner_candidate(
                     schedulers_by_owner, item.file_path, item.target_aliases
-                ):
+                )
+                if scheduler is not None and scheduler is not _AMBIGUOUS:
                     scheduler_checks += 1
                     scheduler.linked_endpoints = sorted(
                         set(scheduler.linked_endpoints) | set(endpoint_keys)
@@ -299,14 +312,17 @@ def _link_runtime_evidence(
                     )
             continue
         if item.relation == "direct":
-            task_candidates = _indexed_candidates(tasks_by_alias, item.target_aliases)
+            index = tasks_by_alias
         elif item.relation == "queue":
-            task_candidates = _indexed_candidates(queues_by_alias, item.target_aliases)
+            index = queues_by_alias
         else:
             continue
-        if len(task_candidates) == 1:
+        index_probes += 1
+        task = _resolve_exact_candidate(index, item.target_aliases)
+        if task is _AMBIGUOUS:
+            ambiguous_task_targets += 1
+        elif task is not None:
             task_checks += 1
-            task = task_candidates[0]
             if item.file_path not in task.producer_files:
                 task.producer_files.append(item.file_path)
             endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
@@ -314,8 +330,6 @@ def _link_runtime_evidence(
                 task.linked_endpoints = sorted(
                     set(task.linked_endpoints) | set(endpoint_keys)
                 )
-        elif task_candidates:
-            ambiguous_task_targets += 1
 
         # Schedulers are invoked by direct task targets, never by a queue name.
         if item.relation != "direct":
@@ -323,9 +337,11 @@ def _link_runtime_evidence(
         endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
         if not endpoint_keys:
             continue
-        for scheduler in _indexed_candidates(
-            schedulers_by_alias, item.target_aliases
-        ):
+        index_probes += 1
+        scheduler = _resolve_scheduler_candidate(
+            schedulers_by_target, schedulers_by_terminal_target, item.target_aliases
+        )
+        if scheduler is not None and scheduler is not _AMBIGUOUS:
             scheduler_checks += 1
             scheduler.linked_endpoints = sorted(
                 set(scheduler.linked_endpoints) | set(endpoint_keys)
@@ -338,6 +354,7 @@ def _link_runtime_evidence(
             "link_scheduler_checks": scheduler_checks,
             "link_signal_broadcast_edges": signal_broadcast_edges,
             "link_ambiguous_task_targets": ambiguous_task_targets,
+            "link_index_probes": index_probes,
         }
     )
 
@@ -365,8 +382,67 @@ def _target_aliases(target: str) -> tuple[str, ...]:
     return (normalized,) if short == normalized else (normalized, short)
 
 
+_AMBIGUOUS = object()
+
+
+def _add_exact_candidate(index: dict[Any, Any], key: Any, candidate: Any) -> None:
+    """Record one exact candidate, degrading duplicate identities to ambiguity."""
+    current = index.get(key)
+    if current is None:
+        index[key] = candidate
+    elif current is not candidate:
+        index[key] = _AMBIGUOUS
+
+
+def _resolve_exact_candidate(index: dict[Any, Any], aliases: tuple[Any, ...]) -> Any:
+    """Resolve primary spelling first, then a bounded unique fallback set.
+
+    A qualified evidence spelling is authoritative when it has a direct index
+    hit. Otherwise its explicit aliases may recover short-form task discovery,
+    but duplicate buckets remain one sentinel lookup rather than a fan-out.
+    """
+    if not aliases:
+        return None
+    primary = index.get(aliases[0])
+    if primary is _AMBIGUOUS:
+        return _AMBIGUOUS
+    if primary is not None:
+        return primary
+    fallback = None
+    for alias in aliases[1:]:
+        candidate = index.get(alias)
+        if candidate is _AMBIGUOUS:
+            return _AMBIGUOUS
+        if candidate is None:
+            continue
+        if fallback is None:
+            fallback = candidate
+        elif fallback is not candidate:
+            return _AMBIGUOUS
+    return fallback
+
+
+def _resolve_scheduler_candidate(
+    exact_index: dict[str, Any],
+    terminal_index: dict[str, Any],
+    aliases: tuple[str, ...],
+) -> Any:
+    """Resolve scheduler targets without matching qualified suffix collisions."""
+    if not aliases:
+        return None
+    primary = aliases[0]
+    candidate = exact_index.get(primary)
+    if candidate is _AMBIGUOUS or candidate is not None:
+        return candidate
+    # A qualified producer must match the same qualified scheduled target. Only
+    # an unqualified producer spelling may use a unique terminal fallback.
+    if "." in primary or "\\" in primary:
+        return None
+    return terminal_index.get(primary)
+
+
 def _indexed_candidates(index: dict[str, list[Any]], aliases: tuple[str, ...]) -> list[Any]:
-    """Stable, identity-deduplicated candidates for exact aliases only."""
+    """Stable, identity-deduplicated candidates for explicit signal broadcasts."""
     candidates: list[Any] = []
     seen: set[int] = set()
     for alias in aliases:
@@ -377,20 +453,15 @@ def _indexed_candidates(index: dict[str, list[Any]], aliases: tuple[str, ...]) -
     return candidates
 
 
-def _scheduler_owner_candidates(
-    index: dict[tuple[str, str], list[RuntimeScheduler]],
+def _resolve_owner_candidate(
+    index: dict[tuple[str, str], Any],
     file_path: str,
     aliases: tuple[str, ...],
-) -> list[RuntimeScheduler]:
-    """Exact scheduler declarations owned by one source file and alias."""
-    candidates: list[RuntimeScheduler] = []
-    seen: set[int] = set()
-    for alias in aliases:
-        for scheduler in index.get((file_path, alias), ()):
-            if id(scheduler) not in seen:
-                seen.add(id(scheduler))
-                candidates.append(scheduler)
-    return candidates
+) -> Any:
+    """Resolve one scheduler declaration owned by the evidence source file."""
+    return _resolve_exact_candidate(
+        index, tuple((file_path, alias) for alias in aliases)
+    )
 
 
 def _discover_celery_tasks(

@@ -1559,6 +1559,37 @@ def test_direct_dispatch_evidence_rejects_ambiguous_duplicate_task_bucket() -> N
 
     assert runtime.scan_stats["link_task_checks"] == 0
     assert runtime.scan_stats["link_ambiguous_task_targets"] == len(evidence)
+    assert runtime.scan_stats["link_index_probes"] == len(evidence)
+    assert all(task.producer_files == [] for task in tasks)
+
+
+def test_queue_evidence_rejects_ambiguous_duplicate_queue_bucket_in_constant_lookups() -> None:
+    """A duplicate queue name cannot restore producer-evidence × worker work."""
+    tasks = [
+        RuntimeTask(
+            name=f"worker_{index}",
+            queue="orders",
+            file_path=f"workers/{index}.js",
+            runtime_kind="js_worker",
+        )
+        for index in range(251)
+    ]
+    evidence = [
+        DispatchEvidence(
+            file_path=f"producers/{index}.js",
+            language="javascript",
+            relation="queue",
+            target_aliases=("orders",),
+        )
+        for index in range(257)
+    ]
+    runtime = RuntimeScan(tasks=tasks)
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert runtime.scan_stats["link_task_checks"] == 0
+    assert runtime.scan_stats["link_ambiguous_task_targets"] == len(evidence)
+    assert runtime.scan_stats["link_index_probes"] == len(evidence)
     assert all(task.producer_files == [] for task in tasks)
 
 
@@ -1593,6 +1624,37 @@ def test_scheduler_endpoint_links_require_matching_dispatch_evidence() -> None:
     runtime = RuntimeScan(schedulers=schedulers)
 
     _link_runtime_evidence(runtime, evidence, endpoints)
+
+    assert runtime.scan_stats["link_scheduler_checks"] == 0
+    assert all(scheduler.linked_endpoints == [] for scheduler in schedulers)
+
+
+def test_qualified_dispatch_does_not_link_schedulers_by_terminal_name() -> None:
+    """A qualified dispatch may not fan out through unrelated `sync` suffixes."""
+    schedulers = [
+        RuntimeScheduler(
+            name=f"scheduler-{index}",
+            file_path=f"schedules/{index}.py",
+            scheduler_type="beat",
+            invoked_targets=[f"other_{index}.tasks.sync"],
+        )
+        for index in range(251)
+    ]
+    runtime = RuntimeScan(schedulers=schedulers)
+    evidence = [
+        DispatchEvidence(
+            file_path="handlers/orders.py",
+            language="python",
+            relation="direct",
+            target_aliases=("orders.tasks.sync", "sync"),
+        )
+    ]
+
+    _link_runtime_evidence(
+        runtime,
+        evidence,
+        [{"method": "POST", "path": "/orders", "file": "handlers/orders.py"}],
+    )
 
     assert runtime.scan_stats["link_scheduler_checks"] == 0
     assert all(scheduler.linked_endpoints == [] for scheduler in schedulers)
@@ -1651,6 +1713,63 @@ def test_php_dispatch_evidence_links_fqcn_and_short_discovered_targets() -> None
     ]
     assert runtime.tasks[0].producer_files == [path]
     assert runtime.tasks[1].producer_files == [path]
+
+
+def test_php_dispatch_evidence_rejects_malformed_source() -> None:
+    """Tree-sitter recovery nodes cannot authenticate executable dispatches."""
+    path = "app/Http/BrokenController.php"
+    source = "<?php\ndispatch(new SyncOrders($order);\n"
+
+    assert _collect_dispatch_evidence({path: source}, {path: "php"}) == []
+
+
+def test_php_dispatch_import_alias_resolves_to_its_actual_class() -> None:
+    """A `use ... as Alias` dispatch cannot link an unrelated short-name task."""
+    path = "app/Http/OrderController.php"
+    source = """<?php
+use App\\Other\\ExportJob as SyncOrders;
+dispatch(new SyncOrders($order));
+"""
+    unrelated = RuntimeTask(
+        name="SyncOrders",
+        file_path="app/Jobs/SyncOrders.php",
+        runtime_kind="laravel_job",
+    )
+    actual = RuntimeTask(
+        name="ExportJob",
+        file_path="app/Other/ExportJob.php",
+        runtime_kind="laravel_job",
+    )
+    runtime = RuntimeScan(tasks=[unrelated, actual])
+
+    evidence = _collect_dispatch_evidence({path: source}, {path: "php"})
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert [(item.relation, item.target_aliases) for item in evidence] == [
+        ("direct", (r"App\Other\ExportJob", "ExportJob"))
+    ]
+    assert unrelated.producer_files == []
+    assert actual.producer_files == [path]
+
+
+def test_php_dispatch_plain_import_keeps_short_task_link() -> None:
+    """A normal Laravel class import retains the valid short discovered target."""
+    path = "app/Http/OrderController.php"
+    source = """<?php
+use App\\Jobs\\SyncOrders;
+dispatch(new SyncOrders($order));
+"""
+    task = RuntimeTask(
+        name="SyncOrders",
+        file_path="app/Jobs/SyncOrders.php",
+        runtime_kind="laravel_job",
+    )
+
+    evidence = _collect_dispatch_evidence({path: source}, {path: "php"})
+    _link_runtime_evidence(RuntimeScan(tasks=[task]), evidence, [])
+
+    assert evidence[0].target_aliases == (r"App\Jobs\SyncOrders", "SyncOrders")
+    assert task.producer_files == [path]
 
 
 def test_js_scope_forms_shadow_require_before_runtime_binding() -> None:

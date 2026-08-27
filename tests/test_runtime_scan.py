@@ -1447,6 +1447,43 @@ def test_js_socketio_direct_require_factory_has_bound_connection() -> None:
     ]
 
 
+def test_js_shadowed_require_is_not_runtime_evidence() -> None:
+    """A local parameter named require is not Node's module loader."""
+    source = (
+        "function configure(require) {\n"
+        "  const io = require('socket.io')(server);\n"
+        "  io.on('connection', handleConnection);\n"
+        "}\n"
+    )
+    parsed = parse_file(Path("realtime/shadowed-require.js"), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces(
+        {"realtime/shadowed-require.js": parsed},
+        {"realtime/shadowed-require.js": source},
+    )
+
+    assert runtime.realtime_consumers == []
+
+
+def test_js_function_named_require_is_not_runtime_evidence() -> None:
+    """A local hoisted function named require also shadows Node's loader."""
+    source = (
+        "function require(moduleName) { return () => moduleName; }\n"
+        "const io = require('socket.io')(server);\n"
+        "io.on('connection', handleConnection);\n"
+    )
+    parsed = parse_file(Path("realtime/function-require.js"), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces(
+        {"realtime/function-require.js": parsed},
+        {"realtime/function-require.js": source},
+    )
+
+    assert runtime.realtime_consumers == []
+
+
 def test_queue_add_preserves_punctuation_only_worker_queue_links() -> None:
     """Queue literals need an exact index even when their names have no word run."""
     files = {

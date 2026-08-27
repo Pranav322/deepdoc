@@ -299,13 +299,18 @@ class _Binder:
         return ""
 
     def _require_module(self, node) -> str:
-        """The module of a `require("m")` call, or "" for anything else."""
+        """The global ``require(\"m\")`` module, if it is not shadowed locally."""
         while node.type in _VALUE_WRAPPERS and node.named_children:
             node = node.named_children[0]
         if node.type != "call_expression":
             return ""
         callee = node.child_by_field_name("function")
-        if callee is None or callee.type != "identifier" or _text(callee) != "require":
+        if (
+            callee is None
+            or callee.type != "identifier"
+            or _text(callee) != "require"
+            or self._is_locally_declared(callee)
+        ):
             return ""
         args = node.child_by_field_name("arguments")
         first = args.named_children[0] if args and args.named_children else None
@@ -313,6 +318,14 @@ class _Binder:
             self._match(_unquote(first))
             if first is not None and first.type == "string"
             else ""
+        )
+
+    def _is_locally_declared(self, name_node) -> bool:
+        """Whether a declaration shadows this otherwise global identifier."""
+        position = name_node.start_byte
+        return any(
+            start <= position < end
+            for _declared_at, (start, end) in self._decls.get(_text(name_node), ())
         )
 
     def _lookup(self, name_node) -> tuple[str, str] | None:
@@ -378,8 +391,22 @@ class _Binder:
 
 
 def _decl_scope(name_node) -> tuple[int, int]:
-    """Byte range of the scope a name declared at `name_node` governs."""
+    """Byte range of the lexical scope a declaration name governs."""
     node = name_node.parent
+    # Declaration names bind outside their own function/class body. Parameters
+    # deliberately do not take this branch: they bind inside the function body.
+    if node is not None and node.type in {
+        "function_declaration",
+        "generator_function_declaration",
+        "class_declaration",
+    }:
+        declared_name = node.child_by_field_name("name")
+        if (
+            declared_name is not None
+            and declared_name.start_byte == name_node.start_byte
+            and declared_name.end_byte == name_node.end_byte
+        ):
+            node = node.parent
     while node is not None and node.type not in _SCOPE_TYPES:
         node = node.parent
     return (node.start_byte, node.end_byte) if node is not None else (0, 0)

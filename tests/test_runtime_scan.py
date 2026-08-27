@@ -18,6 +18,7 @@ from deepdoc.scanner.common import (
     RuntimeTask,
 )
 from deepdoc.scanner.runtime import (
+    _collect_dispatch_evidence,
     _discover_nestjs_runtime,
     _link_runtime_evidence,
     _link_runtime_workflows,
@@ -1576,3 +1577,21 @@ def test_scheduler_endpoint_links_require_matching_dispatch_evidence() -> None:
 
     assert runtime.scan_stats["link_scheduler_checks"] == 0
     assert all(scheduler.linked_endpoints == [] for scheduler in schedulers)
+
+
+def test_python_dispatch_evidence_uses_executable_ast_calls() -> None:
+    """Whitespace-valid calls count; comments and strings never do."""
+    path = "handlers/orders.py"
+    source = (
+        'example = "sync.delay(payload)"\n'
+        "# post_save.send(sender=Order)\n"
+        "sync . delay(payload)\n"
+        "post_save . send(sender=Order)\n"
+    )
+
+    evidence = _collect_dispatch_evidence({path: source}, {path: "python"})
+
+    assert [(item.relation, item.target_aliases) for item in evidence] == [
+        ("direct", ("sync",)),
+        ("signal", ("post_save",)),
+    ]

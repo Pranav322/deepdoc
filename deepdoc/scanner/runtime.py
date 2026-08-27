@@ -1,3 +1,4 @@
+import ast
 import re
 from pathlib import Path
 from typing import Any
@@ -110,6 +111,63 @@ def _by_language(
         for path, content in eligible.items()
         if languages.get(path) in wanted
     }
+
+
+def _collect_dispatch_evidence(
+    file_contents: dict[str, str], languages: dict[str, str]
+) -> list[DispatchEvidence]:
+    """Collect only language-structural dispatch evidence from eligible source."""
+    evidence: list[DispatchEvidence] = []
+    for file_path, content in file_contents.items():
+        if languages.get(file_path) == "python":
+            evidence.extend(_python_dispatch_evidence(file_path, content))
+    return evidence
+
+
+def _python_dispatch_evidence(
+    file_path: str, content: str
+) -> list[DispatchEvidence]:
+    """Executable Python task/signal calls, never comments or string text."""
+    try:
+        tree = ast.parse(content)
+    except SyntaxError:
+        return []
+    calls = sorted(
+        (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
+        key=lambda node: (node.lineno, node.col_offset),
+    )
+    evidence: list[DispatchEvidence] = []
+    for call in calls:
+        func = call.func
+        if not isinstance(func, ast.Attribute):
+            continue
+        target = _python_dotted_name(func.value)
+        if not target:
+            continue
+        if func.attr in {"delay", "apply_async"}:
+            relation = "direct"
+        elif func.attr == "send":
+            relation = "signal"
+        else:
+            continue
+        evidence.append(
+            DispatchEvidence(
+                file_path=file_path,
+                language="python",
+                relation=relation,
+                target_aliases=_target_aliases(target),
+            )
+        )
+    return evidence
+
+
+def _python_dotted_name(node: ast.expr) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        parent = _python_dotted_name(node.value)
+        return f"{parent}.{node.attr}" if parent else ""
+    return ""
 
 
 # Every task-link pattern below needs one of these dispatch shapes present, so a

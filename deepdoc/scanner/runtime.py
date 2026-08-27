@@ -74,7 +74,11 @@ def discover_runtime_surfaces(
     runtime.realtime_consumers.extend(
         _discover_python_realtime_consumers(python_files)
     )
-    runtime.dispatch_evidence = _collect_dispatch_evidence(eligible, languages)
+    runtime.dispatch_evidence = _collect_dispatch_evidence(
+        eligible,
+        languages,
+        _python_task_names_by_path(runtime.tasks),
+    )
     runtime.dispatch_evidence.extend(_scheduler_owner_evidence(runtime.schedulers))
     _link_runtime_evidence(runtime, runtime.dispatch_evidence, api_endpoints or [])
     runtime.scan_stats["link_candidate_files"] = len(
@@ -126,15 +130,27 @@ def _by_language(
     }
 
 
+def _python_task_names_by_path(tasks: list[RuntimeTask]) -> dict[str, set[str]]:
+    """Celery task names keyed by their defining Python source file."""
+    names: dict[str, set[str]] = {}
+    for task in tasks:
+        if task.runtime_kind == "celery" and task.file_path.endswith(".py"):
+            names.setdefault(task.file_path, set()).add(task.name)
+    return names
+
+
 def _collect_dispatch_evidence(
-    file_contents: dict[str, str], languages: dict[str, str]
+    file_contents: dict[str, str],
+    languages: dict[str, str],
+    python_task_names_by_path: dict[str, set[str]] | None = None,
 ) -> list[DispatchEvidence]:
-    """Collect only language-structural dispatch evidence from eligible source."""
+    """Collect language-structural evidence only from eligible source files."""
     evidence: list[DispatchEvidence] = []
+    task_names = python_task_names_by_path or {}
     for file_path, content in file_contents.items():
         language = languages.get(file_path)
         if language == "python":
-            evidence.extend(_python_dispatch_evidence(file_path, content))
+            evidence.extend(_python_dispatch_evidence(file_path, content, task_names))
         elif language == "php":
             evidence.extend(
                 DispatchEvidence(
@@ -166,14 +182,41 @@ def _scheduler_owner_evidence(
     ]
 
 
+_PYTHON_DJANGO_SIGNAL_NAMES = frozenset(
+    {
+        "pre_init",
+        "post_init",
+        "pre_save",
+        "post_save",
+        "pre_delete",
+        "post_delete",
+        "m2m_changed",
+        "class_prepared",
+        "request_started",
+        "request_finished",
+        "got_request_exception",
+    }
+)
+
+
 def _python_dispatch_evidence(
-    file_path: str, content: str
+    file_path: str,
+    content: str,
+    task_names_by_path: dict[str, set[str]],
 ) -> list[DispatchEvidence]:
-    """Executable Python task/signal calls, never comments or string text."""
+    """Evidence from syntax-proven Celery task/Django signal bindings only."""
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return []
+    (
+        task_aliases,
+        task_modules,
+        signal_aliases,
+        signal_modules,
+        module_write_lines,
+    ) = _python_runtime_bindings(file_path, tree, task_names_by_path)
+    local_shadows_by_call = _python_local_shadows_by_call(tree)
     calls = sorted(
         (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
         key=lambda node: (node.lineno, node.col_offset),
@@ -183,24 +226,371 @@ def _python_dispatch_evidence(
         func = call.func
         if not isinstance(func, ast.Attribute):
             continue
-        target = _python_dotted_name(func.value)
-        if not target:
+        if _python_call_root_is_shadowed(
+            call, func.value, local_shadows_by_call
+        ):
             continue
         if func.attr in {"delay", "apply_async"}:
+            target = _python_bound_task_target(
+                func.value,
+                call.lineno,
+                task_aliases,
+                task_modules,
+                task_names_by_path,
+                module_write_lines,
+            )
             relation = "direct"
         elif func.attr == "send":
+            target = _python_bound_signal_target(
+                func.value,
+                call.lineno,
+                signal_aliases,
+                signal_modules,
+                module_write_lines,
+            )
             relation = "signal"
         else:
             continue
+        if not target:
+            continue
+        aliases = (
+            _python_target_aliases(target)
+            if relation == "direct"
+            else _target_aliases(target)
+        )
         evidence.append(
             DispatchEvidence(
                 file_path=file_path,
                 language="python",
                 relation=relation,
-                target_aliases=_python_target_aliases(target),
+                target_aliases=aliases,
             )
         )
     return evidence
+
+
+def _python_runtime_bindings(
+    file_path: str,
+    tree: ast.Module,
+    task_names_by_path: dict[str, set[str]],
+) -> tuple[
+    dict[str, tuple[str, int]],
+    dict[str, tuple[str, int]],
+    dict[str, tuple[str, int]],
+    dict[str, int],
+    dict[str, tuple[int, ...]],
+]:
+    """Top-level bindings that prove a task or Django signal receiver role."""
+    task_aliases: dict[str, tuple[str, int]] = {}
+    task_modules: dict[str, tuple[str, int]] = {}
+    signal_aliases: dict[str, tuple[str, int]] = {}
+    signal_modules: dict[str, int] = {}
+    module_write_lines = _python_module_write_lines(tree)
+    local_task_names = task_names_by_path.get(file_path, set())
+
+    for node in tree.body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            if (
+                node.name in local_task_names
+                and _python_is_celery_task_declaration(node)
+            ):
+                task_aliases[node.name] = (node.name, node.lineno)
+            continue
+        if isinstance(node, ast.ImportFrom):
+            module = node.module or ""
+            task_path = _python_import_module_file(file_path, module, node.level)
+            imported_tasks = task_names_by_path.get(task_path, set())
+            for alias in node.names:
+                if alias.name == "*":
+                    continue
+                local = alias.asname or alias.name
+                if alias.name in imported_tasks:
+                    task_aliases[local] = (alias.name, node.lineno)
+                if (
+                    module == "django.db.models.signals"
+                    and alias.name in _PYTHON_DJANGO_SIGNAL_NAMES
+                ):
+                    signal_aliases[local] = (alias.name, node.lineno)
+                elif module == "django.db.models" and alias.name == "signals":
+                    signal_modules[local] = node.lineno
+                if not module:
+                    module_path = _python_import_module_file(
+                        file_path, alias.name, node.level
+                    )
+                    if module_path in task_names_by_path:
+                        task_modules[local] = (module_path, node.lineno)
+            continue
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                local = alias.asname or ""
+                if not local:
+                    continue
+                if alias.name == "django.db.models.signals":
+                    signal_modules[local] = node.lineno
+                    continue
+                task_path = _python_import_module_file(file_path, alias.name, 0)
+                if task_path in task_names_by_path:
+                    task_modules[local] = (task_path, node.lineno)
+    return (
+        task_aliases,
+        task_modules,
+        signal_aliases,
+        signal_modules,
+        module_write_lines,
+    )
+
+
+def _python_module_write_lines(tree: ast.Module) -> dict[str, tuple[int, ...]]:
+    """Module-scope binding writes keyed by source line for temporal resolution."""
+    lines_by_name: dict[str, list[int]] = {}
+
+    def add(name: str, line: int) -> None:
+        if name:
+            lines_by_name.setdefault(name, []).append(line)
+
+    def visit(node: ast.AST) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            add(node.name, node.lineno)
+            return
+        if isinstance(node, ast.ClassDef):
+            add(node.name, node.lineno)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                add(alias.asname or alias.name.split(".", 1)[0], node.lineno)
+            return
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    add(alias.asname or alias.name, node.lineno)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            add(node.id, node.lineno)
+        for child in ast.iter_child_nodes(node):
+            visit(child)
+
+    for statement in tree.body:
+        visit(statement)
+    return {
+        name: tuple(sorted(lines)) for name, lines in lines_by_name.items()
+    }
+
+
+def _python_binding_is_current(
+    name: str,
+    binding_line: int,
+    call_line: int,
+    module_write_lines: dict[str, tuple[int, ...]],
+) -> bool:
+    """A top-level binding remains trusted until a later write to its name."""
+    if binding_line > call_line:
+        return False
+    writes = module_write_lines.get(name, ())
+    if sum(write == binding_line for write in writes) > 1:
+        # Same-line semicolon ordering is unavailable from this compact index.
+        # Reject rather than assuming the import won the race.
+        return False
+    return not any(binding_line < write <= call_line for write in writes)
+
+
+def _python_local_shadows_by_call(tree: ast.Module) -> dict[int, frozenset[str]]:
+    """Lexical names shadowing an outer runtime binding at each call site."""
+    shadows_by_call: dict[int, frozenset[str]] = {}
+
+    def visit(node: ast.AST, scopes: tuple[frozenset[str], ...]) -> None:
+        if isinstance(node, ast.Call):
+            shadows_by_call[id(node)] = frozenset().union(*scopes)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for decorator in node.decorator_list:
+                visit(decorator, scopes)
+            for default in (*node.args.defaults, *node.args.kw_defaults):
+                if default is not None:
+                    visit(default, scopes)
+            local_scope = _python_scope_bound_names(node)
+            for statement in node.body:
+                visit(statement, (*scopes, local_scope))
+            return
+        if isinstance(node, ast.Lambda):
+            for default in (*node.args.defaults, *node.args.kw_defaults):
+                if default is not None:
+                    visit(default, scopes)
+            visit(node.body, (*scopes, _python_scope_bound_names(node)))
+            return
+        if isinstance(node, ast.ClassDef):
+            for decorator in node.decorator_list:
+                visit(decorator, scopes)
+            for base in node.bases:
+                visit(base, scopes)
+            for keyword in node.keywords:
+                visit(keyword.value, scopes)
+            class_scope = _python_scope_bound_names(node)
+            for statement in node.body:
+                # Class attributes are not lexical variables inside methods.
+                method_scopes = scopes if isinstance(
+                    statement, (ast.FunctionDef, ast.AsyncFunctionDef)
+                ) else (*scopes, class_scope)
+                visit(statement, method_scopes)
+            return
+        for child in ast.iter_child_nodes(node):
+            visit(child, scopes)
+
+    visit(tree, ())
+    return shadows_by_call
+
+
+def _python_scope_bound_names(
+    scope: ast.FunctionDef | ast.AsyncFunctionDef | ast.Lambda | ast.ClassDef,
+) -> frozenset[str]:
+    """Bindings created in one lexical Python scope, excluding nested bodies."""
+    names: set[str] = set()
+    if not isinstance(scope, ast.ClassDef):
+        for argument in (
+            *scope.args.posonlyargs,
+            *scope.args.args,
+            *scope.args.kwonlyargs,
+        ):
+            names.add(argument.arg)
+        if scope.args.vararg is not None:
+            names.add(scope.args.vararg.arg)
+        if scope.args.kwarg is not None:
+            names.add(scope.args.kwarg.arg)
+
+    def collect(node: ast.AST) -> None:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(node.name)
+            return
+        if isinstance(node, ast.Lambda):
+            return
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                names.add(alias.asname or alias.name.split(".", 1)[0])
+            return
+        if isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name != "*":
+                    names.add(alias.asname or alias.name)
+            return
+        if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
+            names.add(node.id)
+        if isinstance(node, (ast.Global, ast.Nonlocal)):
+            # They can redirect a reference away from the discovered import;
+            # suppressing the evidence is safer than guessing the outer value.
+            names.update(node.names)
+        for child in ast.iter_child_nodes(node):
+            collect(child)
+
+    body = scope.body if not isinstance(scope, ast.Lambda) else (scope.body,)
+    for statement in body:
+        collect(statement)
+    return frozenset(names)
+
+
+def _python_call_root_is_shadowed(
+    call: ast.Call,
+    receiver: ast.expr,
+    shadows_by_call: dict[int, frozenset[str]],
+) -> bool:
+    """Whether a receiver's root name is bound locally at this call site."""
+    dotted = _python_dotted_name(receiver)
+    if not dotted:
+        return True
+    return dotted.split(".", 1)[0] in shadows_by_call.get(id(call), frozenset())
+
+
+def _python_is_celery_task_declaration(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+) -> bool:
+    for decorator in node.decorator_list:
+        target = decorator.func if isinstance(decorator, ast.Call) else decorator
+        dotted = _python_dotted_name(target)
+        if dotted.rsplit(".", 1)[-1] in {"task", "shared_task"}:
+            return True
+    return False
+
+
+def _python_import_module_file(file_path: str, module: str, level: int) -> str:
+    """Conservative .py path for a source-level import module."""
+    parent_parts = list(Path(file_path).parent.parts)
+    if level:
+        climb = level - 1
+        if climb > len(parent_parts):
+            return ""
+        parts = parent_parts[: len(parent_parts) - climb]
+    else:
+        parts = []
+    if module:
+        parts.extend(module.split("."))
+    return Path(*parts).with_suffix(".py").as_posix() if parts else ""
+
+
+def _python_bound_task_target(
+    node: ast.expr,
+    line: int,
+    task_aliases: dict[str, tuple[str, int]],
+    task_modules: dict[str, tuple[str, int]],
+    task_names_by_path: dict[str, set[str]],
+    module_write_lines: dict[str, tuple[int, ...]],
+) -> str:
+    dotted = _python_dotted_name(node)
+    if not dotted:
+        return ""
+    parts = dotted.split(".")
+    if len(parts) == 1:
+        binding = task_aliases.get(parts[0])
+        return (
+            binding[0]
+            if binding is not None
+            and _python_binding_is_current(
+                parts[0], binding[1], line, module_write_lines
+            )
+            else ""
+        )
+    module_binding = task_modules.get(parts[0])
+    if (
+        module_binding is None
+        or not _python_binding_is_current(
+            parts[0], module_binding[1], line, module_write_lines
+        )
+    ):
+        return ""
+    candidate = parts[-1]
+    return dotted if candidate in task_names_by_path.get(module_binding[0], set()) else ""
+
+
+def _python_bound_signal_target(
+    node: ast.expr,
+    line: int,
+    signal_aliases: dict[str, tuple[str, int]],
+    signal_modules: dict[str, int],
+    module_write_lines: dict[str, tuple[int, ...]],
+) -> str:
+    dotted = _python_dotted_name(node)
+    if not dotted:
+        return ""
+    parts = dotted.split(".")
+    if len(parts) == 1:
+        binding = signal_aliases.get(parts[0])
+        return (
+            binding[0]
+            if binding is not None
+            and _python_binding_is_current(
+                parts[0], binding[1], line, module_write_lines
+            )
+            else ""
+        )
+    module_line = signal_modules.get(parts[0])
+    candidate = parts[-1]
+    if (
+        module_line is not None
+        and _python_binding_is_current(
+            parts[0], module_line, line, module_write_lines
+        )
+        and candidate in _PYTHON_DJANGO_SIGNAL_NAMES
+    ):
+        return candidate
+    return ""
 
 
 def _python_dotted_name(node: ast.expr) -> str:
@@ -261,8 +651,7 @@ def _link_runtime_evidence(
         # Queue evidence may resolve only against an explicitly declared queue;
         # task display names are not a cross-runtime queue identity.
         if task.queue:
-            for alias in _target_aliases(task.queue):
-                _add_exact_candidate(queues_by_alias, alias, task)
+            _add_exact_candidate(queues_by_alias, task.queue, task)
     for scheduler in runtime.schedulers:
         for alias in _target_aliases(scheduler.name):
             _add_exact_candidate(
@@ -312,13 +701,12 @@ def _link_runtime_evidence(
                     )
             continue
         if item.relation == "direct":
-            index = tasks_by_alias
+            task = _resolve_exact_candidate(tasks_by_alias, item.target_aliases)
         elif item.relation == "queue":
-            index = queues_by_alias
+            task = _resolve_queue_candidate(queues_by_alias, item.target_aliases)
         else:
             continue
         index_probes += 1
-        task = _resolve_exact_candidate(index, item.target_aliases)
         if task is _AMBIGUOUS:
             ambiguous_task_targets += 1
         elif task is not None:
@@ -420,6 +808,11 @@ def _resolve_exact_candidate(index: dict[Any, Any], aliases: tuple[Any, ...]) ->
         elif fallback is not candidate:
             return _AMBIGUOUS
     return fallback
+
+
+def _resolve_queue_candidate(index: dict[str, Any], aliases: tuple[str, ...]) -> Any:
+    """Resolve queue evidence by its exact primary literal only."""
+    return index.get(aliases[0]) if aliases else None
 
 
 def _resolve_scheduler_candidate(
@@ -782,6 +1175,11 @@ JS_CALL_SHAPE_RE = re.compile(
 )
 
 
+def _js_may_have_bound_runtime_call(content: str, lowered: str) -> bool:
+    """Keep fast filtering without discarding renamed node-cron exports."""
+    return bool(JS_CALL_SHAPE_RE.search(content)) or "node-cron" in lowered
+
+
 def _js_str_arg(call: JsBoundCall, index: int) -> str:
     """Quoted-literal argument at `index`, or "" when it is not a literal."""
     if index >= len(call.args):
@@ -809,7 +1207,7 @@ def _js_dispatch_evidence(file_path: str, content: str) -> list[DispatchEvidence
     lowered = content.lower()
     if not any(token in lowered for token in JS_EVIDENCE_TOKENS):
         return []
-    if not JS_CALL_SHAPE_RE.search(content):
+    if not _js_may_have_bound_runtime_call(content, lowered):
         return []
     source, language = _js_parse_input(file_path, content)
     calls = js_bound_calls(
@@ -853,7 +1251,7 @@ def _discover_js_runtime(
         lowered = content.lower()
         if not any(token in lowered for token in JS_EVIDENCE_TOKENS):
             continue
-        if not JS_CALL_SHAPE_RE.search(content):
+        if not _js_may_have_bound_runtime_call(content, lowered):
             continue
 
         source, language = _js_parse_input(file_path, content)

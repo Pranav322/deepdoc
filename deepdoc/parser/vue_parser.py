@@ -72,56 +72,111 @@ def parse_vue(path: Path, content: str, language: str) -> ParsedFile:
 # Script block extraction
 # ─────────────────────────────────────────────────────────────────────────────
 
-_SCRIPT_PATTERN = re.compile(
-    r"<script\b([^>]*)>(.*?)</script>",
-    re.DOTALL | re.IGNORECASE,
-)
-
 _TEMPLATE_PATTERN = re.compile(
     r"<template\b[^>]*>(.*?)</template>",
     re.DOTALL | re.IGNORECASE,
 )
 
 
+_VUE_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"})
+
+
 def _extract_script_block(content: str) -> tuple[str, str, bool]:
-    """Extract script content, language, and whether it's <script setup>.
+    """Extract a top-level SFC script, ignoring comments and template markup.
 
-    Returns (script_content, lang, is_setup).
-    If both <script setup> and <script> exist, prefer <script setup>.
+    Vue SFC runtime code lives in top-level ``<script>`` blocks. A text regex
+    cannot distinguish one from a tag quoted in an HTML comment or nested in an
+    inert template, so the scanner below tracks enough markup structure to make
+    that boundary explicit.
     """
-    matches = _SCRIPT_PATTERN.finditer(content)
-
     setup_content = ""
     setup_lang = "js"
     regular_content = ""
     regular_lang = "js"
 
-    for m in matches:
-        attrs = m.group(1)
-        body = m.group(2).strip()
-
-        # Determine language from lang attribute
-        lang = "js"
-        lang_match = re.search(r'lang\s*=\s*["\'](\w+)["\']', attrs)
-        if lang_match:
-            lang = lang_match.group(1).lower()
-
-        is_setup = "setup" in attrs.lower()
-
+    for attrs, body in _top_level_vue_script_blocks(content):
+        lang_match = re.search(r'lang\s*=\s*["\'](\w+)["\']', attrs, re.I)
+        lang = lang_match.group(1).lower() if lang_match else "js"
+        is_setup = bool(re.search(r"(?:^|\s)setup(?:\s|=|$)", attrs, re.I))
         if is_setup:
-            setup_content = body
+            setup_content = body.strip()
             setup_lang = lang
         else:
-            regular_content = body
+            regular_content = body.strip()
             regular_lang = lang
 
-    # Prefer <script setup>
     if setup_content:
         return setup_content, setup_lang, True
     if regular_content:
         return regular_content, regular_lang, False
-
     return "", "js", False
+
+
+def _top_level_vue_script_blocks(content: str):
+    """Yield ``(attrs, body)`` only for executable, top-level SFC scripts."""
+    lowered = content.lower()
+    stack: list[str] = []
+    position = 0
+    while position < len(content):
+        tag_start = content.find("<", position)
+        if tag_start < 0:
+            return
+        if lowered.startswith("<!--", tag_start):
+            comment_end = lowered.find("-->", tag_start + 4)
+            position = len(content) if comment_end < 0 else comment_end + 3
+            continue
+        if lowered.startswith("</", tag_start):
+            name_match = re.match(r"</\s*([A-Za-z][\w:-]*)", content[tag_start:])
+            tag_end = content.find(">", tag_start + 2)
+            if name_match and stack:
+                name = name_match.group(1).lower()
+                if stack[-1] == name:
+                    stack.pop()
+            position = len(content) if tag_end < 0 else tag_end + 1
+            continue
+        if lowered.startswith("<!", tag_start) or lowered.startswith("<?", tag_start):
+            tag_end = content.find(">", tag_start + 2)
+            position = len(content) if tag_end < 0 else tag_end + 1
+            continue
+        name_match = re.match(r"<\s*([A-Za-z][\w:-]*)", content[tag_start:])
+        if name_match is None:
+            position = tag_start + 1
+            continue
+        name = name_match.group(1).lower()
+        attrs_start = tag_start + name_match.end()
+        tag_end = _vue_tag_end(content, attrs_start)
+        if tag_end is None:
+            return
+        attrs = content[attrs_start:tag_end]
+        if name in {"script", "style"}:
+            close_start = lowered.find(f"</{name}", tag_end + 1)
+            if close_start < 0:
+                return
+            close_end = content.find(">", close_start + len(name) + 2)
+            if close_end < 0:
+                return
+            if name == "script" and not stack:
+                yield attrs, content[tag_end + 1:close_start]
+            position = close_end + 1
+            continue
+        if not attrs.rstrip().endswith("/") and name not in _VUE_VOID_TAGS:
+            stack.append(name)
+        position = tag_end + 1
+
+
+def _vue_tag_end(content: str, start: int) -> int | None:
+    """Closing ``>`` of a tag, respecting quoted attribute values."""
+    quote = ""
+    for index in range(start, len(content)):
+        char = content[index]
+        if quote:
+            if char == quote:
+                quote = ""
+        elif char in {"\"", "'"}:
+            quote = char
+        elif char == ">":
+            return index
+    return None
 
 
 def _extract_template_block(content: str) -> str:

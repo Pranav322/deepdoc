@@ -4,6 +4,7 @@ from pathlib import Path
 
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.parser import js_ts_parser
+from deepdoc.parser.php_parser import php_dispatches
 from deepdoc.parser.registry import parse_file
 from deepdoc.scanner import (
     discover_config_impacts,
@@ -679,6 +680,24 @@ def test_vue_queue_workers_come_from_the_script_block() -> None:
     ] == ["send-digest"]
 
 
+def test_commented_vue_script_never_creates_runtime_evidence() -> None:
+    """A literal `<script>` inside an HTML comment is not an SFC script block."""
+    path = "src/components/Comment.vue"
+    content = (
+        "<template><!-- <script>\n"
+        "const Queue = require('bullmq').Queue;\n"
+        "const queue = new Queue('fake');\n"
+        "queue.add('job', {});\n"
+        "</script> --></template>\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None and parsed.language == "vue"
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert runtime.dispatch_evidence == []
+
+
 def _js_worker_names(path: str, content: str) -> list[str]:
     parsed = parse_file(Path(path), content)
     assert parsed is not None
@@ -1286,7 +1305,12 @@ def test_duplicate_signal_task_names_keep_own_trigger_links() -> None:
             for trigger in triggers
         ]
         evidence = _collect_dispatch_evidence(
-            {"producer.py": "post_save.send(sender=Order)\n"},
+            {
+                "producer.py": (
+                    "from django.db.models.signals import post_save\n"
+                    "post_save.send(sender=Order)\n"
+                )
+            },
             {"producer.py": "python"},
         )
         _link_runtime_evidence(RuntimeScan(tasks=tasks), evidence, [])
@@ -1332,10 +1356,17 @@ def test_unindexable_cron_trigger_does_not_restore_task_candidate_multiplier() -
         )
         languages[path] = "typescript"
     producer_path = "src/jobs/producer.py"
-    file_contents[producer_path] = "task_7.delay(payload)\n"
+    file_contents[producer_path] = (
+        "from .tasks import task_7\n\n"
+        "task_7.delay(payload)\n"
+    )
     languages[producer_path] = "python"
 
-    evidence = _collect_dispatch_evidence(file_contents, languages)
+    evidence = _collect_dispatch_evidence(
+        file_contents,
+        languages,
+        {"src/jobs/tasks.py": {"task_7"}},
+    )
     runtime = RuntimeScan(tasks=tasks)
     _link_runtime_evidence(runtime, evidence, [])
 
@@ -1666,11 +1697,17 @@ def test_python_dispatch_evidence_uses_executable_ast_calls() -> None:
     source = (
         'example = "sync.delay(payload)"\n'
         "# post_save.send(sender=Order)\n"
+        "from .tasks import sync\n"
+        "from django.db.models.signals import post_save\n"
         "sync . delay(payload)\n"
         "post_save . send(sender=Order)\n"
     )
 
-    evidence = _collect_dispatch_evidence({path: source}, {path: "python"})
+    evidence = _collect_dispatch_evidence(
+        {path: source},
+        {path: "python"},
+        {"handlers/tasks.py": {"sync"}},
+    )
 
     assert [(item.relation, item.target_aliases) for item in evidence] == [
         ("direct", ("sync",)),
@@ -1770,6 +1807,52 @@ dispatch(new SyncOrders($order));
 
     assert evidence[0].target_aliases == (r"App\Jobs\SyncOrders", "SyncOrders")
     assert task.producer_files == [path]
+
+
+def test_php_dispatch_class_aliases_are_case_insensitive() -> None:
+    """PHP class imports resolve regardless of the call site's alias casing."""
+    source = """<?php
+use App\\Jobs\\ActualJob as JobAlias;
+dispatch(new jobalias());
+"""
+
+    assert [item.target for item in php_dispatches(source)] == [
+        r"App\Jobs\ActualJob"
+    ]
+
+
+def test_php_shadowed_laravel_helpers_never_emit_dispatch_evidence() -> None:
+    """Imported or local helper names must not impersonate Laravel dispatch APIs."""
+    imported = """<?php
+use function Vendor\\Helpers\\dispatch;
+dispatch(new \\App\\Jobs\\Real());
+"""
+    local = """<?php
+function event($value) {}
+event(new \\App\\Events\\Real());
+"""
+
+    assert php_dispatches(imported) == ()
+    assert php_dispatches(local) == ()
+
+
+def test_php_dispatch_aliases_are_namespace_scoped() -> None:
+    """The same local PHP alias may resolve differently in separate namespaces."""
+    source = """<?php
+namespace A {
+    use App\\One\\First as Job;
+    dispatch(new Job());
+}
+namespace B {
+    use App\\Two\\Second as Job;
+    dispatch(new Job());
+}
+"""
+
+    assert [item.target for item in php_dispatches(source)] == [
+        r"App\One\First",
+        r"App\Two\Second",
+    ]
 
 
 def test_php_grouped_import_alias_resolves_to_its_actual_class() -> None:
@@ -1978,7 +2061,10 @@ def test_runtime_scan_links_only_structural_dispatch_evidence() -> None:
             "def sync(order_id):\n"
             "    return order_id\n"
         ),
-        "handlers/orders.py": "sync . delay(order_id)\n",
+        "handlers/orders.py": (
+            "from workers.tasks import sync\n\n"
+            "sync . delay(order_id)\n"
+        ),
         "src/notes.ts": "const prompt = `sync.delay(order_id)`;\n",
         "src/generic.js": "const queue = getQueue();\nqueue.add('sync', {});\n",
         "src/comments.js": (
@@ -2007,6 +2093,128 @@ def test_runtime_scan_links_only_structural_dispatch_evidence() -> None:
     assert runtime.scan_stats["link_candidate_files"] == 1
 
 
+def test_python_dispatch_requires_a_resolved_task_binding() -> None:
+    """An ordinary object's `.delay` cannot impersonate a discovered Celery task."""
+    sources = {
+        "orders/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task\n"
+            "def actual(order_id):\n"
+            "    return order_id\n"
+        ),
+        "orders/api.py": (
+            "from .tasks import actual\n\n"
+            "def enqueue(order_id):\n"
+            "    actual.delay(order_id)\n"
+            "    ordinary.delay(order_id)\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("direct", ("actual",))
+    ]
+    assert task.producer_files == ["orders/api.py"]
+
+
+def test_python_imported_task_survives_unrelated_inner_shadow() -> None:
+    """A parameter in one function cannot erase an import used by another."""
+    sources = {
+        "orders/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task\n"
+            "def actual(order_id):\n"
+            "    return order_id\n"
+        ),
+        "orders/api.py": (
+            "from .tasks import actual\n\n"
+            "def enqueue(order_id):\n"
+            "    actual.delay(order_id)\n\n"
+            "def unrelated(actual):\n"
+            "    return actual\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("direct", ("actual",))
+    ]
+    assert task.producer_files == ["orders/api.py"]
+
+
+def test_python_dispatch_before_later_module_rebind_remains_evidence() -> None:
+    """A later module assignment cannot erase a prior executable task call."""
+    sources = {
+        "orders/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task\n"
+            "def actual(order_id):\n"
+            "    return order_id\n"
+        ),
+        "orders/api.py": (
+            "from .tasks import actual\n\n"
+            "actual.delay(1)\n"
+            "actual = make_dynamic_task()\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("direct", ("actual",))
+    ]
+    assert task.producer_files == ["orders/api.py"]
+
+
+def test_python_local_rebind_does_not_reuse_imported_task() -> None:
+    """A function-local write shadows an imported task before `.delay` is called."""
+    sources = {
+        "orders/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task\n"
+            "def actual(order_id):\n"
+            "    return order_id\n"
+        ),
+        "orders/api.py": (
+            "from .tasks import actual\n\n"
+            "def enqueue(order_id):\n"
+            "    actual = make_dynamic_task()\n"
+            "    actual.delay(order_id)\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert runtime.dispatch_evidence == []
+    assert task.producer_files == []
+
+
 def test_python_qualified_dispatch_alias_links_short_task_name() -> None:
     """A dotted Python task reference keeps its full and terminal aliases."""
     path = "handlers/orders.py"
@@ -2016,7 +2224,9 @@ def test_python_qualified_dispatch_alias_links_short_task_name() -> None:
         runtime_kind="celery",
     )
     evidence = _collect_dispatch_evidence(
-        {path: "tasks.sync . delay(order_id)\n"}, {path: "python"}
+        {path: "import tasks as tasks\ntasks.sync . delay(order_id)\n"},
+        {path: "python"},
+        {"tasks.py": {"sync"}},
     )
 
     _link_runtime_evidence(RuntimeScan(tasks=[task]), evidence, [])
@@ -2067,6 +2277,30 @@ def test_queue_evidence_requires_an_explicit_worker_queue() -> None:
             language="javascript",
             relation="queue",
             target_aliases=("orders",),
+        )
+    ]
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert task.producer_files == []
+    assert runtime.scan_stats["link_task_checks"] == 0
+
+
+def test_queue_evidence_never_uses_terminal_queue_aliases() -> None:
+    """Queue identities are literals, not namespace-like task target aliases."""
+    task = RuntimeTask(
+        name="display",
+        file_path="workers/qualified.js",
+        runtime_kind="js_worker",
+        queue=r"tenant\critical",
+    )
+    runtime = RuntimeScan(tasks=[task])
+    evidence = [
+        DispatchEvidence(
+            file_path="producers/plain.js",
+            language="javascript",
+            relation="queue",
+            target_aliases=("critical",),
         )
     ]
 
@@ -2135,6 +2369,36 @@ def test_mixed_type_and_value_imports_bind_only_runtime_values() -> None:
 
     assert [(task.name, task.queue) for task in runtime.tasks] == [("orders", "orders")]
     assert runtime.dispatch_evidence == []
+
+
+def test_js_aliased_node_cron_schedule_bindings_are_discovered() -> None:
+    """A proven node-cron schedule export may be renamed at its binding site."""
+    sources = {
+        "jobs/import-alias.ts": (
+            "import { schedule as later } from 'node-cron';\n"
+            "later('* * * * *', importedTask);\n"
+        ),
+        "jobs/member-alias.js": (
+            "const later = require('node-cron').schedule;\n"
+            "later('*/5 * * * *', memberTask);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [
+        (scheduler.file_path, scheduler.cron, scheduler.invoked_targets)
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "node_cron"
+    ] == [
+        ("jobs/import-alias.ts", "* * * * *", ["importedTask"]),
+        ("jobs/member-alias.js", "*/5 * * * *", ["memberTask"]),
+    ]
 
 
 def test_js_named_node_cron_schedule_bindings_are_discovered() -> None:

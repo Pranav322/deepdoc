@@ -46,11 +46,24 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
     # to contain a recognizable partial call subtree.
     if root.has_error:
         return ()
-    import_aliases = _php_import_aliases(root)
     found: list[PhpDispatch] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
+
+    def visit(
+        node,
+        import_aliases: dict[str, str],
+        shadowed_helpers: frozenset[str],
+    ) -> None:
+        if node.type == "namespace_definition":
+            namespace_aliases = _php_import_aliases(node)
+            namespace_shadows = _php_shadowed_helpers(node)
+            body = node.child_by_field_name("body")
+            if body is not None:
+                visit(body, namespace_aliases, namespace_shadows)
+            else:
+                for child in node.named_children:
+                    if child.type != "namespace_name":
+                        visit(child, namespace_aliases, namespace_shadows)
+            return
         if node.type == "scoped_call_expression":
             name = node.child_by_field_name("name")
             target = (
@@ -66,8 +79,7 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
             function = node.child_by_field_name("function")
             arguments = node.child_by_field_name("arguments")
             if (
-                function is not None
-                and function.text in {b"dispatch", b"event"}
+                _php_unshadowed_helper_name(function, shadowed_helpers)
                 and arguments is not None
                 and arguments.named_children
             ):
@@ -76,70 +88,158 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
                 )
                 if target:
                     found.append(PhpDispatch(target))
-        stack.extend(reversed(node.named_children))
+        for child in node.named_children:
+            visit(child, import_aliases, shadowed_helpers)
+
+    visit(root, _php_import_aliases(root), _php_shadowed_helpers(root))
     return tuple(found)
 
 
-def _php_import_aliases(root) -> dict[str, str]:
-    """Validated class-import aliases keyed by their local PHP spelling."""
+_LARAVEL_HELPER_NAMES = frozenset({"dispatch", "event"})
+
+
+def _php_scope_children(scope):
+    """Immediate declarations belonging to one global or namespace scope."""
+    if scope.type == "namespace_definition":
+        body = scope.child_by_field_name("body")
+        return body.named_children if body is not None else scope.named_children
+    return scope.named_children
+
+
+def _php_import_aliases(scope) -> dict[str, str]:
+    """Validated class-import aliases owned directly by one PHP namespace scope."""
+    candidates = _php_scope_children(scope)
     aliases: dict[str, str] = {}
-    stack = [root]
+    for node in candidates:
+        if node.type != "namespace_use_declaration":
+            continue
+        declaration = node.text.decode("utf8", "replace")
+        # `use function` and `use const` do not define dispatchable classes.
+        if re.match(r"\s*use\s+(?:function|const)\b", declaration):
+            continue
+        children = node.named_children
+        group = next(
+            (child for child in children if child.type == "namespace_use_group"),
+            None,
+        )
+        prefix_node = next(
+            (child for child in children if child.type == "namespace_name"),
+            None,
+        )
+        prefix = (
+            prefix_node.text.decode("utf8", "replace").strip().lstrip("\\")
+            if prefix_node is not None
+            else ""
+        )
+        clauses = (
+            group.named_children
+            if group is not None
+            else [
+                child
+                for child in children
+                if child.type == "namespace_use_clause"
+            ]
+        )
+        for clause in clauses:
+            if clause.type != "namespace_use_clause":
+                continue
+            clause_text = clause.text.decode("utf8", "replace")
+            if re.match(r"\s*(?:function|const)\b", clause_text):
+                continue
+            names = [
+                child
+                for child in clause.named_children
+                if child.type in {"name", "qualified_name"}
+            ]
+            if not names:
+                continue
+            target = _php_class_target(names[0], {})
+            if not target:
+                continue
+            if group is not None and prefix:
+                target = f"{prefix}\\{target}"
+            alias = (
+                names[-1].text.decode("utf8", "replace")
+                if len(names) > 1
+                else target.rsplit("\\", 1)[-1]
+            )
+            if alias:
+                aliases[alias.lower()] = target
+    return aliases
+
+
+def _php_shadowed_helpers(scope) -> frozenset[str]:
+    """Laravel helper names rebound by imports or declarations in this namespace."""
+    shadows: set[str] = set()
+    children = _php_scope_children(scope)
+    for node in children:
+        if node.type == "namespace_use_declaration":
+            shadows.update(_php_function_import_aliases(node))
+    stack = list(reversed(children))
     while stack:
         node = stack.pop()
-        if node.type == "namespace_use_declaration":
-            declaration = node.text.decode("utf8", "replace")
-            # `use function` and `use const` do not define dispatchable classes.
-            if not re.match(r"\s*use\s+(?:function|const)\b", declaration):
-                children = node.named_children
-                group = next(
-                    (child for child in children if child.type == "namespace_use_group"),
-                    None,
-                )
-                prefix_node = next(
-                    (child for child in children if child.type == "namespace_name"),
-                    None,
-                )
-                prefix = (
-                    prefix_node.text.decode("utf8", "replace").strip().lstrip("\\")
-                    if prefix_node is not None
-                    else ""
-                )
-                clauses = (
-                    group.named_children
-                    if group is not None
-                    else [
-                        child
-                        for child in children
-                        if child.type == "namespace_use_clause"
-                    ]
-                )
-                for clause in clauses:
-                    if clause.type != "namespace_use_clause":
-                        continue
-                    clause_text = clause.text.decode("utf8", "replace")
-                    if re.match(r"\s*(?:function|const)\b", clause_text):
-                        continue
-                    names = [
-                        child
-                        for child in clause.named_children
-                        if child.type in {"name", "qualified_name"}
-                    ]
-                    if not names:
-                        continue
-                    target = _php_class_target(names[0], {})
-                    if not target:
-                        continue
-                    if group is not None and prefix:
-                        target = f"{prefix}\\{target}"
-                    alias = (
-                        names[-1].text.decode("utf8", "replace")
-                        if len(names) > 1
-                        else target.rsplit("\\", 1)[-1]
-                    )
-                    if alias:
-                        aliases[alias] = target
+        if node.type == "namespace_definition":
+            continue
+        if node.type == "function_definition":
+            name = node.child_by_field_name("name")
+            if name is not None:
+                helper = name.text.decode("utf8", "replace").strip().lower()
+                if helper in _LARAVEL_HELPER_NAMES:
+                    shadows.add(helper)
         stack.extend(reversed(node.named_children))
+    return frozenset(shadows & _LARAVEL_HELPER_NAMES)
+
+
+def _php_function_import_aliases(declaration) -> set[str]:
+    """Local spellings established by a structural ``use function`` declaration."""
+    declaration_text = declaration.text.decode("utf8", "replace")
+    declaration_is_function = bool(
+        re.match(r"\s*use\s+function\b", declaration_text)
+    )
+    children = declaration.named_children
+    group = next(
+        (child for child in children if child.type == "namespace_use_group"),
+        None,
+    )
+    clauses = (
+        group.named_children
+        if group is not None
+        else [
+            child for child in children if child.type == "namespace_use_clause"
+        ]
+    )
+    aliases: set[str] = set()
+    for clause in clauses:
+        if clause.type != "namespace_use_clause":
+            continue
+        clause_text = clause.text.decode("utf8", "replace")
+        if not declaration_is_function and not re.match(
+            r"\s*function\b", clause_text
+        ):
+            continue
+        names = [
+            child
+            for child in clause.named_children
+            if child.type in {"name", "qualified_name"}
+        ]
+        if not names:
+            continue
+        alias = (
+            names[-1].text.decode("utf8", "replace")
+            if len(names) > 1
+            else names[0].text.decode("utf8", "replace").rsplit("\\", 1)[-1]
+        )
+        if alias:
+            aliases.add(alias.lower())
     return aliases
+
+
+def _php_unshadowed_helper_name(function, shadows: frozenset[str]) -> str:
+    """The Laravel global helper only when the bare name was not rebound."""
+    if function is None or function.type != "name":
+        return ""
+    name = function.text.decode("utf8", "replace").strip().lower()
+    return name if name in _LARAVEL_HELPER_NAMES and name not in shadows else ""
 
 
 def _php_dispatch_argument_target(node, import_aliases: dict[str, str]) -> str:
@@ -162,7 +262,7 @@ def _php_class_target(node, import_aliases: dict[str, str]) -> str:
     target = node.text.decode("utf8", "replace").strip().lstrip("\\")
     if not target:
         return ""
-    return import_aliases.get(target) or target
+    return import_aliases.get(target.lower()) or target
 
 
 def parse_php(path: Path, content: str, language: str) -> ParsedFile:

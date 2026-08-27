@@ -237,23 +237,59 @@ def _link_runtime_evidence(
     endpoint_keys_by_file = _published_endpoint_keys_by_file(api_endpoints)
     tasks_by_alias: dict[str, list[RuntimeTask]] = {}
     queues_by_alias: dict[str, list[RuntimeTask]] = {}
+    signals_by_alias: dict[str, list[RuntimeTask]] = {}
     schedulers_by_alias: dict[str, list[RuntimeScheduler]] = {}
+    schedulers_by_owner: dict[tuple[str, str], list[RuntimeScheduler]] = {}
     for task in runtime.tasks:
         for alias in _target_aliases(task.name):
             tasks_by_alias.setdefault(alias, []).append(task)
+        for trigger in task.triggers:
+            for alias in _target_aliases(trigger):
+                signals_by_alias.setdefault(alias, []).append(task)
         # A worker's explicit queue is the preferred queue target. The name is
         # a conservative fallback for legacy detectors that encode it there.
         for alias in _target_aliases(task.queue or task.name):
             queues_by_alias.setdefault(alias, []).append(task)
     for scheduler in runtime.schedulers:
+        for alias in _target_aliases(scheduler.name):
+            schedulers_by_owner.setdefault((scheduler.file_path, alias), []).append(
+                scheduler
+            )
         for target in scheduler.invoked_targets:
             for alias in _target_aliases(target):
                 schedulers_by_alias.setdefault(alias, []).append(scheduler)
 
     task_checks = 0
     scheduler_checks = 0
+    signal_broadcast_edges = 0
     ambiguous_task_targets = 0
     for item in evidence:
+        if item.relation == "scheduler_owner":
+            endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
+            if endpoint_keys:
+                for scheduler in _scheduler_owner_candidates(
+                    schedulers_by_owner, item.file_path, item.target_aliases
+                ):
+                    scheduler_checks += 1
+                    scheduler.linked_endpoints = sorted(
+                        set(scheduler.linked_endpoints) | set(endpoint_keys)
+                    )
+            continue
+        if item.relation == "signal":
+            signal_candidates = _indexed_candidates(
+                signals_by_alias, item.target_aliases
+            )
+            endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
+            for task in signal_candidates:
+                task_checks += 1
+                signal_broadcast_edges += 1
+                if item.file_path not in task.producer_files:
+                    task.producer_files.append(item.file_path)
+                if endpoint_keys:
+                    task.linked_endpoints = sorted(
+                        set(task.linked_endpoints) | set(endpoint_keys)
+                    )
+            continue
         if item.relation == "direct":
             task_candidates = _indexed_candidates(tasks_by_alias, item.target_aliases)
         elif item.relation == "queue":
@@ -292,6 +328,7 @@ def _link_runtime_evidence(
             "link_evidence_count": len(evidence),
             "link_task_checks": task_checks,
             "link_scheduler_checks": scheduler_checks,
+            "link_signal_broadcast_edges": signal_broadcast_edges,
             "link_ambiguous_task_targets": ambiguous_task_targets,
         }
     )
@@ -329,6 +366,22 @@ def _indexed_candidates(index: dict[str, list[Any]], aliases: tuple[str, ...]) -
             if id(item) not in seen:
                 seen.add(id(item))
                 candidates.append(item)
+    return candidates
+
+
+def _scheduler_owner_candidates(
+    index: dict[tuple[str, str], list[RuntimeScheduler]],
+    file_path: str,
+    aliases: tuple[str, ...],
+) -> list[RuntimeScheduler]:
+    """Exact scheduler declarations owned by one source file and alias."""
+    candidates: list[RuntimeScheduler] = []
+    seen: set[int] = set()
+    for alias in aliases:
+        for scheduler in index.get((file_path, alias), ()):
+            if id(scheduler) not in seen:
+                seen.add(id(scheduler))
+                candidates.append(scheduler)
     return candidates
 
 

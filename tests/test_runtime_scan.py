@@ -1704,3 +1704,70 @@ def test_js_member_alias_queue_add_requires_bound_queue_role() -> None:
         (bound_path, "queue", ("---",)),
     ]
     assert task.producer_files == [bound_path]
+
+
+def test_signal_dispatch_evidence_broadcasts_only_matching_handlers() -> None:
+    """Signal delivery is explicit fan-out, not duplicate-name task ambiguity."""
+    post_save = RuntimeTask(
+        name="handle",
+        file_path="handlers/save.py",
+        runtime_kind="django_signal",
+        triggers=["post_save"],
+    )
+    post_delete = RuntimeTask(
+        name="handle",
+        file_path="handlers/delete.py",
+        runtime_kind="django_signal",
+        triggers=["post_delete"],
+    )
+    runtime = RuntimeScan(tasks=[post_save, post_delete])
+    evidence = [
+        DispatchEvidence(
+            file_path="orders/api.py",
+            language="python",
+            relation="signal",
+            target_aliases=("post_save",),
+        )
+    ]
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert post_save.producer_files == ["orders/api.py"]
+    assert post_delete.producer_files == []
+    assert runtime.scan_stats["link_signal_broadcast_edges"] == 1
+
+
+def test_scheduler_owner_evidence_links_only_owning_scheduler() -> None:
+    """Scheduler declarations are direct evidence, not a global endpoint sweep."""
+    schedulers = [
+        RuntimeScheduler(
+            name=f"scheduler-{index}",
+            file_path=f"schedules/{index}.py",
+            scheduler_type="beat",
+            invoked_targets=[f"task_{index}"],
+        )
+        for index in range(251)
+    ]
+    runtime = RuntimeScan(schedulers=schedulers)
+    evidence = [
+        DispatchEvidence(
+            file_path="schedules/7.py",
+            language="python",
+            relation="scheduler_owner",
+            target_aliases=("scheduler-7",),
+        )
+    ]
+
+    _link_runtime_evidence(
+        runtime,
+        evidence,
+        [{"method": "POST", "path": "/jobs/7", "file": "schedules/7.py"}],
+    )
+
+    assert schedulers[7].linked_endpoints == ["POST /jobs/7"]
+    assert all(
+        scheduler.linked_endpoints == []
+        for index, scheduler in enumerate(schedulers)
+        if index != 7
+    )
+    assert runtime.scan_stats["link_scheduler_checks"] == 1

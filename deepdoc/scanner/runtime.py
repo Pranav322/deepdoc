@@ -2,6 +2,7 @@ import re
 from pathlib import Path
 
 from .common import *
+from .common import RuntimeTask
 from ..parser.base import ParsedFile
 from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
 from ..parser.registry import language_for_extension
@@ -62,9 +63,10 @@ def discover_runtime_surfaces(
     runtime.schedulers.extend(go_schedulers)
     runtime.schedulers.extend(_discover_schedulers(python_js_files))
     runtime.realtime_consumers.extend(_discover_realtime_consumers(python_js_files))
-    runtime.scan_stats["link_candidate_files"] = _link_runtime_workflows(
-        runtime, eligible, api_endpoints or []
-    )
+    (
+        runtime.scan_stats["link_candidate_files"],
+        runtime.scan_stats["link_task_checks"],
+    ) = _link_runtime_workflows(runtime, eligible, api_endpoints or [])
     runtime.tasks = _dedupe_runtime_tasks(runtime.tasks)
     runtime.schedulers = _dedupe_schedulers(runtime.schedulers)
     runtime.realtime_consumers = _dedupe_consumers(runtime.realtime_consumers)
@@ -116,15 +118,48 @@ DISPATCH_MARKER_RE = re.compile(
     r"""\.(?:delay|apply_async|send)\s*\(|dispatch\s*\(|\bevent\s*\(\s*new\b|\bqueue\.add\s*\("""
 )
 
+# The identifier each dispatch shape names, captured without consuming the text
+# around it so nested shapes (`Job::dispatch(new Other)`) still both surface.
+# This turns a candidate file into the handful of targets it actually dispatches,
+# which is what the task index is keyed on - so a marker-bearing file that names
+# nothing we know costs one scan, not one probe per detected task.
+DISPATCH_TARGET_RE = re.compile(
+    r"""(?<![A-Za-z0-9_])(?P<recv>[A-Za-z0-9_]+)
+            (?=\s*\.\s*(?:delay|apply_async|send)\s*\()
+      | (?<![A-Za-z0-9_])(?P<static>[A-Za-z0-9_]+)(?=\s*::\s*dispatch\s*\()
+      | (?<![A-Za-z0-9_])(?:dispatch|event)\s*\(\s*(?:new\s+)?
+            (?=(?P<ctor>[A-Za-z0-9_]+))
+      | (?<![A-Za-z0-9_])queue\s*\.\s*add\s*\(\s*
+            (?=['\"](?P<queued>[^'\"]*)['\"])
+    """,
+    re.VERBOSE,
+)
+
+WORD_RUN_RE = re.compile(r"[A-Za-z0-9_]+")
+
+
+def _dispatch_index_keys(token: str) -> list[str]:
+    r"""Word runs a dispatch site can expose for `token`.
+
+    A task pattern anchors its name at one end of a dispatch site, and `\b`
+    forces that end to fall on a word boundary, so the extraction only ever sees
+    the token's leading or trailing word run: `sync-orders.delay(` shows
+    `orders`, `dispatch(App\Jobs\X` shows `App`. Indexing both ends keeps the
+    lookup a superset of the patterns, which then verify exactly.
+    """
+    runs = WORD_RUN_RE.findall(token)
+    return [runs[0], runs[-1]] if runs else []
+
 
 def _link_runtime_workflows(
     runtime: RuntimeScan,
     file_contents: dict[str, str],
     api_endpoints: list[dict[str, Any]],
-) -> int:
+) -> tuple[int, int]:
     """Attach producer files and endpoints to tasks/schedulers.
 
-    Returns the number of files that actually needed task-pattern work.
+    Returns the number of files that needed task-pattern work, and the number of
+    (file, task) pattern verifications those files actually cost.
     """
     endpoint_keys_by_file: dict[str, set[str]] = {}
     for ep in api_endpoints:
@@ -155,13 +190,28 @@ def _link_runtime_workflows(
         for task in runtime.tasks
         if task.name
     }
-    # Literal each task's patterns must contain, so a candidate file only pays
-    # regex cost for the tasks it could possibly mention.
+    # Literals `task_patterns[name]` can match. Name-keyed like `task_patterns`
+    # itself, so duplicate-name tasks keep sharing one pattern/token set.
     task_tokens = {
         task.name: {task.name, *(trigger for trigger in task.triggers if trigger)}
         for task in runtime.tasks
         if task.name
     }
+    # Tasks reachable from a given dispatch target, so a candidate file only pays
+    # regex cost for the tasks its own dispatch sites could possibly name.
+    tasks_by_target: dict[str, list[RuntimeTask]] = {}
+    unindexed_tasks: list[RuntimeTask] = []
+    for task in runtime.tasks:
+        if not task.name:
+            continue
+        tokens = task_tokens[task.name]
+        if any(not _dispatch_index_keys(token) for token in tokens):
+            # A token with no word run (a bare cron expression trigger) cannot be
+            # reached through the index, so it stays on the always-checked list.
+            unindexed_tasks.append(task)
+            continue
+        for key in {key for token in tokens for key in _dispatch_index_keys(token)}:
+            tasks_by_target.setdefault(key, []).append(task)
     scheduler_patterns = {
         scheduler.name: [
             re.compile(rf"""\b{re.escape(target)}\b""")
@@ -172,18 +222,19 @@ def _link_runtime_workflows(
     }
 
     candidate_files = 0
+    task_checks = 0
     for file_path, content in file_contents.items():
         if not content:
             continue
         endpoint_keys = sorted(endpoint_keys_by_file.get(file_path, ()))
         if DISPATCH_MARKER_RE.search(content):
             candidate_files += 1
-            for task in runtime.tasks:
+            for task in _tasks_named_by(content, tasks_by_target, unindexed_tasks):
+                task_checks += 1
                 patterns = task_patterns.get(task.name, [])
-                tokens = task_tokens.get(task.name, ())
-                if not patterns or not any(token in content for token in tokens):
-                    continue
-                if not any(pattern.search(content) for pattern in patterns):
+                if not patterns or not any(
+                    pattern.search(content) for pattern in patterns
+                ):
                     continue
                 if file_path not in task.producer_files:
                     task.producer_files.append(file_path)
@@ -202,7 +253,32 @@ def _link_runtime_workflows(
             scheduler.linked_endpoints = sorted(
                 set(scheduler.linked_endpoints) | set(endpoint_keys)
             )
-    return candidate_files
+    return candidate_files, task_checks
+
+
+def _tasks_named_by(
+    content: str,
+    tasks_by_target: dict[str, list[RuntimeTask]],
+    unindexed_tasks: list[RuntimeTask],
+) -> list[RuntimeTask]:
+    """Tasks this file's own dispatch sites could name, in a stable order."""
+    candidates = list(unindexed_tasks)
+    seen = {id(task) for task in candidates}
+    targets = dict.fromkeys(
+        match.group("recv")
+        or match.group("static")
+        or match.group("ctor")
+        or match.group("queued")
+        or ""
+        for match in DISPATCH_TARGET_RE.finditer(content)
+    )
+    for target in targets:
+        for key in _dispatch_index_keys(target):
+            for task in tasks_by_target.get(key, ()):
+                if id(task) not in seen:
+                    seen.add(id(task))
+                    candidates.append(task)
+    return candidates
 
 
 def _discover_celery_tasks(

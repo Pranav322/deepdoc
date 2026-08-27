@@ -1062,3 +1062,170 @@ def test_unpublished_endpoints_never_link_to_runtime_surfaces() -> None:
         "GET /test-only" not in surface.linked_endpoints
         for surface in (*runtime.tasks, *runtime.schedulers)
     )
+
+
+class _ProbeCountingStr(str):
+    """A file body that counts substring probes made against it.
+
+    `token in content` is exactly the per-task work the DD-001 hotspot did for
+    every marker-bearing file, so counting it measures link work directly
+    instead of timing it.
+    """
+
+    probes = 0
+
+    def __contains__(self, other: object) -> bool:
+        _ProbeCountingStr.probes += 1
+        return str.__contains__(self, other)
+
+
+def _marker_heavy_corpus(
+    task_count: int, marker_files: int
+) -> tuple[dict[str, ParsedFile], dict[str, str]]:
+    """Many product files with unrelated `.delay(` calls, plus many real tasks."""
+    body = "from celery import shared_task\n\n"
+    for index in range(task_count):
+        body += f"@shared_task(queue='q{index}')\ndef task_{index}(x):\n    return x\n\n"
+    parsed_files = {"worker/tasks.py": _parsed_file("worker/tasks.py")}
+    file_contents: dict[str, str] = {
+        "worker/tasks.py": _ProbeCountingStr(body),
+        # The one genuine product dispatch site.
+        "worker/api.py": _ProbeCountingStr(
+            "from .tasks import task_7\n\ndef enqueue(x):\n    task_7.delay(x)\n"
+        ),
+    }
+    parsed_files["worker/api.py"] = _parsed_file("worker/api.py")
+    for index in range(marker_files):
+        path = f"src/vs/editor/animation{index}.ts"
+        parsed_files[path] = _parsed_file(path, language="typescript")
+        file_contents[path] = _ProbeCountingStr(
+            "import { timeout } from './async';\n"
+            f"export function run{index}() {{ this.anim.delay(120); }}\n"
+            + "// padding\n" * 50
+        )
+    return parsed_files, file_contents
+
+
+def test_task_link_work_is_bounded_by_extracted_dispatch_targets() -> None:
+    """DD-001: unrelated dispatch markers must not cost one probe per task.
+
+    The VS Code hotspot is a repo with hundreds of runtime tasks and hundreds of
+    product files whose `.delay(` calls belong to something else entirely. Link
+    work there must follow the dispatch targets a file actually names, so
+    doubling the task count must not double the work.
+    """
+    marker_files = 257
+
+    measurements = {}
+    for task_count in (251, 502):
+        _ProbeCountingStr.probes = 0
+        parsed_files, file_contents = _marker_heavy_corpus(task_count, marker_files)
+        runtime = discover_runtime_surfaces(parsed_files, file_contents)
+        measurements[task_count] = (_ProbeCountingStr.probes, runtime)
+
+    probes_small, runtime_small = measurements[251]
+    probes_large, _ = measurements[502]
+
+    # Doubling the task count must not scale the per-file probing with it.
+    assert probes_large < probes_small * 1.2, (probes_small, probes_large)
+
+    stats = runtime_small.scan_stats
+    assert stats["link_candidate_files"] == marker_files + 1
+    # Only `worker/api.py` names a target that resolves to a task, and it
+    # resolves to exactly the `task_7` records - never to all 251 tasks.
+    assert stats["link_task_checks"] <= 4, stats
+    linked = [task for task in runtime_small.tasks if task.producer_files]
+    assert {task.name for task in linked} == {"task_7"}
+    assert all(task.producer_files == ["worker/api.py"] for task in linked)
+
+
+def test_every_task_link_grammar_binds_its_producer_file() -> None:
+    """The indexed lookup must keep every dispatch shape and its file order."""
+    languages = {
+        "orders/tasks.py": "python",
+        "orders/signals.py": "python",
+        "app/Jobs/SyncOrders.php": "php",
+        "app/Events/OrderShipped.php": "php",
+        "workers/orders.js": "javascript",
+        "orders/api.py": "python",
+        "orders/batch.py": "python",
+        "orders/emit.py": "python",
+        "app/Http/OrderController.php": "php",
+        "src/producer.js": "javascript",
+    }
+    parsed_files = {
+        path: _parsed_file(path, language=language)
+        for path, language in languages.items()
+    }
+    file_contents = {
+        "orders/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task(queue='critical')\n"
+            "def sync_orders(order_id):\n"
+            "    return order_id\n"
+        ),
+        "orders/signals.py": (
+            "from django.dispatch import receiver\n"
+            "from django.db.models.signals import post_save\n\n"
+            "@receiver(post_save)\n"
+            "def audit_order(sender, **kwargs):\n"
+            "    return None\n"
+        ),
+        "app/Jobs/SyncOrders.php": (
+            "<?php\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class SyncOrders implements ShouldQueue\n{\n}\n"
+        ),
+        "app/Events/OrderShipped.php": "<?php\nclass OrderShipped\n{\n}\n",
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders-sync', async job => syncOrders(job));\n"
+        ),
+        # Producers, one per dispatch shape.
+        "orders/api.py": (
+            "from .tasks import sync_orders\n\n"
+            "def enqueue(order_id):\n"
+            "    sync_orders.delay(order_id)\n"
+        ),
+        "orders/batch.py": (
+            "from .tasks import sync_orders\n\n"
+            "def enqueue_batch(order_id):\n"
+            "    sync_orders.apply_async(args=[order_id])\n"
+        ),
+        "orders/emit.py": (
+            "from django.db.models.signals import post_save\n\n"
+            "def emit(order):\n"
+            "    post_save.send(sender=type(order), instance=order)\n"
+        ),
+        "app/Http/OrderController.php": (
+            "<?php\n"
+            "class OrderController\n{\n"
+            "    public function store($order)\n    {\n"
+            "        SyncOrders::dispatch($order);\n"
+            "        dispatch(SyncOrders::class);\n"
+            "        dispatch(new SyncOrders($order));\n"
+            "        event(new OrderShipped($order));\n"
+            "    }\n}\n"
+        ),
+        "src/producer.js": (
+            "const queue = getQueue();\nqueue.add('orders-sync', {});\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+    producers = {
+        (task.name, task.file_path): task.producer_files for task in runtime.tasks
+    }
+
+    assert producers[("sync_orders", "orders/tasks.py")] == [
+        "orders/api.py",
+        "orders/batch.py",
+    ]
+    assert producers[("audit_order", "orders/signals.py")] == ["orders/emit.py"]
+    assert producers[("SyncOrders", "app/Jobs/SyncOrders.php")] == [
+        "app/Http/OrderController.php"
+    ]
+    assert producers[("OrderShipped", "app/Events/OrderShipped.php")] == [
+        "app/Http/OrderController.php"
+    ]
+    assert producers[("orders-sync", "workers/orders.js")] == ["src/producer.js"]

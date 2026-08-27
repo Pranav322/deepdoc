@@ -51,35 +51,40 @@ def parse_js_ts(path: Path, content: str, language: str) -> ParsedFile:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Syntax-level call evidence
+# Library symbol binding
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-class JsCall(NamedTuple):
-    """One executable expression: `new Worker('x')`, `queue.process(handler)`.
+class JsBoundCall(NamedTuple):
+    """A call whose callee provably resolves to one of the requested modules.
 
-    `args` holds one `(kind, value)` pair per argument, in source order, where
-    kind is "str" for a quoted literal, "name" for an identifier or a named
-    function, and "" for anything with no usable name.
+    `module` is the matched module specifier. `symbol` is the imported member
+    for `new Imported(...)`, otherwise the called method name. `on_value` marks
+    a call on a value *derived* from the module - an instance, a connection, a
+    channel - rather than on the imported symbol itself. `args` holds one
+    `(kind, value)` pair per argument in source order, where kind is "str" for a
+    quoted literal, "name" for an identifier or a named function, and "" for
+    anything with no usable name.
     """
 
+    module: str
+    symbol: str
     is_new: bool
-    receiver: str
-    name: str
+    on_value: bool
     args: tuple[tuple[str, str], ...]
 
 
-class JsEvidence(NamedTuple):
-    imports: tuple[str, ...]
-    calls: tuple[JsCall, ...]
-
-
-def js_syntax_evidence(path: Path, content: str, language: str) -> JsEvidence | None:
-    """Imports and executable call/new expressions, from the syntax tree only.
+def js_bound_calls(
+    path: Path, content: str, language: str, modules: frozenset[str]
+) -> tuple[JsBoundCall, ...] | None:
+    """Executable calls bound to `modules`, resolved inside this file only.
 
     Returns None when tree-sitter cannot supply syntax nodes, so callers fail
-    closed instead of matching raw text: queue code quoted inside a template
-    literal or a comment never runs and must not read as runtime evidence.
+    closed instead of matching raw text: library code quoted inside a template
+    literal or a comment never runs and must not read as evidence. A call is
+    reported only when its callee or receiver traces back, through local
+    declarations, to a real import/require of one of `modules` - importing a
+    library does not vouch for every other call in the same file.
     """
     if not _TS_AVAILABLE:
         return None
@@ -90,24 +95,7 @@ def js_syntax_evidence(path: Path, content: str, language: str) -> JsEvidence | 
     root = tree.root_node
     if root.type == "ERROR":
         return None
-
-    imports: list[str] = []
-    calls: list[JsCall] = []
-    stack = [root]
-    while stack:
-        node = stack.pop()
-        if node.type in ("import_declaration", "import_statement"):
-            source = node.child_by_field_name("source")
-            if source is not None:
-                imports.append(_unquote(source))
-        elif node.type in ("new_expression", "call_expression"):
-            call = _js_call(node)
-            if call is not None:
-                calls.append(call)
-                if not call.is_new and call.name in ("require", "import"):
-                    imports.extend(v for kind, v in call.args[:1] if kind == "str")
-        stack.extend(reversed(node.children))  # keep source order
-    return JsEvidence(tuple(imports), tuple(calls))
+    return _Binder(modules).run(root)
 
 
 def _grammar_for(path: Path, language: str):
@@ -116,51 +104,318 @@ def _grammar_for(path: Path, language: str):
     return TS_LANGUAGE if language == "typescript" else JS_LANGUAGE
 
 
-def _js_call(node) -> JsCall | None:
-    is_new = node.type == "new_expression"
-    callee = node.child_by_field_name("constructor" if is_new else "function")
-    if callee is None:
-        return None
-    if callee.type == "member_expression":
-        name = _field_text(callee, "property")
-        obj = callee.child_by_field_name("object")
-        # `agenda.define(...)` and `this.agenda.define(...)` share one receiver.
-        if obj is None:
-            receiver = ""
-        elif obj.type == "identifier":
-            receiver = obj.text.decode("utf8", "replace")
+# Node types that open a new name scope. A declaration governs the nearest
+# enclosing one; resolving to a wider scope than the language would only make
+# the shadow check below reject more, never less.
+_SCOPE_TYPES = frozenset(
+    {
+        "program",
+        "statement_block",
+        "class_body",
+        "class_declaration",
+        "catch_clause",
+        "arrow_function",
+        "function",
+        "function_declaration",
+        "function_expression",
+        "generator_function",
+        "generator_function_declaration",
+        "method_definition",
+        "for_statement",
+        "for_in_statement",
+        "switch_body",
+    }
+)
+# Wrappers that pass a value through unchanged: `await x`, `(x)`, `x!`, `x as T`.
+_VALUE_WRAPPERS = frozenset(
+    {
+        "await_expression",
+        "parenthesized_expression",
+        "non_null_expression",
+        "as_expression",
+        "satisfies_expression",
+        "type_assertion",
+    }
+)
+# Name-introducing node types, mapped to the field holding the bound pattern.
+_DECL_FIELDS = {
+    "variable_declarator": "name",
+    "function_declaration": "name",
+    "generator_function_declaration": "name",
+    "class_declaration": "name",
+    "catch_clause": "parameter",
+    "arrow_function": "parameter",
+}
+
+
+class _Binder:
+    """Resolves, within one file, which local names come from `modules`.
+
+    Only the straight-line local flows real queue/broker APIs need are modelled:
+    import/require bindings, then declarator and assignment chains derived from
+    them. Anything else - a dynamic receiver, a value from another file, a name
+    that a nested scope redeclares - resolves to nothing, so no call is
+    reported for it.
+    """
+
+    def __init__(self, modules: frozenset[str]) -> None:
+        self._modules = modules
+        # name -> (module, member, declaring byte, scope range)
+        self._bindings: dict[str, tuple[str, str, int, tuple[int, int]]] = {}
+        # name -> [(declaring byte, scope range)] for every declaration of it
+        self._decls: dict[str, list[tuple[int, tuple[int, int]]]] = {}
+        self._calls: list = []
+
+    def run(self, root) -> tuple[JsBoundCall, ...]:
+        stack = [root]
+        while stack:
+            node = stack.pop()
+            self._declare(node)
+            if node.type in ("import_statement", "import_declaration"):
+                self._bind_import(node)
+            elif node.type in ("variable_declarator", "assignment_expression"):
+                self._bind_value(node)
+            elif node.type in ("new_expression", "call_expression"):
+                self._calls.append(node)
+            stack.extend(reversed(node.children))  # keep source order
+        found = (self._bound_call(node) for node in self._calls)
+        return tuple(call for call in found if call is not None)
+
+    # ── declarations ────────────────────────────────────────────────────────
+
+    def _declare(self, node) -> None:
+        """Record every name this node introduces, bound to a library or not.
+
+        Non-library declarations matter too: they are what proves a nested
+        `Worker` is the local one rather than the imported queue class.
+        """
+        if node.type == "formal_parameters":
+            targets = node.named_children
         else:
-            receiver = _field_text(obj, "property")
-    elif callee.type in ("identifier", "import"):
-        name, receiver = callee.text.decode("utf8", "replace"), ""
-    else:
+            field = _DECL_FIELDS.get(node.type)
+            target = node.child_by_field_name(field) if field else None
+            targets = [target] if target is not None else []
+        for target in targets:
+            for name_node in _pattern_names(target):
+                self._add_decl(name_node)
+
+    def _add_decl(self, name_node) -> None:
+        entry = (name_node.start_byte, _decl_scope(name_node))
+        self._decls.setdefault(_text(name_node), []).append(entry)
+
+    def _bind_name(
+        self, name_node, module: str, member: str, declares: bool = True
+    ) -> None:
+        """Bind `name_node` to `module`, if it matched one.
+
+        An assignment writes to a name that something else declared, so it takes
+        that declaration's identity: `let channel; channel = ...` must still
+        resolve, while a target with several declarations cannot be pinned down.
+        """
+        name = _text(name_node)
+        if declares:
+            self._add_decl(name_node)
+        if not module:
+            return
+        declared = self._decls.get(name, ())
+        if declares or not declared:
+            declared_at, scope = name_node.start_byte, _decl_scope(name_node)
+        elif len(declared) == 1:
+            declared_at, scope = declared[0]
+        else:
+            return  # several declarations of the target - identity unprovable
+        self._bindings[name] = (module, member, declared_at, scope)
+
+    def _bind_import(self, node) -> None:
+        source = node.child_by_field_name("source")
+        module = self._match(_unquote(source)) if source is not None else ""
+        for clause in node.named_children:
+            if clause.type != "import_clause":
+                continue
+            for child in clause.named_children:
+                if child.type == "identifier":  # import X from "m"
+                    self._bind_name(child, module, "default")
+                elif child.type == "namespace_import":  # import * as X from "m"
+                    for name_node in child.named_children:
+                        self._bind_name(name_node, module, "*")
+                elif child.type == "named_imports":
+                    for spec in child.named_children:
+                        if spec.type != "import_specifier":
+                            continue
+                        name_node = spec.child_by_field_name("name")
+                        alias = spec.child_by_field_name("alias")
+                        if name_node is not None:
+                            self._bind_name(
+                                alias or name_node, module, _text(name_node)
+                            )
+
+    def _bind_value(self, node) -> None:
+        """Bind `const x = <expr>` / `x = <expr>` when the value is library-derived."""
+        declares = node.type == "variable_declarator"
+        target = node.child_by_field_name("name" if declares else "left")
+        value = node.child_by_field_name("value" if declares else "right")
+        if target is None or value is None:
+            return
+        module = self._require_module(value)
+        if target.type == "object_pattern":  # const { Worker } = require("m")
+            if module:
+                for name_node, member in _destructured_members(target):
+                    self._bind_name(name_node, module, member, declares)
+            return
+        if target.type != "identifier":
+            return
+        if module:
+            self._bind_name(target, module, "*", declares)
+            return
+        resolved = self._resolve(value)
+        if resolved is not None:
+            self._bind_name(target, *resolved, declares=declares)
+
+    # ── resolution ──────────────────────────────────────────────────────────
+
+    def _match(self, spec: str) -> str:
+        """The requested module `spec` names, subpath imports included."""
+        for module in self._modules:
+            if spec == module or spec.startswith(f"{module}/"):
+                return module
+        return ""
+
+    def _require_module(self, node) -> str:
+        """The module of a `require("m")` call, or "" for anything else."""
+        while node.type in _VALUE_WRAPPERS and node.named_children:
+            node = node.named_children[0]
+        if node.type != "call_expression":
+            return ""
+        callee = node.child_by_field_name("function")
+        if callee is None or callee.type != "identifier" or _text(callee) != "require":
+            return ""
+        args = node.child_by_field_name("arguments")
+        first = args.named_children[0] if args and args.named_children else None
+        return (
+            self._match(_unquote(first))
+            if first is not None and first.type == "string"
+            else ""
+        )
+
+    def _lookup(self, name_node) -> tuple[str, str] | None:
+        """The binding `name_node` refers to at its own position, if provable."""
+        binding = self._bindings.get(_text(name_node))
+        if binding is None:
+            return None
+        module, member, declared_at, (start, end) = binding
+        position = name_node.start_byte
+        if not start <= position < end:
+            return None
+        for other_at, (other_start, other_end) in self._decls[_text(name_node)]:
+            if other_at != declared_at and other_start <= position < other_end:
+                return None  # a second declaration is in scope - fail closed
+        return module, member
+
+    def _resolve(self, node) -> tuple[str, str] | None:
+        """(module, member) this expression evaluates to; "" member = derived value."""
+        if node.type in _VALUE_WRAPPERS:
+            children = node.named_children
+            return self._resolve(children[0]) if children else None
+        if node.type == "identifier":
+            return self._lookup(node)
+        if node.type in ("new_expression", "call_expression"):
+            module = self._require_module(node)
+            if module:
+                return module, "*"
+            call = self._bound_call(node)
+            return (call.module, "") if call is not None else None
         return None
+
+    def _bound_call(self, node) -> JsBoundCall | None:
+        is_new = node.type == "new_expression"
+        callee = node.child_by_field_name("constructor" if is_new else "function")
+        if callee is None:
+            return None
+        if callee.type == "identifier":
+            resolved = self._lookup(callee)
+            if resolved is None:
+                return None
+            module, member = resolved
+            symbol = member
+        elif callee.type == "member_expression":
+            obj = callee.child_by_field_name("object")
+            prop = callee.child_by_field_name("property")
+            base = self._resolve(obj) if obj is not None else None
+            if base is None or prop is None:
+                return None
+            module, member = base
+            symbol = _text(prop)
+        else:
+            return None
+        return JsBoundCall(module, symbol, is_new, member == "", _arg_tokens(node))
+
+
+def _decl_scope(name_node) -> tuple[int, int]:
+    """Byte range of the scope a name declared at `name_node` governs."""
+    node = name_node.parent
+    while node is not None and node.type not in _SCOPE_TYPES:
+        node = node.parent
+    return (node.start_byte, node.end_byte) if node is not None else (0, 0)
+
+
+def _pattern_names(node):
+    """Identifier nodes a binding pattern introduces."""
+    kind = node.type
+    if kind in ("identifier", "shorthand_property_identifier_pattern"):
+        yield node
+    elif kind in ("required_parameter", "optional_parameter"):
+        yield from _field_names(node, "pattern")
+    elif kind == "assignment_pattern":
+        yield from _field_names(node, "left")
+    elif kind == "pair_pattern":
+        yield from _field_names(node, "value")
+    elif kind in ("object_pattern", "array_pattern", "rest_pattern"):
+        for child in node.named_children:
+            yield from _pattern_names(child)
+
+
+def _field_names(node, field: str):
+    child = node.child_by_field_name(field)
+    if child is not None:
+        yield from _pattern_names(child)
+
+
+def _destructured_members(pattern):
+    """(local name node, module member) per key of `{ a, b: c }`."""
+    for child in pattern.named_children:
+        if child.type == "shorthand_property_identifier_pattern":
+            yield child, _text(child)
+        elif child.type == "pair_pattern":
+            key = child.child_by_field_name("key")
+            value = child.child_by_field_name("value")
+            if key is not None and value is not None and value.type == "identifier":
+                yield value, _text(key)
+
+
+def _arg_tokens(node) -> tuple[tuple[str, str], ...]:
     args = node.child_by_field_name("arguments")
-    tokens = (
-        tuple(_arg_token(c) for c in args.named_children if c.type != "comment")
-        if args is not None
-        else ()
-    )
-    return JsCall(is_new, receiver, name, tokens)
+    if args is None:
+        return ()
+    return tuple(_arg_token(c) for c in args.named_children if c.type != "comment")
 
 
 def _arg_token(node) -> tuple[str, str]:
     if node.type == "string":
         return ("str", _unquote(node))
     if node.type == "identifier":
-        return ("name", node.text.decode("utf8", "replace"))
+        return ("name", _text(node))
     if node.type in ("function_expression", "function_declaration"):
-        return ("name", _field_text(node, "name"))
+        child = node.child_by_field_name("name")
+        return ("name", _text(child) if child is not None else "")
     return ("", "")
 
 
-def _field_text(node, field: str) -> str:
-    child = node.child_by_field_name(field)
-    return child.text.decode("utf8", "replace") if child is not None else ""
+def _text(node) -> str:
+    return node.text.decode("utf8", "replace")
 
 
 def _unquote(node) -> str:
-    text = node.text.decode("utf8", "replace")
+    text = _text(node)
     return text[1:-1] if len(text) >= 2 and text[0] in "\"'" else text
 
 

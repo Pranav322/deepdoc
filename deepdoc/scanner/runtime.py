@@ -3,7 +3,7 @@ from pathlib import Path
 
 from .common import *
 from ..parser.base import ParsedFile
-from ..parser.js_ts_parser import JsCall, js_syntax_evidence
+from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
 from ..parser.registry import language_for_extension
 from ..parser.vue_parser import _extract_script_block
 from ..source_metadata import classify_source_kind, is_low_trust_source_kind
@@ -493,30 +493,24 @@ def _schedule_chain_summary(chain: str) -> str:
 
 # `new Worker(...)`, `.process(...)` and `.consume(...)` are ordinary JS/TS
 # idioms - browser/Node workers and plain domain methods - so they only describe
-# a queue job when the file itself pulls in the queue library. Without this gate
-# the VS Code checkout reported `lineProcessor.process()` and
-# `Iterable.consume()` as background jobs.
-JS_QUEUE_MODULES = frozenset(
-    {"bullmq", "bull", "bee-queue", "kue", "amqplib", "amqp-connection-manager"}
-)
+# a queue job when that specific callee or receiver resolves, inside the same
+# file, to a symbol imported from one of these libraries. A library import alone
+# vouches for nothing: it left `codec.process()` and `new Worker('browser')`
+# reading as background jobs next to an unrelated `bullmq` import.
+JS_BULLMQ_MODULES = frozenset({"bullmq"})
+JS_QUEUE_MODULES = frozenset({"bullmq", "bull", "bee-queue", "kue"})
+JS_AMQP_MODULES = frozenset({"amqplib", "amqp-connection-manager"})
 JS_AGENDA_MODULES = frozenset({"agenda", "@hokify/agenda"})
-# Neither gate below can pass unless the library name appears literally, so this
-# substring pre-check keeps tree-sitter off the files that were never candidates.
-JS_EVIDENCE_TOKENS = tuple(sorted(JS_QUEUE_MODULES | {"agenda"}))
-JS_QUEUE_SHAPES = ("new worker(", ".process(", ".consume(")
-JS_AGENDA_SHAPES = ("agenda.define", "agenda.every")
+JS_RUNTIME_MODULES = JS_QUEUE_MODULES | JS_AMQP_MODULES | JS_AGENDA_MODULES
+# Binding cannot succeed unless the module name appears literally, and every
+# fact below needs either its (un-aliasable) method name or the `Worker` member
+# in the import, so these substring pre-checks keep tree-sitter off the files
+# that were never candidates.
+JS_EVIDENCE_TOKENS = tuple(sorted(JS_RUNTIME_MODULES))
+JS_CALL_SHAPES = ("worker", ".process(", ".consume(", ".define(", ".every(")
 
 
-def _js_imports_any(imports: tuple[str, ...], modules: frozenset[str]) -> bool:
-    """True when one of `modules` (or a subpath of it) is really imported."""
-    return any(
-        spec == module or spec.startswith(f"{module}/")
-        for spec in imports
-        for module in modules
-    )
-
-
-def _js_str_arg(call: JsCall, index: int) -> str:
+def _js_str_arg(call: JsBoundCall, index: int) -> str:
     """Quoted-literal argument at `index`, or "" when it is not a literal."""
     if index >= len(call.args):
         return ""
@@ -548,82 +542,79 @@ def _discover_js_runtime(
         lowered = content.lower()
         if not any(token in lowered for token in JS_EVIDENCE_TOKENS):
             continue
-        if not any(
-            shape in lowered for shape in JS_QUEUE_SHAPES + JS_AGENDA_SHAPES
-        ):
+        if not any(shape in lowered for shape in JS_CALL_SHAPES):
             continue
 
+        source, language = _js_parse_input(file_path, content)
         # Fail closed without syntax nodes: raw text cannot tell an executable
         # call from queue code quoted inside a prompt template literal, which is
-        # how a VS Code prompt file reported `fake-example` as a real job.
-        source, language = _js_parse_input(file_path, content)
-        evidence = js_syntax_evidence(Path(file_path), source, language)
-        if evidence is None:
+        # how a prompt file reported `fake-example` as a real job.
+        calls = js_bound_calls(Path(file_path), source, language, JS_RUNTIME_MODULES)
+        if not calls:
             continue
 
-        if _js_imports_any(evidence.imports, JS_QUEUE_MODULES):
-            for call in evidence.calls:
-                if call.is_new and call.name == "Worker":
+        for call in calls:
+            if call.is_new:
+                # BullMQ names the queue in the `Worker` constructor itself.
+                if (
+                    call.symbol == "Worker"
+                    and not call.on_value
+                    and call.module in JS_BULLMQ_MODULES
+                ):
                     queue_name = _js_str_arg(call, 0)
-                    if not queue_name:
-                        continue
-                    tasks.append(
-                        RuntimeTask(
-                            name=queue_name,
-                            file_path=file_path,
-                            runtime_kind="js_worker",
-                            decorator="Worker",
-                            queue=queue_name,
+                    if queue_name:
+                        tasks.append(
+                            RuntimeTask(
+                                name=queue_name,
+                                file_path=file_path,
+                                runtime_kind="js_worker",
+                                decorator="Worker",
+                                queue=queue_name,
+                            )
                         )
-                    )
-                elif not call.is_new and call.name in ("process", "consume"):
-                    kind, value = call.args[0] if call.args else ("", "")
-                    queue_name = value if kind == "str" else ""
-                    tasks.append(
-                        RuntimeTask(
-                            name=queue_name or value or "queue-worker",
-                            file_path=file_path,
-                            runtime_kind="js_worker",
-                            decorator="queue_process",
-                            queue=queue_name,
-                        )
-                    )
-
-        agenda_evidence = _js_imports_any(
-            evidence.imports, JS_AGENDA_MODULES
-        ) or any(call.is_new and call.name == "Agenda" for call in evidence.calls)
-        if not agenda_evidence:
-            continue
-
-        for call in evidence.calls:
-            if call.is_new or call.receiver != "agenda":
                 continue
-            if call.name == "define":
-                job_name = _js_str_arg(call, 0)
-                if not job_name:
-                    continue
+            if not call.on_value:
+                # A call on the import itself (`amqplib.connect(...)`) is a step
+                # towards a queue value, not a job registration.
+                continue
+            if (call.symbol == "process" and call.module in JS_QUEUE_MODULES) or (
+                call.symbol == "consume" and call.module in JS_AMQP_MODULES
+            ):
+                kind, value = call.args[0] if call.args else ("", "")
+                queue_name = value if kind == "str" else ""
                 tasks.append(
                     RuntimeTask(
-                        name=job_name,
+                        name=queue_name or value or "queue-worker",
                         file_path=file_path,
                         runtime_kind="js_worker",
-                        decorator="agenda.define",
-                        queue=job_name,
+                        decorator="queue_process",
+                        queue=queue_name,
                     )
                 )
-            elif call.name == "every":
+            elif call.module in JS_AGENDA_MODULES and call.symbol == "define":
+                job_name = _js_str_arg(call, 0)
+                if job_name:
+                    tasks.append(
+                        RuntimeTask(
+                            name=job_name,
+                            file_path=file_path,
+                            runtime_kind="js_worker",
+                            decorator="agenda.define",
+                            queue=job_name,
+                        )
+                    )
+            elif call.module in JS_AGENDA_MODULES and call.symbol == "every":
                 cadence, job_name = _js_str_arg(call, 0), _js_str_arg(call, 1)
-                if not cadence or not job_name:
-                    continue
-                schedulers.append(
-                    RuntimeScheduler(
-                        name=f"agenda-{job_name}",
-                        file_path=file_path,
-                        scheduler_type="agenda",
-                        cron=cadence,
-                        invoked_targets=[job_name],
+                if cadence and job_name:
+                    schedulers.append(
+                        RuntimeScheduler(
+                            name=f"agenda-{job_name}",
+                            file_path=file_path,
+                            scheduler_type="agenda",
+                            cron=cadence,
+                            invoked_targets=[job_name],
+                        )
                     )
-                )
 
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 

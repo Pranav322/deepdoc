@@ -368,8 +368,10 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
     }
     file_contents = {
         "workers/orders.js": (
-            "const { Worker } = require('bullmq');\n"
+            "const { Worker, Queue } = require('bullmq');\n"
+            "const Agenda = require('agenda');\n"
             "const agenda = new Agenda();\n"
+            "const queue = new Queue('inventory');\n"
             "new Worker('orders-sync', async job => syncOrders(job));\n"
             "queue.process('inventory-refresh', async refreshInventory);\n"
             "agenda.define('nightly-report', async () => {});\n"
@@ -501,6 +503,111 @@ def test_agenda_jobs_need_agenda_evidence() -> None:
         "nightly-report"
     ]
     assert [s.scheduler_type for s in detected.schedulers] == ["agenda"]
+
+
+def test_unbound_queue_receivers_are_not_queue_jobs() -> None:
+    """A real queue import does not make every same-file call a queue job."""
+    path = "src/media/codec.ts"
+    content = (
+        'import { Queue } from "bullmq";\n'
+        'const realQueue = new Queue("real");\n'
+        "const codec = { process(_name: string) {} };\n"
+        'codec.process("not-a-queue-job");\n'
+        'const webWorker = new Worker("browser-worker");\n'
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+
+
+def test_bullmq_worker_alias_binds_but_a_shadowed_worker_does_not() -> None:
+    """The bound alias is the queue job; a nested rebinding of it is not."""
+    path = "src/jobs/orders.ts"
+    content = (
+        'import { Worker as BullWorker } from "bullmq";\n'
+        'new BullWorker("orders", handler);\n'
+        "export function spawn(BullWorker: typeof globalThis.Worker) {\n"
+        '    return new BullWorker("browser-worker");\n'
+        "}\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [
+        task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
+    ] == ["orders"]
+
+
+def test_queue_and_agenda_instances_bind_by_symbol_not_by_variable_name() -> None:
+    """Binding follows the constructor, so the variable may be named anything."""
+    files = {
+        "src/jobs/emails.ts": (
+            'import Bull from "bull";\n'
+            'const mailer = new Bull("emails");\n'
+            'mailer.process("send-digest", handleDigest);\n'
+        ),
+        "src/jobs/reports.ts": (
+            'import Agenda from "agenda";\n'
+            "const jobs = new Agenda({ db: { address: url } });\n"
+            "jobs.define('nightly-report', async () => {});\n"
+            "jobs.every('5 minutes', 'nightly-report');\n"
+        ),
+    }
+    parsed = {path: _parsed_file(path, language="typescript") for path in files}
+
+    runtime = discover_runtime_surfaces(parsed, files)
+
+    assert sorted(
+        task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
+    ) == ["nightly-report", "send-digest"]
+    assert [s.scheduler_type for s in runtime.schedulers] == ["agenda"]
+
+
+def test_agenda_constructor_without_an_agenda_import_is_not_a_job() -> None:
+    """`new Agenda()` only binds when the constructor came from the library."""
+    path = "src/ui/calendar/agendaView.ts"
+    content = (
+        "import { View } from './view.js';\n"
+        "const agenda = new Agenda();\n"
+        "agenda.define('nightly-report', view => view.render());\n"
+        "agenda.every('5 minutes', 'nightly-report');\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+    assert [s for s in runtime.schedulers if s.scheduler_type == "agenda"] == []
+
+
+def test_deferred_assignment_binds_only_the_real_broker_channel() -> None:
+    """`let channel; channel = await ...` is a flow real broker clients use."""
+    path = "src/jobs/orderChannel.ts"
+    content = (
+        'import amqplib from "amqplib";\n'
+        "let channel;\n"
+        "export async function boot() {\n"
+        "    channel = await (await amqplib.connect(url)).createChannel();\n"
+        "}\n"
+        'channel.consume("orders-sync", handleOrder);\n'
+        "export function drain(channel: LocalChannel) {\n"
+        '    channel.consume("not-a-broker-queue", noop);\n'
+        "}\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [
+        task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
+    ] == ["orders-sync"]
 
 
 def test_template_literal_prompt_examples_are_not_queue_workers() -> None:

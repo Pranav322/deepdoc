@@ -518,8 +518,8 @@ def test_engine_fingerprint_records_semantic_boundary_refinement():
 
 
 def test_engine_fingerprint_records_runtime_evidence_contract():
-    """Runtime evidence semantics changed and must invalidate stale plans."""
-    assert "runtime_evidence" in ENGINE_FINGERPRINT
+    """The v3 evidence/linking redesign invalidates stale runtime plans."""
+    assert ENGINE_FINGERPRINT.endswith("runtime_evidence_v3")
 
 
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):

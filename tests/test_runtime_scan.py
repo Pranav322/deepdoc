@@ -21,7 +21,6 @@ from deepdoc.scanner.runtime import (
     _collect_dispatch_evidence,
     _discover_nestjs_runtime,
     _link_runtime_evidence,
-    _link_runtime_workflows,
 )
 
 
@@ -169,18 +168,15 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
     task_names = {task.name for task in runtime.tasks}
     scheduler_types = {scheduler.scheduler_type for scheduler in runtime.schedulers}
     assert "sync_orders" in task_names
-    assert "send_invoice" in task_names
+    assert "send_invoice" not in task_names
     assert "beat" in scheduler_types
     assert "node_cron" in scheduler_types
 
     celery_task = next(task for task in runtime.tasks if task.name == "sync_orders")
     assert celery_task.queue == "critical"
     assert "autoretry_for" in celery_task.retry_policy
-
-    triggered_task = next(task for task in runtime.tasks if task.name == "send_invoice")
-    assert triggered_task.triggers == ["delay"]
-    assert triggered_task.producer_files == ["orders/tasks.py"]
-    assert triggered_task.linked_endpoints == ["POST /api/orders/sync"]
+    # A call site is dispatch evidence, not an invented task definition.
+    assert celery_task.producer_files == []
 
     beat_scheduler = next(
         scheduler
@@ -1032,6 +1028,9 @@ def test_unpublished_endpoints_never_link_to_runtime_surfaces() -> None:
             "@shared_task(queue='critical')\n"
             "def sync_orders(order_id):\n"
             "    return order_id\n\n"
+            "@shared_task\n"
+            "def send_invoice(order_id):\n"
+            "    return order_id\n\n"
             "def trigger_invoice(order_id):\n"
             "    send_invoice.delay(order_id)\n\n"
             "app.conf.beat_schedule = {\n"
@@ -1142,7 +1141,8 @@ def test_task_link_work_is_bounded_by_extracted_dispatch_targets() -> None:
     assert probes_large < probes_small * 1.2, (probes_small, probes_large)
 
     stats = runtime_small.scan_stats
-    assert stats["link_candidate_files"] == marker_files + 1
+    # Unbound TypeScript `.delay` calls are not dispatch evidence at all.
+    assert stats["link_candidate_files"] == 1
     # Only `worker/api.py` names a target that resolves to a task, and it
     # resolves to exactly the `task_7` records - never to all 251 tasks.
     assert stats["link_task_checks"] <= 4, stats
@@ -1220,7 +1220,9 @@ def test_every_task_link_grammar_binds_its_producer_file() -> None:
             "    }\n}\n"
         ),
         "src/producer.js": (
-            "const queue = getQueue();\nqueue.add('orders-sync', {});\n"
+            "const Queue = require('bullmq').Queue;\n"
+            "const queue = new Queue('orders-sync');\n"
+            "queue.add('orders-sync', {});\n"
         ),
     }
 
@@ -1253,15 +1255,22 @@ def test_dispatch_index_does_not_collide_shared_word_runs() -> None:
         )
         for index in range(251)
     ]
-    file_contents = {
-        f"src/marker_{index}.py": "sync.delay(payload)\n" for index in range(257)
-    }
+    evidence = [
+        DispatchEvidence(
+            file_path=f"src/marker_{index}.py",
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+        for index in range(257)
+    ]
+    runtime = RuntimeScan(tasks=tasks)
 
-    _, task_checks = _link_runtime_workflows(RuntimeScan(tasks=tasks), file_contents, [])
+    _link_runtime_evidence(runtime, evidence, [])
 
     # `sync.delay` names no `queue-N-sync` task. It must not verify all 251
     # merely because their terminal word run is the same.
-    assert task_checks == 0
+    assert runtime.scan_stats["link_task_checks"] == 0
 
 
 def test_duplicate_signal_task_names_keep_own_trigger_links() -> None:
@@ -1276,11 +1285,11 @@ def test_duplicate_signal_task_names_keep_own_trigger_links() -> None:
             )
             for trigger in triggers
         ]
-        _link_runtime_workflows(
-            RuntimeScan(tasks=tasks),
+        evidence = _collect_dispatch_evidence(
             {"producer.py": "post_save.send(sender=Order)\n"},
-            [],
+            {"producer.py": "python"},
         )
+        _link_runtime_evidence(RuntimeScan(tasks=tasks), evidence, [])
         links = {task.triggers[0]: task.producer_files for task in tasks}
         assert links == {"post_save": ["producer.py"], "post_delete": []}
 
@@ -1292,11 +1301,11 @@ def test_qualified_laravel_dispatch_keeps_its_producer_link() -> None:
         file_path="app/Jobs/SyncOrders.php",
         runtime_kind="laravel_job",
     )
-    _link_runtime_workflows(
-        RuntimeScan(tasks=[task]),
-        {"app/Http/OrderController.php": r"dispatch(new App\Jobs\SyncOrders($order));\n"},
-        [],
+    evidence = _collect_dispatch_evidence(
+        {"app/Http/OrderController.php": "<?php\ndispatch(new App\\Jobs\\SyncOrders($order));\n"},
+        {"app/Http/OrderController.php": "php"},
     )
+    _link_runtime_evidence(RuntimeScan(tasks=[task]), evidence, [])
     assert task.producer_files == ["app/Http/OrderController.php"]
 
 
@@ -1315,20 +1324,26 @@ def test_unindexable_cron_trigger_does_not_restore_task_candidate_multiplier() -
     assert (tasks[7].name, tasks[7].triggers) == ("task_7", ["* * * * *"])
 
     file_contents = {service: body}
+    languages = {service: "typescript"}
     for index in range(marker_files):
-        file_contents[f"src/vs/editor/animation{index}.ts"] = (
+        path = f"src/vs/editor/animation{index}.ts"
+        file_contents[path] = (
             f"export function run{index}() {{ this.unrelated.delay(payload); }}\n"
         )
-    file_contents["src/jobs/producer.ts"] = "task_7.delay(payload);\n"
+        languages[path] = "typescript"
+    producer_path = "src/jobs/producer.py"
+    file_contents[producer_path] = "task_7.delay(payload)\n"
+    languages[producer_path] = "python"
 
+    evidence = _collect_dispatch_evidence(file_contents, languages)
     runtime = RuntimeScan(tasks=tasks)
-    candidate_files, task_checks = _link_runtime_workflows(runtime, file_contents, [])
+    _link_runtime_evidence(runtime, evidence, [])
 
-    assert candidate_files == marker_files + 1
-    assert task_checks <= 4
+    assert [item.file_path for item in evidence] == [producer_path]
+    assert runtime.scan_stats["link_task_checks"] == 1
     assert {
         task.name: task.producer_files for task in runtime.tasks if task.producer_files
-    } == {"task_7": ["src/jobs/producer.ts"]}
+    } == {"task_7": [producer_path]}
 
 
 def test_js_queue_worker_accepts_whitespace_before_process_call() -> None:
@@ -1372,7 +1387,7 @@ def test_js_scheduler_and_realtime_require_bound_executable_calls() -> None:
             "cron.schedule('*/5 * * * *', syncInventory);\n"
         ),
         "realtime/server.js": (
-            "const { Server } = require('socket.io');\n"
+            "const Server = require('socket.io').Server;\n"
             "const io = new Server(server);\n"
             "io.on('connection', handler);\n"
         ),
@@ -1498,10 +1513,14 @@ def test_queue_add_preserves_punctuation_only_worker_queue_links() -> None:
     """Queue literals need an exact index even when their names have no word run."""
     files = {
         "workers/punctuation.js": (
-            "const { Worker } = require('bullmq');\n"
+            "const Worker = require('bullmq').Worker;\n"
             "new Worker('---', handler);\n"
         ),
-        "src/producer.js": "const queue = getQueue();\nqueue.add('---', {});\n",
+        "src/producer.js": (
+            "const Queue = require('bullmq').Queue;\n"
+            "const queue = new Queue('---');\n"
+            "queue.add('---', {});\n"
+        ),
     }
     parsed = {}
     for path, content in files.items():
@@ -1771,3 +1790,110 @@ def test_scheduler_owner_evidence_links_only_owning_scheduler() -> None:
         if index != 7
     )
     assert runtime.scan_stats["link_scheduler_checks"] == 1
+
+
+def test_runtime_scan_links_only_structural_dispatch_evidence() -> None:
+    """Producer links come from real source grammar, never raw cross-language text."""
+    files = {
+        "workers/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task\n"
+            "def sync(order_id):\n"
+            "    return order_id\n"
+        ),
+        "handlers/orders.py": "sync . delay(order_id)\n",
+        "src/notes.ts": "const prompt = `sync.delay(order_id)`;\n",
+        "src/generic.js": "const queue = getQueue();\nqueue.add('sync', {});\n",
+        "src/comments.js": (
+            "// const Queue = require('bullmq').Queue;\n"
+            "// const queue = new Queue('sync');\n"
+            "// queue.add('sync', {});\n"
+        ),
+    }
+    parsed = {}
+    for path, source in files.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, files)
+    worker = next(
+        task
+        for task in runtime.tasks
+        if task.file_path == "workers/tasks.py" and task.name == "sync"
+    )
+
+    assert worker.producer_files == ["handlers/orders.py"]
+    assert [item.file_path for item in runtime.dispatch_evidence] == [
+        "handlers/orders.py"
+    ]
+    assert runtime.scan_stats["link_candidate_files"] == 1
+
+
+def test_python_qualified_dispatch_alias_links_short_task_name() -> None:
+    """A dotted Python task reference keeps its full and terminal aliases."""
+    path = "handlers/orders.py"
+    task = RuntimeTask(
+        name="sync",
+        file_path="workers/tasks.py",
+        runtime_kind="celery",
+    )
+    evidence = _collect_dispatch_evidence(
+        {path: "tasks.sync . delay(order_id)\n"}, {path: "python"}
+    )
+
+    _link_runtime_evidence(RuntimeScan(tasks=[task]), evidence, [])
+
+    assert evidence[0].target_aliases == ("tasks.sync", "sync")
+    assert task.producer_files == [path]
+
+
+def test_dotted_scheduler_target_links_short_dispatch_evidence() -> None:
+    """A dotted scheduler target resolves a unique terminal task dispatch."""
+    scheduler = RuntimeScheduler(
+        name="nightly-sync",
+        file_path="schedules/beat.py",
+        scheduler_type="beat",
+        invoked_targets=["orders.tasks.sync"],
+    )
+    runtime = RuntimeScan(schedulers=[scheduler])
+    evidence = [
+        DispatchEvidence(
+            file_path="handlers/orders.py",
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+    ]
+
+    _link_runtime_evidence(
+        runtime,
+        evidence,
+        [{"method": "POST", "path": "/orders/sync", "file": "handlers/orders.py"}],
+    )
+
+    assert scheduler.linked_endpoints == ["POST /orders/sync"]
+    assert runtime.scan_stats["link_scheduler_checks"] == 1
+
+
+def test_queue_evidence_requires_an_explicit_worker_queue() -> None:
+    """A queue literal cannot link an unrelated task merely by display name."""
+    task = RuntimeTask(
+        name="orders",
+        file_path="workers/tasks.py",
+        runtime_kind="celery",
+    )
+    runtime = RuntimeScan(tasks=[task])
+    evidence = [
+        DispatchEvidence(
+            file_path="producers/orders.js",
+            language="javascript",
+            relation="queue",
+            target_aliases=("orders",),
+        )
+    ]
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert task.producer_files == []
+    assert runtime.scan_stats["link_task_checks"] == 0

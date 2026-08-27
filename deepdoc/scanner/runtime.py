@@ -4,7 +4,13 @@ from pathlib import Path
 from typing import Any
 
 from .common import *
-from .common import RealtimeConsumer, RuntimeScan, RuntimeScheduler, RuntimeTask
+from .common import (
+    DispatchEvidence,
+    RealtimeConsumer,
+    RuntimeScan,
+    RuntimeScheduler,
+    RuntimeTask,
+)
 from ..parser.base import ParsedFile
 from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
 from ..parser.php_parser import php_dispatches
@@ -68,10 +74,16 @@ def discover_runtime_surfaces(
     runtime.realtime_consumers.extend(
         _discover_python_realtime_consumers(python_files)
     )
-    (
-        runtime.scan_stats["link_candidate_files"],
-        runtime.scan_stats["link_task_checks"],
-    ) = _link_runtime_workflows(runtime, eligible, api_endpoints or [])
+    runtime.dispatch_evidence = _collect_dispatch_evidence(eligible, languages)
+    runtime.dispatch_evidence.extend(_scheduler_owner_evidence(runtime.schedulers))
+    _link_runtime_evidence(runtime, runtime.dispatch_evidence, api_endpoints or [])
+    runtime.scan_stats["link_candidate_files"] = len(
+        {
+            item.file_path
+            for item in runtime.dispatch_evidence
+            if item.relation != "scheduler_owner"
+        }
+    )
     runtime.tasks = _dedupe_runtime_tasks(runtime.tasks)
     runtime.schedulers = _dedupe_schedulers(runtime.schedulers)
     runtime.realtime_consumers = _dedupe_consumers(runtime.realtime_consumers)
@@ -138,6 +150,22 @@ def _collect_dispatch_evidence(
     return evidence
 
 
+def _scheduler_owner_evidence(
+    schedulers: list[RuntimeScheduler],
+) -> list[DispatchEvidence]:
+    """Declarations themselves are bounded evidence of scheduler ownership."""
+    return [
+        DispatchEvidence(
+            file_path=scheduler.file_path,
+            language="runtime",
+            relation="scheduler_owner",
+            target_aliases=_target_aliases(scheduler.name),
+        )
+        for scheduler in schedulers
+        if scheduler.name and scheduler.file_path
+    ]
+
+
 def _python_dispatch_evidence(
     file_path: str, content: str
 ) -> list[DispatchEvidence]:
@@ -169,7 +197,7 @@ def _python_dispatch_evidence(
                 file_path=file_path,
                 language="python",
                 relation=relation,
-                target_aliases=_target_aliases(target),
+                target_aliases=_python_target_aliases(target),
             )
         )
     return evidence
@@ -184,43 +212,22 @@ def _python_dotted_name(node: ast.expr) -> str:
     return ""
 
 
-# Every task-link pattern below needs one of these dispatch shapes present, so a
-# single pass with this superset regex replaces the old files x task-names
-# substring sweep as the candidate filter. That sweep was quadratic: every file
-# was probed once per detected task name, then every surviving file ran ~7
-# regexes per task.
-DISPATCH_MARKER_RE = re.compile(
-    r"""\.(?:delay|apply_async|send)\s*\(|dispatch\s*\(|\bevent\s*\(\s*new\b|\bqueue\.add\s*\("""
-)
+def _python_target_aliases(target: str) -> tuple[str, ...]:
+    """Preserve a dotted task reference plus its terminal callable name."""
+    aliases = list(_target_aliases(target))
+    terminal = target.rsplit(".", 1)[-1]
+    if terminal and terminal not in aliases:
+        aliases.append(terminal)
+    return tuple(aliases)
 
-# Each dispatch grammar exposes a different target language. Index exact targets
-# per grammar rather than leading/trailing word fragments: fragments make names
-# such as `queue-0-sync` and `queue-1-sync` collide on `sync`, recreating the
-# files x tasks multiplier this index exists to prevent.
-_DISPATCH_IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
-_QUALIFIED_DISPATCH_TARGET = rf"{_DISPATCH_IDENTIFIER}(?:\\{_DISPATCH_IDENTIFIER})*"
-_DISPATCH_IDENTIFIER_RE = re.compile(rf"^{_DISPATCH_IDENTIFIER}$")
-_QUALIFIED_DISPATCH_TARGET_RE = re.compile(rf"^{_QUALIFIED_DISPATCH_TARGET}$")
 
-# The exact target each dispatch shape names. Qualified PHP names remain intact
-# for `dispatch(new App\\Jobs\\Task(...))`; signal and Python receivers are
-# identifiers; queue names are quoted literals and are indexed separately.
-DISPATCH_TARGET_RE = re.compile(
-    rf"""(?<![A-Za-z0-9_])(?P<delay>{_DISPATCH_IDENTIFIER})
-            (?=\s*\.\s*(?:delay|apply_async)\s*\()
-      | (?<![A-Za-z0-9_])(?P<send>{_DISPATCH_IDENTIFIER})
-            (?=\s*\.\s*send\s*\()
-      | (?<![A-Za-z0-9_\\])(?P<static>{_QUALIFIED_DISPATCH_TARGET})
-            (?=\s*::\s*dispatch\s*\()
-      | \bdispatch\s*\(\s*(?:new\s+)?(?P<dispatch>{_QUALIFIED_DISPATCH_TARGET})
-            (?=\s*(?:::class\b|[(),]))
-      | \bevent\s*\(\s*new\s+(?P<event>{_QUALIFIED_DISPATCH_TARGET})
-            (?=\s*[(),])
-      | \bqueue\s*\.\s*add\s*\(\s*
-            (?=['\"](?P<queued>[^'\"]*)['\"])
-    """,
-    re.VERBOSE,
-)
+def _invoked_target_aliases(target: str) -> tuple[str, ...]:
+    """Canonical scheduler target aliases, including dotted Celery paths."""
+    aliases = list(_target_aliases(target))
+    terminal = target.rsplit(".", 1)[-1]
+    if terminal and terminal not in aliases:
+        aliases.append(terminal)
+    return tuple(aliases)
 
 
 def _link_runtime_evidence(
@@ -246,17 +253,18 @@ def _link_runtime_evidence(
         for trigger in task.triggers:
             for alias in _target_aliases(trigger):
                 signals_by_alias.setdefault(alias, []).append(task)
-        # A worker's explicit queue is the preferred queue target. The name is
-        # a conservative fallback for legacy detectors that encode it there.
-        for alias in _target_aliases(task.queue or task.name):
-            queues_by_alias.setdefault(alias, []).append(task)
+        # Queue evidence may resolve only against an explicitly declared queue;
+        # task display names are not a cross-runtime queue identity.
+        if task.queue:
+            for alias in _target_aliases(task.queue):
+                queues_by_alias.setdefault(alias, []).append(task)
     for scheduler in runtime.schedulers:
         for alias in _target_aliases(scheduler.name):
             schedulers_by_owner.setdefault((scheduler.file_path, alias), []).append(
                 scheduler
             )
         for target in scheduler.invoked_targets:
-            for alias in _target_aliases(target):
+            for alias in _invoked_target_aliases(target):
                 schedulers_by_alias.setdefault(alias, []).append(scheduler)
 
     task_checks = 0
@@ -385,147 +393,6 @@ def _scheduler_owner_candidates(
     return candidates
 
 
-def _link_runtime_workflows(
-    runtime: RuntimeScan,
-    file_contents: dict[str, str],
-    api_endpoints: list[dict[str, Any]],
-) -> tuple[int, int]:
-    """Attach producer files and endpoints to tasks/schedulers.
-
-    Returns the number of files that needed task-pattern work, and the number of
-    (file, task) pattern verifications those files actually cost.
-    """
-    endpoint_keys_by_file: dict[str, set[str]] = {}
-    for ep in api_endpoints:
-        # DD-002: a route the endpoint pass refused to publish (test-only,
-        # phantom, import-string artefact) is not runtime evidence. Callers
-        # should hand over `RepoScan.published_api_endpoints`; this fails closed
-        # for the ones that hand over the raw list.
-        if not ep.get("publication_ready", True):
-            continue
-        key = f"{str(ep.get('method', 'GET')).upper()} {ep.get('path', '')}"
-        for owned in endpoint_owned_files(ep):
-            endpoint_keys_by_file.setdefault(owned, set()).add(key)
-
-    # Patterns and indexes belong to task identity, not task name. Distinct
-    # handlers may share a name while owning different signal triggers; using a
-    # name-keyed dict made their behavior depend on input order.
-    task_patterns: dict[int, list[re.Pattern[str]]] = {}
-    tasks_by_target: dict[str, dict[str, list[RuntimeTask]]] = {
-        "delay": {},
-        "send": {},
-        "static": {},
-        "dispatch": {},
-        "event": {},
-    }
-    # `queue.add('literal')` has a quoted literal target, including names with
-    # no word run such as `---`, so it has its own exact raw-name index.
-    tasks_by_queue_name: dict[str, list[RuntimeTask]] = {}
-    for task in runtime.tasks:
-        if not task.name:
-            continue
-        task_patterns[id(task)] = [
-            re.compile(rf"""\b{re.escape(task.name)}\.(?:delay|apply_async)\s*\("""),
-            re.compile(rf"""\b{re.escape(task.name)}::dispatch\s*\("""),
-            re.compile(rf"""\bdispatch\s*\(\s*{re.escape(task.name)}\b"""),
-            re.compile(rf"""\bdispatch\s*\(\s*new\s+{re.escape(task.name)}\b"""),
-            re.compile(rf"""\bevent\s*\(\s*new\s+{re.escape(task.name)}\b"""),
-            re.compile(rf"""\bqueue\.add\s*\(\s*['\"]{re.escape(task.name)}['\"]"""),
-            *[
-                re.compile(rf"""\b{re.escape(trigger)}\.send\s*\(""")
-                for trigger in task.triggers
-                if trigger
-            ],
-        ]
-        if _DISPATCH_IDENTIFIER_RE.fullmatch(task.name):
-            tasks_by_target["delay"].setdefault(task.name, []).append(task)
-        if _QUALIFIED_DISPATCH_TARGET_RE.fullmatch(task.name):
-            for grammar in ("static", "dispatch", "event"):
-                tasks_by_target[grammar].setdefault(task.name, []).append(task)
-        tasks_by_queue_name.setdefault(task.name, []).append(task)
-        for trigger in task.triggers:
-            if _DISPATCH_IDENTIFIER_RE.fullmatch(trigger):
-                tasks_by_target["send"].setdefault(trigger, []).append(task)
-    scheduler_patterns = {
-        scheduler.name: [
-            re.compile(rf"""\b{re.escape(target)}\b""")
-            for target in scheduler.invoked_targets
-            if target
-        ]
-        for scheduler in runtime.schedulers
-    }
-
-    candidate_files = 0
-    task_checks = 0
-    for file_path, content in file_contents.items():
-        if not content:
-            continue
-        endpoint_keys = sorted(endpoint_keys_by_file.get(file_path, ()))
-        if DISPATCH_MARKER_RE.search(content):
-            candidate_files += 1
-            for task in _tasks_named_by(
-                content, tasks_by_target, tasks_by_queue_name
-            ):
-                task_checks += 1
-                patterns = task_patterns.get(id(task), [])
-                if not patterns or not any(
-                    pattern.search(content) for pattern in patterns
-                ):
-                    continue
-                if file_path not in task.producer_files:
-                    task.producer_files.append(file_path)
-                if endpoint_keys:
-                    task.linked_endpoints = sorted(
-                        set(task.linked_endpoints) | set(endpoint_keys)
-                    )
-        # The scheduler loop's only effect is guarded by `endpoint_keys`, so a
-        # file owning no endpoint cannot change scheduler state at all.
-        if not endpoint_keys:
-            continue
-        for scheduler in runtime.schedulers:
-            patterns = scheduler_patterns.get(scheduler.name, [])
-            if not patterns or not any(pattern.search(content) for pattern in patterns):
-                continue
-            scheduler.linked_endpoints = sorted(
-                set(scheduler.linked_endpoints) | set(endpoint_keys)
-            )
-    return candidate_files, task_checks
-
-
-def _tasks_named_by(
-    content: str,
-    tasks_by_target: dict[str, dict[str, list[RuntimeTask]]],
-    tasks_by_queue_name: dict[str, list[RuntimeTask]],
-) -> list[RuntimeTask]:
-    """Tasks this file's own exact dispatch sites can name, in stable order."""
-    if not any(tasks_by_target.values()) and not tasks_by_queue_name:
-        # Nothing to link, so a repo with dispatch syntax but no detected tasks
-        # (the common case) never pays for target extraction.
-        return []
-    candidates: list[RuntimeTask] = []
-    seen: set[int] = set()
-    for match in DISPATCH_TARGET_RE.finditer(content):
-        queue_name = match.group("queued")
-        if queue_name is not None:
-            matching_tasks = tasks_by_queue_name.get(queue_name, ())
-        else:
-            grammar = next(
-                (
-                    name
-                    for name in ("delay", "send", "static", "dispatch", "event")
-                    if match.group(name) is not None
-                ),
-                "",
-            )
-            target = match.group(grammar) if grammar else ""
-            matching_tasks = tasks_by_target.get(grammar, {}).get(target, ())
-        for task in matching_tasks:
-            if id(task) not in seen:
-                seen.add(id(task))
-                candidates.append(task)
-    return candidates
-
-
 def _discover_celery_tasks(
     file_contents: dict[str, str],
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
@@ -536,9 +403,6 @@ def _discover_celery_tasks(
         re.MULTILINE,
     )
     queue_pattern = re.compile(r"(?:queue|routing_key)\s*=\s*['\"]([^'\"]+)['\"]")
-    trigger_pattern = re.compile(
-        r"([A-Za-z_][A-Za-z0-9_]*)\s*\.(delay|apply_async)\s*\("
-    )
     beat_dict_pattern = re.compile(
         r"['\"]task['\"]\s*:\s*['\"]([^'\"]+)['\"].*?['\"]schedule['\"]\s*:\s*([^,}\n]+)",
         re.DOTALL,
@@ -574,16 +438,6 @@ def _discover_celery_tasks(
                     decorator=match.group("decorator"),
                     queue=queue_match.group(1) if queue_match else "",
                     retry_policy=", ".join(retry_values[:4]),
-                )
-            )
-
-        for trigger in trigger_pattern.finditer(content):
-            tasks.append(
-                RuntimeTask(
-                    name=trigger.group(1),
-                    file_path=file_path,
-                    runtime_kind="celery",
-                    triggers=[trigger.group(2)],
                 )
             )
 

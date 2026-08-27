@@ -1782,6 +1782,20 @@ def test_js_scope_forms_shadow_require_before_runtime_binding() -> None:
             "  io.on('connection', handler);\n"
             "}\n"
         ),
+        "realtime/var-newline.js": (
+            "function configure() {\n"
+            "  if (flag) { var\nrequire = loader; }\n"
+            "  const io = require('socket.io')(server);\n"
+            "  io.on('connection', handler);\n"
+            "}\n"
+        ),
+        "realtime/var-tab.js": (
+            "function configure() {\n"
+            "  if (flag) { var\trequire = loader; }\n"
+            "  const io = require('socket.io')(server);\n"
+            "  io.on('connection', handler);\n"
+            "}\n"
+        ),
         "realtime/function-expression.js": (
             "const configure = function require() {\n"
             "  const io = require('socket.io')(server);\n"
@@ -2016,3 +2030,94 @@ def test_queue_evidence_requires_an_explicit_worker_queue() -> None:
 
     assert task.producer_files == []
     assert runtime.scan_stats["link_task_checks"] == 0
+
+
+def test_malformed_js_never_creates_runtime_evidence() -> None:
+    """Tree-sitter recovery nodes cannot authenticate JS runtime APIs."""
+    path = "workers/broken.js"
+    source = (
+        "const { Worker } = require('bullmq');\n"
+        "new Worker('broken', handler;\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.tasks == []
+
+
+def test_type_only_typescript_imports_do_not_bind_runtime_apis() -> None:
+    """Erased imports cannot authenticate queue or realtime values at runtime."""
+    sources = {
+        "workers/type-only.ts": (
+            "import type { Queue, Worker } from 'bullmq';\n"
+            "const queue = new Queue('orders');\n"
+            "queue.add('send-order', {});\n"
+            "new Worker('orders', handleOrder);\n"
+        ),
+        "realtime/type-only.ts": (
+            "import type { Server } from 'socket.io';\n"
+            "const io = new Server(server);\n"
+            "io.on('connection', handleConnection);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.tasks == []
+    assert runtime.realtime_consumers == []
+    assert runtime.dispatch_evidence == []
+
+
+def test_mixed_type_and_value_imports_bind_only_runtime_values() -> None:
+    """A `type Queue` specifier cannot piggyback on a real `Worker` import."""
+    path = "workers/mixed.ts"
+    source = (
+        "import { type Queue, Worker } from 'bullmq';\n"
+        "const queue = new Queue('orders');\n"
+        "queue.add('send-order', {});\n"
+        "new Worker('orders', handleOrder);\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert [(task.name, task.queue) for task in runtime.tasks] == [("orders", "orders")]
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_named_node_cron_schedule_bindings_are_discovered() -> None:
+    """Named and CommonJS-member scheduler bindings survive prefiltering."""
+    sources = {
+        "jobs/named.ts": (
+            "import { schedule } from 'node-cron';\n"
+            "schedule('* * * * *', namedTask);\n"
+        ),
+        "jobs/member.js": (
+            "const schedule = require('node-cron').schedule;\n"
+            "schedule('*/5 * * * *', memberTask);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [
+        (scheduler.file_path, scheduler.cron, scheduler.invoked_targets)
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "node_cron"
+    ] == [
+        ("jobs/named.ts", "* * * * *", ["namedTask"]),
+        ("jobs/member.js", "*/5 * * * *", ["memberTask"]),
+    ]

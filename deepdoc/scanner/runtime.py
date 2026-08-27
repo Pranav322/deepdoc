@@ -777,7 +777,7 @@ JS_BOUND_RUNTIME_MODULES = (
 # that were never candidates while retaining legal whitespace before `(`.
 JS_EVIDENCE_TOKENS = tuple(sorted(JS_BOUND_RUNTIME_MODULES))
 JS_CALL_SHAPE_RE = re.compile(
-    r"\bworker\b|\.\s*(?:process|consume|define|every|schedule|on|add)\s*\(",
+    r"\bworker\b|\bschedule\s*\(|\.\s*(?:process|consume|define|every|schedule|on|add)\s*\(",
     re.IGNORECASE,
 )
 

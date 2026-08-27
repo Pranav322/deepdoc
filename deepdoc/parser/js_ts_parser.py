@@ -111,7 +111,7 @@ def js_bound_calls(
     except Exception:
         return None
     root = tree.root_node
-    if root.type == "ERROR":
+    if root.type == "ERROR" or root.has_error:
         return None
     return _Binder(modules).run(root)
 
@@ -253,6 +253,8 @@ class _Binder:
         self._bindings[name] = (module, member, declared_at, scope)
 
     def _bind_import(self, node) -> None:
+        if _is_type_only_import(node):
+            return
         source = node.child_by_field_name("source")
         module = self._match(_unquote(source)) if source is not None else ""
         for clause in node.named_children:
@@ -266,7 +268,10 @@ class _Binder:
                         self._bind_name(name_node, module, _MODULE_EXPORT)
                 elif child.type == "named_imports":
                     for spec in child.named_children:
-                        if spec.type != "import_specifier":
+                        if (
+                            spec.type != "import_specifier"
+                            or _is_type_only_import_specifier(spec)
+                        ):
                             continue
                         name_node = spec.child_by_field_name("name")
                         alias = spec.child_by_field_name("alias")
@@ -439,7 +444,7 @@ def _var_function_scope(name_node) -> tuple[int, int] | None:
     declaration = name_node.parent
     while declaration is not None and declaration.type != "variable_declaration":
         declaration = declaration.parent
-    if declaration is None or not _text(declaration).lstrip().startswith("var "):
+    if declaration is None or not re.match(r"\s*var\b", _text(declaration)):
         return None
     node = declaration.parent
     while node is not None:
@@ -517,6 +522,16 @@ def _text(node) -> str:
 def _unquote(node) -> str:
     text = _text(node)
     return text[1:-1] if len(text) >= 2 and text[0] in "\"'" else text
+
+
+def _is_type_only_import(node) -> bool:
+    """Whether a TypeScript import declaration is erased before runtime."""
+    return bool(re.match(r"\s*import\s+type\b", _text(node)))
+
+
+def _is_type_only_import_specifier(node) -> bool:
+    """Whether one named import is prefixed with TypeScript's `type` modifier."""
+    return bool(re.match(r"\s*type\b", _text(node)))
 
 
 # ─────────────────────────────────────────────────────────────────────────────

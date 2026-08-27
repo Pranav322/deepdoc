@@ -8,6 +8,7 @@ export tracking, and decorator extraction.
 from __future__ import annotations
 
 from pathlib import Path
+from typing import NamedTuple
 import re
 
 from .base import ParsedFile, Symbol
@@ -30,14 +31,7 @@ def parse_js_ts(path: Path, content: str, language: str) -> ParsedFile:
     imports: list[str] = []
 
     if _TS_AVAILABLE:
-        if path.suffix in (".tsx",):
-            lang = TSX_LANGUAGE
-        elif language == "typescript":
-            lang = TS_LANGUAGE
-        else:
-            lang = JS_LANGUAGE
-
-        parser = Parser(lang)
+        parser = Parser(_grammar_for(path, language))
         tree = parser.parse(bytes(content, "utf8"))
         lines = content.splitlines()
         _walk(tree.root_node, lines, symbols, imports, exported=False)
@@ -54,6 +48,120 @@ def parse_js_ts(path: Path, content: str, language: str) -> ParsedFile:
         imports=imports,
         raw_content=content[:12000],
     )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Syntax-level call evidence
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+class JsCall(NamedTuple):
+    """One executable expression: `new Worker('x')`, `queue.process(handler)`.
+
+    `args` holds one `(kind, value)` pair per argument, in source order, where
+    kind is "str" for a quoted literal, "name" for an identifier or a named
+    function, and "" for anything with no usable name.
+    """
+
+    is_new: bool
+    receiver: str
+    name: str
+    args: tuple[tuple[str, str], ...]
+
+
+class JsEvidence(NamedTuple):
+    imports: tuple[str, ...]
+    calls: tuple[JsCall, ...]
+
+
+def js_syntax_evidence(path: Path, content: str, language: str) -> JsEvidence | None:
+    """Imports and executable call/new expressions, from the syntax tree only.
+
+    Returns None when tree-sitter cannot supply syntax nodes, so callers fail
+    closed instead of matching raw text: queue code quoted inside a template
+    literal or a comment never runs and must not read as runtime evidence.
+    """
+    if not _TS_AVAILABLE:
+        return None
+    try:
+        tree = Parser(_grammar_for(path, language)).parse(bytes(content, "utf8"))
+    except Exception:
+        return None
+    root = tree.root_node
+    if root.type == "ERROR":
+        return None
+
+    imports: list[str] = []
+    calls: list[JsCall] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type in ("import_declaration", "import_statement"):
+            source = node.child_by_field_name("source")
+            if source is not None:
+                imports.append(_unquote(source))
+        elif node.type in ("new_expression", "call_expression"):
+            call = _js_call(node)
+            if call is not None:
+                calls.append(call)
+                if not call.is_new and call.name in ("require", "import"):
+                    imports.extend(v for kind, v in call.args[:1] if kind == "str")
+        stack.extend(reversed(node.children))  # keep source order
+    return JsEvidence(tuple(imports), tuple(calls))
+
+
+def _grammar_for(path: Path, language: str):
+    if path.suffix == ".tsx":
+        return TSX_LANGUAGE
+    return TS_LANGUAGE if language == "typescript" else JS_LANGUAGE
+
+
+def _js_call(node) -> JsCall | None:
+    is_new = node.type == "new_expression"
+    callee = node.child_by_field_name("constructor" if is_new else "function")
+    if callee is None:
+        return None
+    if callee.type == "member_expression":
+        name = _field_text(callee, "property")
+        obj = callee.child_by_field_name("object")
+        # `agenda.define(...)` and `this.agenda.define(...)` share one receiver.
+        if obj is None:
+            receiver = ""
+        elif obj.type == "identifier":
+            receiver = obj.text.decode("utf8", "replace")
+        else:
+            receiver = _field_text(obj, "property")
+    elif callee.type in ("identifier", "import"):
+        name, receiver = callee.text.decode("utf8", "replace"), ""
+    else:
+        return None
+    args = node.child_by_field_name("arguments")
+    tokens = (
+        tuple(_arg_token(c) for c in args.named_children if c.type != "comment")
+        if args is not None
+        else ()
+    )
+    return JsCall(is_new, receiver, name, tokens)
+
+
+def _arg_token(node) -> tuple[str, str]:
+    if node.type == "string":
+        return ("str", _unquote(node))
+    if node.type == "identifier":
+        return ("name", node.text.decode("utf8", "replace"))
+    if node.type in ("function_expression", "function_declaration"):
+        return ("name", _field_text(node, "name"))
+    return ("", "")
+
+
+def _field_text(node, field: str) -> str:
+    child = node.child_by_field_name(field)
+    return child.text.decode("utf8", "replace") if child is not None else ""
+
+
+def _unquote(node) -> str:
+    text = node.text.decode("utf8", "replace")
+    return text[1:-1] if len(text) >= 2 and text[0] in "\"'" else text
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -3,7 +3,9 @@ from pathlib import Path
 
 from .common import *
 from ..parser.base import ParsedFile
+from ..parser.js_ts_parser import JsCall, js_syntax_evidence
 from ..parser.registry import language_for_extension
+from ..parser.vue_parser import _extract_script_block
 from ..source_metadata import classify_source_kind, is_low_trust_source_kind
 
 # Runtime detectors are framework-specific, so each one only sees files whose
@@ -498,29 +500,42 @@ JS_QUEUE_MODULES = frozenset(
     {"bullmq", "bull", "bee-queue", "kue", "amqplib", "amqp-connection-manager"}
 )
 JS_AGENDA_MODULES = frozenset({"agenda", "@hokify/agenda"})
-JS_MODULE_RE = re.compile(
-    r"""(?:require|import)\s*\(\s*['"]([^'"]+)['"]|from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"]"""
-)
+# Neither gate below can pass unless the library name appears literally, so this
+# substring pre-check keeps tree-sitter off the files that were never candidates.
+JS_EVIDENCE_TOKENS = tuple(sorted(JS_QUEUE_MODULES | {"agenda"}))
+JS_QUEUE_SHAPES = ("new worker(", ".process(", ".consume(")
+JS_AGENDA_SHAPES = ("agenda.define", "agenda.every")
 
 
-def _js_imports_any(content: str, modules: frozenset[str]) -> bool:
-    """True when the file imports/requires one of `modules` (or a subpath of it)."""
-    specifiers = {
-        spec
-        for match in JS_MODULE_RE.finditer(content)
-        for spec in match.groups()
-        if spec
-    }
+def _js_imports_any(imports: tuple[str, ...], modules: frozenset[str]) -> bool:
+    """True when one of `modules` (or a subpath of it) is really imported."""
     return any(
         spec == module or spec.startswith(f"{module}/")
-        for spec in specifiers
+        for spec in imports
         for module in modules
     )
 
 
-def _js_has_agenda_evidence(content: str) -> bool:
-    """Agenda import or an actual `new Agenda(...)`, not just an `agenda` receiver."""
-    return "new Agenda(" in content or _js_imports_any(content, JS_AGENDA_MODULES)
+def _js_str_arg(call: JsCall, index: int) -> str:
+    """Quoted-literal argument at `index`, or "" when it is not a literal."""
+    if index >= len(call.args):
+        return ""
+    kind, value = call.args[index]
+    return value if kind == "str" else ""
+
+
+def _js_parse_input(file_path: str, content: str) -> tuple[str, str]:
+    """Source text and grammar language for one JS/TS/Vue candidate file.
+
+    A Vue SFC is markup wrapped around a script block, so only the script is
+    real JS - handing the whole file to a JS grammar would not be executable
+    evidence.
+    """
+    suffix = Path(file_path).suffix.lower()
+    if suffix == ".vue":
+        script, script_lang, _ = _extract_script_block(content)
+        return script, "typescript" if script_lang in ("ts", "tsx") else "javascript"
+    return content, language_for_extension(suffix)
 
 
 def _discover_js_runtime(
@@ -528,81 +543,87 @@ def _discover_js_runtime(
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
-    worker_pattern = re.compile(
-        r"new\s+Worker\(\s*['\"]([^'\"]+)['\"]",
-    )
-    process_pattern = re.compile(
-        r"\.(?:process|consume)\s*\(\s*(?:['\"]([^'\"]+)['\"]\s*,)?\s*(?:async\s+)?(?:function\s+([A-Za-z_][A-Za-z0-9_]*)|([A-Za-z_][A-Za-z0-9_]*))",
-    )
-    agenda_define_pattern = re.compile(
-        r"agenda\.define\(\s*['\"]([^'\"]+)['\"]",
-    )
-    agenda_every_pattern = re.compile(
-        r"agenda\.every\(\s*['\"]([^'\"]+)['\"]\s*,\s*['\"]([^'\"]+)['\"]",
-    )
 
     for file_path, content in file_contents.items():
         lowered = content.lower()
-        queue_shape = any(
-            token in lowered
-            for token in ("new worker(", ".process(", ".consume(")
-        )
-        agenda_shape = "agenda.define" in lowered or "agenda.every" in lowered
-        if not queue_shape and not agenda_shape:
+        if not any(token in lowered for token in JS_EVIDENCE_TOKENS):
+            continue
+        if not any(
+            shape in lowered for shape in JS_QUEUE_SHAPES + JS_AGENDA_SHAPES
+        ):
             continue
 
-        if queue_shape and _js_imports_any(content, JS_QUEUE_MODULES):
-            for queue_name in worker_pattern.findall(content):
-                tasks.append(
-                    RuntimeTask(
-                        name=queue_name,
-                        file_path=file_path,
-                        runtime_kind="js_worker",
-                        decorator="Worker",
-                        queue=queue_name,
-                    )
-                )
-
-            for queue_name, named_handler, bare_handler in process_pattern.findall(
-                content
-            ):
-                task_name = (
-                    queue_name or named_handler or bare_handler or "queue-worker"
-                )
-                tasks.append(
-                    RuntimeTask(
-                        name=task_name,
-                        file_path=file_path,
-                        runtime_kind="js_worker",
-                        decorator="queue_process",
-                        queue=queue_name or "",
-                    )
-                )
-
-        if not agenda_shape or not _js_has_agenda_evidence(content):
+        # Fail closed without syntax nodes: raw text cannot tell an executable
+        # call from queue code quoted inside a prompt template literal, which is
+        # how a VS Code prompt file reported `fake-example` as a real job.
+        source, language = _js_parse_input(file_path, content)
+        evidence = js_syntax_evidence(Path(file_path), source, language)
+        if evidence is None:
             continue
 
-        for job_name in agenda_define_pattern.findall(content):
-            tasks.append(
-                RuntimeTask(
-                    name=job_name,
-                    file_path=file_path,
-                    runtime_kind="js_worker",
-                    decorator="agenda.define",
-                    queue=job_name,
-                )
-            )
+        if _js_imports_any(evidence.imports, JS_QUEUE_MODULES):
+            for call in evidence.calls:
+                if call.is_new and call.name == "Worker":
+                    queue_name = _js_str_arg(call, 0)
+                    if not queue_name:
+                        continue
+                    tasks.append(
+                        RuntimeTask(
+                            name=queue_name,
+                            file_path=file_path,
+                            runtime_kind="js_worker",
+                            decorator="Worker",
+                            queue=queue_name,
+                        )
+                    )
+                elif not call.is_new and call.name in ("process", "consume"):
+                    kind, value = call.args[0] if call.args else ("", "")
+                    queue_name = value if kind == "str" else ""
+                    tasks.append(
+                        RuntimeTask(
+                            name=queue_name or value or "queue-worker",
+                            file_path=file_path,
+                            runtime_kind="js_worker",
+                            decorator="queue_process",
+                            queue=queue_name,
+                        )
+                    )
 
-        for cadence, job_name in agenda_every_pattern.findall(content):
-            schedulers.append(
-                RuntimeScheduler(
-                    name=f"agenda-{job_name}",
-                    file_path=file_path,
-                    scheduler_type="agenda",
-                    cron=cadence,
-                    invoked_targets=[job_name],
+        agenda_evidence = _js_imports_any(
+            evidence.imports, JS_AGENDA_MODULES
+        ) or any(call.is_new and call.name == "Agenda" for call in evidence.calls)
+        if not agenda_evidence:
+            continue
+
+        for call in evidence.calls:
+            if call.is_new or call.receiver != "agenda":
+                continue
+            if call.name == "define":
+                job_name = _js_str_arg(call, 0)
+                if not job_name:
+                    continue
+                tasks.append(
+                    RuntimeTask(
+                        name=job_name,
+                        file_path=file_path,
+                        runtime_kind="js_worker",
+                        decorator="agenda.define",
+                        queue=job_name,
+                    )
                 )
-            )
+            elif call.name == "every":
+                cadence, job_name = _js_str_arg(call, 0), _js_str_arg(call, 1)
+                if not cadence or not job_name:
+                    continue
+                schedulers.append(
+                    RuntimeScheduler(
+                        name=f"agenda-{job_name}",
+                        file_path=file_path,
+                        scheduler_type="agenda",
+                        cron=cadence,
+                        invoked_targets=[job_name],
+                    )
+                )
 
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 

@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from deepdoc.parser.base import ParsedFile, Symbol
+from deepdoc.parser import js_ts_parser
+from deepdoc.parser.registry import parse_file
 from deepdoc.scanner import (
     discover_config_impacts,
     discover_database_schema,
@@ -499,6 +501,83 @@ def test_agenda_jobs_need_agenda_evidence() -> None:
         "nightly-report"
     ]
     assert [s.scheduler_type for s in detected.schedulers] == ["agenda"]
+
+
+def test_template_literal_prompt_examples_are_not_queue_workers() -> None:
+    """Queue code quoted inside a prompt template literal never executes."""
+    path = "src/prompts/worker_examples.ts"
+    content = (
+        "export const WORKER_PROMPT = `\n"
+        '  import { Worker } from "bullmq";\n'
+        '  new Worker("fake-example", async job => job);\n'
+        '  queue.process("also-fake", handler);\n'
+        "`;\n"
+        "export function buildPrompt(): string {\n"
+        "    return WORKER_PROMPT;\n"
+        "}\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None and parsed.language == "typescript"
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+
+
+def test_real_queue_import_with_embedded_example_emits_no_fake_workers() -> None:
+    """A genuine bullmq import does not make quoted example calls real jobs."""
+    path = "src/prompts/queue_examples.ts"
+    content = (
+        'import { Queue } from "bullmq";\n'
+        'const realQueue = new Queue("real");\n'
+        "export const EXAMPLE = `\n"
+        '  new Worker("fake-example", async job => job);\n'
+        '  queue.process("also-fake", handler);\n'
+        "`;\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+
+
+def test_vue_queue_workers_come_from_the_script_block() -> None:
+    """A Vue SFC is markup around a script block; only the script is real JS."""
+    path = "src/components/JobsPanel.vue"
+    content = (
+        "<template><div>{{ label }}</div></template>\n"
+        '<script setup lang="ts">\n'
+        'import { Queue } from "bullmq";\n'
+        'const queue = new Queue("emails");\n'
+        'queue.process("send-digest", handleDigest);\n'
+        "</script>\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None and parsed.language == "vue"
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [
+        task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
+    ] == ["send-digest"]
+
+
+def test_js_runtime_fails_closed_without_tree_sitter(monkeypatch) -> None:
+    """No syntax nodes means no evidence - never fall back to raw text."""
+    monkeypatch.setattr(js_ts_parser, "_TS_AVAILABLE", False)
+    path = "workers/orders.js"
+    content = (
+        "const { Worker } = require('bullmq');\n"
+        "new Worker('orders-sync', async job => syncOrders(job));\n"
+    )
+
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="javascript")}, {path: content}
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
 
 
 def test_discover_debug_signals_reads_dict_endpoints() -> None:

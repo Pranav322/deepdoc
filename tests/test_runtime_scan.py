@@ -371,6 +371,38 @@ def test_runtime_discovery_extracts_django_and_laravel_surfaces() -> None:
     )
 
 
+def test_laravel_comments_strings_and_invalid_php_never_create_runtime_surfaces() -> None:
+    """Laravel facts require complete PHP syntax nodes, never raw source text."""
+    sources = {
+        "app/Jobs/comment.php": "<?php\n// class CommentJob implements ShouldQueue\n",
+        "app/Jobs/string.php": (
+            "<?php\n$example = 'class StringJob implements ShouldQueue';\n"
+        ),
+        "app/Jobs/broken.php": "<?php\nclass BrokenJob implements ShouldQueue {\n",
+        "app/Console/Kernel.php": (
+            "<?php\n// $schedule->command('fake:run')->daily();\n"
+        ),
+    }
+    parsed = {
+        path: _parsed_file(path, language="php") for path in sources
+    }
+
+    runtime = discover_runtime_surfaces(
+        parsed,
+        sources,
+        api_endpoints=[
+            {"method": "POST", "path": "/fake", "file": "app/Console/Kernel.php"}
+        ],
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind.startswith("laravel_")] == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
 def test_runtime_discovery_extracts_js_and_go_workers() -> None:
     parsed_files = {
         "workers/orders.js": _parsed_file("workers/orders.js", language="javascript"),
@@ -716,6 +748,24 @@ def test_vue_nonexecutable_script_type_never_creates_runtime_evidence() -> None:
         '<script type="text/plain">\n'
         "const { Worker } = require('bullmq');\n"
         "new Worker('fake-worker', handleFake);\n"
+        "</script>\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None and parsed.language == "vue"
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+
+
+def test_vue_data_lang_cannot_authenticate_nonexecutable_typescript() -> None:
+    """Only the exact SFC `lang` attribute changes an inline script grammar."""
+    path = "src/components/DataLangOnly.vue"
+    content = (
+        '<script data-lang="ts">\n'
+        'import { Worker } from "bullmq";\n'
+        "const marker: number = 1;\n"
+        'new Worker("fake-worker", handleFake);\n'
         "</script>\n"
     )
     parsed = parse_file(Path(path), content)
@@ -1173,7 +1223,7 @@ class _ProbeCountingStr(str):
 
     probes = 0
 
-    def __contains__(self, other: object) -> bool:
+    def __contains__(self, other: str) -> bool:
         _ProbeCountingStr.probes += 1
         return str.__contains__(self, other)
 
@@ -1225,8 +1275,13 @@ def test_task_link_work_is_bounded_by_extracted_dispatch_targets() -> None:
     probes_small, runtime_small = measurements[251]
     probes_large, _ = measurements[502]
 
-    # Doubling the task count must not scale the per-file probing with it.
-    assert probes_large < probes_small * 1.2, (probes_small, probes_large)
+    # Doubling the task count must not scale the per-file probing with it. A
+    # parser-only implementation may remove those raw string probes entirely;
+    # when the baseline is zero, the larger corpus must stay zero too.
+    if probes_small == 0:
+        assert probes_large == 0, (probes_small, probes_large)
+    else:
+        assert probes_large < probes_small * 1.2, (probes_small, probes_large)
 
     stats = runtime_small.scan_stats
     # Unbound TypeScript `.delay` calls are not dispatch evidence at all.
@@ -1401,6 +1456,35 @@ def test_qualified_laravel_dispatch_keeps_its_producer_link() -> None:
     )
     _link_runtime_evidence(RuntimeScan(tasks=[task]), evidence, [])
     assert task.producer_files == ["app/Http/OrderController.php"]
+
+
+def test_php_same_file_duplicate_short_names_keep_distinct_canonical_tasks() -> None:
+    """Laravel task dedupe must never collapse parser-proven FQCN identities."""
+    task_path = "app/Jobs/MultipleSends.php"
+    producer_path = "app/Http/SendController.php"
+    sources = {
+        task_path: (
+            "<?php\n"
+            "namespace App\\Jobs;\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class Send implements ShouldQueue {}\n"
+            "namespace Billing\\Events;\n"
+            "class Send {}\n"
+        ),
+        producer_path: "<?php\n\\Billing\\Events\\Send::dispatch($event);\n",
+    }
+    parsed = {
+        task_path: _parsed_file(task_path, language="php"),
+        producer_path: _parsed_file(producer_path, language="php"),
+    }
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    jobs = [task for task in runtime.tasks if task.runtime_kind == "laravel_job"]
+    by_identity = {task.target_identities[0]: task for task in jobs}
+
+    assert sorted(by_identity) == [r"App\Jobs\Send", r"Billing\Events\Send"]
+    assert by_identity[r"App\Jobs\Send"].producer_files == []
+    assert by_identity[r"Billing\Events\Send"].producer_files == [producer_path]
 
 
 def test_unindexable_cron_trigger_does_not_restore_task_candidate_multiplier() -> None:
@@ -2290,6 +2374,46 @@ def test_endpoint_attachment_bounds_work_for_endpoint_heavy_files(monkeypatch) -
     assert runtime.scan_stats["link_endpoint_cap_rejections"] == endpoint_count - 64
 
 
+def test_repeated_endpoint_evidence_counts_downstream_cap_once_per_source_batch() -> None:
+    """Repeated evidence cannot multiply one destination/source cap rejection."""
+    task = RuntimeTask(
+        name="sync",
+        file_path="workers/sync.py",
+        runtime_kind="celery",
+    )
+    runtime = RuntimeScan(tasks=[task])
+    first_file = "api/first.py"
+    repeated_file = "api/repeated.py"
+    evidence = [
+        DispatchEvidence(
+            file_path=first_file,
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+    ] + [
+        DispatchEvidence(
+            file_path=repeated_file,
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+        for _ in range(256)
+    ]
+    endpoints = [
+        {"method": "POST", "path": f"/first/{index}", "file": first_file}
+        for index in range(64)
+    ] + [
+        {"method": "POST", "path": f"/repeated/{index}", "file": repeated_file}
+        for index in range(256)
+    ]
+
+    _link_runtime_evidence(runtime, evidence, endpoints)
+
+    assert len(task.linked_endpoints) == 64
+    assert runtime.scan_stats["link_endpoint_cap_rejections"] == 256
+
+
 def test_scheduler_owner_evidence_links_only_owning_scheduler() -> None:
     """Scheduler declarations are direct evidence, not a global endpoint sweep."""
     schedulers = [
@@ -2474,6 +2598,111 @@ def test_python_runtime_discovery_requires_framework_bound_ast_declarations() ->
     assert runtime.dispatch_evidence == []
 
 
+def test_python_channels_comments_strings_and_invalid_source_create_no_consumers() -> None:
+    """Channels consumers require a valid AST and a bound framework base class."""
+    sources = {
+        "realtime/comment.py": "# class CommentGhost(AsyncWebsocketConsumer):\n",
+        "realtime/string.py": 'example = "class StringGhost(WebsocketConsumer):"\n',
+        "realtime/broken.py": "class BrokenGhost(WebsocketConsumer):\n",
+        "realtime/faux.py": "class Faux(AsyncWebsocketConsumer):\n    pass\n",
+    }
+    parsed = {path: _parsed_file(path) for path in sources}
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.realtime_consumers == []
+
+
+def test_python_only_the_decorated_same_name_declaration_authenticates_delay() -> None:
+    """Task proof follows the exact AST declaration, not a name-wide set."""
+    path = "orders/tasks.py"
+    source = (
+        "from celery import shared_task\n"
+        "def actual():\n"
+        "    return None\n"
+        "actual.delay()\n"
+        "@shared_task\n"
+        "def actual():\n"
+        "    return None\n"
+        "actual.delay()\n"
+        "def actual():\n"
+        "    return None\n"
+        "actual.delay()\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        (path, ("actual",))
+    ]
+
+
+def test_python_framework_member_writes_revoke_celery_and_signal_proof() -> None:
+    """Mutated framework APIs cannot authenticate decorators or `.connect()` calls."""
+    sources = {
+        "workers/faux.py": (
+            "import celery\n"
+            "celery.shared_task = fake_decorator\n"
+            "@celery.shared_task\n"
+            "def ghost():\n"
+            "    return None\n"
+        ),
+        "signals/faux.py": (
+            "from django.db.models.signals import post_save\n"
+            "post_save.connect = fake_connect\n"
+            "post_save.connect(handler)\n"
+        ),
+    }
+    parsed = {path: _parsed_file(path) for path in sources}
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [task for task in runtime.tasks if task.name in {"ghost", "handler"}] == []
+
+
+def test_python_channels_plain_redefinition_revokes_prior_consumer() -> None:
+    """Only the latest AST class binding can establish a Channels consumer."""
+    sources = {
+        "app/consumers.py": (
+            "from channels.generic.websocket import AsyncWebsocketConsumer\n\n"
+            "class OrdersConsumer(AsyncWebsocketConsumer):\n"
+            "    pass\n\n"
+            "class OrdersConsumer:\n"
+            "    pass\n"
+        )
+    }
+    parsed = {path: _parsed_file(path) for path in sources}
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.realtime_consumers == []
+
+
+def test_python_framework_member_deletes_revoke_runtime_proof() -> None:
+    """Deleting a framework member revokes the root's runtime authority."""
+    sources = {
+        "workers/deleted.py": (
+            "import celery\n"
+            "del celery.shared_task\n\n"
+            "@celery.shared_task\n"
+            "def ghost():\n"
+            "    return None\n"
+        ),
+        "signals/deleted.py": (
+            "from django.db.models.signals import post_save\n"
+            "del post_save.connect\n"
+            "post_save.connect(handler)\n"
+        ),
+    }
+    parsed = {path: _parsed_file(path) for path in sources}
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.tasks == []
+
+
 def test_python_celery_aliases_multiline_decorators_and_bound_app_are_discovered() -> None:
     """Valid AST-bound Celery forms remain surfaces without raw decorator matching."""
     path = "workers/tasks.py"
@@ -2588,6 +2817,29 @@ def test_python_module_imports_and_bare_annotations_preserve_task_bindings() -> 
         ("pkg/annotation.py", ("actual",)),
     ]
     assert task.producer_files == ["pkg/module_import.py", "pkg/annotation.py"]
+
+
+def test_python_bare_annotation_does_not_revoke_decorated_task_export() -> None:
+    """`task: Type` annotates without rebinding the exported Celery callable."""
+    sources = {
+        "orders/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    return None\n"
+            "actual: object\n"
+        ),
+        "orders/api.py": "from .tasks import actual\nactual.delay()\n",
+    }
+    parsed = {path: _parsed_file(path) for path in sources}
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("orders/api.py", ("actual",))
+    ]
+    assert task.producer_files == ["orders/api.py"]
 
 
 def test_python_rebound_task_export_cannot_authenticate_cross_file_dispatch() -> None:
@@ -3209,6 +3461,39 @@ def test_js_member_writes_invalidate_runtime_receivers_and_exports() -> None:
     assert worker.producer_files == []
 
 
+def test_js_alias_member_writes_revoke_original_runtime_values() -> None:
+    """A member write through an alias taints every spelling of that value."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/queue-alias.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "const alias = queue;\n"
+            "alias.add = fakeAdd;\n"
+            "queue.add('forged', {});\n"
+        ),
+        "producers/module-alias.js": (
+            "const bull = require('bullmq');\n"
+            "const alias = bull;\n"
+            "alias.Queue = FakeQueue;\n"
+            "const queue = new bull.Queue('orders');\n"
+            "queue.add('forged', {});\n"
+        ),
+    }
+    parsed = {
+        path: _parsed_file(path, language="javascript") for path in sources
+    }
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+
+    assert runtime.dispatch_evidence == []
+    assert worker.producer_files == []
+
+
 def test_js_nested_mutator_revokes_outer_runtime_bindings() -> None:
     """A nested function can mutate an outer receiver before its later use."""
     sources = {
@@ -3240,6 +3525,43 @@ def test_js_nested_mutator_revokes_outer_runtime_bindings() -> None:
 
     assert runtime.dispatch_evidence == []
     worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
+    assert runtime.realtime_consumers == []
+
+
+def test_js_eval_and_with_scope_cannot_authenticate_runtime_evidence() -> None:
+    """Dynamic scope operations revoke otherwise trusted queue/realtime roles."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/eval.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "eval('queue.add = fakeAdd');\n"
+            "queue.add('forged', {});\n"
+        ),
+        "producers/with.js": (
+            "const { Queue } = require('bullmq');\n"
+            "let queue;\n"
+            "with ({ Queue: FakeQueue }) { queue = new Queue('orders'); }\n"
+            "queue.add('forged', {});\n"
+        ),
+        "realtime/eval.js": (
+            "eval('require = fakeLoader');\n"
+            "const io = require('socket.io')(server);\n"
+            "io.on('connection', handler);\n"
+        ),
+    }
+    parsed = {
+        path: _parsed_file(path, language="javascript") for path in sources
+    }
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+
+    assert runtime.dispatch_evidence == []
     assert worker.producer_files == []
     assert runtime.realtime_consumers == []
 

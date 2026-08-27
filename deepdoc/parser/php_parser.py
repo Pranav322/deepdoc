@@ -20,6 +20,7 @@ try:
     PHP_LANGUAGE = Language(tsphp.language_php())
     _TS_AVAILABLE = True
 except Exception:
+    Parser = None  # type: ignore[assignment]
     _TS_AVAILABLE = False
 
 
@@ -32,10 +33,23 @@ class PhpDispatch:
 
 @dataclass(frozen=True)
 class PhpClassDeclaration:
-    """A parser-proven PHP class name and its canonical lexical FQCN."""
+    """A parser-proven PHP class and its runtime-relevant structural metadata."""
 
     name: str
     target: str
+    interfaces: tuple[str, ...] = ()
+    queue: str = ""
+    has_handle: bool = False
+    handle_event: str = ""
+
+
+@dataclass(frozen=True)
+class PhpSchedule:
+    """One complete `$schedule` chain proven by the PHP grammar."""
+
+    kind: str
+    target: str
+    cron: str
 
 
 def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
@@ -46,7 +60,7 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
     ``dispatch/event(new Class(...))``. Comments, strings, dynamic values, and
     arbitrary methods never reach the runtime linker.
     """
-    if not _TS_AVAILABLE:
+    if not _TS_AVAILABLE or Parser is None:
         return ()
     parser = Parser(PHP_LANGUAGE)
     root = parser.parse(content.encode("utf8")).root_node
@@ -108,15 +122,16 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
 
 
 def php_class_declarations(content: str) -> tuple[PhpClassDeclaration, ...]:
-    """Return strict parser-proven top-level PHP class identities by namespace."""
-    if not _TS_AVAILABLE:
+    """Return strict parser-proven PHP classes with structural runtime metadata."""
+    if not _TS_AVAILABLE or Parser is None:
         return ()
-    parser = Parser(PHP_LANGUAGE)  # type: ignore[possibly-unbound]
+    parser = Parser(PHP_LANGUAGE)
     root = parser.parse(content.encode("utf8")).root_node
     if root.has_error:
         return ()
     found: list[PhpClassDeclaration] = []
     for namespace, scope_nodes in _php_top_level_scopes(root):
+        aliases = _php_import_aliases_from_nodes(scope_nodes)
         for node in scope_nodes:
             if node.type != "class_declaration":
                 continue
@@ -127,10 +142,233 @@ def php_class_declarations(content: str) -> tuple[PhpClassDeclaration, ...]:
             if target:
                 found.append(
                     PhpClassDeclaration(
-                        name=name.text.decode("utf8", "replace"), target=target
+                        name=name.text.decode("utf8", "replace"),
+                        target=target,
+                        interfaces=_php_class_interfaces(node, aliases, namespace),
+                        queue=_php_class_queue(node),
+                        has_handle=_php_has_handle(node),
+                        handle_event=_php_handle_event(node, aliases, namespace),
                     )
                 )
     return tuple(found)
+
+
+def php_schedules(content: str) -> tuple[PhpSchedule, ...]:
+    """Return only complete structural Laravel `$schedule` chains.
+
+    PHP comments, strings, and error-recovery trees cannot reach this helper. A
+    schedule requires `$schedule->{command|job|call}(...)` followed by at least
+    one real chained cadence call, matching the previous public surface while
+    moving recognition behind the parser boundary.
+    """
+    if not _TS_AVAILABLE or Parser is None:
+        return ()
+    parser = Parser(PHP_LANGUAGE)
+    root = parser.parse(content.encode("utf8")).root_node
+    if root.has_error:
+        return ()
+    found: list[PhpSchedule] = []
+
+    def visit(node, aliases: dict[str, str], namespace: str) -> None:
+        if node.type == "namespace_definition":
+            body = node.child_by_field_name("body")
+            if body is not None:
+                scoped = tuple(body.named_children)
+                scoped_aliases = _php_import_aliases_from_nodes(scoped)
+                scoped_namespace = _php_namespace_name(node)
+                for child in scoped:
+                    visit(child, scoped_aliases, scoped_namespace)
+            return
+        if node.type == "member_call_expression" and not _php_is_chained_member_call(node):
+            schedule = _php_schedule_from_call(node, aliases, namespace)
+            if schedule is not None:
+                found.append(schedule)
+        for child in node.named_children:
+            visit(child, aliases, namespace)
+
+    for namespace, scope_nodes in _php_top_level_scopes(root):
+        aliases = _php_import_aliases_from_nodes(scope_nodes)
+        for node in scope_nodes:
+            visit(node, aliases, namespace)
+    return tuple(found)
+
+
+def _php_class_interfaces(node, aliases: dict[str, str], namespace: str) -> tuple[str, ...]:
+    """Canonical interfaces named by one parser-proven class declaration."""
+    interfaces: list[str] = []
+    for clause in node.named_children:
+        if clause.type != "class_interface_clause":
+            continue
+        for interface in clause.named_children:
+            target = _php_class_target(interface, aliases, namespace)
+            if target:
+                interfaces.append(target)
+    return tuple(interfaces)
+
+
+def _php_class_queue(node) -> str:
+    """Literal public/protected `$queue` property from one class AST."""
+    for body in node.named_children:
+        if body.type != "declaration_list":
+            continue
+        for declaration in body.named_children:
+            if declaration.type != "property_declaration":
+                continue
+            visibility = {
+                child.text.decode("utf8", "replace").lower()
+                for child in declaration.named_children
+                if child.type == "visibility_modifier"
+            }
+            if not visibility & {"public", "protected"}:
+                continue
+            for element in declaration.named_children:
+                if element.type != "property_element":
+                    continue
+                parts = element.named_children
+                variable = next(
+                    (part for part in parts if part.type == "variable_name"), None
+                )
+                value = next((part for part in parts if part.type == "string"), None)
+                if (
+                    variable is not None
+                    and variable.text == b"$queue"
+                    and value is not None
+                ):
+                    return _php_string_literal(value)
+    return ""
+
+
+def _php_has_handle(node) -> bool:
+    """Whether a class has a real method declaration named `handle`."""
+    for body in node.named_children:
+        if body.type != "declaration_list":
+            continue
+        for method in body.named_children:
+            if method.type != "method_declaration":
+                continue
+            name = method.child_by_field_name("name")
+            if name is not None and name.text.lower() == b"handle":
+                return True
+    return False
+
+
+def _php_handle_event(node, aliases: dict[str, str], namespace: str) -> str:
+    """Canonical first parameter type of a real `handle` method, if present."""
+    for body in node.named_children:
+        if body.type != "declaration_list":
+            continue
+        for method in body.named_children:
+            if method.type != "method_declaration":
+                continue
+            name = method.child_by_field_name("name")
+            if name is None or name.text.lower() != b"handle":
+                continue
+            parameters = next(
+                (child for child in method.named_children if child.type == "formal_parameters"),
+                None,
+            )
+            if parameters is None:
+                continue
+            parameter = next(
+                (child for child in parameters.named_children if child.type == "simple_parameter"),
+                None,
+            )
+            if parameter is None:
+                continue
+            named_type = next(
+                (child for child in parameter.named_children if child.type == "named_type"),
+                None,
+            )
+            type_name = (
+                named_type.named_children[0]
+                if named_type is not None and named_type.named_children
+                else None
+            )
+            target = (
+                _php_class_target(type_name, aliases, namespace)
+                if type_name is not None
+                else ""
+            )
+            return target
+    return ""
+
+
+def _php_is_chained_member_call(node) -> bool:
+    """Whether `node` is the object of a larger member-call chain."""
+    parent = node.parent
+    return (
+        parent is not None
+        and parent.type == "member_call_expression"
+        and parent.child_by_field_name("object") is node
+    )
+
+
+def _php_schedule_from_call(node, aliases: dict[str, str], namespace: str) -> PhpSchedule | None:
+    """Interpret one complete parsed `$schedule` method chain, or fail closed."""
+    chain: list[tuple[str, object]] = []
+    current = node
+    while current is not None and current.type == "member_call_expression":
+        name = current.child_by_field_name("name")
+        arguments = current.child_by_field_name("arguments")
+        if name is None or arguments is None:
+            return None
+        chain.append((name.text.decode("utf8", "replace").lower(), arguments))
+        current = current.child_by_field_name("object")
+    if (
+        current is None
+        or current.type != "variable_name"
+        or current.text.lower() != b"$schedule"
+        or len(chain) < 2
+    ):
+        return None
+    chain.reverse()
+    kind, arguments = chain[0]
+    if kind not in {"command", "job", "call"}:
+        return None
+    cadence = _php_schedule_cadence(chain[1:])
+    if not cadence:
+        return None
+    argument = _php_first_argument(arguments)
+    if kind == "command":
+        target = _php_string_literal(argument)
+    elif kind == "job":
+        target = _php_schedule_job_target(argument, aliases, namespace)
+    else:
+        target = "closure"
+    return PhpSchedule(kind, target, cadence) if target else None
+
+
+def _php_first_argument(arguments):
+    """First grammar argument expression, never text-scanned source."""
+    if arguments is None or not arguments.named_children:
+        return None
+    argument = arguments.named_children[0]
+    return argument.named_children[0] if argument.type == "argument" and argument.named_children else argument
+
+
+def _php_string_literal(node) -> str:
+    """One parser-proven quoted PHP string literal, without delimiters."""
+    if node is None or node.type != "string":
+        return ""
+    text = node.text.decode("utf8", "replace")
+    return text[1:-1] if len(text) >= 2 and text[0] in "\"'" else ""
+
+
+def _php_schedule_job_target(node, aliases: dict[str, str], namespace: str) -> str:
+    """Canonical target of `$schedule->job(new Job(...))`, or empty."""
+    if node is None or node.type != "object_creation_expression" or not node.named_children:
+        return ""
+    return _php_class_target(node.named_children[0], aliases, namespace)
+
+
+def _php_schedule_cadence(chain: list[tuple[str, object]]) -> str:
+    """Stable summary of parser-proven schedule cadence methods."""
+    for method, arguments in chain:
+        value = _php_string_literal(_php_first_argument(arguments))
+        if method == "cron" and value:
+            return value
+        return f"{method}({value})" if value else method
+    return ""
 
 
 _LARAVEL_HELPER_NAMES = frozenset({"dispatch", "event"})
@@ -362,7 +600,7 @@ def parse_php(path: Path, content: str, language: str) -> ParsedFile:
     symbols: list[Symbol] = []
     imports: list[str] = []
 
-    if _TS_AVAILABLE:
+    if _TS_AVAILABLE and Parser is not None:
         parser = Parser(PHP_LANGUAGE)
         tree = parser.parse(bytes(content, "utf8"))
         lines = content.splitlines()

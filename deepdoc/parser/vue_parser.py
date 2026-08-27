@@ -96,7 +96,7 @@ _VUE_RUNTIME_LANGUAGES = frozenset(
 def _vue_attr_value(attrs: str, name: str) -> str:
     """A quoted or bare SFC attribute value, without HTML interpretation."""
     match = re.search(
-        rf"\b{re.escape(name)}\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))",
+        rf"(?<![\w:-]){re.escape(name)}\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))",
         attrs,
         re.I,
     )

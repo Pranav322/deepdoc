@@ -24,6 +24,7 @@ try:
     TSX_LANGUAGE = Language(tsts.language_tsx())
     _TS_AVAILABLE = True
 except Exception:
+    Parser = None  # type: ignore[assignment]
     _TS_AVAILABLE = False
 
 
@@ -31,7 +32,7 @@ def parse_js_ts(path: Path, content: str, language: str) -> ParsedFile:
     symbols: list[Symbol] = []
     imports: list[str] = []
 
-    if _TS_AVAILABLE:
+    if _TS_AVAILABLE and Parser is not None:
         parser = Parser(_grammar_for(path, language))
         tree = parser.parse(bytes(content, "utf8"))
         lines = content.splitlines()
@@ -137,7 +138,7 @@ def js_bound_calls(
     carries the role of the value it was made on, so callers can require the API
     a library really documents instead of trusting the module name alone.
     """
-    if not _TS_AVAILABLE:
+    if not _TS_AVAILABLE or Parser is None:
         return None
     try:
         tree = Parser(_grammar_for(path, language)).parse(bytes(content, "utf8"))
@@ -204,6 +205,7 @@ _UNCERTAIN_WRITE_ANCESTORS = frozenset(
         "try_statement",
         "catch_clause",
         "finally_clause",
+        "with_statement",
         "ternary_expression",
     }
 )
@@ -252,6 +254,8 @@ class _Binder:
         self._cross_scope_invalidations: set[_Declaration] = set()
         self._global_writes: dict[str, list[int]] = {}
         self._nested_global_writes: set[str] = set()
+        self._value_mutation_positions: dict[_ResolvedValue, list[int]] = {}
+        self._dynamic_scope_positions: dict[tuple[int, int], list[int]] = {}
         self._calls: list = []
 
     def run(self, root) -> tuple[JsBoundCall, ...]:
@@ -282,9 +286,13 @@ class _Binder:
             elif node.type == "update_expression":
                 target = node.child_by_field_name("argument")
                 if target is not None:
+                    self._record_member_mutation(target)
                     for name_node in _pattern_names(target):
                         self._record_write(name_node, None)
-            elif node.type in ("new_expression", "call_expression"):
+            elif node.type == "call_expression":
+                self._record_direct_eval(node)
+                self._calls.append(node)
+            elif node.type == "new_expression":
                 self._calls.append(node)
         found = (self._bound_call(node) for node in self._calls)
         return tuple(call for call in found if call is not None)
@@ -425,6 +433,51 @@ class _Binder:
         positions.insert(index, write_at)
         writes.insert(index, write)
 
+    def _record_member_mutation(self, target) -> None:
+        """Taint the resolved object/module behind a member or subscript write."""
+        base = _member_write_base(target)
+        if base is None:
+            return
+        value = self._resolve(base)
+        if value is None:
+            return
+        positions = self._value_mutation_positions.setdefault(value, [])
+        position = target.start_byte
+        if not positions or position >= positions[-1]:
+            positions.append(position)
+            return
+        positions.insert(bisect_right(positions, position), position)
+
+    def _value_was_mutated(self, value: _ResolvedValue, position: int) -> bool:
+        """Whether a prior member write invalidated this resolved object value."""
+        return bisect_right(self._value_mutation_positions.get(value, ()), position) > 0
+
+    def _record_direct_eval(self, node) -> None:
+        """Fail closed after an unshadowed direct `eval` in one execution scope."""
+        callee = node.child_by_field_name("function")
+        if (
+            callee is None
+            or callee.type != "identifier"
+            or _text(callee) != "eval"
+            or self._is_locally_declared(callee)
+            or self._global_name_was_written(callee)
+        ):
+            return
+        scope = _execution_scope(node)
+        positions = self._dynamic_scope_positions.setdefault(scope, [])
+        position = node.start_byte
+        if not positions or position >= positions[-1]:
+            positions.append(position)
+            return
+        positions.insert(bisect_right(positions, position), position)
+
+    def _scope_has_direct_eval(self, node) -> bool:
+        """Whether an earlier direct eval can alter this node's lexical scope."""
+        return bisect_right(
+            self._dynamic_scope_positions.get(_execution_scope(node), ()),
+            node.start_byte,
+        ) > 0
+
     def _bind_import(self, node) -> None:
         if _is_type_only_import(node):
             return
@@ -487,6 +540,7 @@ class _Binder:
         if target is None:
             return
         if node.type == "augmented_assignment_expression":
+            self._record_member_mutation(target)
             for name_node in _written_binding_names(target):
                 self._record_write(name_node, None)
             return
@@ -510,6 +564,7 @@ class _Binder:
                     self._record_write(name_node, None)
             return
         if target.type != "identifier":
+            self._record_member_mutation(target)
             if not declares:
                 for name_node in _written_binding_names(target):
                     self._record_write(name_node, None)
@@ -542,15 +597,24 @@ class _Binder:
             callee is None
             or callee.type != "identifier"
             or _text(callee) != "require"
+            or self._scope_has_direct_eval(node)
             or self._is_locally_declared(callee)
             or self._global_name_was_written(callee)
         ):
             return ""
         args = node.child_by_field_name("arguments")
         first = args.named_children[0] if args and args.named_children else None
-        return (
+        module = (
             self._match(_unquote(first))
             if first is not None and first.type == "string"
+            else ""
+        )
+        return (
+            module
+            if module
+            and not self._value_was_mutated(
+                _ResolvedValue(module, _MODULE_EXPORT), node.start_byte
+            )
             else ""
         )
 
@@ -568,14 +632,21 @@ class _Binder:
     def _lookup(self, name_node) -> _ResolvedValue | None:
         """The most recent proven write for this lexical declaration."""
         declaration = self._declaration_for(name_node)
-        if declaration is None or declaration in self._cross_scope_invalidations:
+        if (
+            declaration is None
+            or declaration in self._cross_scope_invalidations
+            or self._scope_has_direct_eval(name_node)
+        ):
             return None
         self._binding_lookup_probes += 1
         positions = self._write_positions.get(declaration, ())
         writes = self._writes.get(declaration, ())
         self._binding_history_steps += 1
         index = bisect_right(positions, name_node.start_byte) - 1
-        return writes[index].value if index >= 0 else None
+        value = writes[index].value if index >= 0 else None
+        if value is None or self._value_was_mutated(value, name_node.start_byte):
+            return None
+        return value
 
     def _resolve(self, node) -> _ResolvedValue | None:
         """The proven module value this expression evaluates to, if any."""
@@ -783,6 +854,19 @@ def _pattern_names(node):
     elif kind in ("object_pattern", "array_pattern", "rest_pattern"):
         for child in node.named_children:
             yield from _pattern_names(child)
+
+
+def _member_write_base(node):
+    """Resolved base expression mutated by a member/subscript assignment target."""
+    current = node
+    saw_member = False
+    while current is not None and current.type in {
+        "member_expression",
+        "subscript_expression",
+    }:
+        saw_member = True
+        current = current.child_by_field_name("object")
+    return current if saw_member else None
 
 
 def _written_binding_names(node):

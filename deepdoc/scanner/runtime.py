@@ -3,7 +3,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, Sequence
 
 from .common import (
     DispatchEvidence,
@@ -15,7 +15,7 @@ from .common import (
 from .utils import endpoint_owned_files
 from ..parser.base import ParsedFile
 from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
-from ..parser.php_parser import php_class_declarations, php_dispatches
+from ..parser.php_parser import php_class_declarations, php_dispatches, php_schedules
 from ..parser.registry import language_for_extension
 from ..parser.vue_parser import _extract_script_blocks
 from ..source_metadata import classify_source_kind, is_low_trust_source_kind
@@ -62,10 +62,14 @@ def discover_runtime_surfaces(
     # parse error therefore produces no Celery/Django/scheduler fact instead of
     # leaving a regex to reinterpret broken or quoted source as executable.
     python_trees = _python_ast_trees(python_files)
-    celery_tasks, celery_schedulers, celery_task_exports = _discover_celery_tasks(
+    (
+        celery_tasks,
+        celery_schedulers,
+        celery_task_exports,
+        celery_task_definitions,
+    ) = _discover_celery_tasks(
         python_files, python_trees
     )
-    celery_task_definitions = _python_task_definitions_by_path(celery_tasks)
     runtime.tasks.extend(celery_tasks)
     runtime.schedulers.extend(celery_schedulers)
     runtime.tasks.extend(_discover_django_runtime(python_files, python_trees))
@@ -81,7 +85,7 @@ def discover_runtime_surfaces(
     runtime.schedulers.extend(go_schedulers)
     runtime.schedulers.extend(_discover_schedulers(python_files, python_trees))
     runtime.realtime_consumers.extend(
-        _discover_python_realtime_consumers(python_files)
+        _discover_python_realtime_consumers(python_files, python_trees)
     )
     runtime.dispatch_evidence = _collect_dispatch_evidence(
         eligible,
@@ -152,21 +156,6 @@ def _python_ast_trees(file_contents: dict[str, str]) -> dict[str, ast.Module]:
     return trees
 
 
-def _python_task_definitions_by_path(
-    tasks: list[RuntimeTask],
-) -> dict[str, set[str]]:
-    """All AST-proven Celery declarations, regardless of later re-exports."""
-    definitions: dict[str, set[str]] = {}
-    for task in tasks:
-        if (
-            task.runtime_kind == "celery"
-            and task.decorator
-            and task.file_path.endswith(".py")
-        ):
-            definitions.setdefault(task.file_path, set()).add(task.name)
-    return definitions
-
-
 def _php_runtime_target_identities(tasks: list[RuntimeTask]) -> frozenset[str]:
     """Case-insensitive canonical PHP runtime targets, never display aliases."""
     return frozenset(
@@ -181,21 +170,21 @@ def _php_runtime_target_identities(tasks: list[RuntimeTask]) -> frozenset[str]:
 def _collect_dispatch_evidence(
     file_contents: dict[str, str],
     languages: dict[str, str],
-    python_task_names_by_path: dict[str, set[str]] | None = None,
+    python_task_definitions_by_path: dict[str, set[Any]] | None = None,
     php_runtime_targets: frozenset[str] | None = None,
     *,
     python_exported_task_names_by_path: dict[str, set[str]] | None = None,
 ) -> list[DispatchEvidence]:
     """Collect language-structural evidence only from eligible source files."""
     evidence: list[DispatchEvidence] = []
-    task_names = python_task_names_by_path or {}
-    exported_task_names = python_exported_task_names_by_path or task_names
+    task_definitions = python_task_definitions_by_path or {}
+    exported_task_names = python_exported_task_names_by_path or task_definitions
     for file_path, content in file_contents.items():
         language = languages.get(file_path)
         if language == "python":
             evidence.extend(
                 _python_dispatch_evidence(
-                    file_path, content, task_names, exported_task_names
+                    file_path, content, task_definitions, exported_task_names
                 )
             )
         elif language == "php":
@@ -281,7 +270,7 @@ _PYTHON_DJANGO_SIGNAL_NAMES = frozenset(
 def _python_dispatch_evidence(
     file_path: str,
     content: str,
-    task_definitions_by_path: dict[str, set[str]],
+    task_definitions_by_path: dict[str, set[Any]],
     task_exports_by_path: dict[str, set[str]],
 ) -> list[DispatchEvidence]:
     """Evidence from syntax-proven Celery task/Django signal bindings only."""
@@ -377,7 +366,7 @@ _PYTHON_SIGNAL_MODULE_ROLE = "signal_module"
 def _python_runtime_bindings(
     file_path: str,
     tree: ast.Module,
-    task_definitions_by_path: dict[str, set[str]],
+    task_definitions_by_path: dict[str, set[Any]],
     task_exports_by_path: dict[str, set[str]],
 ) -> _PythonRuntimeBindings:
     """Exact-position module binding histories for task and signal receivers."""
@@ -394,15 +383,16 @@ def _python_runtime_bindings(
                 (position, _PythonBindingEvent(role, target))
             )
 
-    local_task_names = task_definitions_by_path.get(file_path, set())
+    local_task_definitions = task_definitions_by_path.get(file_path, set())
     for node in tree.body:
         position = _python_node_position(node)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            is_task_definition = (node.name, position) in local_task_definitions
             record(
                 node.name,
                 position,
-                _PYTHON_TASK_ROLE if node.name in local_task_names else "",
-                node.name if node.name in local_task_names else "",
+                _PYTHON_TASK_ROLE if is_task_definition else "",
+                node.name if is_task_definition else "",
             )
             continue
         if isinstance(node, ast.ClassDef):
@@ -466,6 +456,16 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     writes: list[tuple[str, tuple[int, int]]] = []
 
     def visit(current: ast.AST) -> None:
+        if isinstance(current, ast.Delete):
+            for name in _python_delete_names(current):
+                writes.append((name, _python_node_position(current)))
+            return
+        if isinstance(current, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
+            if isinstance(current, ast.AnnAssign) and current.value is None:
+                return
+            for name in _python_assignment_names(current):
+                writes.append((name, _python_node_position(current)))
+            return
         if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             writes.append((current.name, _python_node_position(current)))
             return
@@ -765,6 +765,7 @@ def _link_runtime_evidence(
         id(item): set(item.linked_endpoints)
         for item in [*runtime.tasks, *runtime.schedulers]
     }
+    endpoint_batches_attached: set[tuple[int, str]] = set()
     producer_cap_rejections = 0
     endpoint_cap_rejections = endpoint_source_cap_rejections
 
@@ -780,11 +781,17 @@ def _link_runtime_evidence(
         producer_orders.setdefault(id(task), []).append(file_path)
 
     def attach_endpoints(
-        item: RuntimeTask | RuntimeScheduler, endpoint_keys: tuple[str, ...]
+        item: RuntimeTask | RuntimeScheduler,
+        source_file: str,
+        endpoint_keys: tuple[str, ...],
     ) -> None:
         nonlocal endpoint_cap_rejections
         if not endpoint_keys:
             return
+        batch = (id(item), source_file)
+        if batch in endpoint_batches_attached:
+            return
+        endpoint_batches_attached.add(batch)
         values = linked_endpoint_sets.setdefault(id(item), set())
         for key in endpoint_keys:
             if key in values:
@@ -815,7 +822,7 @@ def _link_runtime_evidence(
                 )
                 if scheduler is not None and scheduler is not _AMBIGUOUS:
                     scheduler_checks += 1
-                    attach_endpoints(scheduler, endpoint_keys)
+                    attach_endpoints(scheduler, item.file_path, endpoint_keys)
             continue
         if item.relation == "signal":
             index_probes += 1
@@ -831,7 +838,7 @@ def _link_runtime_evidence(
                 signal_broadcast_edges += 1
                 attach_producer(task, item.file_path)
                 if endpoint_keys:
-                    attach_endpoints(task, endpoint_keys)
+                    attach_endpoints(task, item.file_path, endpoint_keys)
             continue
         if item.relation == "direct":
             task = (
@@ -851,7 +858,7 @@ def _link_runtime_evidence(
             attach_producer(task, item.file_path)
             endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
             if endpoint_keys:
-                attach_endpoints(task, endpoint_keys)
+                attach_endpoints(task, item.file_path, endpoint_keys)
 
         # Schedulers are invoked by direct task targets, never by a queue name.
         if item.relation != "direct":
@@ -865,7 +872,7 @@ def _link_runtime_evidence(
         )
         if scheduler is not None and scheduler is not _AMBIGUOUS:
             scheduler_checks += 1
-            attach_endpoints(scheduler, endpoint_keys)
+            attach_endpoints(scheduler, item.file_path, endpoint_keys)
 
     for task in runtime.tasks:
         task.producer_files = producer_orders.get(id(task), [])
@@ -1073,25 +1080,47 @@ _CELERY_RETRY_KEYWORDS = (
 def _discover_celery_tasks(
     file_contents: dict[str, str],
     trees: dict[str, ast.Module] | None = None,
-) -> tuple[list[RuntimeTask], list[RuntimeScheduler], dict[str, set[str]]]:
+) -> tuple[
+    list[RuntimeTask],
+    list[RuntimeScheduler],
+    dict[str, set[str]],
+    dict[str, set[tuple[str, tuple[int, int]]]],
+]:
     """Discover Celery declarations from valid AST nodes and proven bindings."""
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
     task_exports: dict[str, set[str]] = {}
+    task_definitions: dict[str, set[tuple[str, tuple[int, int]]]] = {}
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
         content = file_contents[file_path]
-        file_tasks, file_schedulers, file_task_exports = _discover_celery_file_runtime(
-            file_path, content, tree
-        )
+        (
+            file_tasks,
+            file_schedulers,
+            file_task_exports,
+            file_task_definitions,
+        ) = _discover_celery_file_runtime(file_path, content, tree)
         tasks.extend(file_tasks)
         schedulers.extend(file_schedulers)
         task_exports[file_path] = file_task_exports
-    return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers), task_exports
+        task_definitions[file_path] = file_task_definitions
+    return (
+        _dedupe_runtime_tasks(tasks),
+        _dedupe_schedulers(schedulers),
+        task_exports,
+        task_definitions,
+    )
 
 
 def _discover_celery_file_runtime(
-    file_path: str, content: str, tree: ast.Module
-) -> tuple[list[RuntimeTask], list[RuntimeScheduler], set[str]]:
+    file_path: str,
+    content: str,
+    tree: ast.Module,
+) -> tuple[
+    list[RuntimeTask],
+    list[RuntimeScheduler],
+    set[str],
+    set[tuple[str, tuple[int, int]]],
+]:
     """Celery facts for one valid module in exact top-level source order."""
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
@@ -1100,6 +1129,7 @@ def _discover_celery_file_runtime(
     constructor_names: set[str] = set()
     app_names: set[str] = set()
     task_exports: set[str] = set()
+    task_definitions: set[tuple[str, tuple[int, int]]] = set()
 
     def revoke(names: set[str]) -> None:
         decorator_names.difference_update(names)
@@ -1131,6 +1161,9 @@ def _discover_celery_file_runtime(
                 revoke({local})
                 if alias.name == "celery" or alias.name.startswith("celery."):
                     celery_module_names.add(local)
+            continue
+        if isinstance(node, ast.AnnAssign) and node.value is None:
+            # A bare module annotation does not evaluate or rebind the name.
             continue
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             names = _python_assignment_names(node)
@@ -1189,6 +1222,7 @@ def _discover_celery_file_runtime(
                     )
                 )
                 task_exports.add(node.name)
+                task_definitions.add((node.name, _python_node_position(node)))
             continue
         if isinstance(node, ast.ClassDef):
             revoke({node.name})
@@ -1196,23 +1230,41 @@ def _discover_celery_file_runtime(
         # Any remaining top-level construct that may bind/delete a task name is
         # dynamic from this scanner's perspective, so its export fails closed.
         revoke({name for name, _ in _python_module_write_events(node)})
-    return tasks, schedulers, task_exports
+    return tasks, schedulers, task_exports, task_definitions
 
 
 def _python_assignment_value(node: ast.Assign | ast.AnnAssign) -> ast.expr | None:
     return node.value
 
 
-def _python_assignment_names(
-    node: ast.Assign | ast.AnnAssign | ast.AugAssign,
-) -> set[str]:
-    targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
-    return {
+def _python_write_target_names(targets: Sequence[ast.expr]) -> set[str]:
+    """Lexical names or roots whose value is changed by write/delete targets."""
+    names = {
         item.id
         for target in targets
         for item in ast.walk(target)
         if isinstance(item, ast.Name) and isinstance(item.ctx, (ast.Store, ast.Del))
     }
+    for target in targets:
+        root = target
+        while isinstance(root, (ast.Attribute, ast.Subscript)):
+            root = root.value
+        if isinstance(root, ast.Name):
+            names.add(root.id)
+    return names
+
+
+def _python_assignment_names(
+    node: ast.Assign | ast.AnnAssign | ast.AugAssign,
+) -> set[str]:
+    """Names whose runtime binding is changed by an assignment target."""
+    targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+    return _python_write_target_names(targets)
+
+
+def _python_delete_names(node: ast.Delete) -> set[str]:
+    """Names whose runtime binding is removed by a delete target."""
+    return _python_write_target_names(tuple(node.targets))
 
 
 def _python_is_celery_app_factory(
@@ -1365,6 +1417,8 @@ def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
 
 
 def _python_assignment_names_if_any(node: ast.AST) -> set[str]:
+    if isinstance(node, ast.Delete):
+        return _python_delete_names(node)
     if isinstance(node, (ast.Assign, ast.AnnAssign, ast.AugAssign)):
         if isinstance(node, ast.AnnAssign) and node.value is None:
             return set()
@@ -1538,140 +1592,68 @@ def _discover_laravel_runtime(
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
-    class_pattern = re.compile(r"class\s+([A-Za-z_][A-Za-z0-9_]*)")
-    should_queue_pattern = re.compile(
-        r"class\s+([A-Za-z_][A-Za-z0-9_]*)\s+implements\s+ShouldQueue"
-    )
-    handle_event_pattern = re.compile(
-        r"function\s+handle\s*\(\s*([\\A-Za-z_][\\A-Za-z0-9_]*)",
-    )
-    queue_pattern = re.compile(
-        r"(?:public|protected)\s+\$queue\s*=\s*['\"]([^'\"]+)['\"]"
-    )
-    command_schedule_pattern = re.compile(
-        r"\$schedule->command\(\s*['\"]([^'\"]+)['\"][^\)]*\)(?P<chain>(?:\s*->\s*[A-Za-z_][A-Za-z0-9_]*\([^\)]*\))+)",
-    )
-    job_schedule_pattern = re.compile(
-        r"\$schedule->job\(\s*(?:new\s+)?([\\A-Za-z_][\\A-Za-z0-9_]*)[^\)]*\)(?P<chain>(?:\s*->\s*[A-Za-z_][A-Za-z0-9_]*\([^\)]*\))+)",
-    )
-    call_schedule_pattern = re.compile(
-        r"\$schedule->call\([^\)]*\)(?P<chain>(?:\s*->\s*[A-Za-z_][A-Za-z0-9_]*\([^\)]*\))+)",
-    )
 
     for file_path, content in file_contents.items():
         lower_file = file_path.lower()
-        class_targets = {
-            declaration.name.lower(): declaration.target
-            for declaration in php_class_declarations(content)
-        }
-        queue_match = queue_pattern.search(content)
-
-        if "shouldqueue" in content.lower() or "/jobs/" in lower_file:
-            for job_name in should_queue_pattern.findall(content):
+        for declaration in php_class_declarations(content):
+            is_queued = any(
+                interface.rsplit("\\", 1)[-1].lower() == "shouldqueue"
+                for interface in declaration.interfaces
+            )
+            if is_queued or "/jobs/" in lower_file:
                 tasks.append(
                     RuntimeTask(
-                        name=job_name,
+                        name=declaration.name,
                         file_path=file_path,
                         runtime_kind="laravel_job",
                         decorator="ShouldQueue",
-                        queue=queue_match.group(1) if queue_match else "",
-                        target_identities=_php_task_identities(class_targets, job_name),
+                        queue=declaration.queue,
+                        target_identities=(declaration.target,),
                     )
                 )
-
-        if "/listeners/" in lower_file and "function handle(" in content:
-            class_match = class_pattern.search(content)
-            event_match = handle_event_pattern.search(content)
-            if class_match:
+            if "/listeners/" in lower_file and declaration.has_handle:
                 tasks.append(
                     RuntimeTask(
-                        name=class_match.group(1),
+                        name=declaration.name,
                         file_path=file_path,
                         runtime_kind="laravel_listener",
                         decorator="listener",
-                        queue=queue_match.group(1) if queue_match else "",
-                        triggers=[event_match.group(1).split("\\")[-1]]
-                        if event_match
+                        queue=declaration.queue,
+                        triggers=[declaration.handle_event.rsplit("\\", 1)[-1]]
+                        if declaration.handle_event
                         else [],
-                        target_identities=_php_task_identities(
-                            class_targets, class_match.group(1)
-                        ),
+                        target_identities=(declaration.target,),
                     )
                 )
-
-        if "/events/" in lower_file:
-            class_match = class_pattern.search(content)
-            if class_match:
+            if "/events/" in lower_file:
                 tasks.append(
                     RuntimeTask(
-                        name=class_match.group(1),
+                        name=declaration.name,
                         file_path=file_path,
                         runtime_kind="laravel_event",
                         decorator="event",
-                        target_identities=_php_task_identities(
-                            class_targets, class_match.group(1)
-                        ),
+                        target_identities=(declaration.target,),
                     )
                 )
-
-        for idx, match in enumerate(
-            command_schedule_pattern.finditer(content), start=1
-        ):
-            command_name = match.group(1)
-            schedulers.append(
-                RuntimeScheduler(
-                    name=f"laravel-command-{idx}",
-                    file_path=file_path,
-                    scheduler_type="laravel_schedule",
-                    cron=_schedule_chain_summary(match.group("chain")),
-                    invoked_targets=[command_name],
-                )
+        schedule_counts: dict[str, int] = {}
+        for schedule in php_schedules(content):
+            schedule_counts[schedule.kind] = schedule_counts.get(schedule.kind, 0) + 1
+            target = (
+                schedule.target.rsplit("\\", 1)[-1]
+                if schedule.kind == "job"
+                else schedule.target
             )
-
-        for idx, match in enumerate(job_schedule_pattern.finditer(content), start=1):
-            job_name = match.group(1).split("\\")[-1]
             schedulers.append(
                 RuntimeScheduler(
-                    name=f"laravel-job-{idx}",
+                    name=f"laravel-{schedule.kind}-{schedule_counts[schedule.kind]}",
                     file_path=file_path,
                     scheduler_type="laravel_schedule",
-                    cron=_schedule_chain_summary(match.group("chain")),
-                    invoked_targets=[job_name],
-                )
-            )
-
-        for idx, match in enumerate(call_schedule_pattern.finditer(content), start=1):
-            schedulers.append(
-                RuntimeScheduler(
-                    name=f"laravel-call-{idx}",
-                    file_path=file_path,
-                    scheduler_type="laravel_schedule",
-                    cron=_schedule_chain_summary(match.group("chain")),
-                    invoked_targets=["closure"],
+                    cron=schedule.cron,
+                    invoked_targets=[target],
                 )
             )
 
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
-
-
-def _php_task_identities(
-    class_targets: dict[str, str], class_name: str
-) -> tuple[str, ...]:
-    """Canonical parser-proven FQCN for one discovered Laravel class."""
-    identity = class_targets.get(class_name.lower())
-    return (identity,) if identity else ()
-
-
-def _schedule_chain_summary(chain: str) -> str:
-    method_match = re.search(r"->\s*([A-Za-z_][A-Za-z0-9_]*)\(([^\)]*)\)", chain)
-    cron_match = re.search(r"->\s*cron\(\s*['\"]([^'\"]+)['\"]\s*\)", chain)
-    if cron_match:
-        return cron_match.group(1)
-    if method_match:
-        method = method_match.group(1)
-        args = method_match.group(2).strip()
-        return f"{method}({args})" if args else method
-    return chain.strip()[:120]
 
 
 # `new Worker(...)`, `.process(...)` and `.consume(...)` are ordinary JS/TS
@@ -2111,63 +2093,220 @@ def _discover_go_runtime(
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 
 
+_CHANNELS_CONSUMER_TYPES = frozenset(
+    {"AsyncWebsocketConsumer", "WebsocketConsumer"}
+)
+_CHANNELS_WEBSOCKET_MODULE = "channels.generic.websocket"
+_DJANGO_ROUTE_MODULES = frozenset({"django.urls", "django.conf.urls"})
+
+
 def _discover_python_realtime_consumers(
     file_contents: dict[str, str],
+    trees: dict[str, ast.Module] | None = None,
 ) -> list[RealtimeConsumer]:
-    """Discover Django Channels consumers from Python source only.
-
-    JavaScript realtime detection is intentionally handled by
-    ``_discover_js_runtime`` through syntax-bound API roles. Keeping this
-    function Python-only prevents raw JS-like text in templates or comments
-    from creating a Socket.IO/WebSocket runtime fact.
-    """
+    """Discover Channels consumers only through AST-proven framework bindings."""
     consumers: list[RealtimeConsumer] = []
-    consumer_pattern = re.compile(
-        r"class\s+(\w+)\((AsyncWebsocketConsumer|WebsocketConsumer)\)\s*:"
-    )
-    route_pattern = re.compile(
-        r"re_path\s*\(\s*r?['\"]([^'\"]+)['\"]|path\s*\(\s*['\"]([^'\"]+)['\"]"
-    )
-    group_pattern = re.compile(r"group_(?:add|discard|send)\s*\(\s*['\"]([^'\"]+)['\"]")
+    for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
+        consumer_names: dict[str, str] = {}
+        consumer_modules: set[str] = set()
+        route_names: set[str] = set()
+        route_modules: set[str] = set()
+        auth_names: set[str] = set()
+        class_nodes: dict[str, tuple[str, ast.ClassDef]] = {}
 
-    for file_path, content in file_contents.items():
-        if (
-            "WebsocketConsumer" not in content
-            and "AsyncWebsocketConsumer" not in content
-            and "ProtocolTypeRouter" not in content
-        ):
-            continue
+        def revoke(name: str) -> None:
+            consumer_names.pop(name, None)
+            consumer_modules.discard(name)
+            route_names.discard(name)
+            route_modules.discard(name)
+            auth_names.discard(name)
 
-        routes = []
-        for match in route_pattern.finditer(content):
-            route = match.group(1) or match.group(2)
-            if route:
-                routes.append(route)
-        groups = group_pattern.findall(content)
-        auth_hints = []
-        if "AuthMiddlewareStack" in content:
-            auth_hints.append("AuthMiddlewareStack")
-        if "scope['user']" in content or 'scope["user"]' in content:
-            auth_hints.append("scope_user")
+        for node in tree.body:
+            if isinstance(node, ast.ImportFrom):
+                module = node.module or ""
+                for alias in node.names:
+                    if alias.name == "*":
+                        continue
+                    local = alias.asname or alias.name
+                    revoke(local)
+                    if (
+                        module == _CHANNELS_WEBSOCKET_MODULE
+                        and alias.name in _CHANNELS_CONSUMER_TYPES
+                    ):
+                        consumer_names[local] = alias.name
+                    elif module == "channels.generic" and alias.name == "websocket":
+                        consumer_modules.add(local)
+                    elif module in _DJANGO_ROUTE_MODULES and alias.name in {
+                        "path",
+                        "re_path",
+                    }:
+                        route_names.add(local)
+                    elif module == "channels.auth" and alias.name == "AuthMiddlewareStack":
+                        auth_names.add(local)
+                continue
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    local = alias.asname or alias.name.split(".", 1)[0]
+                    revoke(local)
+                    if alias.name == _CHANNELS_WEBSOCKET_MODULE:
+                        consumer_modules.add(local)
+                    elif alias.name in _DJANGO_ROUTE_MODULES:
+                        route_modules.add(local)
+                    elif alias.name == "channels.auth":
+                        auth_names.add(local)
+                continue
+            if isinstance(node, ast.ClassDef):
+                class_nodes.pop(node.name, None)
+                consumer_type = _python_channels_consumer_type(
+                    node, consumer_names, consumer_modules
+                )
+                if consumer_type:
+                    class_nodes[node.name] = (consumer_type, node)
+                continue
+            for name, _ in _python_module_write_events(node):
+                revoke(name)
 
-        for match in consumer_pattern.finditer(content):
+        routes_by_consumer = {name: set() for name in class_nodes}
+        auth_used = any(
+            _python_channels_auth_call(call, auth_names)
+            for call in ast.walk(tree)
+            if isinstance(call, ast.Call)
+        )
+        for call in ast.walk(tree):
+            if not isinstance(call, ast.Call) or not _python_channels_route_call(
+                call, route_names, route_modules
+            ):
+                continue
+            consumer_name = _python_channels_route_consumer(call)
+            route = _python_string_literal(call.args[0]) if call.args else ""
+            if consumer_name in routes_by_consumer and route:
+                routes_by_consumer[consumer_name].add(route)
+
+        for name, (consumer_type, class_node) in class_nodes.items():
+            auth_hints: list[str] = []
+            if auth_used:
+                auth_hints.append("AuthMiddlewareStack")
+            if _python_channels_scope_user(class_node):
+                auth_hints.append("scope_user")
             consumers.append(
                 RealtimeConsumer(
-                    name=match.group(1),
+                    name=name,
                     file_path=file_path,
-                    consumer_type=match.group(2),
-                    routes=sorted(set(routes))[:10],
-                    groups=sorted(set(groups))[:10],
+                    consumer_type=consumer_type,
+                    routes=sorted(routes_by_consumer[name])[:10],
+                    groups=sorted(_python_channels_groups(class_node))[:10],
                     auth_hints=auth_hints,
                 )
             )
     return _dedupe_consumers(consumers)
 
 
+def _python_channels_consumer_type(
+    node: ast.ClassDef,
+    consumer_names: dict[str, str],
+    consumer_modules: set[str],
+) -> str:
+    """Framework consumer base proven by a prior Channels import."""
+    for base in node.bases:
+        dotted = _python_dotted_name(base)
+        if dotted in consumer_names:
+            return consumer_names[dotted]
+        parts = dotted.split(".") if dotted else []
+        if (
+            len(parts) == 2
+            and parts[0] in consumer_modules
+            and parts[1] in _CHANNELS_CONSUMER_TYPES
+        ):
+            return parts[1]
+    return ""
+
+
+def _python_channels_route_call(
+    call: ast.Call,
+    route_names: set[str],
+    route_modules: set[str],
+) -> bool:
+    """A `path`/`re_path` call bound to Django's routing module."""
+    dotted = _python_dotted_name(call.func)
+    if dotted in route_names:
+        return True
+    parts = dotted.split(".") if dotted else []
+    return (
+        len(parts) == 2
+        and parts[0] in route_modules
+        and parts[1] in {"path", "re_path"}
+    )
+
+
+def _python_channels_route_consumer(call: ast.Call) -> str:
+    """Class name supplied as a real `Consumer.as_asgi()` route endpoint."""
+    if len(call.args) < 2 or not isinstance(call.args[1], ast.Call):
+        return ""
+    func = call.args[1].func
+    if (
+        not isinstance(func, ast.Attribute)
+        or func.attr != "as_asgi"
+        or not isinstance(func.value, ast.Name)
+    ):
+        return ""
+    return func.value.id
+
+
+def _python_channels_groups(node: ast.ClassDef) -> set[str]:
+    """Literal Channels group operations performed by one consumer class."""
+    groups: set[str] = set()
+    for call in ast.walk(node):
+        if not isinstance(call, ast.Call) or not isinstance(call.func, ast.Attribute):
+            continue
+        if call.func.attr not in {"group_add", "group_discard", "group_send"}:
+            continue
+        layer = call.func.value
+        if not (
+            isinstance(layer, ast.Attribute)
+            and layer.attr == "channel_layer"
+            and isinstance(layer.value, ast.Name)
+            and layer.value.id == "self"
+        ):
+            continue
+        if call.args:
+            group = _python_string_literal(call.args[0])
+            if group:
+                groups.add(group)
+    return groups
+
+
+def _python_channels_auth_call(call: ast.Call, auth_names: set[str]) -> bool:
+    """Whether a call resolves to an imported Channels auth middleware."""
+    dotted = _python_dotted_name(call.func)
+    return dotted in auth_names or dotted.endswith(".AuthMiddlewareStack") and bool(auth_names)
+
+
+def _python_channels_scope_user(node: ast.ClassDef) -> bool:
+    """A structural `self.scope['user']` access within one consumer class."""
+    for current in ast.walk(node):
+        if not isinstance(current, ast.Subscript):
+            continue
+        if not (
+            isinstance(current.value, ast.Attribute)
+            and current.value.attr == "scope"
+            and isinstance(current.value.value, ast.Name)
+            and current.value.value.id == "self"
+        ):
+            continue
+        if _python_string_literal(current.slice) == "user":
+            return True
+    return False
+
+
 def _dedupe_runtime_tasks(tasks: list[RuntimeTask]) -> list[RuntimeTask]:
     by_key: dict[tuple[str, str, str], RuntimeTask] = {}
     for task in tasks:
-        key = (task.file_path, task.name, task.runtime_kind)
+        canonical_identity = (
+            task.target_identities[0].strip().lstrip("\\").lower()
+            if task.runtime_kind.startswith("laravel_") and task.target_identities
+            else task.name
+        )
+        key = (task.file_path, canonical_identity, task.runtime_kind)
         existing = by_key.get(key)
         if not existing:
             by_key[key] = task

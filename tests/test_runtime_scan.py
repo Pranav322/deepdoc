@@ -431,3 +431,178 @@ def test_discover_debug_signals_reads_dict_endpoints() -> None:
     assert health.file_path == "src/health.py"
     assert "/health" in health.patterns
     assert "src/readiness.py" in health.files
+
+
+def test_low_trust_fixtures_do_not_create_product_runtime_surfaces() -> None:
+    """DD-002: fixture/example/test source must not become product runtime facts."""
+    paths = {
+        "worker/tasks.py": "python",
+        "tests/fixtures/celery_fixture.py": "python",
+        "examples/demo_worker.py": "python",
+        "app/Jobs/RealJob.php": "php",
+        "tests/fixtures/Jobs/FixtureJob.php": "php",
+    }
+    parsed_files = {
+        path: _parsed_file(path, language=language) for path, language in paths.items()
+    }
+    file_contents = {
+        "worker/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task(queue='critical')\n"
+            "def sync_orders(order_id):\n"
+            "    return order_id\n"
+        ),
+        "tests/fixtures/celery_fixture.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task(queue='fixture')\n"
+            "def fixture_job(x):\n"
+            "    return x\n\n"
+            "def call_it():\n"
+            "    fixture_job.delay(1)\n"
+        ),
+        "examples/demo_worker.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task\n"
+            "def demo_job(x):\n"
+            "    return x\n"
+        ),
+        "app/Jobs/RealJob.php": (
+            "<?php\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class RealJob implements ShouldQueue\n{\n}\n"
+        ),
+        "tests/fixtures/Jobs/FixtureJob.php": (
+            "<?php\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class FixtureJob implements ShouldQueue\n{\n}\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    task_names = {task.name for task in runtime.tasks}
+    assert "sync_orders" in task_names
+    assert "RealJob" in task_names
+    assert "fixture_job" not in task_names
+    assert "demo_job" not in task_names
+    assert "FixtureJob" not in task_names
+    assert all(
+        "fixtures/" not in task.file_path and "examples/" not in task.file_path
+        for task in runtime.tasks
+    )
+    assert all(
+        "fixtures/" not in producer
+        for task in runtime.tasks
+        for producer in task.producer_files
+    )
+
+
+def test_embedded_foreign_language_snippets_do_not_trigger_foreign_detectors() -> None:
+    """DD-002: a product TypeScript prompt containing Python is not a Python runtime."""
+    parsed_files = {
+        "src/chat/prompts.ts": _parsed_file(
+            "src/chat/prompts.ts", language="typescript"
+        ),
+        "src/editor/widget.ts": _parsed_file(
+            "src/editor/widget.ts", language="typescript"
+        ),
+        "worker/tasks.py": _parsed_file("worker/tasks.py", language="python"),
+    }
+    file_contents = {
+        # Product source, but the runtime-looking code is Python inside a TS string.
+        "src/chat/prompts.ts": (
+            "export const CELERY_PROMPT = `\n"
+            "from celery import shared_task\n"
+            "@shared_task(queue='prompt')\n"
+            "def prompt_job(x):\n"
+            "    return x\n"
+            "prompt_job.delay(1)\n"
+            "from django.core.management.base import BaseCommand\n"
+            "class Command(BaseCommand):\n"
+            "    pass\n"
+            "post_save.connect(prompt_handler)\n"
+            "`;\n"
+        ),
+        # Ordinary TypeScript idioms that merely look like Celery/Django dispatch.
+        "src/editor/widget.ts": (
+            "import { delay } from 'rxjs/operators';\n"
+            "export class Widget {\n"
+            "  start() {\n"
+            "    this.onDidChange.connect(this._onChange);\n"
+            "    this._obs.pipe(delay(300)).subscribe();\n"
+            "    this.animation.delay(120);\n"
+            "  }\n"
+            "}\n"
+        ),
+        "worker/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task(queue='critical')\n"
+            "def sync_orders(order_id):\n"
+            "    return order_id\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    assert {task.name for task in runtime.tasks} == {"sync_orders"}
+    assert all(
+        not task.file_path.endswith(".ts") for task in runtime.tasks
+    ), [task.file_path for task in runtime.tasks]
+
+
+def test_workflow_linking_is_bounded_to_dispatch_candidates() -> None:
+    """DD-001: low-trust and non-dispatching files must not enter the link sweep.
+
+    Deterministic synthetic corpus shaped like the VS Code hotspot: many product
+    files that merely *mention* a task name, plus many low-trust fixtures that
+    do contain real dispatch syntax. Only genuine product dispatch sites may be
+    linked, and only they may cost link work.
+    """
+    corpus_size = 400
+    parsed_files = {
+        "worker/tasks.py": _parsed_file("worker/tasks.py", language="python"),
+        "worker/api.py": _parsed_file("worker/api.py", language="python"),
+    }
+    file_contents = {
+        "worker/tasks.py": (
+            "from celery import shared_task\n\n"
+            "@shared_task(queue='critical')\n"
+            "def sync_orders(order_id):\n"
+            "    return order_id\n"
+        ),
+        # The only real product dispatch site.
+        "worker/api.py": (
+            "from .tasks import sync_orders\n\n"
+            "def enqueue(order_id):\n"
+            "    sync_orders.delay(order_id)\n"
+        ),
+    }
+
+    for index in range(corpus_size):
+        # Product source that mentions the task name but never dispatches it.
+        mention = f"src/vs/editor/mod{index}.ts"
+        parsed_files[mention] = _parsed_file(mention, language="typescript")
+        file_contents[mention] = (
+            f"// see worker/tasks.py sync_orders for the ordering contract\n"
+            f"export const LABEL_{index} = 'sync_orders';\n"
+            + "// padding\n" * 200
+        )
+        # Low-trust fixture that *does* contain dispatch syntax.
+        fixture = f"src/vs/workbench/test/fixtures/prompt{index}.ts"
+        parsed_files[fixture] = _parsed_file(fixture, language="typescript")
+        file_contents[fixture] = (
+            "export const PROMPT = `\nsync_orders.delay(1)\n`;\n" + "// padding\n" * 200
+        )
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    stats = runtime.scan_stats
+    assert stats["input_files"] == corpus_size * 2 + 2
+    assert stats["low_trust_files_skipped"] == corpus_size
+    assert stats["eligible_files"] == corpus_size + 2
+    # Only the genuine dispatch site may reach the task x regex sweep.
+    assert stats["link_candidate_files"] == 1
+    assert stats["link_candidate_files"] < stats["eligible_files"] / 100
+
+    sync_orders = next(task for task in runtime.tasks if task.name == "sync_orders")
+    assert sync_orders.producer_files == ["worker/api.py"]

@@ -182,6 +182,8 @@ class RuntimeScan:
     tasks: list[RuntimeTask] = field(default_factory=list)
     schedulers: list[RuntimeScheduler] = field(default_factory=list)
     realtime_consumers: list[RealtimeConsumer] = field(default_factory=list)
+    # Observable work counters for the scan (see `discover_runtime_surfaces`).
+    scan_stats: dict[str, int] = field(default_factory=dict)
 
 @dataclass
 class ConfigImpact:

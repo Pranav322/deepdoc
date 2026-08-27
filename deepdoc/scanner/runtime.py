@@ -1,47 +1,130 @@
 from .common import *
+from ..parser.registry import language_for_extension
+from ..source_metadata import classify_source_kind, is_low_trust_source_kind
+
+# Runtime detectors are framework-specific, so each one only sees files whose
+# real language can host that framework. Without this, Python runtime code
+# quoted inside a TypeScript prompt/example string became a Celery/Django
+# surface, and ordinary TS idioms (`.delay(`, `.connect(`) became tasks.
+PYTHON_LANGUAGES = frozenset({"python"})
+JS_LANGUAGES = frozenset({"javascript", "typescript", "vue"})
+PHP_LANGUAGES = frozenset({"php"})
+GO_LANGUAGES = frozenset({"go"})
 
 
 def discover_runtime_surfaces(
     parsed_files: dict[str, ParsedFile],
     file_contents: dict[str, str],
     api_endpoints: list[dict[str, Any]] | None = None,
+    source_kind_by_file: dict[str, str] | None = None,
 ) -> RuntimeScan:
-    """Detect first-class background job, scheduler, and realtime surfaces."""
+    """Detect first-class background job, scheduler, and realtime surfaces.
+
+    Only product-trust source participates: low-trust kinds (test/fixture/
+    example/generated) describe how a runtime *could* look, not what this
+    product actually runs. `source_kind_by_file` is the scan-wide classification
+    (`RepoScan.source_kind_by_file`); when absent each path is classified with
+    the same shared `classify_source_kind()` so there is no second path
+    classifier.
+    """
     runtime = RuntimeScan()
-    celery_tasks, celery_schedulers = _discover_celery_tasks(file_contents)
+    eligible = _eligible_contents(file_contents, source_kind_by_file)
+    runtime.scan_stats = {
+        "input_files": len(file_contents),
+        "eligible_files": len(eligible),
+        "low_trust_files_skipped": len(file_contents) - len(eligible),
+    }
+    languages = _language_index(eligible, parsed_files)
+    python_files = _by_language(eligible, languages, PYTHON_LANGUAGES)
+    js_files = _by_language(eligible, languages, JS_LANGUAGES)
+    php_files = _by_language(eligible, languages, PHP_LANGUAGES)
+    go_files = _by_language(eligible, languages, GO_LANGUAGES)
+    python_js_files = _by_language(eligible, languages, PYTHON_LANGUAGES | JS_LANGUAGES)
+
+    celery_tasks, celery_schedulers = _discover_celery_tasks(python_files)
     runtime.tasks.extend(celery_tasks)
     runtime.schedulers.extend(celery_schedulers)
-    runtime.tasks.extend(_discover_django_runtime(file_contents))
-    laravel_tasks, laravel_schedulers = _discover_laravel_runtime(file_contents)
+    runtime.tasks.extend(_discover_django_runtime(python_files))
+    laravel_tasks, laravel_schedulers = _discover_laravel_runtime(php_files)
     runtime.tasks.extend(laravel_tasks)
     runtime.schedulers.extend(laravel_schedulers)
-    js_tasks, js_schedulers = _discover_js_runtime(file_contents)
+    js_tasks, js_schedulers = _discover_js_runtime(js_files)
     runtime.tasks.extend(js_tasks)
     runtime.schedulers.extend(js_schedulers)
-    go_tasks, go_schedulers = _discover_go_runtime(file_contents)
+    go_tasks, go_schedulers = _discover_go_runtime(go_files)
     runtime.tasks.extend(go_tasks)
     runtime.schedulers.extend(go_schedulers)
-    runtime.schedulers.extend(_discover_schedulers(file_contents))
-    runtime.realtime_consumers.extend(_discover_realtime_consumers(file_contents))
-    _link_runtime_workflows(runtime, file_contents, api_endpoints or [])
+    runtime.schedulers.extend(_discover_schedulers(python_js_files))
+    runtime.realtime_consumers.extend(_discover_realtime_consumers(python_js_files))
+    runtime.scan_stats["link_candidate_files"] = _link_runtime_workflows(
+        runtime, eligible, api_endpoints or []
+    )
     runtime.tasks = _dedupe_runtime_tasks(runtime.tasks)
     runtime.schedulers = _dedupe_schedulers(runtime.schedulers)
     runtime.realtime_consumers = _dedupe_consumers(runtime.realtime_consumers)
     return runtime
 
 
+def _eligible_contents(
+    file_contents: dict[str, str],
+    source_kind_by_file: dict[str, str] | None,
+) -> dict[str, str]:
+    """Drop empty and low-trust files, preserving the caller's key order."""
+    kinds = source_kind_by_file or {}
+    return {
+        path: content
+        for path, content in file_contents.items()
+        if content
+        and not is_low_trust_source_kind(kinds.get(path) or classify_source_kind(path))
+    }
+
+
+def _language_index(
+    paths: dict[str, str], parsed_files: dict[str, ParsedFile]
+) -> dict[str, str]:
+    """Real language per file: parser verdict first, extension as fallback."""
+    index: dict[str, str] = {}
+    for path in paths:
+        parsed = parsed_files.get(path)
+        language = (getattr(parsed, "language", "") or "").lower()
+        index[path] = language or language_for_extension(Path(path).suffix)
+    return index
+
+
+def _by_language(
+    eligible: dict[str, str], languages: dict[str, str], wanted: frozenset[str]
+) -> dict[str, str]:
+    return {
+        path: content
+        for path, content in eligible.items()
+        if languages.get(path) in wanted
+    }
+
+
+# Every task-link pattern below needs one of these dispatch shapes present, so a
+# single pass with this superset regex replaces the old files x task-names
+# substring sweep as the candidate filter. That sweep was quadratic: every file
+# was probed once per detected task name, then every surviving file ran ~7
+# regexes per task.
+DISPATCH_MARKER_RE = re.compile(
+    r"""\.(?:delay|apply_async|send)\s*\(|dispatch\s*\(|\bevent\s*\(\s*new\b|\bqueue\.add\s*\("""
+)
+
+
 def _link_runtime_workflows(
     runtime: RuntimeScan,
     file_contents: dict[str, str],
     api_endpoints: list[dict[str, Any]],
-) -> None:
-    endpoint_records = [
-        (
-            f"{str(ep.get('method', 'GET')).upper()} {ep.get('path', '')}",
-            set(endpoint_owned_files(ep)),
-        )
-        for ep in api_endpoints
-    ]
+) -> int:
+    """Attach producer files and endpoints to tasks/schedulers.
+
+    Returns the number of files that actually needed task-pattern work.
+    """
+    endpoint_keys_by_file: dict[str, set[str]] = {}
+    for ep in api_endpoints:
+        key = f"{str(ep.get('method', 'GET')).upper()} {ep.get('path', '')}"
+        for owned in endpoint_owned_files(ep):
+            endpoint_keys_by_file.setdefault(owned, set()).add(key)
 
     task_patterns = {
         task.name: [
@@ -60,6 +143,13 @@ def _link_runtime_workflows(
         for task in runtime.tasks
         if task.name
     }
+    # Literal each task's patterns must contain, so a candidate file only pays
+    # regex cost for the tasks it could possibly mention.
+    task_tokens = {
+        task.name: {task.name, *(trigger for trigger in task.triggers if trigger)}
+        for task in runtime.tasks
+        if task.name
+    }
     scheduler_patterns = {
         scheduler.name: [
             re.compile(rf"""\b{re.escape(target)}\b""")
@@ -69,38 +159,38 @@ def _link_runtime_workflows(
         for scheduler in runtime.schedulers
     }
 
-    # Pre-filter: build a set of all names/targets we need to search for so files
-    # that mention none of them can be skipped before any regex is applied.
-    _all_names = {t.name for t in runtime.tasks if t.name} | {
-        tgt for s in runtime.schedulers for tgt in s.invoked_targets if tgt
-    }
-
+    candidate_files = 0
     for file_path, content in file_contents.items():
         if not content:
             continue
-        if _all_names and not any(n in content for n in _all_names):
+        endpoint_keys = sorted(endpoint_keys_by_file.get(file_path, ()))
+        if DISPATCH_MARKER_RE.search(content):
+            candidate_files += 1
+            for task in runtime.tasks:
+                patterns = task_patterns.get(task.name, [])
+                tokens = task_tokens.get(task.name, ())
+                if not patterns or not any(token in content for token in tokens):
+                    continue
+                if not any(pattern.search(content) for pattern in patterns):
+                    continue
+                if file_path not in task.producer_files:
+                    task.producer_files.append(file_path)
+                if endpoint_keys:
+                    task.linked_endpoints = sorted(
+                        set(task.linked_endpoints) | set(endpoint_keys)
+                    )
+        # The scheduler loop's only effect is guarded by `endpoint_keys`, so a
+        # file owning no endpoint cannot change scheduler state at all.
+        if not endpoint_keys:
             continue
-        endpoint_keys = sorted(
-            key for key, owned_files in endpoint_records if file_path in owned_files
-        )
-        for task in runtime.tasks:
-            patterns = task_patterns.get(task.name, [])
-            if not patterns or not any(pattern.search(content) for pattern in patterns):
-                continue
-            if file_path not in task.producer_files:
-                task.producer_files.append(file_path)
-            if endpoint_keys:
-                task.linked_endpoints = sorted(
-                    set(task.linked_endpoints) | set(endpoint_keys)
-                )
         for scheduler in runtime.schedulers:
             patterns = scheduler_patterns.get(scheduler.name, [])
             if not patterns or not any(pattern.search(content) for pattern in patterns):
                 continue
-            if endpoint_keys:
-                scheduler.linked_endpoints = sorted(
-                    set(scheduler.linked_endpoints) | set(endpoint_keys)
-                )
+            scheduler.linked_endpoints = sorted(
+                set(scheduler.linked_endpoints) | set(endpoint_keys)
+            )
+    return candidate_files
 
 
 def _discover_celery_tasks(

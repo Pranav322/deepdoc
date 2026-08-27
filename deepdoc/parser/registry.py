@@ -30,6 +30,12 @@ def supported_extensions() -> set[str]:
     return set(_REGISTRY.keys())
 
 
+def language_for_extension(ext: str) -> str:
+    """Language name for a file extension, or "" when unsupported."""
+    entry = _REGISTRY.get(ext.lower())
+    return entry[0] if entry else ""
+
+
 def parse_file(path: Path, content: str | None = None) -> ParsedFile | None:
     """Parse a source file. Returns None if extension not supported."""
     ext = path.suffix.lower()

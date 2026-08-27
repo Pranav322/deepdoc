@@ -17,11 +17,12 @@ def _record_scan_timing(
     telemetry: RunTelemetry | None,
     name: str,
     started_at: float,
-) -> None:
+) -> float:
     elapsed = time.perf_counter() - started_at
     timings[name] = timings.get(name, 0.0) + elapsed
     if telemetry is not None:
         telemetry.record_duration(f"scan.{name}", elapsed)
+    return elapsed
 
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
@@ -1526,18 +1527,29 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
         "artifacts",
         step_start,
     )
+    console.print("  [bold]Discovering runtime surfaces (tasks/schedulers/realtime)...[/bold]")
     step_start = time.perf_counter()
     scan.runtime_scan = discover_runtime_surfaces(
         scan.parsed_files,
         scan.file_contents,
         scan.api_endpoints,
+        source_kind_by_file=scan.source_kind_by_file,
     )
-    _record_scan_timing(
+    runtime_seconds = _record_scan_timing(
         scan.scan_timings,
         telemetry,
         "runtime",
         step_start,
     )
+    runtime_stats = scan.runtime_scan.scan_stats
+    console.print(
+        f"    [dim]{runtime_stats.get('eligible_files', 0)} product file(s), "
+        f"{runtime_stats.get('low_trust_files_skipped', 0)} low-trust skipped, "
+        f"{runtime_stats.get('link_candidate_files', 0)} dispatch candidate(s) "
+        f"in {runtime_seconds:.2f}s[/dim]"
+    )
+
+    console.print("  [bold]Mapping config/env impacts...[/bold]")
     step_start = time.perf_counter()
     scan.config_impacts = discover_config_impacts(
         scan.file_contents, scan.api_endpoints

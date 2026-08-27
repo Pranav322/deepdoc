@@ -116,6 +116,9 @@ def _php_import_aliases(root) -> dict[str, str]:
                 for clause in clauses:
                     if clause.type != "namespace_use_clause":
                         continue
+                    clause_text = clause.text.decode("utf8", "replace")
+                    if re.match(r"\s*(?:function|const)\b", clause_text):
+                        continue
                     names = [
                         child
                         for child in clause.named_children

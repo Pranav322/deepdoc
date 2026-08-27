@@ -1799,6 +1799,23 @@ dispatch(new SyncOrders($order));
     assert actual.producer_files == [path]
 
 
+def test_php_grouped_function_and_const_imports_do_not_alias_classes() -> None:
+    """Non-class grouped imports cannot rebind a class dispatch target."""
+    path = "app/Http/OrderController.php"
+    source = """<?php
+use App\\Jobs\\{function helper as SyncOrders, const FLAG as ExportJob};
+dispatch(new SyncOrders());
+event(new ExportJob());
+"""
+
+    evidence = _collect_dispatch_evidence({path: source}, {path: "php"})
+
+    assert [item.target_aliases for item in evidence] == [
+        ("SyncOrders",),
+        ("ExportJob",),
+    ]
+
+
 def test_js_scope_forms_shadow_require_before_runtime_binding() -> None:
     """All lexical forms that bind `require` suppress CommonJS runtime evidence."""
     sources = {

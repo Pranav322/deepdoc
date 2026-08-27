@@ -1000,3 +1000,65 @@ def test_workflow_linking_is_bounded_to_dispatch_candidates() -> None:
 
     sync_orders = next(task for task in runtime.tasks if task.name == "sync_orders")
     assert sync_orders.producer_files == ["worker/api.py"]
+
+
+def test_unpublished_endpoints_never_link_to_runtime_surfaces() -> None:
+    """DD-002: a route the scan refused to publish is not runtime evidence.
+
+    `publication_ready=False` marks a route the endpoint pass decided is not a
+    real published surface (test-only, phantom, import-string artefact). Linking
+    it to a task or scheduler smuggles it back into generated runtime evidence,
+    so the runtime boundary must fail closed even when a caller hands over the
+    raw `api_endpoints` list instead of `RepoScan.published_api_endpoints`.
+    """
+    path = "orders/tasks.py"
+    parsed_files = {path: _parsed_file(path)}
+    file_contents = {
+        path: (
+            "from celery import shared_task\n"
+            "from celery.schedules import crontab\n\n"
+            "@shared_task(queue='critical')\n"
+            "def sync_orders(order_id):\n"
+            "    return order_id\n\n"
+            "def trigger_invoice(order_id):\n"
+            "    send_invoice.delay(order_id)\n\n"
+            "app.conf.beat_schedule = {\n"
+            "    'nightly-sync': {\n"
+            "        'task': 'orders.tasks.sync_orders',\n"
+            "        'schedule': crontab(minute='0', hour='2'),\n"
+            "    }\n"
+            "}\n"
+        )
+    }
+
+    def _endpoint(method: str, route: str, published: bool) -> dict[str, object]:
+        return {
+            "method": method,
+            "path": route,
+            "file": path,
+            "handler_file": path,
+            "route_file": path,
+            "publication_ready": published,
+        }
+
+    runtime = discover_runtime_surfaces(
+        parsed_files,
+        file_contents,
+        api_endpoints=[
+            _endpoint("GET", "/test-only", False),
+            _endpoint("POST", "/api/orders/sync", True),
+        ],
+    )
+
+    triggered = next(task for task in runtime.tasks if task.name == "send_invoice")
+    assert triggered.linked_endpoints == ["POST /api/orders/sync"]
+    beat = next(
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "beat"
+    )
+    assert beat.linked_endpoints == ["POST /api/orders/sync"]
+    assert all(
+        "GET /test-only" not in surface.linked_endpoints
+        for surface in (*runtime.tasks, *runtime.schedulers)
+    )

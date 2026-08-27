@@ -1533,7 +1533,7 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
     scan.runtime_scan = discover_runtime_surfaces(
         scan.parsed_files,
         scan.file_contents,
-        scan.api_endpoints,
+        scan.published_api_endpoints,
         source_kind_by_file=scan.source_kind_by_file,
     )
     runtime_seconds = _record_scan_timing(

@@ -128,6 +128,12 @@ def _link_runtime_workflows(
     """
     endpoint_keys_by_file: dict[str, set[str]] = {}
     for ep in api_endpoints:
+        # DD-002: a route the endpoint pass refused to publish (test-only,
+        # phantom, import-string artefact) is not runtime evidence. Callers
+        # should hand over `RepoScan.published_api_endpoints`; this fails closed
+        # for the ones that hand over the raw list.
+        if not ep.get("publication_ready", True):
+            continue
         key = f"{str(ep.get('method', 'GET')).upper()} {ep.get('path', '')}"
         for owned in endpoint_owned_files(ep):
             endpoint_keys_by_file.setdefault(owned, set()).add(key)

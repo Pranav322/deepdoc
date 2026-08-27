@@ -230,6 +230,16 @@ class _Binder:
                 self._bind_import(node)
             elif node.type in ("variable_declarator", "assignment_expression"):
                 self._bind_value(node)
+            elif node.type == "for_in_statement":
+                target = node.child_by_field_name("left")
+                if target is not None and not _loop_binding_keyword(node):
+                    for name_node in _pattern_names(target):
+                        self._record_write(name_node, None)
+            elif node.type == "update_expression":
+                target = node.child_by_field_name("argument")
+                if target is not None:
+                    for name_node in _pattern_names(target):
+                        self._record_write(name_node, None)
             elif node.type in ("new_expression", "call_expression"):
                 self._calls.append(node)
         found = (self._bound_call(node) for node in self._calls)
@@ -251,6 +261,14 @@ class _Binder:
 
     def _declare(self, node) -> None:
         """Record every lexical name, including names unrelated to a library."""
+        if node.type == "for_in_statement":
+            keyword = _loop_binding_keyword(node)
+            target = node.child_by_field_name("left")
+            if keyword and target is not None:
+                scope = _loop_binding_scope(node, keyword)
+                for name_node in _pattern_names(target):
+                    self._add_decl(name_node, scope=scope)
+            return
         if node.type in ("import_statement", "import_declaration"):
             if _is_type_only_import(node):
                 return
@@ -269,9 +287,13 @@ class _Binder:
             for name_node in _pattern_names(target):
                 self._add_decl(name_node)
 
-    def _add_decl(self, name_node) -> None:
+    def _add_decl(
+        self, name_node, *, scope: tuple[int, int] | None = None
+    ) -> None:
         name = _text(name_node)
-        declaration = _Declaration(name_node.start_byte, _decl_scope(name_node))
+        declaration = _Declaration(
+            name_node.start_byte, scope if scope is not None else _decl_scope(name_node)
+        )
         entries = self._decls.setdefault(name, [])
         if declaration not in entries:
             entries.append(declaration)
@@ -352,8 +374,14 @@ class _Binder:
             if module:
                 for name_node, member in _destructured_members(target):
                     self._record_write(name_node, _ResolvedValue(module, member))
+            elif not declares:
+                for name_node in _pattern_names(target):
+                    self._record_write(name_node, None)
             return
         if target.type != "identifier":
+            if not declares:
+                for name_node in _pattern_names(target):
+                    self._record_write(name_node, None)
             return
         if module:
             resolved = _ResolvedValue(module, _MODULE_EXPORT)
@@ -536,6 +564,40 @@ def _var_function_scope(name_node) -> tuple[int, int] | None:
             return node.start_byte, node.end_byte
         node = node.parent
     return None
+
+
+def _loop_binding_keyword(node) -> str:
+    """`const`/`let`/`var` token introducing a for-in/of loop target."""
+    target = node.child_by_field_name("left")
+    if target is None:
+        return ""
+    for child in node.children:
+        if child.start_byte >= target.start_byte:
+            break
+        if child.type in {"const", "let", "var"}:
+            return child.type
+    return ""
+
+
+def _loop_binding_scope(node, keyword: str) -> tuple[int, int]:
+    """Lexical loop scope, or var's containing function/program scope."""
+    if keyword != "var":
+        return node.start_byte, node.end_byte
+    parent = node.parent
+    while parent is not None:
+        if parent.type in {
+            "program",
+            "arrow_function",
+            "function",
+            "function_declaration",
+            "function_expression",
+            "generator_function",
+            "generator_function_declaration",
+            "method_definition",
+        }:
+            return parent.start_byte, parent.end_byte
+        parent = parent.parent
+    return node.start_byte, node.end_byte
 
 
 def _pattern_names(node):

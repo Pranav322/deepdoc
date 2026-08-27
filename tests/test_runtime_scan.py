@@ -2213,6 +2213,92 @@ def test_js_runtime_bindings_follow_lexical_write_history() -> None:
     assert runtime.realtime_consumers == []
 
 
+def test_js_dynamic_object_destructuring_invalidates_bound_receiver() -> None:
+    """A destructuring assignment is a real write, not a safe Queue alias."""
+    path = "jobs/object-reassignment.js"
+    source = (
+        "const Queue = require('bullmq').Queue;\n"
+        "let queue = new Queue('orders');\n"
+        "({ queue } = getDynamicQueue());\n"
+        "queue.add('send-order', {});\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_dynamic_array_destructuring_invalidates_bound_receiver() -> None:
+    """Array destructuring writes likewise revoke a prior Queue binding."""
+    path = "jobs/array-reassignment.js"
+    source = (
+        "const Queue = require('bullmq').Queue;\n"
+        "let queue = new Queue('orders');\n"
+        "[queue] = getDynamicQueues();\n"
+        "queue.add('send-order', {});\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_for_of_write_invalidates_bound_receiver() -> None:
+    """A loop target is an assignment to the existing lexical receiver."""
+    path = "jobs/for-of-reassignment.js"
+    source = (
+        "const Queue = require('bullmq').Queue;\n"
+        "let queue = new Queue('orders');\n"
+        "for (queue of values) { queue.add('send-order', {}); }\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_for_of_local_declaration_shadows_without_erasing_outer_binding() -> None:
+    """A loop-local `const` is not a write to the outer Queue variable."""
+    path = "jobs/for-of-shadow.js"
+    source = (
+        "const Queue = require('bullmq').Queue;\n"
+        "const queue = new Queue('outer');\n"
+        "for (const queue of values) { queue.add('inner', {}); }\n"
+        "queue.add('outer-job', {});\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("queue", ("outer",))
+    ]
+
+
+def test_js_update_expression_invalidates_bound_receiver() -> None:
+    """An increment/decrement writes an unknown value to the local receiver."""
+    path = "jobs/update-reassignment.js"
+    source = (
+        "const Queue = require('bullmq').Queue;\n"
+        "let queue = new Queue('orders');\n"
+        "queue++;\n"
+        "queue.add('send-order', {});\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.dispatch_evidence == []
+
+
 def test_js_queue_evidence_uses_bound_constructor_queue_identity() -> None:
     """Queue producer evidence uses Queue's name, not BullMQ's job name."""
     producer = "producers/email.js"

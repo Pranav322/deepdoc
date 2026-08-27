@@ -58,20 +58,36 @@ def parse_js_ts(path: Path, content: str, language: str) -> ParsedFile:
 class JsBoundCall(NamedTuple):
     """A call whose callee provably resolves to one of the requested modules.
 
-    `module` is the matched module specifier. `symbol` is the imported member
-    for `new Imported(...)`, otherwise the called method name. `on_value` marks
-    a call on a value *derived* from the module - an instance, a connection, a
-    channel - rather than on the imported symbol itself. `args` holds one
-    `(kind, value)` pair per argument in source order, where kind is "str" for a
-    quoted literal, "name" for an identifier or a named function, and "" for
-    anything with no usable name.
+    `module` is the matched module specifier and `symbol` the constructed member
+    for `new Imported(...)`, otherwise the called method name. `receiver` is the
+    *role* of the value being called on - which API of the module produced it -
+    because a module is not one capability: BullMQ's `Queue` and `Worker` are
+    different objects, and an AMQP connection is not the channel it opens. It is
+    `""` for a call on the module's own export, an import member name for a call
+    on an imported symbol, and otherwise a chain like `connect().createChannel()`
+    naming the calls that produced the receiver. `args` holds one `(kind, value)`
+    pair per argument in source order, where kind is "str" for a quoted literal,
+    "name" for an identifier or a named function, and "" for anything with no
+    usable name.
     """
 
     module: str
     symbol: str
     is_new: bool
-    on_value: bool
+    receiver: str
     args: tuple[tuple[str, str], ...]
+
+
+# What a default import, a namespace import and `require()` all resolve to: the
+# module export itself, so `amqplib.connect` and `amqp.connect` are one role.
+_MODULE_EXPORT = "default"
+
+
+def _produced_role(call: JsBoundCall) -> str:
+    """Role of the value `call` returns, chained onto its receiver's role."""
+    if call.receiver and call.receiver.endswith("()"):
+        return f"{call.receiver}.{call.symbol}()"
+    return f"{call.symbol}()"
 
 
 def js_bound_calls(
@@ -84,7 +100,9 @@ def js_bound_calls(
     literal or a comment never runs and must not read as evidence. A call is
     reported only when its callee or receiver traces back, through local
     declarations, to a real import/require of one of `modules` - importing a
-    library does not vouch for every other call in the same file.
+    library does not vouch for every other call in the same file - and each call
+    carries the role of the value it was made on, so callers can require the API
+    a library really documents instead of trusting the module name alone.
     """
     if not _TS_AVAILABLE:
         return None
@@ -234,10 +252,10 @@ class _Binder:
                 continue
             for child in clause.named_children:
                 if child.type == "identifier":  # import X from "m"
-                    self._bind_name(child, module, "default")
+                    self._bind_name(child, module, _MODULE_EXPORT)
                 elif child.type == "namespace_import":  # import * as X from "m"
                     for name_node in child.named_children:
-                        self._bind_name(name_node, module, "*")
+                        self._bind_name(name_node, module, _MODULE_EXPORT)
                 elif child.type == "named_imports":
                     for spec in child.named_children:
                         if spec.type != "import_specifier":
@@ -265,7 +283,7 @@ class _Binder:
         if target.type != "identifier":
             return
         if module:
-            self._bind_name(target, module, "*", declares)
+            self._bind_name(target, module, _MODULE_EXPORT, declares)
             return
         resolved = self._resolve(value)
         if resolved is not None:
@@ -312,7 +330,7 @@ class _Binder:
         return module, member
 
     def _resolve(self, node) -> tuple[str, str] | None:
-        """(module, member) this expression evaluates to; "" member = derived value."""
+        """(module, role) this expression evaluates to; see `JsBoundCall`."""
         if node.type in _VALUE_WRAPPERS:
             children = node.named_children
             return self._resolve(children[0]) if children else None
@@ -321,9 +339,9 @@ class _Binder:
         if node.type in ("new_expression", "call_expression"):
             module = self._require_module(node)
             if module:
-                return module, "*"
+                return module, _MODULE_EXPORT
             call = self._bound_call(node)
-            return (call.module, "") if call is not None else None
+            return (call.module, _produced_role(call)) if call is not None else None
         return None
 
     def _bound_call(self, node) -> JsBoundCall | None:
@@ -335,8 +353,7 @@ class _Binder:
             resolved = self._lookup(callee)
             if resolved is None:
                 return None
-            module, member = resolved
-            symbol = member
+            module, symbol, receiver = *resolved, ""
         elif callee.type == "member_expression":
             obj = callee.child_by_field_name("object")
             prop = callee.child_by_field_name("property")
@@ -344,10 +361,12 @@ class _Binder:
             if base is None or prop is None:
                 return None
             module, member = base
-            symbol = _text(prop)
+            # A member of the module export is the imported symbol itself, so
+            # `new amqp.Worker()` and an imported `new Worker()` are one role.
+            symbol, receiver = _text(prop), "" if member == _MODULE_EXPORT else member
         else:
             return None
-        return JsBoundCall(module, symbol, is_new, member == "", _arg_tokens(node))
+        return JsBoundCall(module, symbol, is_new, receiver, _arg_tokens(node))
 
 
 def _decl_scope(name_node) -> tuple[int, int]:

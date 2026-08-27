@@ -497,11 +497,33 @@ def _schedule_chain_summary(chain: str) -> str:
 # file, to a symbol imported from one of these libraries. A library import alone
 # vouches for nothing: it left `codec.process()` and `new Worker('browser')`
 # reading as background jobs next to an unrelated `bullmq` import.
+# Importing a library is also not the same as using the part of it that runs
+# jobs, so each rule below names the API role that consumes rather than the
+# module: BullMQ's `Queue` only produces and has no `.process()`, and an AMQP
+# connection is not the channel it opens. Roles come from `JsBoundCall.receiver`:
+# `""` is the module's own export, and `X()`/`X().Y()` a value that bound call
+# returned. Anything unlisted - another export, another shape, a value from
+# another file - makes no claim.
 JS_BULLMQ_MODULES = frozenset({"bullmq"})
-JS_QUEUE_MODULES = frozenset({"bullmq", "bull", "bee-queue", "kue"})
+# The single class Bull v3 and Bee-Queue construct both produces and consumes;
+# Kue hands its queue out from the module instead. BullMQ is absent by design.
+JS_QUEUE_INSTANCE_ROLES = {
+    "bull": ("default()",),
+    "bee-queue": ("default()",),
+    "kue": ("createQueue()",),
+}
 JS_AMQP_MODULES = frozenset({"amqplib", "amqp-connection-manager"})
+JS_AMQP_CHANNEL_ROLE = "connect().createChannel()"
 JS_AGENDA_MODULES = frozenset({"agenda", "@hokify/agenda"})
-JS_RUNTIME_MODULES = JS_QUEUE_MODULES | JS_AMQP_MODULES | JS_AGENDA_MODULES
+# `new Agenda(...)`, whether the constructor arrived as the module export or as
+# a named `Agenda` import.
+JS_AGENDA_INSTANCE_ROLES = ("default()", "Agenda()")
+JS_RUNTIME_MODULES = (
+    JS_BULLMQ_MODULES
+    | frozenset(JS_QUEUE_INSTANCE_ROLES)
+    | JS_AMQP_MODULES
+    | JS_AGENDA_MODULES
+)
 # Binding cannot succeed unless the module name appears literally, and every
 # fact below needs either its (un-aliasable) method name or the `Worker` member
 # in the import, so these substring pre-checks keep tree-sitter off the files
@@ -558,7 +580,7 @@ def _discover_js_runtime(
                 # BullMQ names the queue in the `Worker` constructor itself.
                 if (
                     call.symbol == "Worker"
-                    and not call.on_value
+                    and not call.receiver
                     and call.module in JS_BULLMQ_MODULES
                 ):
                     queue_name = _js_str_arg(call, 0)
@@ -573,12 +595,17 @@ def _discover_js_runtime(
                             )
                         )
                 continue
-            if not call.on_value:
-                # A call on the import itself (`amqplib.connect(...)`) is a step
-                # towards a queue value, not a job registration.
-                continue
-            if (call.symbol == "process" and call.module in JS_QUEUE_MODULES) or (
-                call.symbol == "consume" and call.module in JS_AMQP_MODULES
+            agenda_job = (
+                call.module in JS_AGENDA_MODULES
+                and call.receiver in JS_AGENDA_INSTANCE_ROLES
+            )
+            if (
+                call.symbol == "process"
+                and call.receiver in JS_QUEUE_INSTANCE_ROLES.get(call.module, ())
+            ) or (
+                call.symbol == "consume"
+                and call.module in JS_AMQP_MODULES
+                and call.receiver == JS_AMQP_CHANNEL_ROLE
             ):
                 kind, value = call.args[0] if call.args else ("", "")
                 queue_name = value if kind == "str" else ""
@@ -591,7 +618,7 @@ def _discover_js_runtime(
                         queue=queue_name,
                     )
                 )
-            elif call.module in JS_AGENDA_MODULES and call.symbol == "define":
+            elif agenda_job and call.symbol == "define":
                 job_name = _js_str_arg(call, 0)
                 if job_name:
                     tasks.append(
@@ -603,7 +630,7 @@ def _discover_js_runtime(
                             queue=job_name,
                         )
                     )
-            elif call.module in JS_AGENDA_MODULES and call.symbol == "every":
+            elif agenda_job and call.symbol == "every":
                 cadence, job_name = _js_str_arg(call, 0), _js_str_arg(call, 1)
                 if cadence and job_name:
                     schedulers.append(

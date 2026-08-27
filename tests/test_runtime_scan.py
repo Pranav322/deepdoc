@@ -372,8 +372,9 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
             "const Agenda = require('agenda');\n"
             "const agenda = new Agenda();\n"
             "const queue = new Queue('inventory');\n"
+            "queue.add('inventory-refresh', {});\n"
             "new Worker('orders-sync', async job => syncOrders(job));\n"
-            "queue.process('inventory-refresh', async refreshInventory);\n"
+            "new Worker('inventory-refresh', async refreshInventory);\n"
             "agenda.define('nightly-report', async () => {});\n"
             "agenda.every('5 minutes', 'nightly-report');\n"
         ),
@@ -656,9 +657,8 @@ def test_vue_queue_workers_come_from_the_script_block() -> None:
     content = (
         "<template><div>{{ label }}</div></template>\n"
         '<script setup lang="ts">\n'
-        'import { Queue } from "bullmq";\n'
-        'const queue = new Queue("emails");\n'
-        'queue.process("send-digest", handleDigest);\n'
+        'import { Worker } from "bullmq";\n'
+        'new Worker("send-digest", handleDigest);\n'
         "</script>\n"
     )
     parsed = parse_file(Path(path), content)
@@ -669,6 +669,120 @@ def test_vue_queue_workers_come_from_the_script_block() -> None:
     assert [
         task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
     ] == ["send-digest"]
+
+
+def _js_worker_names(path: str, content: str) -> list[str]:
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+    return [task.name for task in runtime.tasks if task.runtime_kind == "js_worker"]
+
+
+def test_bullmq_queue_is_producer_only_and_never_a_consumer() -> None:
+    """BullMQ splits producer from consumer: only `Worker` consumes."""
+    assert (
+        _js_worker_names(
+            "src/jobs/emails.ts",
+            'import { Queue } from "bullmq";\n'
+            'new Queue("emails").process("send-digest", handleDigest);\n'
+            'const queue = new Queue("reports");\n'
+            'queue.process("nightly-report", buildReport);\n'
+            "queue.add('send-digest', {});\n",
+        )
+        == []
+    )
+    # The same file's `Worker` is the real consumer role.
+    assert _js_worker_names(
+        "src/jobs/both.ts",
+        'import { Queue, Worker } from "bullmq";\n'
+        'const queue = new Queue("emails");\n'
+        'queue.process("not-a-job", handleDigest);\n'
+        'new Worker("send-digest", handleDigest);\n',
+    ) == ["send-digest"]
+
+
+def test_amqp_consume_needs_the_connect_create_channel_role() -> None:
+    """Only a channel consumes; other amqplib-derived values do not."""
+    assert (
+        _js_worker_names(
+            "src/jobs/orders.ts",
+            'import amqplib from "amqplib";\n'
+            'amqplib.createCodec().consume("orders-sync", handleOrder);\n'
+            "const connection = await amqplib.connect(url);\n"
+            'connection.consume("orders-direct", handleOrder);\n',
+        )
+        == []
+    )
+    assert _js_worker_names(
+        "src/jobs/channel.ts",
+        'import * as amqp from "amqplib";\n'
+        "const connection = await amqp.connect(url);\n"
+        "const channel = await connection.createChannel();\n"
+        'channel.consume("orders-sync", handleOrder);\n',
+    ) == ["orders-sync"]
+
+
+def test_agenda_jobs_need_the_agenda_constructor_role() -> None:
+    """Any other `agenda` export is not a job scheduler instance."""
+    assert (
+        _js_worker_names(
+            "src/jobs/plainJob.ts",
+            'import { Job } from "agenda";\n'
+            "const job = new Job({});\n"
+            "job.define('nightly-report', buildReport);\n",
+        )
+        == []
+    )
+    path = "src/jobs/reports.ts"
+    content = (
+        'import { Agenda } from "@hokify/agenda";\n'
+        "const jobs = new Agenda({ db: { address: url } });\n"
+        "jobs.define('nightly-report', buildReport);\n"
+        "jobs.every('5 minutes', 'nightly-report');\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+    assert [t.name for t in runtime.tasks if t.runtime_kind == "js_worker"] == [
+        "nightly-report"
+    ]
+    assert [s.scheduler_type for s in runtime.schedulers] == ["agenda"]
+
+
+def test_bull_legacy_queue_process_is_a_consumer() -> None:
+    """Bull v3 has one class: the instance both produces and consumes."""
+    assert _js_worker_names(
+        "src/jobs/legacy.js",
+        "const Bull = require('bull');\n"
+        "const emails = new Bull('emails');\n"
+        "emails.process('send-digest', handleDigest);\n",
+    ) == ["send-digest"]
+
+
+def test_queue_roles_follow_aliases_but_not_unrelated_receivers() -> None:
+    """The role travels with the bound symbol, whatever it is renamed to."""
+    assert _js_worker_names(
+        "src/jobs/aliased.ts",
+        'import * as bullmq from "bullmq";\n'
+        'const { Worker: QueueWorker } = require("bullmq");\n'
+        'new bullmq.Worker("orders-sync", handleOrder);\n'
+        'new QueueWorker("orders-retry", handleRetry);\n'
+        'new bullmq.Queue("emails").process("not-a-job", handleDigest);\n',
+    ) == ["orders-sync", "orders-retry"]
+
+
+def test_unmodelled_queue_apis_fail_closed() -> None:
+    """A real library value with an unmapped API shape makes no claim."""
+    assert (
+        _js_worker_names(
+            "src/jobs/unmapped.ts",
+            'import { Worker, Queue } from "bullmq";\n'
+            'const worker = new Worker("orders-sync", handleOrder);\n'
+            'worker.getQueue().process("derived-job", handleOrder);\n'
+            'Queue.prototype.process.call(queue, "reflected-job", handleOrder);\n',
+        )
+        == ["orders-sync"]
+    )
 
 
 def test_js_runtime_fails_closed_without_tree_sitter(monkeypatch) -> None:

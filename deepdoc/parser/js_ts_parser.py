@@ -130,6 +130,7 @@ _SCOPE_TYPES = frozenset(
         "program",
         "statement_block",
         "class_body",
+        "class",
         "class_declaration",
         "catch_clause",
         "arrow_function",
@@ -159,8 +160,11 @@ _VALUE_WRAPPERS = frozenset(
 _DECL_FIELDS = {
     "variable_declarator": "name",
     "function_declaration": "name",
+    "function_expression": "name",
     "generator_function_declaration": "name",
+    "generator_function": "name",
     "class_declaration": "name",
+    "class": "name",
     "catch_clause": "parameter",
     "arrow_function": "parameter",
 }
@@ -209,6 +213,10 @@ class _Binder:
         """
         if node.type == "formal_parameters":
             targets = node.named_children
+        elif node.type == "import_alias":
+            # TypeScript `import local = namespace.member` introduces `local`
+            # but does not bind it to one of the requested runtime modules.
+            targets = node.named_children[:1]
         else:
             field = _DECL_FIELDS.get(node.type)
             target = node.child_by_field_name(field) if field else None
@@ -349,6 +357,17 @@ class _Binder:
             return self._resolve(children[0]) if children else None
         if node.type == "identifier":
             return self._lookup(node)
+        if node.type == "member_expression":
+            obj = node.child_by_field_name("object")
+            prop = node.child_by_field_name("property")
+            base = self._resolve(obj) if obj is not None else None
+            if base is None or prop is None:
+                return None
+            module, member = base
+            # A literal requested module may expose a named export directly
+            # (`require('bullmq').Worker`). Do not treat arbitrary members of
+            # an already-produced value as new module bindings.
+            return (module, _text(prop)) if member == _MODULE_EXPORT else None
         if node.type in ("new_expression", "call_expression"):
             module = self._require_module(node)
             if module:
@@ -392,6 +411,9 @@ class _Binder:
 
 def _decl_scope(name_node) -> tuple[int, int]:
     """Byte range of the lexical scope a declaration name governs."""
+    var_scope = _var_function_scope(name_node)
+    if var_scope is not None:
+        return var_scope
     node = name_node.parent
     # Declaration names bind outside their own function/class body. Parameters
     # deliberately do not take this branch: they bind inside the function body.
@@ -410,6 +432,30 @@ def _decl_scope(name_node) -> tuple[int, int]:
     while node is not None and node.type not in _SCOPE_TYPES:
         node = node.parent
     return (node.start_byte, node.end_byte) if node is not None else (0, 0)
+
+
+def _var_function_scope(name_node) -> tuple[int, int] | None:
+    """The function/program scope of a JavaScript ``var`` declaration."""
+    declaration = name_node.parent
+    while declaration is not None and declaration.type != "variable_declaration":
+        declaration = declaration.parent
+    if declaration is None or not _text(declaration).lstrip().startswith("var "):
+        return None
+    node = declaration.parent
+    while node is not None:
+        if node.type in {
+            "program",
+            "arrow_function",
+            "function",
+            "function_declaration",
+            "function_expression",
+            "generator_function",
+            "generator_function_declaration",
+            "method_definition",
+        }:
+            return node.start_byte, node.end_byte
+        node = node.parent
+    return None
 
 
 def _pattern_names(node):

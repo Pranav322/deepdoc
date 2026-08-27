@@ -1632,3 +1632,75 @@ def test_php_dispatch_evidence_links_fqcn_and_short_discovered_targets() -> None
     ]
     assert runtime.tasks[0].producer_files == [path]
     assert runtime.tasks[1].producer_files == [path]
+
+
+def test_js_scope_forms_shadow_require_before_runtime_binding() -> None:
+    """All lexical forms that bind `require` suppress CommonJS runtime evidence."""
+    sources = {
+        "realtime/var.js": (
+            "function configure() {\n"
+            "  if (flag) { var require = loader; }\n"
+            "  const io = require('socket.io')(server);\n"
+            "  io.on('connection', handler);\n"
+            "}\n"
+        ),
+        "realtime/function-expression.js": (
+            "const configure = function require() {\n"
+            "  const io = require('socket.io')(server);\n"
+            "  io.on('connection', handler);\n"
+            "};\n"
+        ),
+        "realtime/class-expression.js": (
+            "const Configure = class require {\n"
+            "  boot() {\n"
+            "    const io = require('socket.io')(server);\n"
+            "    io.on('connection', handler);\n"
+            "  }\n"
+            "};\n"
+        ),
+        "realtime/import-alias.ts": (
+            "import require = shim.require;\n"
+            "const io = require('socket.io')(server);\n"
+            "io.on('connection', handler);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.realtime_consumers == []
+
+
+def test_js_member_alias_queue_add_requires_bound_queue_role() -> None:
+    """A literal enqueue is evidence only through a proven queue API role."""
+    bound_path = "producers/bound.js"
+    generic_path = "producers/generic.js"
+    sources = {
+        bound_path: (
+            "const Queue = require('bullmq').Queue;\n"
+            "const queue = new Queue('---');\n"
+            "queue . add('---', payload);\n"
+        ),
+        generic_path: "const queue = getQueue();\nqueue.add('---', payload);\n",
+    }
+    evidence = _collect_dispatch_evidence(
+        sources, {path: "javascript" for path in sources}
+    )
+    task = RuntimeTask(
+        name="---",
+        queue="---",
+        file_path="workers/punctuation.js",
+        runtime_kind="js_worker",
+    )
+    runtime = RuntimeScan(tasks=[task])
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert [(item.file_path, item.relation, item.target_aliases) for item in evidence] == [
+        (bound_path, "queue", ("---",)),
+    ]
+    assert task.producer_files == [bound_path]

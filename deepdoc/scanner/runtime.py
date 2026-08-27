@@ -133,6 +133,8 @@ def _collect_dispatch_evidence(
                 )
                 for dispatch in php_dispatches(content)
             )
+        elif language in JS_LANGUAGES:
+            evidence.extend(_js_dispatch_evidence(file_path, content))
     return evidence
 
 
@@ -234,10 +236,15 @@ def _link_runtime_evidence(
     """
     endpoint_keys_by_file = _published_endpoint_keys_by_file(api_endpoints)
     tasks_by_alias: dict[str, list[RuntimeTask]] = {}
+    queues_by_alias: dict[str, list[RuntimeTask]] = {}
     schedulers_by_alias: dict[str, list[RuntimeScheduler]] = {}
     for task in runtime.tasks:
         for alias in _target_aliases(task.name):
             tasks_by_alias.setdefault(alias, []).append(task)
+        # A worker's explicit queue is the preferred queue target. The name is
+        # a conservative fallback for legacy detectors that encode it there.
+        for alias in _target_aliases(task.queue or task.name):
+            queues_by_alias.setdefault(alias, []).append(task)
     for scheduler in runtime.schedulers:
         for target in scheduler.invoked_targets:
             for alias in _target_aliases(target):
@@ -247,9 +254,12 @@ def _link_runtime_evidence(
     scheduler_checks = 0
     ambiguous_task_targets = 0
     for item in evidence:
-        if item.relation != "direct":
+        if item.relation == "direct":
+            task_candidates = _indexed_candidates(tasks_by_alias, item.target_aliases)
+        elif item.relation == "queue":
+            task_candidates = _indexed_candidates(queues_by_alias, item.target_aliases)
+        else:
             continue
-        task_candidates = _indexed_candidates(tasks_by_alias, item.target_aliases)
         if len(task_candidates) == 1:
             task_checks += 1
             task = task_candidates[0]
@@ -263,6 +273,9 @@ def _link_runtime_evidence(
         elif task_candidates:
             ambiguous_task_targets += 1
 
+        # Schedulers are invoked by direct task targets, never by a queue name.
+        if item.relation != "direct":
+            continue
         endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
         if not endpoint_keys:
             continue
@@ -756,6 +769,9 @@ JS_QUEUE_INSTANCE_ROLES = {
     "bee-queue": ("default()",),
     "kue": ("createQueue()",),
 }
+# BullMQ's Queue only produces, while the older queue APIs can both produce and
+# consume. Producer linkage accepts only these verified receiver roles.
+JS_QUEUE_PRODUCER_ROLES = {"bullmq": ("Queue()",), **JS_QUEUE_INSTANCE_ROLES}
 JS_AMQP_MODULES = frozenset({"amqplib", "amqp-connection-manager"})
 JS_AMQP_CHANNEL_ROLE = "connect().createChannel()"
 JS_AGENDA_MODULES = frozenset({"agenda", "@hokify/agenda"})
@@ -783,7 +799,7 @@ JS_BOUND_RUNTIME_MODULES = (
 # that were never candidates while retaining legal whitespace before `(`.
 JS_EVIDENCE_TOKENS = tuple(sorted(JS_BOUND_RUNTIME_MODULES))
 JS_CALL_SHAPE_RE = re.compile(
-    r"\bworker\b|\.(?:process|consume|define|every|schedule|on)\s*\(",
+    r"\bworker\b|\.\s*(?:process|consume|define|every|schedule|on|add)\s*\(",
     re.IGNORECASE,
 )
 
@@ -808,6 +824,40 @@ def _js_parse_input(file_path: str, content: str) -> tuple[str, str]:
         script, script_lang, _ = _extract_script_block(content)
         return script, "typescript" if script_lang in ("ts", "tsx") else "javascript"
     return content, language_for_extension(suffix)
+
+
+def _js_dispatch_evidence(file_path: str, content: str) -> list[DispatchEvidence]:
+    """Literal queue enqueues proven by a bound JS/TS/Vue queue API role."""
+    lowered = content.lower()
+    if not any(token in lowered for token in JS_EVIDENCE_TOKENS):
+        return []
+    if not JS_CALL_SHAPE_RE.search(content):
+        return []
+    source, language = _js_parse_input(file_path, content)
+    calls = js_bound_calls(
+        Path(file_path), source, language, JS_BOUND_RUNTIME_MODULES
+    )
+    if not calls:
+        return []
+    evidence: list[DispatchEvidence] = []
+    for call in calls:
+        if (
+            call.is_new
+            or call.symbol != "add"
+            or call.receiver not in JS_QUEUE_PRODUCER_ROLES.get(call.module, ())
+        ):
+            continue
+        queue_name = _js_str_arg(call, 0)
+        if queue_name:
+            evidence.append(
+                DispatchEvidence(
+                    file_path=file_path,
+                    language=language,
+                    relation="queue",
+                    target_aliases=(queue_name,),
+                )
+            )
+    return evidence
 
 
 def _discover_js_runtime(

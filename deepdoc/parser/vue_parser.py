@@ -79,14 +79,50 @@ _TEMPLATE_PATTERN = re.compile(
 
 
 _VUE_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"})
+_VUE_EXECUTABLE_SCRIPT_TYPES = frozenset(
+    {
+        "module",
+        "text/javascript",
+        "application/javascript",
+        "text/ecmascript",
+        "application/ecmascript",
+    }
+)
+_VUE_RUNTIME_LANGUAGES = frozenset(
+    {"js", "jsx", "ts", "tsx", "javascript", "typescript"}
+)
+
+
+def _vue_attr_value(attrs: str, name: str) -> str:
+    """A quoted or bare SFC attribute value, without HTML interpretation."""
+    match = re.search(
+        rf"\b{re.escape(name)}\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'=<>`]+))",
+        attrs,
+        re.I,
+    )
+    if match is None:
+        return ""
+    return next((value for value in match.groups() if value is not None), "")
+
+
+def _is_executable_vue_script(attrs: str) -> bool:
+    """Whether an inline SFC script can contribute JS/TS runtime evidence."""
+    if re.search(r"\bsrc\s*=", attrs, re.I):
+        return False
+    script_type = _vue_attr_value(attrs, "type").split(";", 1)[0].strip().lower()
+    if script_type and script_type not in _VUE_EXECUTABLE_SCRIPT_TYPES:
+        return False
+    language = _vue_attr_value(attrs, "lang").lower() or "js"
+    return language in _VUE_RUNTIME_LANGUAGES
 
 
 def _extract_script_blocks(content: str) -> tuple[tuple[str, str, bool], ...]:
     """All executable top-level SFC scripts in document order."""
     blocks: list[tuple[str, str, bool]] = []
     for attrs, body in _top_level_vue_script_blocks(content):
-        lang_match = re.search(r'lang\s*=\s*["\'](\w+)["\']', attrs, re.I)
-        lang = lang_match.group(1).lower() if lang_match else "js"
+        if not _is_executable_vue_script(attrs):
+            continue
+        lang = _vue_attr_value(attrs, "lang").lower() or "js"
         is_setup = bool(re.search(r"(?:^|\s)setup(?:\s|=|$)", attrs, re.I))
         body = body.strip()
         if body:

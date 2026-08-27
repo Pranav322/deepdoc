@@ -1,5 +1,5 @@
 import ast
-from bisect import bisect_right
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import re
 from pathlib import Path
@@ -62,9 +62,10 @@ def discover_runtime_surfaces(
     # parse error therefore produces no Celery/Django/scheduler fact instead of
     # leaving a regex to reinterpret broken or quoted source as executable.
     python_trees = _python_ast_trees(python_files)
-    celery_tasks, celery_schedulers = _discover_celery_tasks(
+    celery_tasks, celery_schedulers, celery_task_exports = _discover_celery_tasks(
         python_files, python_trees
     )
+    celery_task_definitions = _python_task_definitions_by_path(celery_tasks)
     runtime.tasks.extend(celery_tasks)
     runtime.schedulers.extend(celery_schedulers)
     runtime.tasks.extend(_discover_django_runtime(python_files, python_trees))
@@ -85,8 +86,9 @@ def discover_runtime_surfaces(
     runtime.dispatch_evidence = _collect_dispatch_evidence(
         eligible,
         languages,
-        _python_task_names_by_path(runtime.tasks),
+        celery_task_definitions,
         _php_runtime_target_identities(runtime.tasks),
+        python_exported_task_names_by_path=celery_task_exports,
     )
     runtime.dispatch_evidence.extend(_scheduler_owner_evidence(runtime.schedulers))
     _link_runtime_evidence(runtime, runtime.dispatch_evidence, api_endpoints or [])
@@ -150,13 +152,19 @@ def _python_ast_trees(file_contents: dict[str, str]) -> dict[str, ast.Module]:
     return trees
 
 
-def _python_task_names_by_path(tasks: list[RuntimeTask]) -> dict[str, set[str]]:
-    """Celery task names keyed by their defining Python source file."""
-    names: dict[str, set[str]] = {}
+def _python_task_definitions_by_path(
+    tasks: list[RuntimeTask],
+) -> dict[str, set[str]]:
+    """All AST-proven Celery declarations, regardless of later re-exports."""
+    definitions: dict[str, set[str]] = {}
     for task in tasks:
-        if task.runtime_kind == "celery" and task.file_path.endswith(".py"):
-            names.setdefault(task.file_path, set()).add(task.name)
-    return names
+        if (
+            task.runtime_kind == "celery"
+            and task.decorator
+            and task.file_path.endswith(".py")
+        ):
+            definitions.setdefault(task.file_path, set()).add(task.name)
+    return definitions
 
 
 def _php_runtime_target_identities(tasks: list[RuntimeTask]) -> frozenset[str]:
@@ -175,14 +183,21 @@ def _collect_dispatch_evidence(
     languages: dict[str, str],
     python_task_names_by_path: dict[str, set[str]] | None = None,
     php_runtime_targets: frozenset[str] | None = None,
+    *,
+    python_exported_task_names_by_path: dict[str, set[str]] | None = None,
 ) -> list[DispatchEvidence]:
     """Collect language-structural evidence only from eligible source files."""
     evidence: list[DispatchEvidence] = []
     task_names = python_task_names_by_path or {}
+    exported_task_names = python_exported_task_names_by_path or task_names
     for file_path, content in file_contents.items():
         language = languages.get(file_path)
         if language == "python":
-            evidence.extend(_python_dispatch_evidence(file_path, content, task_names))
+            evidence.extend(
+                _python_dispatch_evidence(
+                    file_path, content, task_names, exported_task_names
+                )
+            )
         elif language == "php":
             for dispatch in php_dispatches(content):
                 if (
@@ -266,14 +281,17 @@ _PYTHON_DJANGO_SIGNAL_NAMES = frozenset(
 def _python_dispatch_evidence(
     file_path: str,
     content: str,
-    task_names_by_path: dict[str, set[str]],
+    task_definitions_by_path: dict[str, set[str]],
+    task_exports_by_path: dict[str, set[str]],
 ) -> list[DispatchEvidence]:
     """Evidence from syntax-proven Celery task/Django signal bindings only."""
     try:
         tree = ast.parse(content)
     except SyntaxError:
         return []
-    bindings = _python_runtime_bindings(file_path, tree, task_names_by_path)
+    bindings = _python_runtime_bindings(
+        file_path, tree, task_definitions_by_path, task_exports_by_path
+    )
     local_shadows_by_call = _python_local_shadows_by_call(tree)
     calls = sorted(
         (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
@@ -293,7 +311,7 @@ def _python_dispatch_evidence(
                 func.value,
                 _python_node_position(call),
                 bindings,
-                task_names_by_path,
+                task_exports_by_path,
             )
             relation = "direct"
         elif func.attr == "send":
@@ -359,7 +377,8 @@ _PYTHON_SIGNAL_MODULE_ROLE = "signal_module"
 def _python_runtime_bindings(
     file_path: str,
     tree: ast.Module,
-    task_names_by_path: dict[str, set[str]],
+    task_definitions_by_path: dict[str, set[str]],
+    task_exports_by_path: dict[str, set[str]],
 ) -> _PythonRuntimeBindings:
     """Exact-position module binding histories for task and signal receivers."""
     raw_histories: dict[str, list[tuple[tuple[int, int], _PythonBindingEvent]]] = {}
@@ -375,7 +394,7 @@ def _python_runtime_bindings(
                 (position, _PythonBindingEvent(role, target))
             )
 
-    local_task_names = task_names_by_path.get(file_path, set())
+    local_task_names = task_definitions_by_path.get(file_path, set())
     for node in tree.body:
         position = _python_node_position(node)
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
@@ -392,7 +411,7 @@ def _python_runtime_bindings(
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
             task_path = _python_import_module_file(file_path, module, node.level)
-            imported_tasks = task_names_by_path.get(task_path, set())
+            imported_tasks = task_exports_by_path.get(task_path, set())
             for alias in node.names:
                 if alias.name == "*":
                     continue
@@ -412,7 +431,7 @@ def _python_runtime_bindings(
                         f"{module}.{alias.name}" if module else alias.name,
                         node.level,
                     )
-                    if module_path in task_names_by_path:
+                    if module_path in task_exports_by_path:
                         record(local, position, _PYTHON_TASK_MODULE_ROLE, module_path)
                     else:
                         record(local, position)
@@ -424,7 +443,7 @@ def _python_runtime_bindings(
                     record(local, position, _PYTHON_SIGNAL_MODULE_ROLE)
                     continue
                 task_path = _python_import_module_file(file_path, alias.name, 0)
-                if task_path in task_names_by_path:
+                if task_path in task_exports_by_path:
                     record(local, position, _PYTHON_TASK_MODULE_ROLE, task_path)
                 else:
                     record(local, position)
@@ -604,7 +623,7 @@ def _python_bound_task_target(
     node: ast.expr,
     position: tuple[int, int],
     bindings: _PythonRuntimeBindings,
-    task_names_by_path: dict[str, set[str]],
+    task_exports_by_path: dict[str, set[str]],
 ) -> str:
     dotted = _python_dotted_name(node)
     if not dotted:
@@ -618,7 +637,7 @@ def _python_bound_task_target(
     if binding.role != _PYTHON_TASK_MODULE_ROLE:
         return ""
     candidate = parts[-1]
-    return dotted if candidate in task_names_by_path.get(binding.target, set()) else ""
+    return dotted if candidate in task_exports_by_path.get(binding.target, set()) else ""
 
 
 def _python_bound_signal_target(
@@ -682,21 +701,31 @@ def _link_runtime_evidence(
     affect a runtime surface. A direct target resolving to multiple task records
     is ambiguous—not a reason to enumerate every record in that bucket.
     """
-    endpoint_keys_by_file = _published_endpoint_keys_by_file(api_endpoints)
+    endpoint_keys_by_file, endpoint_source_cap_rejections = (
+        _published_endpoint_keys_by_file(api_endpoints)
+    )
     _ensure_scheduler_owner_keys(runtime.schedulers)
     # Direct, queue, and scheduler relations are one-to-one claims. Store only
     # a unique object or an ambiguity sentinel, never a candidate bucket that a
     # producer site could enumerate. Signals intentionally retain a list because
     # their dispatch grammar explicitly means a broadcast to matching handlers.
     tasks_by_alias: dict[str, Any] = {}
+    php_tasks_by_identity: dict[str, Any] = {}
     queues_by_alias: dict[str, Any] = {}
     signals_by_alias: dict[str, list[RuntimeTask] | object] = {}
     schedulers_by_target: dict[str, Any] = {}
     schedulers_by_terminal_target: dict[str, Any] = {}
-    schedulers_by_owner: dict[tuple[str, str], Any] = {}
+    schedulers_by_generated_owner: dict[tuple[str, str], Any] = {}
+    schedulers_by_legacy_owner: dict[tuple[str, str], Any] = {}
     for task in runtime.tasks:
-        for alias in _target_aliases(task.name):
-            _add_exact_candidate(tasks_by_alias, alias, task)
+        if task.runtime_kind.startswith("laravel_"):
+            for identity in task.target_identities:
+                normalized = identity.strip().lstrip("\\").lower()
+                if normalized:
+                    _add_exact_candidate(php_tasks_by_identity, normalized, task)
+        else:
+            for alias in _target_aliases(task.name):
+                _add_exact_candidate(tasks_by_alias, alias, task)
         for trigger in task.triggers:
             for alias in _target_aliases(trigger):
                 _add_bounded_signal_candidate(signals_by_alias, alias, task)
@@ -706,16 +735,15 @@ def _link_runtime_evidence(
             _add_exact_candidate(queues_by_alias, task.queue, task)
     for scheduler in runtime.schedulers:
         _add_exact_candidate(
-            schedulers_by_owner,
+            schedulers_by_generated_owner,
             (scheduler.file_path, scheduler.owner_key),
             scheduler,
         )
-        # Legacy hand-authored evidence may still use a unique display name.
-        # Generated declaration evidence always uses `owner_key`, so duplicate
-        # names fail closed instead of erasing each declaration's own link.
+        # Legacy hand-authored evidence resolves by display name only in its own
+        # namespace. Generated owner keys can never collide with this index.
         for alias in _target_aliases(scheduler.name):
             _add_exact_candidate(
-                schedulers_by_owner, (scheduler.file_path, alias), scheduler
+                schedulers_by_legacy_owner, (scheduler.file_path, alias), scheduler
             )
         for target in scheduler.invoked_targets:
             aliases = _invoked_target_aliases(target)
@@ -738,7 +766,7 @@ def _link_runtime_evidence(
         for item in [*runtime.tasks, *runtime.schedulers]
     }
     producer_cap_rejections = 0
-    endpoint_cap_rejections = 0
+    endpoint_cap_rejections = endpoint_source_cap_rejections
 
     def attach_producer(task: RuntimeTask, file_path: str) -> None:
         nonlocal producer_cap_rejections
@@ -752,20 +780,19 @@ def _link_runtime_evidence(
         producer_orders.setdefault(id(task), []).append(file_path)
 
     def attach_endpoints(
-        item: RuntimeTask | RuntimeScheduler, endpoint_keys: set[str] | tuple[str, ...]
+        item: RuntimeTask | RuntimeScheduler, endpoint_keys: tuple[str, ...]
     ) -> None:
         nonlocal endpoint_cap_rejections
         if not endpoint_keys:
             return
         values = linked_endpoint_sets.setdefault(id(item), set())
-        new_values = sorted(set(endpoint_keys) - values)
-        remaining = MAX_RUNTIME_LINKED_ENDPOINTS - len(values)
-        if remaining <= 0:
-            endpoint_cap_rejections += len(new_values)
-            return
-        values.update(new_values[:remaining])
-        if len(new_values) > remaining:
-            endpoint_cap_rejections += len(new_values) - remaining
+        for key in endpoint_keys:
+            if key in values:
+                continue
+            if len(values) >= MAX_RUNTIME_LINKED_ENDPOINTS:
+                endpoint_cap_rejections += 1
+                continue
+            values.add(key)
 
     task_checks = 0
     scheduler_checks = 0
@@ -778,8 +805,13 @@ def _link_runtime_evidence(
             endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
             if endpoint_keys:
                 index_probes += 1
+                owner_index = (
+                    schedulers_by_generated_owner
+                    if item.language == "runtime"
+                    else schedulers_by_legacy_owner
+                )
                 scheduler = _resolve_owner_candidate(
-                    schedulers_by_owner, item.file_path, item.target_aliases
+                    owner_index, item.file_path, item.target_aliases
                 )
                 if scheduler is not None and scheduler is not _AMBIGUOUS:
                     scheduler_checks += 1
@@ -802,7 +834,11 @@ def _link_runtime_evidence(
                     attach_endpoints(task, endpoint_keys)
             continue
         if item.relation == "direct":
-            task = _resolve_exact_candidate(tasks_by_alias, item.target_aliases)
+            task = (
+                _resolve_php_task_candidate(php_tasks_by_identity, item.target_aliases)
+                if item.language == "php"
+                else _resolve_exact_candidate(tasks_by_alias, item.target_aliases)
+            )
         elif item.relation == "queue":
             task = _resolve_queue_candidate(queues_by_alias, item.target_aliases)
         else:
@@ -854,16 +890,34 @@ def _link_runtime_evidence(
 
 def _published_endpoint_keys_by_file(
     api_endpoints: list[dict[str, Any]],
-) -> dict[str, set[str]]:
-    """Published endpoint keys owned by each file, failing closed on raw input."""
-    endpoint_keys_by_file: dict[str, set[str]] = {}
+) -> tuple[dict[str, tuple[str, ...]], int]:
+    """Bounded, deterministic published endpoint keys for each owning file.
+
+    The scan must inspect every endpoint record once, but never retain or sort an
+    unbounded file-local set merely because a runtime link references that file
+    repeatedly. The retained tuple matches the old lexical-first behavior.
+    """
+    selected_by_file: dict[str, list[str]] = {}
+    source_cap_rejections = 0
     for ep in api_endpoints:
         if not ep.get("publication_ready", True):
             continue
         key = f"{str(ep.get('method', 'GET')).upper()} {ep.get('path', '')}"
         for owned in endpoint_owned_files(ep):
-            endpoint_keys_by_file.setdefault(owned, set()).add(key)
-    return endpoint_keys_by_file
+            selected = selected_by_file.setdefault(owned, [])
+            index = bisect_left(selected, key)
+            if index < len(selected) and selected[index] == key:
+                continue
+            if len(selected) < MAX_RUNTIME_LINKED_ENDPOINTS:
+                selected.insert(index, key)
+                continue
+            source_cap_rejections += 1
+            if index < len(selected):
+                selected.insert(index, key)
+                selected.pop()
+    return {
+        file_path: tuple(keys) for file_path, keys in selected_by_file.items()
+    }, source_cap_rejections
 
 
 def _target_aliases(target: str) -> tuple[str, ...]:
@@ -920,6 +974,15 @@ def _resolve_exact_candidate(index: dict[Any, Any], aliases: tuple[Any, ...]) ->
         elif fallback is not candidate:
             return _AMBIGUOUS
     return fallback
+
+
+def _resolve_php_task_candidate(
+    index: dict[str, Any], aliases: tuple[str, ...]
+) -> Any:
+    """Resolve PHP direct evidence only by its parser-proven canonical FQCN."""
+    if not aliases:
+        return None
+    return index.get(aliases[0].strip().lstrip("\\").lower())
 
 
 def _resolve_queue_candidate(index: dict[str, Any], aliases: tuple[str, ...]) -> Any:
@@ -1010,23 +1073,25 @@ _CELERY_RETRY_KEYWORDS = (
 def _discover_celery_tasks(
     file_contents: dict[str, str],
     trees: dict[str, ast.Module] | None = None,
-) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
+) -> tuple[list[RuntimeTask], list[RuntimeScheduler], dict[str, set[str]]]:
     """Discover Celery declarations from valid AST nodes and proven bindings."""
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
+    task_exports: dict[str, set[str]] = {}
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
         content = file_contents[file_path]
-        file_tasks, file_schedulers = _discover_celery_file_runtime(
+        file_tasks, file_schedulers, file_task_exports = _discover_celery_file_runtime(
             file_path, content, tree
         )
         tasks.extend(file_tasks)
         schedulers.extend(file_schedulers)
-    return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
+        task_exports[file_path] = file_task_exports
+    return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers), task_exports
 
 
 def _discover_celery_file_runtime(
     file_path: str, content: str, tree: ast.Module
-) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
+) -> tuple[list[RuntimeTask], list[RuntimeScheduler], set[str]]:
     """Celery facts for one valid module in exact top-level source order."""
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
@@ -1034,12 +1099,14 @@ def _discover_celery_file_runtime(
     celery_module_names: set[str] = set()
     constructor_names: set[str] = set()
     app_names: set[str] = set()
+    task_exports: set[str] = set()
 
     def revoke(names: set[str]) -> None:
         decorator_names.difference_update(names)
         celery_module_names.difference_update(names)
         constructor_names.difference_update(names)
         app_names.difference_update(names)
+        task_exports.difference_update(names)
 
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
@@ -1104,6 +1171,7 @@ def _discover_celery_file_runtime(
             decorator = _python_celery_decorator(
                 node, decorator_names, celery_module_names, app_names
             )
+            revoke({node.name})
             if decorator is not None:
                 queue, retry_policy = _python_celery_decorator_metadata(decorator)
                 tasks.append(
@@ -1120,11 +1188,15 @@ def _discover_celery_file_runtime(
                         retry_policy=retry_policy,
                     )
                 )
-            revoke({node.name})
+                task_exports.add(node.name)
             continue
         if isinstance(node, ast.ClassDef):
             revoke({node.name})
-    return tasks, schedulers
+            continue
+        # Any remaining top-level construct that may bind/delete a task name is
+        # dynamic from this scanner's perspective, so its export fails closed.
+        revoke({name for name, _ in _python_module_write_events(node)})
+    return tasks, schedulers, task_exports
 
 
 def _python_assignment_value(node: ast.Assign | ast.AnnAssign) -> ast.expr | None:

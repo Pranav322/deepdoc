@@ -7,6 +7,7 @@ export tracking, and decorator extraction.
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from pathlib import Path
 from typing import NamedTuple
 import re
@@ -245,7 +246,12 @@ class _Binder:
         self._modules = modules
         self._decls: dict[str, list[_Declaration]] = {}
         self._writes: dict[_Declaration, list[_BindingWrite]] = {}
+        self._write_positions: dict[_Declaration, list[int]] = {}
+        self._binding_lookup_probes = 0
+        self._binding_history_steps = 0
+        self._cross_scope_invalidations: set[_Declaration] = set()
         self._global_writes: dict[str, list[int]] = {}
+        self._nested_global_writes: set[str] = set()
         self._calls: list = []
 
     def run(self, root) -> tuple[JsBoundCall, ...]:
@@ -255,10 +261,18 @@ class _Binder:
         # after the call site in source text.
         for node in nodes:
             self._declare(node)
+        # Before any RHS can establish a module role, mark closure/global writes
+        # that make a source-order-only binding unsafe.
+        for node in nodes:
+            self._pre_mark_cross_scope_writes(node)
         for node in nodes:
             if node.type in ("import_statement", "import_declaration"):
                 self._bind_import(node)
-            elif node.type in ("variable_declarator", "assignment_expression"):
+            elif node.type in (
+                "variable_declarator",
+                "assignment_expression",
+                "augmented_assignment_expression",
+            ):
                 self._bind_value(node)
             elif node.type == "for_in_statement":
                 target = node.child_by_field_name("left")
@@ -317,6 +331,33 @@ class _Binder:
             for name_node in _pattern_names(target):
                 self._add_decl(name_node)
 
+    def _pre_mark_cross_scope_writes(self, node) -> None:
+        """Record closure/global mutations before resolving any RHS values."""
+        if node.type == "variable_declarator":
+            target = node.child_by_field_name("name")
+        elif node.type in {
+            "assignment_expression",
+            "augmented_assignment_expression",
+        }:
+            target = node.child_by_field_name("left")
+        elif node.type == "update_expression":
+            target = node.child_by_field_name("argument")
+        elif node.type == "for_in_statement" and not _loop_binding_keyword(node):
+            target = node.child_by_field_name("left")
+        else:
+            return
+        if target is not None:
+            for name_node in _written_binding_names(target):
+                self._mark_cross_scope_write(name_node)
+
+    def _mark_cross_scope_write(self, name_node) -> None:
+        declaration = self._declaration_for(name_node)
+        if declaration is None:
+            if not _execution_scope_is_program(name_node):
+                self._nested_global_writes.add(_text(name_node))
+        elif _execution_scope(name_node) != declaration.execution_scope:
+            self._cross_scope_invalidations.add(declaration)
+
     def _add_decl(
         self, name_node, *, scope: tuple[int, int] | None = None
     ) -> None:
@@ -357,23 +398,32 @@ class _Binder:
     ) -> None:
         """Record a trusted value or explicit invalidation for one local name."""
         write_at = name_node.start_byte if at is None else at
+        self._mark_cross_scope_write(name_node)
         declaration = self._declaration_for(name_node)
         if declaration is None:
-            # `require = customLoader` mutates the global loader binding. We do
-            # not model a path back to trust, so every later require call fails
-            # closed unless a real local declaration already shadows it.
+            # `require = customLoader` mutates the global loader binding. A
+            # top-level write retains normal source ordering; nested writes were
+            # already marked as unconditionally unsafe by the prepass.
             self._global_writes.setdefault(_text(name_node), []).append(write_at)
             return
-        if value is not None and not (
-            _is_definite_binding_write(name_node, declaration)
-            or _is_deferred_export_initializer_write(name_node, declaration)
+        if value is not None and not _is_definite_binding_write(
+            name_node, declaration
         ):
             # Preserve the write's source-order invalidation, but never turn a
             # conditional or nested-closure assignment into role proof.
             value = None
-        self._writes.setdefault(declaration, []).append(
-            _BindingWrite(write_at, value)
-        )
+        write = _BindingWrite(write_at, value)
+        writes = self._writes.setdefault(declaration, [])
+        positions = self._write_positions.setdefault(declaration, [])
+        if not positions or write_at >= positions[-1]:
+            positions.append(write_at)
+            writes.append(write)
+            return
+        # Static imports are hoisted and use -1 even when their declaration is
+        # textually later; retain a sorted index without scanning at lookup.
+        index = bisect_right(positions, write_at)
+        positions.insert(index, write_at)
+        writes.insert(index, write)
 
     def _bind_import(self, node) -> None:
         if _is_type_only_import(node):
@@ -434,8 +484,14 @@ class _Binder:
         """Track one declarator/assignment write when its value is provable."""
         declares = node.type == "variable_declarator"
         target = node.child_by_field_name("name" if declares else "left")
+        if target is None:
+            return
+        if node.type == "augmented_assignment_expression":
+            for name_node in _written_binding_names(target):
+                self._record_write(name_node, None)
+            return
         value = node.child_by_field_name("value" if declares else "right")
-        if target is None or value is None:
+        if value is None:
             return
         module = self._require_module(value)
         if target.type == "object_pattern":  # const { Worker } = require("m")
@@ -455,7 +511,7 @@ class _Binder:
             return
         if target.type != "identifier":
             if not declares:
-                for name_node in _pattern_names(target):
+                for name_node in _written_binding_names(target):
                     self._record_write(name_node, None)
             return
         if module:
@@ -499,10 +555,11 @@ class _Binder:
         )
 
     def _global_name_was_written(self, name_node) -> bool:
-        return any(
-            write_at <= name_node.start_byte
-            for write_at in self._global_writes.get(_text(name_node), ())
-        )
+        name = _text(name_node)
+        writes = self._global_writes.get(name, ())
+        return name in self._nested_global_writes or bisect_right(
+            writes, name_node.start_byte
+        ) > 0
 
     def _is_locally_declared(self, name_node) -> bool:
         """Whether a declaration shadows this otherwise global identifier."""
@@ -511,15 +568,14 @@ class _Binder:
     def _lookup(self, name_node) -> _ResolvedValue | None:
         """The most recent proven write for this lexical declaration."""
         declaration = self._declaration_for(name_node)
-        if declaration is None:
+        if declaration is None or declaration in self._cross_scope_invalidations:
             return None
-        latest: _BindingWrite | None = None
-        for write in self._writes.get(declaration, ()):
-            if write.at <= name_node.start_byte and (
-                latest is None or write.at >= latest.at
-            ):
-                latest = write
-        return latest.value if latest is not None else None
+        self._binding_lookup_probes += 1
+        positions = self._write_positions.get(declaration, ())
+        writes = self._writes.get(declaration, ())
+        self._binding_history_steps += 1
+        index = bisect_right(positions, name_node.start_byte) - 1
+        return writes[index].value if index >= 0 else None
 
     def _resolve(self, node) -> _ResolvedValue | None:
         """The proven module value this expression evaluates to, if any."""
@@ -602,6 +658,15 @@ def _execution_scope(name_node) -> tuple[int, int]:
     return (0, 0)
 
 
+def _execution_scope_is_program(node) -> bool:
+    """Whether a name is evaluated directly in the module program scope."""
+    while node is not None:
+        if node.type in _EXECUTION_SCOPE_TYPES:
+            return node.type == "program"
+        node = node.parent
+    return False
+
+
 def _is_definite_binding_write(name_node, declaration: _Declaration) -> bool:
     """Whether this source write can prove the declaration's role at lookup."""
     execution_scope = _execution_scope(name_node)
@@ -619,60 +684,6 @@ def _is_definite_binding_write(name_node, declaration: _Declaration) -> bool:
             return False
         node = node.parent
     return False
-
-
-def _is_deferred_export_initializer_write(
-    name_node, declaration: _Declaration
-) -> bool:
-    """Allow a direct awaited setup write inside an exported async initializer.
-
-    This is the narrow module-startup shape used by real AMQP clients: a public
-    async initializer establishes an outer connection/channel which later
-    runtime declarations consume. It deliberately excludes unexported helpers,
-    synchronous assignments, and control-flow-dependent writes.
-    """
-    program = name_node
-    while program.parent is not None:
-        program = program.parent
-    program_scope = (program.start_byte, program.end_byte)
-    if declaration.execution_scope != program_scope:
-        return False
-    function = name_node.parent
-    while function is not None and function.type not in _EXECUTION_SCOPE_TYPES - {"program"}:
-        function = function.parent
-    if (
-        function is None
-        or function.type not in {"function_declaration", "generator_function_declaration"}
-        or function.parent is None
-        or function.parent.type != "export_statement"
-        or not any(child.type == "async" for child in function.children)
-    ):
-        return False
-    assignment = name_node.parent
-    if assignment is None or assignment.type != "assignment_expression":
-        return False
-    right = assignment.child_by_field_name("right")
-    if right is None or not any(
-        child.type == "await_expression"
-        for child in _node_and_descendants(right)
-    ):
-        return False
-    node = name_node.parent
-    while node is not None and node is not function:
-        if node.type in _UNCERTAIN_WRITE_ANCESTORS:
-            return False
-        if node.type == "binary_expression" and (
-            "&&" in _text(node) or "||" in _text(node)
-        ):
-            return False
-        node = node.parent
-    return True
-
-
-def _node_and_descendants(node):
-    yield node
-    for child in node.named_children:
-        yield from _node_and_descendants(child)
 
 
 def _decl_scope(name_node) -> tuple[int, int]:
@@ -772,6 +783,24 @@ def _pattern_names(node):
     elif kind in ("object_pattern", "array_pattern", "rest_pattern"):
         for child in node.named_children:
             yield from _pattern_names(child)
+
+
+def _written_binding_names(node):
+    """Binding roots invalidated by an assignment target.
+
+    Patterns write their named bindings directly. A member/subscript write does
+    not introduce a name, but mutates the root object; revoking that root keeps
+    a replaced API method/export from impersonating a trusted runtime surface.
+    """
+    names = tuple(_pattern_names(node))
+    if names:
+        yield from names
+        return
+    root = node
+    while root is not None and root.type in {"member_expression", "subscript_expression"}:
+        root = root.child_by_field_name("object")
+    if root is not None and root.type == "identifier":
+        yield root
 
 
 def _field_names(node, field: str):

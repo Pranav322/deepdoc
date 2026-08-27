@@ -597,16 +597,15 @@ def test_agenda_constructor_without_an_agenda_import_is_not_a_job() -> None:
     assert [s for s in runtime.schedulers if s.scheduler_type == "agenda"] == []
 
 
-def test_deferred_assignment_binds_only_the_real_broker_channel() -> None:
-    """`let channel; channel = await ...` is a flow real broker clients use."""
+def test_same_function_assignment_binds_only_the_real_broker_channel() -> None:
+    """A local awaited channel assignment is proven for calls in that function."""
     path = "src/jobs/orderChannel.ts"
     content = (
         'import amqplib from "amqplib";\n'
-        "let channel;\n"
         "export async function boot() {\n"
-        "    channel = await (await amqplib.connect(url)).createChannel();\n"
+        "    const channel = await (await amqplib.connect(url)).createChannel();\n"
+        '    channel.consume("orders-sync", handleOrder);\n'
         "}\n"
-        'channel.consume("orders-sync", handleOrder);\n'
         "export function drain(channel: LocalChannel) {\n"
         '    channel.consume("not-a-broker-queue", noop);\n'
         "}\n"
@@ -619,6 +618,35 @@ def test_deferred_assignment_binds_only_the_real_broker_channel() -> None:
     assert [
         task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
     ] == ["orders-sync"]
+
+
+def test_uninvoked_exported_initializer_cannot_bind_an_outer_queue() -> None:
+    """Export/await syntax does not prove a nested initializer ever ran."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/never.js": (
+            "import { Queue } from 'bullmq';\n"
+            "let queue;\n"
+            "export async function neverCalled() {\n"
+            "  queue = await new Queue('orders');\n"
+            "}\n"
+            "queue.add('not-an-orders-job', {});\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
 
 
 def test_template_literal_prompt_examples_are_not_queue_workers() -> None:
@@ -679,6 +707,23 @@ def test_vue_queue_workers_come_from_the_script_block() -> None:
     assert [
         task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
     ] == ["send-digest"]
+
+
+def test_vue_nonexecutable_script_type_never_creates_runtime_evidence() -> None:
+    """A data/plain-text SFC script is not executable JavaScript."""
+    path = "src/components/DataOnly.vue"
+    content = (
+        '<script type="text/plain">\n'
+        "const { Worker } = require('bullmq');\n"
+        "new Worker('fake-worker', handleFake);\n"
+        "</script>\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None and parsed.language == "vue"
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
 
 
 def test_vue_runtime_scans_every_top_level_executable_script_block() -> None:
@@ -1348,6 +1393,7 @@ def test_qualified_laravel_dispatch_keeps_its_producer_link() -> None:
         name=r"App\Jobs\SyncOrders",
         file_path="app/Jobs/SyncOrders.php",
         runtime_kind="laravel_job",
+        target_identities=(r"App\Jobs\SyncOrders",),
     )
     evidence = _collect_dispatch_evidence(
         {"app/Http/OrderController.php": "<?php\ndispatch(new App\\Jobs\\SyncOrders($order));\n"},
@@ -1754,11 +1800,13 @@ def test_php_dispatch_evidence_links_fqcn_and_short_discovered_targets() -> None
                 name="SyncOrders",
                 file_path="app/Jobs/SyncOrders.php",
                 runtime_kind="laravel_job",
+                target_identities=(r"App\Jobs\SyncOrders",),
             ),
             RuntimeTask(
                 name="OrderShipped",
                 file_path="app/Events/OrderShipped.php",
                 runtime_kind="laravel_event",
+                target_identities=(r"App\Events\OrderShipped",),
             ),
         ]
     )
@@ -1795,11 +1843,13 @@ dispatch(new SyncOrders($order));
         name="SyncOrders",
         file_path="app/Jobs/SyncOrders.php",
         runtime_kind="laravel_job",
+        target_identities=(r"App\Jobs\SyncOrders",),
     )
     actual = RuntimeTask(
         name="ExportJob",
         file_path="app/Other/ExportJob.php",
         runtime_kind="laravel_job",
+        target_identities=(r"App\Other\ExportJob",),
     )
     runtime = RuntimeScan(tasks=[unrelated, actual])
 
@@ -1824,6 +1874,7 @@ dispatch(new SyncOrders($order));
         name="SyncOrders",
         file_path="app/Jobs/SyncOrders.php",
         runtime_kind="laravel_job",
+        target_identities=(r"App\Jobs\SyncOrders",),
     )
 
     evidence = _collect_dispatch_evidence({path: source}, {path: "php"})
@@ -1941,6 +1992,36 @@ Real::dispatch($payload);
     assert task.producer_files == []
 
 
+def test_php_canonical_identity_links_one_of_duplicate_short_names() -> None:
+    """A proven FQCN wins even when unrelated Laravel tasks share its short name."""
+    first = RuntimeTask(
+        name="Send",
+        file_path="app/Jobs/Send.php",
+        runtime_kind="laravel_job",
+        target_identities=(r"App\Jobs\Send",),
+    )
+    second = RuntimeTask(
+        name="Send",
+        file_path="app/Billing/Jobs/Send.php",
+        runtime_kind="laravel_job",
+        target_identities=(r"Billing\Jobs\Send",),
+    )
+    runtime = RuntimeScan(tasks=[first, second])
+    evidence = [
+        DispatchEvidence(
+            file_path="app/Http/SendController.php",
+            language="php",
+            relation="direct",
+            target_aliases=(r"App\Jobs\Send", "Send"),
+        )
+    ]
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert first.producer_files == ["app/Http/SendController.php"]
+    assert second.producer_files == []
+
+
 def test_php_grouped_import_alias_resolves_to_its_actual_class() -> None:
     """Grouped `use` aliases receive the same canonical collision protection."""
     path = "app/Http/OrderController.php"
@@ -1952,11 +2033,13 @@ dispatch(new SyncOrders($order));
         name="SyncOrders",
         file_path="app/Jobs/SyncOrders.php",
         runtime_kind="laravel_job",
+        target_identities=(r"App\Jobs\SyncOrders",),
     )
     actual = RuntimeTask(
         name="ExportJob",
         file_path="app/Other/ExportJob.php",
         runtime_kind="laravel_job",
+        target_identities=(r"App\Other\ExportJob",),
     )
     runtime = RuntimeScan(tasks=[unrelated, actual])
 
@@ -2167,6 +2250,46 @@ def test_runtime_links_retain_bounded_unique_producers_and_endpoints() -> None:
     assert runtime.scan_stats["link_endpoint_cap_rejections"] == 1
 
 
+def test_endpoint_attachment_bounds_work_for_endpoint_heavy_files(monkeypatch) -> None:
+    """Endpoint caps bound attachment work, not merely the stored output list."""
+    sorted_input_sizes: list[int] = []
+    original_sorted = sorted
+
+    def counted_sorted(values, *args, **kwargs):
+        items = list(values)
+        sorted_input_sizes.append(len(items))
+        return original_sorted(items, *args, **kwargs)
+
+    monkeypatch.setattr(runtime_parser, "sorted", counted_sorted, raising=False)
+    endpoint_count = 256
+    file_path = "api/orders.py"
+    task = RuntimeTask(
+        name="sync",
+        file_path="workers/sync.py",
+        runtime_kind="celery",
+    )
+    runtime = RuntimeScan(tasks=[task])
+    evidence = [
+        DispatchEvidence(
+            file_path=file_path,
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+        for _ in range(endpoint_count)
+    ]
+    endpoints = [
+        {"method": "POST", "path": f"/orders/{index}", "file": file_path}
+        for index in range(endpoint_count)
+    ]
+
+    _link_runtime_evidence(runtime, evidence, endpoints)
+
+    assert len(task.linked_endpoints) == 64
+    assert max(sorted_input_sizes) <= 64
+    assert runtime.scan_stats["link_endpoint_cap_rejections"] == endpoint_count - 64
+
+
 def test_scheduler_owner_evidence_links_only_owning_scheduler() -> None:
     """Scheduler declarations are direct evidence, not a global endpoint sweep."""
     schedulers = [
@@ -2242,6 +2365,37 @@ def test_duplicate_scheduler_declarations_keep_their_own_source_endpoint() -> No
         item.linked_endpoints == ["POST /orders/reconcile"]
         for item in schedulers
     )
+
+
+def test_generated_scheduler_owner_keys_do_not_collide_with_legacy_names() -> None:
+    """Generated declaration identities occupy a namespace separate from names."""
+    path = "orders/schedules.py"
+    colliding_name = "owner:beat|sync|cron-2|sync|1"
+    first = RuntimeScheduler(
+        name=colliding_name,
+        file_path=path,
+        scheduler_type="beat",
+        cron="cron-1",
+        invoked_targets=["sync"],
+    )
+    second = RuntimeScheduler(
+        name="sync",
+        file_path=path,
+        scheduler_type="beat",
+        cron="cron-2",
+        invoked_targets=["sync"],
+    )
+    runtime = RuntimeScan(schedulers=[first, second])
+    evidence = runtime_parser._scheduler_owner_evidence(runtime.schedulers)
+
+    _link_runtime_evidence(
+        runtime,
+        evidence,
+        [{"method": "POST", "path": "/orders/reconcile", "file": path}],
+    )
+
+    assert first.linked_endpoints == ["POST /orders/reconcile"]
+    assert second.linked_endpoints == ["POST /orders/reconcile"]
 
 
 def test_runtime_scan_links_only_structural_dispatch_evidence() -> None:
@@ -2434,6 +2588,80 @@ def test_python_module_imports_and_bare_annotations_preserve_task_bindings() -> 
         ("pkg/annotation.py", ("actual",)),
     ]
     assert task.producer_files == ["pkg/module_import.py", "pkg/annotation.py"]
+
+
+def test_python_rebound_task_export_cannot_authenticate_cross_file_dispatch() -> None:
+    """A later top-level rebinding revokes a previously decorated task export."""
+    sources = {
+        "stale/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    return None\n"
+            "actual = object()\n"
+        ),
+        "stale/api.py": "from .tasks import actual\nactual.delay()\n",
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert runtime.dispatch_evidence == []
+    assert task.producer_files == []
+
+
+def test_python_local_task_binding_remains_valid_before_a_later_rebind() -> None:
+    """A module-local call uses its source-position binding, not final exports."""
+    path = "stale/tasks.py"
+    source = (
+        "from celery import shared_task\n"
+        "@shared_task\n"
+        "def actual():\n"
+        "    return None\n"
+        "actual.delay()\n"
+        "actual = object()\n"
+        "actual.delay()\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        (path, ("actual",))
+    ]
+    assert task.producer_files == [path]
+
+
+def test_python_schedule_entry_cannot_prove_a_same_name_plain_function() -> None:
+    """A beat target is runtime metadata, not a local decorated task binding."""
+    path = "orders/schedules.py"
+    source = (
+        "from celery.schedules import crontab\n"
+        "app.conf.beat_schedule = {\n"
+        "  'nightly': {\n"
+        "    'task': 'orders.tasks.actual',\n"
+        "    'schedule': crontab(hour='2'),\n"
+        "  },\n"
+        "}\n"
+        "def actual():\n"
+        "    return None\n"
+        "actual.delay()\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert [
+        item for item in runtime.dispatch_evidence if item.relation == "direct"
+    ] == []
 
 
 def test_python_binding_history_uses_one_indexed_probe_per_dispatch(monkeypatch) -> None:
@@ -2913,6 +3141,128 @@ def test_js_runtime_bindings_follow_lexical_write_history() -> None:
     ]
     assert runtime.dispatch_evidence == []
     assert runtime.realtime_consumers == []
+
+
+def test_js_augmented_assignments_invalidate_runtime_bindings() -> None:
+    """Logical/compound writes revoke Queue and global require proof."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/augmented.js": (
+            "const { Queue } = require('bullmq');\n"
+            "let queue = new Queue('orders');\n"
+            "queue &&= getDynamicQueue();\n"
+            "queue.add('not-an-orders-job', {});\n"
+        ),
+        "realtime/augmented.js": (
+            "require &&= customLoader;\n"
+            "const io = require('socket.io')(server);\n"
+            "io.on('connection', handleConnection);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
+    assert runtime.realtime_consumers == []
+
+
+def test_js_member_writes_invalidate_runtime_receivers_and_exports() -> None:
+    """Mutating a trusted API method or module export revokes its role proof."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/method.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "queue.add = fakeAdd;\n"
+            "queue.add('not-an-orders-job', {});\n"
+        ),
+        "producers/export.js": (
+            "const bull = require('bullmq');\n"
+            "bull.Queue = FakeQueue;\n"
+            "const queue = new bull.Queue('orders');\n"
+            "queue.add('not-an-orders-job', {});\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
+
+
+def test_js_nested_mutator_revokes_outer_runtime_bindings() -> None:
+    """A nested function can mutate an outer receiver before its later use."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/hoisted.js": (
+            "const { Queue } = require('bullmq');\n"
+            "let queue = new Queue('orders');\n"
+            "replace();\n"
+            "queue.add('not-an-orders-job', {});\n"
+            "function replace() { queue = getDynamicQueue(); }\n"
+        ),
+        "realtime/hoisted.js": (
+            "poison();\n"
+            "const io = require('socket.io')(server);\n"
+            "io.on('connection', handleConnection);\n"
+            "function poison() { require = customLoader; }\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
+    assert runtime.realtime_consumers == []
+
+
+def test_js_binding_history_uses_one_indexed_probe_per_lookup() -> None:
+    """Large rebinding histories never cause a per-lookup linear scan."""
+    writes = "\n".join(
+        f"queue = new Queue('orders-{index}'); queue.add('job-{index}', {{}});"
+        for index in range(128)
+    )
+    source = (
+        "const { Queue } = require('bullmq');\n"
+        "let queue = new Queue('orders-initial');\n"
+        f"{writes}\n"
+    )
+    tree = js_ts_parser.Parser(js_ts_parser.JS_LANGUAGE).parse(source.encode())
+    binder = js_ts_parser._Binder(frozenset({"bullmq"}))
+
+    calls = binder.run(tree.root_node)
+
+    assert len([call for call in calls if call.symbol == "add"]) == 128
+    assert binder._binding_history_steps == binder._binding_lookup_probes
+    assert binder._binding_lookup_probes <= len(calls) * 2
 
 
 def test_js_non_guaranteed_writes_do_not_prove_queue_receivers() -> None:

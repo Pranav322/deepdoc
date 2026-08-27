@@ -11,8 +11,17 @@ from deepdoc.scanner import (
     discover_debug_signals,
     discover_runtime_surfaces,
 )
-from deepdoc.scanner.common import RuntimeScan, RuntimeTask
-from deepdoc.scanner.runtime import _discover_nestjs_runtime, _link_runtime_workflows
+from deepdoc.scanner.common import (
+    DispatchEvidence,
+    RuntimeScan,
+    RuntimeScheduler,
+    RuntimeTask,
+)
+from deepdoc.scanner.runtime import (
+    _discover_nestjs_runtime,
+    _link_runtime_evidence,
+    _link_runtime_workflows,
+)
 
 
 def _parsed_file(
@@ -1503,3 +1512,67 @@ def test_queue_add_preserves_punctuation_only_worker_queue_links() -> None:
 
     worker = next(task for task in runtime.tasks if task.name == "---")
     assert worker.producer_files == ["src/producer.js"]
+
+
+def test_direct_dispatch_evidence_rejects_ambiguous_duplicate_task_bucket() -> None:
+    """One direct spelling never expands across every same-name task record."""
+    tasks = [
+        RuntimeTask(
+            name="sync",
+            file_path=f"workers/sync_{index}.py",
+            runtime_kind="celery",
+        )
+        for index in range(251)
+    ]
+    evidence = [
+        DispatchEvidence(
+            file_path=f"producers/producer_{index}.py",
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+        for index in range(257)
+    ]
+    runtime = RuntimeScan(tasks=tasks)
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert runtime.scan_stats["link_task_checks"] == 0
+    assert runtime.scan_stats["link_ambiguous_task_targets"] == len(evidence)
+    assert all(task.producer_files == [] for task in tasks)
+
+
+def test_scheduler_endpoint_links_require_matching_dispatch_evidence() -> None:
+    """Endpoint-owning files do not sweep every scheduler without a target hit."""
+    schedulers = [
+        RuntimeScheduler(
+            name=f"scheduler-{index}",
+            file_path=f"schedules/{index}.py",
+            scheduler_type="beat",
+            invoked_targets=[f"task_{index}"],
+        )
+        for index in range(251)
+    ]
+    evidence = [
+        DispatchEvidence(
+            file_path=f"handlers/handler_{index}.py",
+            language="python",
+            relation="direct",
+            target_aliases=("unrelated",),
+        )
+        for index in range(257)
+    ]
+    endpoints = [
+        {
+            "method": "POST",
+            "path": f"/jobs/{index}",
+            "file": f"handlers/handler_{index}.py",
+        }
+        for index in range(257)
+    ]
+    runtime = RuntimeScan(schedulers=schedulers)
+
+    _link_runtime_evidence(runtime, evidence, endpoints)
+
+    assert runtime.scan_stats["link_scheduler_checks"] == 0
+    assert all(scheduler.linked_endpoints == [] for scheduler in schedulers)

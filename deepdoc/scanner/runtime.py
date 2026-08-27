@@ -151,6 +151,104 @@ DISPATCH_TARGET_RE = re.compile(
 )
 
 
+def _link_runtime_evidence(
+    runtime: RuntimeScan,
+    evidence: list[DispatchEvidence],
+    api_endpoints: list[dict[str, Any]],
+) -> None:
+    """Link syntax-proven direct dispatches through bounded target indexes.
+
+    Collection is deliberately separate: evidence must exist before a file can
+    affect a runtime surface. A direct target resolving to multiple task records
+    is ambiguous—not a reason to enumerate every record in that bucket.
+    """
+    endpoint_keys_by_file = _published_endpoint_keys_by_file(api_endpoints)
+    tasks_by_alias: dict[str, list[RuntimeTask]] = {}
+    schedulers_by_alias: dict[str, list[RuntimeScheduler]] = {}
+    for task in runtime.tasks:
+        for alias in _target_aliases(task.name):
+            tasks_by_alias.setdefault(alias, []).append(task)
+    for scheduler in runtime.schedulers:
+        for target in scheduler.invoked_targets:
+            for alias in _target_aliases(target):
+                schedulers_by_alias.setdefault(alias, []).append(scheduler)
+
+    task_checks = 0
+    scheduler_checks = 0
+    ambiguous_task_targets = 0
+    for item in evidence:
+        if item.relation != "direct":
+            continue
+        task_candidates = _indexed_candidates(tasks_by_alias, item.target_aliases)
+        if len(task_candidates) == 1:
+            task_checks += 1
+            task = task_candidates[0]
+            if item.file_path not in task.producer_files:
+                task.producer_files.append(item.file_path)
+            endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
+            if endpoint_keys:
+                task.linked_endpoints = sorted(
+                    set(task.linked_endpoints) | set(endpoint_keys)
+                )
+        elif task_candidates:
+            ambiguous_task_targets += 1
+
+        endpoint_keys = endpoint_keys_by_file.get(item.file_path, ())
+        if not endpoint_keys:
+            continue
+        for scheduler in _indexed_candidates(
+            schedulers_by_alias, item.target_aliases
+        ):
+            scheduler_checks += 1
+            scheduler.linked_endpoints = sorted(
+                set(scheduler.linked_endpoints) | set(endpoint_keys)
+            )
+
+    runtime.scan_stats.update(
+        {
+            "link_evidence_count": len(evidence),
+            "link_task_checks": task_checks,
+            "link_scheduler_checks": scheduler_checks,
+            "link_ambiguous_task_targets": ambiguous_task_targets,
+        }
+    )
+
+
+def _published_endpoint_keys_by_file(
+    api_endpoints: list[dict[str, Any]],
+) -> dict[str, set[str]]:
+    """Published endpoint keys owned by each file, failing closed on raw input."""
+    endpoint_keys_by_file: dict[str, set[str]] = {}
+    for ep in api_endpoints:
+        if not ep.get("publication_ready", True):
+            continue
+        key = f"{str(ep.get('method', 'GET')).upper()} {ep.get('path', '')}"
+        for owned in endpoint_owned_files(ep):
+            endpoint_keys_by_file.setdefault(owned, set()).add(key)
+    return endpoint_keys_by_file
+
+
+def _target_aliases(target: str) -> tuple[str, ...]:
+    """Stable canonical aliases for namespaced runtime targets."""
+    normalized = target.strip().lstrip("\\")
+    if not normalized:
+        return ()
+    short = normalized.rsplit("\\", 1)[-1]
+    return (normalized,) if short == normalized else (normalized, short)
+
+
+def _indexed_candidates(index: dict[str, list[Any]], aliases: tuple[str, ...]) -> list[Any]:
+    """Stable, identity-deduplicated candidates for exact aliases only."""
+    candidates: list[Any] = []
+    seen: set[int] = set()
+    for alias in aliases:
+        for item in index.get(alias, ()):
+            if id(item) not in seen:
+                seen.add(id(item))
+                candidates.append(item)
+    return candidates
+
+
 def _link_runtime_workflows(
     runtime: RuntimeScan,
     file_contents: dict[str, str],

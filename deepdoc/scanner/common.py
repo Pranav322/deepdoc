@@ -153,6 +153,22 @@ class RuntimeTask:
     producer_files: list[str] = field(default_factory=list)
     linked_endpoints: list[str] = field(default_factory=list)
 
+
+@dataclass(frozen=True)
+class DispatchEvidence:
+    """One syntax/role-proven runtime dispatch site.
+
+    ``relation`` defines how the target may resolve: ``direct`` is a
+    one-to-one invocation and therefore fails closed when its aliases are
+    ambiguous; later extractor slices add explicit broadcast/queue relations.
+    """
+
+    file_path: str
+    language: str
+    relation: str
+    target_aliases: tuple[str, ...]
+
+
 @dataclass
 class RuntimeScheduler:
     """Scheduler or cron registration."""
@@ -182,6 +198,7 @@ class RuntimeScan:
     tasks: list[RuntimeTask] = field(default_factory=list)
     schedulers: list[RuntimeScheduler] = field(default_factory=list)
     realtime_consumers: list[RealtimeConsumer] = field(default_factory=list)
+    dispatch_evidence: list[DispatchEvidence] = field(default_factory=list)
     # Observable work counters for the scan (see `discover_runtime_surfaces`).
     scan_stats: dict[str, int] = field(default_factory=dict)
 

@@ -364,6 +364,14 @@ class _Binder:
             # A member of the module export is the imported symbol itself, so
             # `new amqp.Worker()` and an imported `new Worker()` are one role.
             symbol, receiver = _text(prop), "" if member == _MODULE_EXPORT else member
+        elif callee.type == "call_expression":
+            # Support direct module factories such as
+            # `require("socket.io")(server)`, but not arbitrary nested calls:
+            # only a literal, requested module can establish this binding.
+            module = self._require_module(callee)
+            if not module:
+                return None
+            symbol, receiver = _MODULE_EXPORT, ""
         else:
             return None
         return JsBoundCall(module, symbol, is_new, receiver, _arg_tokens(node))

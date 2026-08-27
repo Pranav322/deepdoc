@@ -11,7 +11,7 @@ from deepdoc.scanner import (
     discover_debug_signals,
     discover_runtime_surfaces,
 )
-from deepdoc.scanner.common import RuntimeScan
+from deepdoc.scanner.common import RuntimeScan, RuntimeTask
 from deepdoc.scanner.runtime import _discover_nestjs_runtime, _link_runtime_workflows
 
 
@@ -1233,6 +1233,63 @@ def test_every_task_link_grammar_binds_its_producer_file() -> None:
     assert producers[("orders-sync", "workers/orders.js")] == ["src/producer.js"]
 
 
+def test_dispatch_index_does_not_collide_shared_word_runs() -> None:
+    """Distinct names sharing `sync` must not create one giant candidate bucket."""
+    tasks = [
+        RuntimeTask(
+            name=f"queue-{index}-sync",
+            file_path=f"workers/{index}.py",
+            runtime_kind="celery",
+        )
+        for index in range(251)
+    ]
+    file_contents = {
+        f"src/marker_{index}.py": "sync.delay(payload)\n" for index in range(257)
+    }
+
+    _, task_checks = _link_runtime_workflows(RuntimeScan(tasks=tasks), file_contents, [])
+
+    # `sync.delay` names no `queue-N-sync` task. It must not verify all 251
+    # merely because their terminal word run is the same.
+    assert task_checks == 0
+
+
+def test_duplicate_signal_task_names_keep_own_trigger_links() -> None:
+    """Same-name handlers must not share the last task's trigger patterns."""
+    for triggers in (("post_save", "post_delete"), ("post_delete", "post_save")):
+        tasks = [
+            RuntimeTask(
+                name="handle",
+                file_path=f"handlers/{trigger}.py",
+                runtime_kind="django_signal",
+                triggers=[trigger],
+            )
+            for trigger in triggers
+        ]
+        _link_runtime_workflows(
+            RuntimeScan(tasks=tasks),
+            {"producer.py": "post_save.send(sender=Order)\n"},
+            [],
+        )
+        links = {task.triggers[0]: task.producer_files for task in tasks}
+        assert links == {"post_save": ["producer.py"], "post_delete": []}
+
+
+def test_qualified_laravel_dispatch_keeps_its_producer_link() -> None:
+    """Exact indexes must retain valid qualified PHP class dispatches."""
+    task = RuntimeTask(
+        name=r"App\Jobs\SyncOrders",
+        file_path="app/Jobs/SyncOrders.php",
+        runtime_kind="laravel_job",
+    )
+    _link_runtime_workflows(
+        RuntimeScan(tasks=[task]),
+        {"app/Http/OrderController.php": r"dispatch(new App\Jobs\SyncOrders($order));\n"},
+        [],
+    )
+    assert task.producer_files == ["app/Http/OrderController.php"]
+
+
 def test_unindexable_cron_trigger_does_not_restore_task_candidate_multiplier() -> None:
     """A non-word cron trigger must not unindex its otherwise linkable task."""
     task_count = 251
@@ -1262,6 +1319,132 @@ def test_unindexable_cron_trigger_does_not_restore_task_candidate_multiplier() -
     assert {
         task.name: task.producer_files for task in runtime.tasks if task.producer_files
     } == {"task_7": ["src/jobs/producer.ts"]}
+
+
+def test_js_queue_worker_accepts_whitespace_before_process_call() -> None:
+    """A real bound Bull call remains valid with whitespace before `(`."""
+    source = (
+        "const Bull = require('bull');\n"
+        "const queue = new Bull('emails');\n"
+        "queue.process ('send-digest', handler);\n"
+    )
+    parsed = parse_file(Path("workers/email.js"), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({"workers/email.js": parsed}, {"workers/email.js": source})
+
+    assert [
+        (task.name, task.runtime_kind, task.queue) for task in runtime.tasks
+    ] == [("send-digest", "js_worker", "send-digest")]
+
+
+def test_js_scheduler_and_realtime_require_bound_executable_calls() -> None:
+    """JS template text is not runtime evidence; bound calls remain evidence."""
+    template_source = (
+        "const prompt = `\n"
+        "const cron = require('node-cron');\n"
+        "cron.schedule('* * * * *', work);\n"
+        "const io = require('socket.io');\n"
+        "io.on('connection', socket => socket.on('message', handler));\n"
+        "`;\n"
+    )
+    template_parsed = parse_file(Path("src/prompt.ts"), template_source)
+    assert template_parsed is not None
+    template_runtime = discover_runtime_surfaces(
+        {"src/prompt.ts": template_parsed}, {"src/prompt.ts": template_source}
+    )
+    assert template_runtime.schedulers == []
+    assert template_runtime.realtime_consumers == []
+
+    sources = {
+        "jobs/cron.js": (
+            "const cron = require('node-cron');\n"
+            "cron.schedule('*/5 * * * *', syncInventory);\n"
+        ),
+        "realtime/server.js": (
+            "const { Server } = require('socket.io');\n"
+            "const io = new Server(server);\n"
+            "io.on('connection', handler);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [(scheduler.scheduler_type, scheduler.cron) for scheduler in runtime.schedulers] == [
+        ("node_cron", "*/5 * * * *")
+    ]
+    assert [(consumer.consumer_type, consumer.routes) for consumer in runtime.realtime_consumers] == [
+        ("socket_io", ["connection"])
+    ]
+
+
+def test_js_node_cron_schedule_names_reset_per_file() -> None:
+    """Structural node-cron discovery preserves the prior per-file name scope."""
+    sources = {
+        "jobs/first.js": (
+            "const cron = require('node-cron');\n"
+            "cron.schedule('* * * * *', first);\n"
+        ),
+        "jobs/second.js": (
+            "const cron = require('node-cron');\n"
+            "cron.schedule('*/2 * * * *', second);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [(scheduler.file_path, scheduler.name) for scheduler in runtime.schedulers] == [
+        ("jobs/first.js", "node-cron-1"),
+        ("jobs/second.js", "node-cron-1"),
+    ]
+
+
+def test_js_socketio_default_factory_has_bound_connection() -> None:
+    """The documented Socket.IO default factory is structural evidence too."""
+    source = (
+        "const socketIO = require('socket.io');\n"
+        "const io = socketIO(server);\n"
+        "io.on('connection', handleConnection);\n"
+    )
+    parsed = parse_file(Path("realtime/default-factory.js"), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces(
+        {"realtime/default-factory.js": parsed},
+        {"realtime/default-factory.js": source},
+    )
+
+    assert [(consumer.consumer_type, consumer.routes) for consumer in runtime.realtime_consumers] == [
+        ("socket_io", ["connection"])
+    ]
+
+
+def test_js_socketio_direct_require_factory_has_bound_connection() -> None:
+    """A direct `require('socket.io')(server)` factory remains bound evidence."""
+    source = (
+        "const io = require('socket.io')(server);\n"
+        "io.on('connection', handleConnection);\n"
+    )
+    parsed = parse_file(Path("realtime/direct-factory.js"), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces(
+        {"realtime/direct-factory.js": parsed},
+        {"realtime/direct-factory.js": source},
+    )
+
+    assert [(consumer.consumer_type, consumer.routes) for consumer in runtime.realtime_consumers] == [
+        ("socket_io", ["connection"])
+    ]
 
 
 def test_queue_add_preserves_punctuation_only_worker_queue_links() -> None:

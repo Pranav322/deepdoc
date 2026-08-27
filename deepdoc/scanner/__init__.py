@@ -26,7 +26,7 @@ from .runtime import (
     _link_runtime_workflows,
     _discover_celery_tasks,
     _discover_schedulers,
-    _discover_realtime_consumers,
+    _discover_python_realtime_consumers,
     _dedupe_runtime_tasks,
     _dedupe_schedulers,
     _dedupe_consumers,

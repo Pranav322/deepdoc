@@ -517,6 +517,11 @@ def test_engine_fingerprint_records_semantic_boundary_refinement():
     assert "semantic_boundaries" in ENGINE_FINGERPRINT
 
 
+def test_engine_fingerprint_records_runtime_evidence_contract():
+    """Runtime evidence semantics changed and must invalidate stale plans."""
+    assert "runtime_evidence" in ENGINE_FINGERPRINT
+
+
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
     """Outdated sync state should trigger a one-time full replan."""
     root, plan = tmp_repo_with_plan

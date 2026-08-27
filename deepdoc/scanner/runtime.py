@@ -1,8 +1,9 @@
 import re
 from pathlib import Path
+from typing import Any
 
 from .common import *
-from .common import RuntimeTask
+from .common import RealtimeConsumer, RuntimeScan, RuntimeScheduler, RuntimeTask
 from ..parser.base import ParsedFile
 from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
 from ..parser.registry import language_for_extension
@@ -46,7 +47,6 @@ def discover_runtime_surfaces(
     js_files = _by_language(eligible, languages, JS_LANGUAGES)
     php_files = _by_language(eligible, languages, PHP_LANGUAGES)
     go_files = _by_language(eligible, languages, GO_LANGUAGES)
-    python_js_files = _by_language(eligible, languages, PYTHON_LANGUAGES | JS_LANGUAGES)
 
     celery_tasks, celery_schedulers = _discover_celery_tasks(python_files)
     runtime.tasks.extend(celery_tasks)
@@ -55,14 +55,17 @@ def discover_runtime_surfaces(
     laravel_tasks, laravel_schedulers = _discover_laravel_runtime(php_files)
     runtime.tasks.extend(laravel_tasks)
     runtime.schedulers.extend(laravel_schedulers)
-    js_tasks, js_schedulers = _discover_js_runtime(js_files)
+    js_tasks, js_schedulers, js_consumers = _discover_js_runtime(js_files)
     runtime.tasks.extend(js_tasks)
     runtime.schedulers.extend(js_schedulers)
+    runtime.realtime_consumers.extend(js_consumers)
     go_tasks, go_schedulers = _discover_go_runtime(go_files)
     runtime.tasks.extend(go_tasks)
     runtime.schedulers.extend(go_schedulers)
-    runtime.schedulers.extend(_discover_schedulers(python_js_files))
-    runtime.realtime_consumers.extend(_discover_realtime_consumers(python_js_files))
+    runtime.schedulers.extend(_discover_schedulers(python_files))
+    runtime.realtime_consumers.extend(
+        _discover_python_realtime_consumers(python_files)
+    )
     (
         runtime.scan_stats["link_candidate_files"],
         runtime.scan_stats["link_task_checks"],
@@ -118,37 +121,34 @@ DISPATCH_MARKER_RE = re.compile(
     r"""\.(?:delay|apply_async|send)\s*\(|dispatch\s*\(|\bevent\s*\(\s*new\b|\bqueue\.add\s*\("""
 )
 
-# The identifier each dispatch shape names, captured without consuming the text
-# around it so nested shapes (`Job::dispatch(new Other)`) still both surface.
-# This turns a candidate file into the handful of targets it actually dispatches,
-# which is what the task index is keyed on - so a marker-bearing file that names
-# nothing we know costs one scan, not one probe per detected task.
+# Each dispatch grammar exposes a different target language. Index exact targets
+# per grammar rather than leading/trailing word fragments: fragments make names
+# such as `queue-0-sync` and `queue-1-sync` collide on `sync`, recreating the
+# files x tasks multiplier this index exists to prevent.
+_DISPATCH_IDENTIFIER = r"[A-Za-z_][A-Za-z0-9_]*"
+_QUALIFIED_DISPATCH_TARGET = rf"{_DISPATCH_IDENTIFIER}(?:\\{_DISPATCH_IDENTIFIER})*"
+_DISPATCH_IDENTIFIER_RE = re.compile(rf"^{_DISPATCH_IDENTIFIER}$")
+_QUALIFIED_DISPATCH_TARGET_RE = re.compile(rf"^{_QUALIFIED_DISPATCH_TARGET}$")
+
+# The exact target each dispatch shape names. Qualified PHP names remain intact
+# for `dispatch(new App\\Jobs\\Task(...))`; signal and Python receivers are
+# identifiers; queue names are quoted literals and are indexed separately.
 DISPATCH_TARGET_RE = re.compile(
-    r"""(?<![A-Za-z0-9_])(?P<recv>[A-Za-z0-9_]+)
-            (?=\s*\.\s*(?:delay|apply_async|send)\s*\()
-      | (?<![A-Za-z0-9_])(?P<static>[A-Za-z0-9_]+)(?=\s*::\s*dispatch\s*\()
-      | (?<![A-Za-z0-9_])(?:dispatch|event)\s*\(\s*(?:new\s+)?
-            (?=(?P<ctor>[A-Za-z0-9_]+))
-      | (?<![A-Za-z0-9_])queue\s*\.\s*add\s*\(\s*
+    rf"""(?<![A-Za-z0-9_])(?P<delay>{_DISPATCH_IDENTIFIER})
+            (?=\s*\.\s*(?:delay|apply_async)\s*\()
+      | (?<![A-Za-z0-9_])(?P<send>{_DISPATCH_IDENTIFIER})
+            (?=\s*\.\s*send\s*\()
+      | (?<![A-Za-z0-9_\\])(?P<static>{_QUALIFIED_DISPATCH_TARGET})
+            (?=\s*::\s*dispatch\s*\()
+      | \bdispatch\s*\(\s*(?:new\s+)?(?P<dispatch>{_QUALIFIED_DISPATCH_TARGET})
+            (?=\s*(?:::class\b|[(),]))
+      | \bevent\s*\(\s*new\s+(?P<event>{_QUALIFIED_DISPATCH_TARGET})
+            (?=\s*[(),])
+      | \bqueue\s*\.\s*add\s*\(\s*
             (?=['\"](?P<queued>[^'\"]*)['\"])
     """,
     re.VERBOSE,
 )
-
-WORD_RUN_RE = re.compile(r"[A-Za-z0-9_]+")
-
-
-def _dispatch_index_keys(token: str) -> list[str]:
-    r"""Word runs a dispatch site can expose for `token`.
-
-    A task pattern anchors its name at one end of a dispatch site, and `\b`
-    forces that end to fall on a word boundary, so the extraction only ever sees
-    the token's leading or trailing word run: `sync-orders.delay(` shows
-    `orders`, `dispatch(App\Jobs\X` shows `App`. Indexing both ends keeps the
-    lookup a superset of the patterns, which then verify exactly.
-    """
-    runs = WORD_RUN_RE.findall(token)
-    return [runs[0], runs[-1]] if runs else []
 
 
 def _link_runtime_workflows(
@@ -173,8 +173,24 @@ def _link_runtime_workflows(
         for owned in endpoint_owned_files(ep):
             endpoint_keys_by_file.setdefault(owned, set()).add(key)
 
-    task_patterns = {
-        task.name: [
+    # Patterns and indexes belong to task identity, not task name. Distinct
+    # handlers may share a name while owning different signal triggers; using a
+    # name-keyed dict made their behavior depend on input order.
+    task_patterns: dict[int, list[re.Pattern[str]]] = {}
+    tasks_by_target: dict[str, dict[str, list[RuntimeTask]]] = {
+        "delay": {},
+        "send": {},
+        "static": {},
+        "dispatch": {},
+        "event": {},
+    }
+    # `queue.add('literal')` has a quoted literal target, including names with
+    # no word run such as `---`, so it has its own exact raw-name index.
+    tasks_by_queue_name: dict[str, list[RuntimeTask]] = {}
+    for task in runtime.tasks:
+        if not task.name:
+            continue
+        task_patterns[id(task)] = [
             re.compile(rf"""\b{re.escape(task.name)}\.(?:delay|apply_async)\s*\("""),
             re.compile(rf"""\b{re.escape(task.name)}::dispatch\s*\("""),
             re.compile(rf"""\bdispatch\s*\(\s*{re.escape(task.name)}\b"""),
@@ -187,35 +203,15 @@ def _link_runtime_workflows(
                 if trigger
             ],
         ]
-        for task in runtime.tasks
-        if task.name
-    }
-    # Literals `task_patterns[name]` can match. Name-keyed like `task_patterns`
-    # itself, so duplicate-name tasks keep sharing one pattern/token set.
-    task_tokens = {
-        task.name: {task.name, *(trigger for trigger in task.triggers if trigger)}
-        for task in runtime.tasks
-        if task.name
-    }
-    # Tasks reachable from a word-shaped dispatch target, so a candidate file only
-    # pays regex cost for the tasks its own identifier-shaped dispatch sites could
-    # possibly name. Tokens with no word run cannot satisfy the corresponding
-    # `\b`-anchored patterns and are omitted rather than creating a fallback.
-    tasks_by_target: dict[str, list[RuntimeTask]] = {}
-    # `queue.add('literal')` is different: its word boundary is before `queue`,
-    # not the literal. Keep an exact raw-name index for that one grammar so queue
-    # names such as `---` retain their valid producer links without broad scans.
-    tasks_by_queue_name: dict[str, list[RuntimeTask]] = {}
-    for task in runtime.tasks:
-        if not task.name:
-            continue
+        if _DISPATCH_IDENTIFIER_RE.fullmatch(task.name):
+            tasks_by_target["delay"].setdefault(task.name, []).append(task)
+        if _QUALIFIED_DISPATCH_TARGET_RE.fullmatch(task.name):
+            for grammar in ("static", "dispatch", "event"):
+                tasks_by_target[grammar].setdefault(task.name, []).append(task)
         tasks_by_queue_name.setdefault(task.name, []).append(task)
-        for key in {
-            key
-            for token in task_tokens[task.name]
-            for key in _dispatch_index_keys(token)
-        }:
-            tasks_by_target.setdefault(key, []).append(task)
+        for trigger in task.triggers:
+            if _DISPATCH_IDENTIFIER_RE.fullmatch(trigger):
+                tasks_by_target["send"].setdefault(trigger, []).append(task)
     scheduler_patterns = {
         scheduler.name: [
             re.compile(rf"""\b{re.escape(target)}\b""")
@@ -237,7 +233,7 @@ def _link_runtime_workflows(
                 content, tasks_by_target, tasks_by_queue_name
             ):
                 task_checks += 1
-                patterns = task_patterns.get(task.name, [])
+                patterns = task_patterns.get(id(task), [])
                 if not patterns or not any(
                     pattern.search(content) for pattern in patterns
                 ):
@@ -264,11 +260,11 @@ def _link_runtime_workflows(
 
 def _tasks_named_by(
     content: str,
-    tasks_by_target: dict[str, list[RuntimeTask]],
+    tasks_by_target: dict[str, dict[str, list[RuntimeTask]]],
     tasks_by_queue_name: dict[str, list[RuntimeTask]],
 ) -> list[RuntimeTask]:
-    """Tasks this file's own dispatch sites could name, in a stable order."""
-    if not tasks_by_target and not tasks_by_queue_name:
+    """Tasks this file's own exact dispatch sites can name, in stable order."""
+    if not any(tasks_by_target.values()) and not tasks_by_queue_name:
         # Nothing to link, so a repo with dispatch syntax but no detected tasks
         # (the common case) never pays for target extraction.
         return []
@@ -279,17 +275,16 @@ def _tasks_named_by(
         if queue_name is not None:
             matching_tasks = tasks_by_queue_name.get(queue_name, ())
         else:
-            target = (
-                match.group("recv")
-                or match.group("static")
-                or match.group("ctor")
-                or ""
+            grammar = next(
+                (
+                    name
+                    for name in ("delay", "send", "static", "dispatch", "event")
+                    if match.group(name) is not None
+                ),
+                "",
             )
-            matching_tasks = (
-                task
-                for key in _dispatch_index_keys(target)
-                for task in tasks_by_target.get(key, ())
-            )
+            target = match.group(grammar) if grammar else ""
+            matching_tasks = tasks_by_target.get(grammar, {}).get(target, ())
         for task in matching_tasks:
             if id(task) not in seen:
                 seen.add(id(task))
@@ -382,28 +377,11 @@ def _discover_celery_tasks(
 
 
 def _discover_schedulers(file_contents: dict[str, str]) -> list[RuntimeScheduler]:
+    """Discover Python crontab declarations after JS uses structural binding."""
     schedulers: list[RuntimeScheduler] = []
-    node_cron_pattern = re.compile(r"cron\.schedule\s*\(\s*['\"]([^'\"]+)['\"]")
-    function_call_pattern = re.compile(r"([A-Za-z_][A-Za-z0-9_]*)\s*\(")
     crontab_pattern = re.compile(r"crontab\s*\(([^)]*)\)")
 
     for file_path, content in file_contents.items():
-        if "cron.schedule" in content or "node-cron" in content:
-            for idx, match in enumerate(node_cron_pattern.finditer(content), start=1):
-                snippet = content[match.end() : match.end() + 300]
-                invoked = []
-                for call in function_call_pattern.findall(snippet):
-                    if call not in {"if", "for", "while", "switch", "setTimeout"}:
-                        invoked.append(call)
-                schedulers.append(
-                    RuntimeScheduler(
-                        name=f"node-cron-{idx}",
-                        file_path=file_path,
-                        scheduler_type="node_cron",
-                        cron=match.group(1),
-                        invoked_targets=invoked[:6],
-                    )
-                )
         if "crontab(" in content:
             for idx, match in enumerate(crontab_pattern.finditer(content), start=1):
                 schedulers.append(
@@ -616,18 +594,30 @@ JS_AGENDA_MODULES = frozenset({"agenda", "@hokify/agenda"})
 # `new Agenda(...)`, whether the constructor arrived as the module export or as
 # a named `Agenda` import.
 JS_AGENDA_INSTANCE_ROLES = ("default()", "Agenda()")
+JS_SCHEDULER_MODULES = frozenset({"node-cron"})
+JS_REALTIME_MODULES = frozenset({"socket.io", "ws"})
+JS_SOCKET_IO_INSTANCE_ROLES = ("Server()", "default()")
+JS_WS_INSTANCE_ROLE = "WebSocketServer()"
 JS_RUNTIME_MODULES = (
     JS_BULLMQ_MODULES
     | frozenset(JS_QUEUE_INSTANCE_ROLES)
     | JS_AMQP_MODULES
     | JS_AGENDA_MODULES
 )
+# The parser runs once per JS/TS/Vue candidate and returns only executable calls
+# bound to these supported modules. Scheduler/realtime roles join the same
+# evidence path so template literals and comments cannot create runtime facts.
+JS_BOUND_RUNTIME_MODULES = (
+    JS_RUNTIME_MODULES | JS_SCHEDULER_MODULES | JS_REALTIME_MODULES
+)
 # Binding cannot succeed unless the module name appears literally, and every
-# fact below needs either its (un-aliasable) method name or the `Worker` member
-# in the import, so these substring pre-checks keep tree-sitter off the files
-# that were never candidates.
-JS_EVIDENCE_TOKENS = tuple(sorted(JS_RUNTIME_MODULES))
-JS_CALL_SHAPES = ("worker", ".process(", ".consume(", ".define(", ".every(")
+# fact below needs one of these call shapes. This keeps tree-sitter off files
+# that were never candidates while retaining legal whitespace before `(`.
+JS_EVIDENCE_TOKENS = tuple(sorted(JS_BOUND_RUNTIME_MODULES))
+JS_CALL_SHAPE_RE = re.compile(
+    r"\bworker\b|\.(?:process|consume|define|every|schedule|on)\s*\(",
+    re.IGNORECASE,
+)
 
 
 def _js_str_arg(call: JsBoundCall, index: int) -> str:
@@ -654,22 +644,26 @@ def _js_parse_input(file_path: str, content: str) -> tuple[str, str]:
 
 def _discover_js_runtime(
     file_contents: dict[str, str],
-) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
+) -> tuple[list[RuntimeTask], list[RuntimeScheduler], list[RealtimeConsumer]]:
+    """Discover JS/TS/Vue runtime facts only from syntax-bound API calls."""
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
+    realtime_routes: dict[tuple[str, str], set[str]] = {}
 
     for file_path, content in file_contents.items():
+        node_cron_count = 0
         lowered = content.lower()
         if not any(token in lowered for token in JS_EVIDENCE_TOKENS):
             continue
-        if not any(shape in lowered for shape in JS_CALL_SHAPES):
+        if not JS_CALL_SHAPE_RE.search(content):
             continue
 
         source, language = _js_parse_input(file_path, content)
-        # Fail closed without syntax nodes: raw text cannot tell an executable
-        # call from queue code quoted inside a prompt template literal, which is
-        # how a prompt file reported `fake-example` as a real job.
-        calls = js_bound_calls(Path(file_path), source, language, JS_RUNTIME_MODULES)
+        # Fail closed without syntax nodes: raw text cannot tell executable code
+        # from library examples quoted in template literals or comments.
+        calls = js_bound_calls(
+            Path(file_path), source, language, JS_BOUND_RUNTIME_MODULES
+        )
         if not calls:
             continue
 
@@ -740,8 +734,56 @@ def _discover_js_runtime(
                             invoked_targets=[job_name],
                         )
                     )
+            elif (
+                call.module in JS_SCHEDULER_MODULES
+                and call.symbol == "schedule"
+                and not call.receiver
+            ):
+                cron = _js_str_arg(call, 0)
+                if cron:
+                    node_cron_count += 1
+                    kind, target = call.args[1] if len(call.args) > 1 else ("", "")
+                    schedulers.append(
+                        RuntimeScheduler(
+                            name=f"node-cron-{node_cron_count}",
+                            file_path=file_path,
+                            scheduler_type="node_cron",
+                            cron=cron,
+                            invoked_targets=[target] if kind == "name" and target else [],
+                        )
+                    )
+            elif call.symbol == "on":
+                event = _js_str_arg(call, 0)
+                consumer_type = ""
+                if (
+                    call.module == "socket.io"
+                    and call.receiver in JS_SOCKET_IO_INSTANCE_ROLES
+                ):
+                    consumer_type = "socket_io"
+                elif call.module == "ws" and call.receiver == JS_WS_INSTANCE_ROLE:
+                    consumer_type = "websocket"
+                if event and consumer_type:
+                    realtime_routes.setdefault((file_path, consumer_type), set()).add(
+                        event
+                    )
 
-    return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
+    consumers = [
+        RealtimeConsumer(
+            name=Path(file_path).stem,
+            file_path=file_path,
+            consumer_type=consumer_type,
+            routes=sorted(routes),
+            groups=[],
+            auth_hints=["socket_connection"] if "connection" in routes else [],
+        )
+        for (file_path, consumer_type), routes in sorted(realtime_routes.items())
+        if "connection" in routes
+    ]
+    return (
+        _dedupe_runtime_tasks(tasks),
+        _dedupe_schedulers(schedulers),
+        _dedupe_consumers(consumers),
+    )
 
 
 def _discover_nestjs_runtime(file_contents: dict[str, str]) -> list[RuntimeTask]:
@@ -913,9 +955,16 @@ def _discover_go_runtime(
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 
 
-def _discover_realtime_consumers(
+def _discover_python_realtime_consumers(
     file_contents: dict[str, str],
 ) -> list[RealtimeConsumer]:
+    """Discover Django Channels consumers from Python source only.
+
+    JavaScript realtime detection is intentionally handled by
+    ``_discover_js_runtime`` through syntax-bound API roles. Keeping this
+    function Python-only prevents raw JS-like text in templates or comments
+    from creating a Socket.IO/WebSocket runtime fact.
+    """
     consumers: list[RealtimeConsumer] = []
     consumer_pattern = re.compile(
         r"class\s+(\w+)\((AsyncWebsocketConsumer|WebsocketConsumer)\)\s*:"
@@ -924,17 +973,12 @@ def _discover_realtime_consumers(
         r"re_path\s*\(\s*r?['\"]([^'\"]+)['\"]|path\s*\(\s*['\"]([^'\"]+)['\"]"
     )
     group_pattern = re.compile(r"group_(?:add|discard|send)\s*\(\s*['\"]([^'\"]+)['\"]")
-    socket_route_pattern = re.compile(r"\b(?:io|socket)\.on\(\s*['\"]([^'\"]+)['\"]")
 
     for file_path, content in file_contents.items():
         if (
             "WebsocketConsumer" not in content
             and "AsyncWebsocketConsumer" not in content
             and "ProtocolTypeRouter" not in content
-            and "socket.io" not in content.lower()
-            and "new WebSocketServer" not in content
-            and ".on('connection'" not in content
-            and '.on("connection"' not in content
         ):
             continue
 
@@ -959,25 +1003,6 @@ def _discover_realtime_consumers(
                     routes=sorted(set(routes))[:10],
                     groups=sorted(set(groups))[:10],
                     auth_hints=auth_hints,
-                )
-            )
-        if not list(consumer_pattern.finditer(content)) and socket_route_pattern.search(
-            content
-        ):
-            routes = sorted(
-                {route for route in socket_route_pattern.findall(content) if route}
-            )[:10]
-            consumer_type = (
-                "socket_io" if "socket.io" in content.lower() else "websocket"
-            )
-            consumers.append(
-                RealtimeConsumer(
-                    name=Path(file_path).stem,
-                    file_path=file_path,
-                    consumer_type=consumer_type,
-                    routes=routes,
-                    groups=[],
-                    auth_hints=["socket_connection"] if "connection" in routes else [],
                 )
             )
     return _dedupe_consumers(consumers)

@@ -1772,6 +1772,33 @@ dispatch(new SyncOrders($order));
     assert task.producer_files == [path]
 
 
+def test_php_grouped_import_alias_resolves_to_its_actual_class() -> None:
+    """Grouped `use` aliases receive the same canonical collision protection."""
+    path = "app/Http/OrderController.php"
+    source = """<?php
+use App\\Other\\{ExportJob as SyncOrders, AnotherJob};
+dispatch(new SyncOrders($order));
+"""
+    unrelated = RuntimeTask(
+        name="SyncOrders",
+        file_path="app/Jobs/SyncOrders.php",
+        runtime_kind="laravel_job",
+    )
+    actual = RuntimeTask(
+        name="ExportJob",
+        file_path="app/Other/ExportJob.php",
+        runtime_kind="laravel_job",
+    )
+    runtime = RuntimeScan(tasks=[unrelated, actual])
+
+    evidence = _collect_dispatch_evidence({path: source}, {path: "php"})
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert evidence[0].target_aliases == (r"App\Other\ExportJob", "ExportJob")
+    assert unrelated.producer_files == []
+    assert actual.producer_files == [path]
+
+
 def test_js_scope_forms_shadow_require_before_runtime_binding() -> None:
     """All lexical forms that bind `require` suppress CommonJS runtime evidence."""
     sources = {

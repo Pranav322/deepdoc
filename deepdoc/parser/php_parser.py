@@ -90,7 +90,30 @@ def _php_import_aliases(root) -> dict[str, str]:
             declaration = node.text.decode("utf8", "replace")
             # `use function` and `use const` do not define dispatchable classes.
             if not re.match(r"\s*use\s+(?:function|const)\b", declaration):
-                for clause in node.named_children:
+                children = node.named_children
+                group = next(
+                    (child for child in children if child.type == "namespace_use_group"),
+                    None,
+                )
+                prefix_node = next(
+                    (child for child in children if child.type == "namespace_name"),
+                    None,
+                )
+                prefix = (
+                    prefix_node.text.decode("utf8", "replace").strip().lstrip("\\")
+                    if prefix_node is not None
+                    else ""
+                )
+                clauses = (
+                    group.named_children
+                    if group is not None
+                    else [
+                        child
+                        for child in children
+                        if child.type == "namespace_use_clause"
+                    ]
+                )
+                for clause in clauses:
                     if clause.type != "namespace_use_clause":
                         continue
                     names = [
@@ -103,6 +126,8 @@ def _php_import_aliases(root) -> dict[str, str]:
                     target = _php_class_target(names[0], {})
                     if not target:
                         continue
+                    if group is not None and prefix:
+                        target = f"{prefix}\\{target}"
                     alias = (
                         names[-1].text.decode("utf8", "replace")
                         if len(names) > 1

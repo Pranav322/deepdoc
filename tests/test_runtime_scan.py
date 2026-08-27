@@ -407,6 +407,100 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
     assert "go_schedule" in scheduler_types
 
 
+def test_generic_js_process_and_consume_are_not_queue_workers() -> None:
+    """`.process(`/`.consume(` are ordinary method names without a queue import."""
+    parsed_files = {
+        "src/vs/base/browser/ui/tree/compressedObjectTreeModel.ts": _parsed_file(
+            "src/vs/base/browser/ui/tree/compressedObjectTreeModel.ts",
+            language="typescript",
+        ),
+    }
+    file_contents = {
+        "src/vs/base/browser/ui/tree/compressedObjectTreeModel.ts": (
+            "import { Iterable } from '../../../common/iterator.js';\n"
+            "export function build(nodes, lineProcessor, replyProcessor) {\n"
+            "    Iterable.consume(nodes, 1);\n"
+            "    lineProcessor.process(line, context);\n"
+            "    return replyProcessor.process(reply);\n"
+            "}\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+
+    # Same `.consume(` shape, but the file really is a broker consumer.
+    parsed_files["src/jobs/orderConsumer.ts"] = _parsed_file(
+        "src/jobs/orderConsumer.ts", language="typescript"
+    )
+    file_contents["src/jobs/orderConsumer.ts"] = (
+        "import amqplib from 'amqplib';\n"
+        "const channel = await (await amqplib.connect(url)).createChannel();\n"
+        "channel.consume('orders-sync', handleOrder);\n"
+    )
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    assert [
+        task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
+    ] == ["orders-sync"]
+
+
+def test_generic_js_new_worker_is_not_a_queue_worker() -> None:
+    """A browser/Node `new Worker(...)` is not a queue job without a queue import."""
+    parsed_files = {
+        "src/vs/editor/common/services/editorWorkerService.ts": _parsed_file(
+            "src/vs/editor/common/services/editorWorkerService.ts",
+            language="typescript",
+        ),
+    }
+    file_contents = {
+        "src/vs/editor/common/services/editorWorkerService.ts": (
+            "import { URI } from '../../../base/common/uri.js';\n"
+            "const worker = new Worker('vs/editor/common/services/editorSimpleWorker');\n"
+            "worker.postMessage({ type: 'init' });\n"
+        ),
+    }
+
+    runtime = discover_runtime_surfaces(parsed_files, file_contents)
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
+
+
+def test_agenda_jobs_need_agenda_evidence() -> None:
+    """`agenda.define(...)` only counts when the file really uses Agenda."""
+    coincidence = {
+        "src/vs/workbench/contrib/notes/browser/agendaView.ts": (
+            "const agenda = this.buildAgenda();\n"
+            "agenda.define('nightly-report', view => view.render());\n"
+            "agenda.every('5 minutes', 'nightly-report');\n"
+        ),
+    }
+    real = {
+        "src/jobs/reports.ts": (
+            "import Agenda from 'agenda';\n"
+            "const agenda = new Agenda({ db: { address: process.env.MONGO_URL } });\n"
+            "agenda.define('nightly-report', async () => {});\n"
+            "agenda.every('5 minutes', 'nightly-report');\n"
+        ),
+    }
+    parsed = {
+        path: _parsed_file(path, language="typescript")
+        for path in (*coincidence, *real)
+    }
+
+    noise = discover_runtime_surfaces(parsed, coincidence)
+    assert [task for task in noise.tasks if task.runtime_kind == "js_worker"] == []
+    assert [s for s in noise.schedulers if s.scheduler_type == "agenda"] == []
+
+    detected = discover_runtime_surfaces(parsed, real)
+    assert [task.name for task in detected.tasks if task.runtime_kind == "js_worker"] == [
+        "nightly-report"
+    ]
+    assert [s.scheduler_type for s in detected.schedulers] == ["agenda"]
+
+
 def test_discover_debug_signals_reads_dict_endpoints() -> None:
     signals = discover_debug_signals(
         {},

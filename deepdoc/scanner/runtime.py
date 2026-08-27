@@ -489,6 +489,40 @@ def _schedule_chain_summary(chain: str) -> str:
     return chain.strip()[:120]
 
 
+# `new Worker(...)`, `.process(...)` and `.consume(...)` are ordinary JS/TS
+# idioms - browser/Node workers and plain domain methods - so they only describe
+# a queue job when the file itself pulls in the queue library. Without this gate
+# the VS Code checkout reported `lineProcessor.process()` and
+# `Iterable.consume()` as background jobs.
+JS_QUEUE_MODULES = frozenset(
+    {"bullmq", "bull", "bee-queue", "kue", "amqplib", "amqp-connection-manager"}
+)
+JS_AGENDA_MODULES = frozenset({"agenda", "@hokify/agenda"})
+JS_MODULE_RE = re.compile(
+    r"""(?:require|import)\s*\(\s*['"]([^'"]+)['"]|from\s+['"]([^'"]+)['"]|import\s+['"]([^'"]+)['"]"""
+)
+
+
+def _js_imports_any(content: str, modules: frozenset[str]) -> bool:
+    """True when the file imports/requires one of `modules` (or a subpath of it)."""
+    specifiers = {
+        spec
+        for match in JS_MODULE_RE.finditer(content)
+        for spec in match.groups()
+        if spec
+    }
+    return any(
+        spec == module or spec.startswith(f"{module}/")
+        for spec in specifiers
+        for module in modules
+    )
+
+
+def _js_has_agenda_evidence(content: str) -> bool:
+    """Agenda import or an actual `new Agenda(...)`, not just an `agenda` receiver."""
+    return "new Agenda(" in content or _js_imports_any(content, JS_AGENDA_MODULES)
+
+
 def _discover_js_runtime(
     file_contents: dict[str, str],
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
@@ -509,40 +543,44 @@ def _discover_js_runtime(
 
     for file_path, content in file_contents.items():
         lowered = content.lower()
-        if not any(
+        queue_shape = any(
             token in lowered
-            for token in (
-                "new worker(",
-                ".process(",
-                ".consume(",
-                "agenda.define",
-                "agenda.every",
-            )
-        ):
+            for token in ("new worker(", ".process(", ".consume(")
+        )
+        agenda_shape = "agenda.define" in lowered or "agenda.every" in lowered
+        if not queue_shape and not agenda_shape:
             continue
 
-        for queue_name in worker_pattern.findall(content):
-            tasks.append(
-                RuntimeTask(
-                    name=queue_name,
-                    file_path=file_path,
-                    runtime_kind="js_worker",
-                    decorator="Worker",
-                    queue=queue_name,
+        if queue_shape and _js_imports_any(content, JS_QUEUE_MODULES):
+            for queue_name in worker_pattern.findall(content):
+                tasks.append(
+                    RuntimeTask(
+                        name=queue_name,
+                        file_path=file_path,
+                        runtime_kind="js_worker",
+                        decorator="Worker",
+                        queue=queue_name,
+                    )
                 )
-            )
 
-        for queue_name, named_handler, bare_handler in process_pattern.findall(content):
-            task_name = queue_name or named_handler or bare_handler or "queue-worker"
-            tasks.append(
-                RuntimeTask(
-                    name=task_name,
-                    file_path=file_path,
-                    runtime_kind="js_worker",
-                    decorator="queue_process",
-                    queue=queue_name or "",
+            for queue_name, named_handler, bare_handler in process_pattern.findall(
+                content
+            ):
+                task_name = (
+                    queue_name or named_handler or bare_handler or "queue-worker"
                 )
-            )
+                tasks.append(
+                    RuntimeTask(
+                        name=task_name,
+                        file_path=file_path,
+                        runtime_kind="js_worker",
+                        decorator="queue_process",
+                        queue=queue_name or "",
+                    )
+                )
+
+        if not agenda_shape or not _js_has_agenda_evidence(content):
+            continue
 
         for job_name in agenda_define_pattern.findall(content):
             tasks.append(

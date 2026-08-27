@@ -382,7 +382,7 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
             "const queue = new Queue('inventory');\n"
             "queue.add('inventory-refresh', {});\n"
             "new Worker('orders-sync', async job => syncOrders(job));\n"
-            "new Worker('inventory-refresh', async refreshInventory);\n"
+            "new Worker('inventory-refresh', async () => refreshInventory());\n"
             "agenda.define('nightly-report', async () => {});\n"
             "agenda.every('5 minutes', 'nightly-report');\n"
         ),
@@ -2121,3 +2121,88 @@ def test_js_named_node_cron_schedule_bindings_are_discovered() -> None:
         ("jobs/named.ts", "* * * * *", ["namedTask"]),
         ("jobs/member.js", "*/5 * * * *", ["memberTask"]),
     ]
+
+
+def test_js_runtime_bindings_follow_lexical_write_history() -> None:
+    """Dynamic writes invalidate a binding without erasing valid sibling scopes."""
+    sources = {
+        "workers/reassigned.js": (
+            "const Queue = require('bullmq').Queue;\n"
+            "let queue = new Queue('orders');\n"
+            "queue = getDynamicQueue();\n"
+            "queue.add('send-order', {});\n"
+        ),
+        "realtime/reassigned.js": (
+            "require = customLoader;\n"
+            "const io = require('socket.io')(server);\n"
+            "io.on('connection', handleConnection);\n"
+        ),
+        "workers/siblings.js": (
+            "const Bull = require('bull');\n"
+            "function first() {\n"
+            "  var queue = new Bull('first');\n"
+            "  queue.process('first', handleFirst);\n"
+            "}\n"
+            "function second() {\n"
+            "  var queue = new Bull('second');\n"
+            "  queue.process('second', handleSecond);\n"
+            "}\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [
+        (task.file_path, task.name, task.queue)
+        for task in runtime.tasks
+        if task.runtime_kind == "js_worker"
+    ] == [
+        ("workers/siblings.js", "first", "first"),
+        ("workers/siblings.js", "second", "second"),
+    ]
+    assert runtime.dispatch_evidence == []
+    assert runtime.realtime_consumers == []
+
+
+def test_js_queue_evidence_uses_bound_constructor_queue_identity() -> None:
+    """Queue producer evidence uses Queue's name, not BullMQ's job name."""
+    producer = "producers/email.js"
+    sources = {
+        producer: (
+            "const Queue = require('bullmq').Queue;\n"
+            "const queue = new Queue('email-events');\n"
+            "queue.add('send-digest', {});\n"
+        ),
+        "producers/dynamic.js": (
+            "const Queue = require('bullmq').Queue;\n"
+            "const queue = new Queue(queueName);\n"
+            "queue.add('send-digest', {});\n"
+        ),
+        "workers/email.js": (
+            "const Worker = require('bullmq').Worker;\n"
+            "new Worker('email-events', handleEmail);\n"
+        ),
+        "workers/job.js": (
+            "const Worker = require('bullmq').Worker;\n"
+            "new Worker('send-digest', handleDigest);\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    workers = {task.queue: task for task in runtime.tasks if task.runtime_kind == "js_worker"}
+
+    assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        (producer, ("email-events",))
+    ]
+    assert workers["email-events"].producer_files == [producer]
+    assert workers["send-digest"].producer_files == []

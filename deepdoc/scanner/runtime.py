@@ -825,7 +825,9 @@ def _js_dispatch_evidence(file_path: str, content: str) -> list[DispatchEvidence
             or call.receiver not in JS_QUEUE_PRODUCER_ROLES.get(call.module, ())
         ):
             continue
-        queue_name = _js_str_arg(call, 0)
+        # Bull/BullMQ `.add(jobName, data)` names a job. The dispatch target is
+        # instead the literal identity of its proven Queue receiver.
+        queue_name = call.receiver_identity
         if queue_name:
             evidence.append(
                 DispatchEvidence(

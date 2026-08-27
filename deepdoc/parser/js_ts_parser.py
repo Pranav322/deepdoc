@@ -68,7 +68,9 @@ class JsBoundCall(NamedTuple):
     naming the calls that produced the receiver. `args` holds one `(kind, value)`
     pair per argument in source order, where kind is "str" for a quoted literal,
     "name" for an identifier or a named function, and "" for anything with no
-    usable name.
+    a usable name. `receiver_identity` is a literal identity carried by a
+    proven produced receiver (for example the queue name supplied to
+    `new Queue('emails')`); callers may use it only with an allowed API role.
     """
 
     module: str
@@ -76,6 +78,7 @@ class JsBoundCall(NamedTuple):
     is_new: bool
     receiver: str
     args: tuple[tuple[str, str], ...]
+    receiver_identity: str = ""
 
 
 # What a default import, a namespace import and `require()` all resolve to: the
@@ -88,6 +91,34 @@ def _produced_role(call: JsBoundCall) -> str:
     if call.receiver and call.receiver.endswith("()"):
         return f"{call.receiver}.{call.symbol}()"
     return f"{call.symbol}()"
+
+
+class _Declaration(NamedTuple):
+    """One lexical binding identity, keyed by declaration byte and scope."""
+
+    start: int
+    scope: tuple[int, int]
+
+
+class _ResolvedValue(NamedTuple):
+    """A proven module value plus an optional literal produced-object identity."""
+
+    module: str
+    member: str
+    identity: str = ""
+
+
+class _BindingWrite(NamedTuple):
+    """The value (or explicit invalidation) assigned to one declaration."""
+
+    at: int
+    value: _ResolvedValue | None
+
+
+def _produced_value(call: JsBoundCall) -> _ResolvedValue:
+    """Value a trusted call/new expression produces for a later local binding."""
+    identity = _literal_arg(call.args, 0) if not call.receiver else ""
+    return _ResolvedValue(call.module, _produced_role(call), identity)
 
 
 def js_bound_calls(
@@ -171,51 +202,64 @@ _DECL_FIELDS = {
 
 
 class _Binder:
-    """Resolves, within one file, which local names come from `modules`.
+    """Resolves one file's literal-module bindings without cross-scope guesses.
 
-    Only the straight-line local flows real queue/broker APIs need are modelled:
-    import/require bindings, then declarator and assignment chains derived from
-    them. Anything else - a dynamic receiver, a value from another file, a name
-    that a nested scope redeclares - resolves to nothing, so no call is
-    reported for it.
+    Declarations are collected before values are resolved so hoisted names shadow
+    the global CommonJS loader. Each declaration then owns an ordered write
+    history: a dynamic write is an explicit invalidation, while a later proven
+    write may safely establish a new local value. A lookup always chooses the
+    narrowest visible declaration and its most recent prior write.
     """
 
     def __init__(self, modules: frozenset[str]) -> None:
         self._modules = modules
-        # name -> (module, member, declaring byte, scope range)
-        self._bindings: dict[str, tuple[str, str, int, tuple[int, int]]] = {}
-        # name -> [(declaring byte, scope range)] for every declaration of it
-        self._decls: dict[str, list[tuple[int, tuple[int, int]]]] = {}
+        self._decls: dict[str, list[_Declaration]] = {}
+        self._writes: dict[_Declaration, list[_BindingWrite]] = {}
+        self._global_writes: dict[str, list[int]] = {}
         self._calls: list = []
 
     def run(self, root) -> tuple[JsBoundCall, ...]:
-        stack = [root]
-        while stack:
-            node = stack.pop()
+        nodes = self._nodes_in_source_order(root)
+        # Collect every declaration first so a hoisted/lexical shadow makes a
+        # later `require(...)` fail closed even when the declaration appears
+        # after the call site in source text.
+        for node in nodes:
             self._declare(node)
+        for node in nodes:
             if node.type in ("import_statement", "import_declaration"):
                 self._bind_import(node)
             elif node.type in ("variable_declarator", "assignment_expression"):
                 self._bind_value(node)
             elif node.type in ("new_expression", "call_expression"):
                 self._calls.append(node)
-            stack.extend(reversed(node.children))  # keep source order
         found = (self._bound_call(node) for node in self._calls)
         return tuple(call for call in found if call is not None)
 
-    # ── declarations ────────────────────────────────────────────────────────
+    @staticmethod
+    def _nodes_in_source_order(root) -> list:
+        stack = [root]
+        nodes = []
+        while stack:
+            node = stack.pop()
+            nodes.append(node)
+            stack.extend(reversed(node.children))
+        # Parents run before children at one byte offset, so a declarator write
+        # is available while its nested executable call is evaluated later.
+        return sorted(nodes, key=lambda node: (node.start_byte, -node.end_byte))
+
+    # ── declarations and writes ─────────────────────────────────────────────
 
     def _declare(self, node) -> None:
-        """Record every name this node introduces, bound to a library or not.
-
-        Non-library declarations matter too: they are what proves a nested
-        `Worker` is the local one rather than the imported queue class.
-        """
-        if node.type == "formal_parameters":
+        """Record every lexical name, including names unrelated to a library."""
+        if node.type in ("import_statement", "import_declaration"):
+            if _is_type_only_import(node):
+                return
+            targets = _runtime_import_names(node)
+        elif node.type == "formal_parameters":
             targets = node.named_children
         elif node.type == "import_alias":
-            # TypeScript `import local = namespace.member` introduces `local`
-            # but does not bind it to one of the requested runtime modules.
+            # TypeScript `import local = namespace.member` shadows `local` but
+            # cannot establish one of the requested literal module bindings.
             targets = node.named_children[:1]
         else:
             field = _DECL_FIELDS.get(node.type)
@@ -226,31 +270,44 @@ class _Binder:
                 self._add_decl(name_node)
 
     def _add_decl(self, name_node) -> None:
-        entry = (name_node.start_byte, _decl_scope(name_node))
-        self._decls.setdefault(_text(name_node), []).append(entry)
-
-    def _bind_name(
-        self, name_node, module: str, member: str, declares: bool = True
-    ) -> None:
-        """Bind `name_node` to `module`, if it matched one.
-
-        An assignment writes to a name that something else declared, so it takes
-        that declaration's identity: `let channel; channel = ...` must still
-        resolve, while a target with several declarations cannot be pinned down.
-        """
         name = _text(name_node)
-        if declares:
-            self._add_decl(name_node)
-        if not module:
+        declaration = _Declaration(name_node.start_byte, _decl_scope(name_node))
+        entries = self._decls.setdefault(name, [])
+        if declaration not in entries:
+            entries.append(declaration)
+
+    def _declaration_for(self, name_node) -> _Declaration | None:
+        """The narrowest unambiguous declaration visible at this identifier."""
+        position = name_node.start_byte
+        visible = [
+            declaration
+            for declaration in self._decls.get(_text(name_node), ())
+            if declaration.scope[0] <= position < declaration.scope[1]
+        ]
+        if not visible:
+            return None
+        narrowest_span = min(end - start for start, end in (item.scope for item in visible))
+        narrowest = [
+            item
+            for item in visible
+            if item.scope[1] - item.scope[0] == narrowest_span
+        ]
+        return narrowest[0] if len(narrowest) == 1 else None
+
+    def _record_write(self, name_node, value: _ResolvedValue | None) -> None:
+        """Record a trusted value or explicit invalidation for one local name."""
+        declaration = self._declaration_for(name_node)
+        if declaration is None:
+            # `require = customLoader` mutates the global loader binding. We do
+            # not model a path back to trust, so every later require call fails
+            # closed unless a real local declaration already shadows it.
+            self._global_writes.setdefault(_text(name_node), []).append(
+                name_node.start_byte
+            )
             return
-        declared = self._decls.get(name, ())
-        if declares or not declared:
-            declared_at, scope = name_node.start_byte, _decl_scope(name_node)
-        elif len(declared) == 1:
-            declared_at, scope = declared[0]
-        else:
-            return  # several declarations of the target - identity unprovable
-        self._bindings[name] = (module, member, declared_at, scope)
+        self._writes.setdefault(declaration, []).append(
+            _BindingWrite(name_node.start_byte, value)
+        )
 
     def _bind_import(self, node) -> None:
         if _is_type_only_import(node):
@@ -262,10 +319,12 @@ class _Binder:
                 continue
             for child in clause.named_children:
                 if child.type == "identifier":  # import X from "m"
-                    self._bind_name(child, module, _MODULE_EXPORT)
+                    self._record_write(child, _ResolvedValue(module, _MODULE_EXPORT))
                 elif child.type == "namespace_import":  # import * as X from "m"
                     for name_node in child.named_children:
-                        self._bind_name(name_node, module, _MODULE_EXPORT)
+                        self._record_write(
+                            name_node, _ResolvedValue(module, _MODULE_EXPORT)
+                        )
                 elif child.type == "named_imports":
                     for spec in child.named_children:
                         if (
@@ -276,12 +335,13 @@ class _Binder:
                         name_node = spec.child_by_field_name("name")
                         alias = spec.child_by_field_name("alias")
                         if name_node is not None:
-                            self._bind_name(
-                                alias or name_node, module, _text(name_node)
+                            self._record_write(
+                                alias or name_node,
+                                _ResolvedValue(module, _text(name_node)),
                             )
 
     def _bind_value(self, node) -> None:
-        """Bind `const x = <expr>` / `x = <expr>` when the value is library-derived."""
+        """Track one declarator/assignment write when its value is provable."""
         declares = node.type == "variable_declarator"
         target = node.child_by_field_name("name" if declares else "left")
         value = node.child_by_field_name("value" if declares else "right")
@@ -291,16 +351,17 @@ class _Binder:
         if target.type == "object_pattern":  # const { Worker } = require("m")
             if module:
                 for name_node, member in _destructured_members(target):
-                    self._bind_name(name_node, module, member, declares)
+                    self._record_write(name_node, _ResolvedValue(module, member))
             return
         if target.type != "identifier":
             return
         if module:
-            self._bind_name(target, module, _MODULE_EXPORT, declares)
-            return
-        resolved = self._resolve(value)
-        if resolved is not None:
-            self._bind_name(target, *resolved, declares=declares)
+            resolved = _ResolvedValue(module, _MODULE_EXPORT)
+        else:
+            resolved = self._resolve(value)
+        # A None value is not ignored: it revokes a previous trusted write to
+        # this same declaration, preventing stale queue/socket evidence.
+        self._record_write(target, resolved)
 
     # ── resolution ──────────────────────────────────────────────────────────
 
@@ -312,7 +373,7 @@ class _Binder:
         return ""
 
     def _require_module(self, node) -> str:
-        """The global ``require(\"m\")`` module, if it is not shadowed locally."""
+        """The unshadowed, unmodified global ``require("m")`` module."""
         while node.type in _VALUE_WRAPPERS and node.named_children:
             node = node.named_children[0]
         if node.type != "call_expression":
@@ -323,6 +384,7 @@ class _Binder:
             or callee.type != "identifier"
             or _text(callee) != "require"
             or self._is_locally_declared(callee)
+            or self._global_name_was_written(callee)
         ):
             return ""
         args = node.child_by_field_name("arguments")
@@ -333,30 +395,31 @@ class _Binder:
             else ""
         )
 
-    def _is_locally_declared(self, name_node) -> bool:
-        """Whether a declaration shadows this otherwise global identifier."""
-        position = name_node.start_byte
+    def _global_name_was_written(self, name_node) -> bool:
         return any(
-            start <= position < end
-            for _declared_at, (start, end) in self._decls.get(_text(name_node), ())
+            write_at <= name_node.start_byte
+            for write_at in self._global_writes.get(_text(name_node), ())
         )
 
-    def _lookup(self, name_node) -> tuple[str, str] | None:
-        """The binding `name_node` refers to at its own position, if provable."""
-        binding = self._bindings.get(_text(name_node))
-        if binding is None:
-            return None
-        module, member, declared_at, (start, end) = binding
-        position = name_node.start_byte
-        if not start <= position < end:
-            return None
-        for other_at, (other_start, other_end) in self._decls[_text(name_node)]:
-            if other_at != declared_at and other_start <= position < other_end:
-                return None  # a second declaration is in scope - fail closed
-        return module, member
+    def _is_locally_declared(self, name_node) -> bool:
+        """Whether a declaration shadows this otherwise global identifier."""
+        return self._declaration_for(name_node) is not None
 
-    def _resolve(self, node) -> tuple[str, str] | None:
-        """(module, role) this expression evaluates to; see `JsBoundCall`."""
+    def _lookup(self, name_node) -> _ResolvedValue | None:
+        """The most recent proven write for this lexical declaration."""
+        declaration = self._declaration_for(name_node)
+        if declaration is None:
+            return None
+        latest: _BindingWrite | None = None
+        for write in self._writes.get(declaration, ()):
+            if write.at <= name_node.start_byte and (
+                latest is None or write.at >= latest.at
+            ):
+                latest = write
+        return latest.value if latest is not None else None
+
+    def _resolve(self, node) -> _ResolvedValue | None:
+        """The proven module value this expression evaluates to, if any."""
         if node.type in _VALUE_WRAPPERS:
             children = node.named_children
             return self._resolve(children[0]) if children else None
@@ -368,17 +431,20 @@ class _Binder:
             base = self._resolve(obj) if obj is not None else None
             if base is None or prop is None:
                 return None
-            module, member = base
             # A literal requested module may expose a named export directly
-            # (`require('bullmq').Worker`). Do not treat arbitrary members of
-            # an already-produced value as new module bindings.
-            return (module, _text(prop)) if member == _MODULE_EXPORT else None
+            # (`require('bullmq').Worker`). Arbitrary members of a produced
+            # value never create a fresh module binding.
+            return (
+                _ResolvedValue(base.module, _text(prop))
+                if base.member == _MODULE_EXPORT
+                else None
+            )
         if node.type in ("new_expression", "call_expression"):
             module = self._require_module(node)
             if module:
-                return module, _MODULE_EXPORT
+                return _ResolvedValue(module, _MODULE_EXPORT)
             call = self._bound_call(node)
-            return (call.module, _produced_role(call)) if call is not None else None
+            return _produced_value(call) if call is not None else None
         return None
 
     def _bound_call(self, node) -> JsBoundCall | None:
@@ -386,32 +452,41 @@ class _Binder:
         callee = node.child_by_field_name("constructor" if is_new else "function")
         if callee is None:
             return None
+        receiver_identity = ""
         if callee.type == "identifier":
             resolved = self._lookup(callee)
             if resolved is None:
                 return None
-            module, symbol, receiver = *resolved, ""
+            module, symbol, receiver = resolved.module, resolved.member, ""
         elif callee.type == "member_expression":
             obj = callee.child_by_field_name("object")
             prop = callee.child_by_field_name("property")
             base = self._resolve(obj) if obj is not None else None
             if base is None or prop is None:
                 return None
-            module, member = base
+            module, member = base.module, base.member
             # A member of the module export is the imported symbol itself, so
             # `new amqp.Worker()` and an imported `new Worker()` are one role.
-            symbol, receiver = _text(prop), "" if member == _MODULE_EXPORT else member
+            symbol = _text(prop)
+            receiver = "" if member == _MODULE_EXPORT else member
+            receiver_identity = base.identity if receiver else ""
         elif callee.type == "call_expression":
-            # Support direct module factories such as
-            # `require("socket.io")(server)`, but not arbitrary nested calls:
-            # only a literal, requested module can establish this binding.
+            # Support direct module factories such as `require('socket.io')()`;
+            # only a literal, trusted requested module can establish this role.
             module = self._require_module(callee)
             if not module:
                 return None
             symbol, receiver = _MODULE_EXPORT, ""
         else:
             return None
-        return JsBoundCall(module, symbol, is_new, receiver, _arg_tokens(node))
+        return JsBoundCall(
+            module,
+            symbol,
+            is_new,
+            receiver,
+            _arg_tokens(node),
+            receiver_identity,
+        )
 
 
 def _decl_scope(name_node) -> tuple[int, int]:
@@ -497,6 +572,14 @@ def _destructured_members(pattern):
                 yield value, _text(key)
 
 
+def _literal_arg(args: tuple[tuple[str, str], ...], index: int) -> str:
+    """Quoted-literal value at `index`, or an empty string when it is dynamic."""
+    if index >= len(args):
+        return ""
+    kind, value = args[index]
+    return value if kind == "str" else ""
+
+
 def _arg_tokens(node) -> tuple[tuple[str, str], ...]:
     args = node.child_by_field_name("arguments")
     if args is None:
@@ -532,6 +615,31 @@ def _is_type_only_import(node) -> bool:
 def _is_type_only_import_specifier(node) -> bool:
     """Whether one named import is prefixed with TypeScript's `type` modifier."""
     return bool(re.match(r"\s*type\b", _text(node)))
+
+
+def _runtime_import_names(node) -> list:
+    """Local value names introduced by a parsed, non-type import declaration."""
+    names = []
+    for clause in node.named_children:
+        if clause.type != "import_clause":
+            continue
+        for child in clause.named_children:
+            if child.type == "identifier":
+                names.append(child)
+            elif child.type == "namespace_import":
+                names.extend(child.named_children)
+            elif child.type == "named_imports":
+                for spec in child.named_children:
+                    if (
+                        spec.type != "import_specifier"
+                        or _is_type_only_import_specifier(spec)
+                    ):
+                        continue
+                    name_node = spec.child_by_field_name("name")
+                    alias = spec.child_by_field_name("alias")
+                    if name_node is not None:
+                        names.append(alias or name_node)
+    return names
 
 
 # ─────────────────────────────────────────────────────────────────────────────

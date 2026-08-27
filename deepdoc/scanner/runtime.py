@@ -262,6 +262,10 @@ def _tasks_named_by(
     unindexed_tasks: list[RuntimeTask],
 ) -> list[RuntimeTask]:
     """Tasks this file's own dispatch sites could name, in a stable order."""
+    if not tasks_by_target and not unindexed_tasks:
+        # Nothing to link, so a repo with dispatch syntax but no detected tasks
+        # (the common case) never pays for target extraction.
+        return []
     candidates = list(unindexed_tasks)
     seen = {id(task) for task in candidates}
     targets = dict.fromkeys(

@@ -11,6 +11,8 @@ from deepdoc.scanner import (
     discover_debug_signals,
     discover_runtime_surfaces,
 )
+from deepdoc.scanner.common import RuntimeScan
+from deepdoc.scanner.runtime import _discover_nestjs_runtime, _link_runtime_workflows
 
 
 def _parsed_file(
@@ -1229,3 +1231,55 @@ def test_every_task_link_grammar_binds_its_producer_file() -> None:
         "app/Http/OrderController.php"
     ]
     assert producers[("orders-sync", "workers/orders.js")] == ["src/producer.js"]
+
+
+def test_unindexable_cron_trigger_does_not_restore_task_candidate_multiplier() -> None:
+    """A non-word cron trigger must not unindex its otherwise linkable task."""
+    task_count = 251
+    marker_files = 257
+    service = "src/jobs/cron.service.ts"
+    body = "import { Cron } from '@nestjs/schedule';\n\nexport class CronService {\n"
+    for index in range(task_count):
+        body += f"  @Cron('* * * * *')\n  task_{index}() {{ return {index}; }}\n\n"
+    body += "}\n"
+
+    tasks = _discover_nestjs_runtime({service: body})
+    assert len(tasks) == task_count
+    assert (tasks[7].name, tasks[7].triggers) == ("task_7", ["* * * * *"])
+
+    file_contents = {service: body}
+    for index in range(marker_files):
+        file_contents[f"src/vs/editor/animation{index}.ts"] = (
+            f"export function run{index}() {{ this.unrelated.delay(payload); }}\n"
+        )
+    file_contents["src/jobs/producer.ts"] = "task_7.delay(payload);\n"
+
+    runtime = RuntimeScan(tasks=tasks)
+    candidate_files, task_checks = _link_runtime_workflows(runtime, file_contents, [])
+
+    assert candidate_files == marker_files + 1
+    assert task_checks <= 4
+    assert {
+        task.name: task.producer_files for task in runtime.tasks if task.producer_files
+    } == {"task_7": ["src/jobs/producer.ts"]}
+
+
+def test_queue_add_preserves_punctuation_only_worker_queue_links() -> None:
+    """Queue literals need an exact index even when their names have no word run."""
+    files = {
+        "workers/punctuation.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('---', handler);\n"
+        ),
+        "src/producer.js": "const queue = getQueue();\nqueue.add('---', {});\n",
+    }
+    parsed = {}
+    for path, content in files.items():
+        parsed_file = parse_file(Path(path), content)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, files)
+
+    worker = next(task for task in runtime.tasks if task.name == "---")
+    assert worker.producer_files == ["src/producer.js"]

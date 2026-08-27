@@ -197,20 +197,24 @@ def _link_runtime_workflows(
         for task in runtime.tasks
         if task.name
     }
-    # Tasks reachable from a given dispatch target, so a candidate file only pays
-    # regex cost for the tasks its own dispatch sites could possibly name.
+    # Tasks reachable from a word-shaped dispatch target, so a candidate file only
+    # pays regex cost for the tasks its own identifier-shaped dispatch sites could
+    # possibly name. Tokens with no word run cannot satisfy the corresponding
+    # `\b`-anchored patterns and are omitted rather than creating a fallback.
     tasks_by_target: dict[str, list[RuntimeTask]] = {}
-    unindexed_tasks: list[RuntimeTask] = []
+    # `queue.add('literal')` is different: its word boundary is before `queue`,
+    # not the literal. Keep an exact raw-name index for that one grammar so queue
+    # names such as `---` retain their valid producer links without broad scans.
+    tasks_by_queue_name: dict[str, list[RuntimeTask]] = {}
     for task in runtime.tasks:
         if not task.name:
             continue
-        tokens = task_tokens[task.name]
-        if any(not _dispatch_index_keys(token) for token in tokens):
-            # A token with no word run (a bare cron expression trigger) cannot be
-            # reached through the index, so it stays on the always-checked list.
-            unindexed_tasks.append(task)
-            continue
-        for key in {key for token in tokens for key in _dispatch_index_keys(token)}:
+        tasks_by_queue_name.setdefault(task.name, []).append(task)
+        for key in {
+            key
+            for token in task_tokens[task.name]
+            for key in _dispatch_index_keys(token)
+        }:
             tasks_by_target.setdefault(key, []).append(task)
     scheduler_patterns = {
         scheduler.name: [
@@ -229,7 +233,9 @@ def _link_runtime_workflows(
         endpoint_keys = sorted(endpoint_keys_by_file.get(file_path, ()))
         if DISPATCH_MARKER_RE.search(content):
             candidate_files += 1
-            for task in _tasks_named_by(content, tasks_by_target, unindexed_tasks):
+            for task in _tasks_named_by(
+                content, tasks_by_target, tasks_by_queue_name
+            ):
                 task_checks += 1
                 patterns = task_patterns.get(task.name, [])
                 if not patterns or not any(
@@ -259,29 +265,35 @@ def _link_runtime_workflows(
 def _tasks_named_by(
     content: str,
     tasks_by_target: dict[str, list[RuntimeTask]],
-    unindexed_tasks: list[RuntimeTask],
+    tasks_by_queue_name: dict[str, list[RuntimeTask]],
 ) -> list[RuntimeTask]:
     """Tasks this file's own dispatch sites could name, in a stable order."""
-    if not tasks_by_target and not unindexed_tasks:
+    if not tasks_by_target and not tasks_by_queue_name:
         # Nothing to link, so a repo with dispatch syntax but no detected tasks
         # (the common case) never pays for target extraction.
         return []
-    candidates = list(unindexed_tasks)
-    seen = {id(task) for task in candidates}
-    targets = dict.fromkeys(
-        match.group("recv")
-        or match.group("static")
-        or match.group("ctor")
-        or match.group("queued")
-        or ""
-        for match in DISPATCH_TARGET_RE.finditer(content)
-    )
-    for target in targets:
-        for key in _dispatch_index_keys(target):
-            for task in tasks_by_target.get(key, ()):
-                if id(task) not in seen:
-                    seen.add(id(task))
-                    candidates.append(task)
+    candidates: list[RuntimeTask] = []
+    seen: set[int] = set()
+    for match in DISPATCH_TARGET_RE.finditer(content):
+        queue_name = match.group("queued")
+        if queue_name is not None:
+            matching_tasks = tasks_by_queue_name.get(queue_name, ())
+        else:
+            target = (
+                match.group("recv")
+                or match.group("static")
+                or match.group("ctor")
+                or ""
+            )
+            matching_tasks = (
+                task
+                for key in _dispatch_index_keys(target)
+                for task in tasks_by_target.get(key, ())
+            )
+        for task in matching_tasks:
+            if id(task) not in seen:
+                seen.add(id(task))
+                candidates.append(task)
     return candidates
 
 

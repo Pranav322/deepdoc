@@ -518,8 +518,8 @@ def test_engine_fingerprint_records_semantic_boundary_refinement():
 
 
 def test_engine_fingerprint_records_runtime_evidence_contract():
-    """The v3 evidence/linking redesign invalidates stale runtime plans."""
-    assert ENGINE_FINGERPRINT.endswith("runtime_evidence_v3")
+    """The v4 bounded evidence redesign invalidates stale runtime plans."""
+    assert ENGINE_FINGERPRINT.endswith("runtime_evidence_v4")
 
 
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
@@ -852,7 +852,6 @@ def test_handle_deleted_files_noop_when_nothing_deleted(tmp_repo_with_plan):
 
 def test_merge_targeted_plan_mutates_existing_by_slug(tmp_repo_with_plan):
     """Replanned bucket matching existing slug is mutated in-place, not duplicated."""
-    from deepdoc.smart_update_v2 import SmartUpdater
     from deepdoc.v2_models import RepoScan
     from .conftest import make_bucket, make_plan
 

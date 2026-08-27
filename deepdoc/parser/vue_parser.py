@@ -81,34 +81,33 @@ _TEMPLATE_PATTERN = re.compile(
 _VUE_VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"})
 
 
-def _extract_script_block(content: str) -> tuple[str, str, bool]:
-    """Extract a top-level SFC script, ignoring comments and template markup.
-
-    Vue SFC runtime code lives in top-level ``<script>`` blocks. A text regex
-    cannot distinguish one from a tag quoted in an HTML comment or nested in an
-    inert template, so the scanner below tracks enough markup structure to make
-    that boundary explicit.
-    """
-    setup_content = ""
-    setup_lang = "js"
-    regular_content = ""
-    regular_lang = "js"
-
+def _extract_script_blocks(content: str) -> tuple[tuple[str, str, bool], ...]:
+    """All executable top-level SFC scripts in document order."""
+    blocks: list[tuple[str, str, bool]] = []
     for attrs, body in _top_level_vue_script_blocks(content):
         lang_match = re.search(r'lang\s*=\s*["\'](\w+)["\']', attrs, re.I)
         lang = lang_match.group(1).lower() if lang_match else "js"
         is_setup = bool(re.search(r"(?:^|\s)setup(?:\s|=|$)", attrs, re.I))
-        if is_setup:
-            setup_content = body.strip()
-            setup_lang = lang
-        else:
-            regular_content = body.strip()
-            regular_lang = lang
+        body = body.strip()
+        if body:
+            blocks.append((body, lang, is_setup))
+    return tuple(blocks)
 
-    if setup_content:
-        return setup_content, setup_lang, True
-    if regular_content:
-        return regular_content, regular_lang, False
+
+def _extract_script_block(content: str) -> tuple[str, str, bool]:
+    """Extract the preferred script for legacy single-script parser consumers.
+
+    Runtime scanning uses ``_extract_script_blocks`` so a normal script and a
+    script-setup block remain separate executable binding scopes.
+    """
+    blocks = _extract_script_blocks(content)
+    setup_blocks = [block for block in blocks if block[2]]
+    if setup_blocks:
+        script, lang, _ = setup_blocks[-1]
+        return script, lang, True
+    if blocks:
+        script, lang, _ = blocks[-1]
+        return script, lang, False
     return "", "js", False
 
 

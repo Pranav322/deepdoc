@@ -4,6 +4,7 @@ from pathlib import Path
 
 from deepdoc.parser.base import ParsedFile, Symbol
 from deepdoc.parser import js_ts_parser
+from deepdoc.scanner import runtime as runtime_parser
 from deepdoc.parser.php_parser import php_dispatches
 from deepdoc.parser.registry import parse_file
 from deepdoc.scanner import (
@@ -678,6 +679,29 @@ def test_vue_queue_workers_come_from_the_script_block() -> None:
     assert [
         task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
     ] == ["send-digest"]
+
+
+def test_vue_runtime_scans_every_top_level_executable_script_block() -> None:
+    """A valid normal script and script setup both contribute runtime evidence."""
+    path = "src/components/JobsPanel.vue"
+    content = (
+        "<script>\n"
+        "const { Worker } = require('bullmq');\n"
+        "new Worker('normal-worker', handleNormal);\n"
+        "</script>\n"
+        "<script setup>\n"
+        "const { Worker } = require('bullmq');\n"
+        "new Worker('setup-worker', handleSetup);\n"
+        "</script>\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None and parsed.language == "vue"
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [
+        task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
+    ] == ["normal-worker", "setup-worker"]
 
 
 def test_commented_vue_script_never_creates_runtime_evidence() -> None:
@@ -1821,6 +1845,24 @@ dispatch(new jobalias());
     ]
 
 
+def test_php_static_dispatch_and_global_helper_preserve_valid_case_forms() -> None:
+    """PHP static methods are case-insensitive and global helpers may be rooted."""
+    static_source = """<?php
+namespace App\\Jobs;
+Real::DISPATCH($payload);
+"""
+    global_source = """<?php
+\\dispatch(new \\App\\Jobs\\Real($payload));
+"""
+
+    assert [item.target for item in php_dispatches(static_source)] == [
+        r"App\Jobs\Real"
+    ]
+    assert [item.target for item in php_dispatches(global_source)] == [
+        r"App\Jobs\Real"
+    ]
+
+
 def test_php_shadowed_laravel_helpers_never_emit_dispatch_evidence() -> None:
     """Imported or local helper names must not impersonate Laravel dispatch APIs."""
     imported = """<?php
@@ -1853,6 +1895,50 @@ namespace B {
         r"App\One\First",
         r"App\Two\Second",
     ]
+
+
+def test_php_dispatch_aliases_are_semicolon_namespace_scoped() -> None:
+    """Semicolon namespaces own aliases until the next namespace declaration."""
+    source = """<?php
+namespace A;
+use App\\One\\First as Job;
+dispatch(new Job());
+namespace B;
+use App\\Two\\Second as Job;
+dispatch(new Job());
+"""
+
+    assert [item.target for item in php_dispatches(source)] == [
+        r"App\One\First",
+        r"App\Two\Second",
+    ]
+
+
+def test_php_static_dispatch_requires_a_canonical_discovered_runtime_identity() -> None:
+    """A local static method cannot impersonate a Laravel job by short name."""
+    sources = {
+        "app/Jobs/Real.php": """<?php
+namespace App\\Jobs;
+use Illuminate\\Contracts\\Queue\\ShouldQueue;
+class Real implements ShouldQueue {}
+""",
+        "app/Http/Controller.php": """<?php
+namespace App\\Http;
+class Real { public static function dispatch($payload) {} }
+Real::dispatch($payload);
+""",
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.file_path == "app/Jobs/Real.php")
+
+    assert runtime.dispatch_evidence == []
+    assert task.producer_files == []
 
 
 def test_php_grouped_import_alias_resolves_to_its_actual_class() -> None:
@@ -2016,6 +2102,71 @@ def test_signal_dispatch_evidence_broadcasts_only_matching_handlers() -> None:
     assert runtime.scan_stats["link_signal_broadcast_edges"] == 1
 
 
+def test_signal_dispatch_rejects_overbound_handler_fanout() -> None:
+    """A signal broadcast above the retained fanout cap fails closed as a whole."""
+    handlers = [
+        RuntimeTask(
+            name=f"handler_{index}",
+            file_path=f"handlers/{index}.py",
+            runtime_kind="django_signal",
+            triggers=["post_save"],
+        )
+        for index in range(33)
+    ]
+    runtime = RuntimeScan(tasks=handlers)
+    evidence = [
+        DispatchEvidence(
+            file_path="orders/api.py",
+            language="python",
+            relation="signal",
+            target_aliases=("post_save",),
+        )
+    ]
+
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert all(task.producer_files == [] for task in handlers)
+    assert runtime.scan_stats["link_signal_broadcast_edges"] == 0
+    assert runtime.scan_stats["link_signal_fanout_rejections"] == 1
+    assert runtime.scan_stats["link_index_probes"] == 1
+
+
+def test_runtime_links_retain_bounded_unique_producers_and_endpoints() -> None:
+    """Planner-facing runtime relationship lists have fixed, deterministic caps."""
+    task = RuntimeTask(
+        name="sync",
+        file_path="workers/sync.py",
+        runtime_kind="celery",
+    )
+    runtime = RuntimeScan(tasks=[task])
+    evidence = [
+        DispatchEvidence(
+            file_path=f"api/{index}.py",
+            language="python",
+            relation="direct",
+            target_aliases=("sync",),
+        )
+        for index in range(65)
+    ]
+    endpoints = [
+        {
+            "method": "POST",
+            "path": f"/sync/{index}",
+            "file": f"api/{index}.py",
+        }
+        for index in range(65)
+    ]
+
+    _link_runtime_evidence(runtime, evidence, endpoints)
+
+    assert len(task.producer_files) == 64
+    assert len(task.linked_endpoints) == 64
+    assert len(set(task.producer_files)) == 64
+    assert len(set(task.linked_endpoints)) == 64
+    assert runtime.scan_stats["link_producer_cap_rejections"] == 1
+    assert runtime.scan_stats["link_endpoint_cap_rejections"] == 1
+
+
 def test_scheduler_owner_evidence_links_only_owning_scheduler() -> None:
     """Scheduler declarations are direct evidence, not a global endpoint sweep."""
     schedulers = [
@@ -2050,6 +2201,47 @@ def test_scheduler_owner_evidence_links_only_owning_scheduler() -> None:
         if index != 7
     )
     assert runtime.scan_stats["link_scheduler_checks"] == 1
+
+
+def test_duplicate_scheduler_declarations_keep_their_own_source_endpoint() -> None:
+    """Distinct same-name beat declarations receive their own owner evidence."""
+    path = "orders/schedules.py"
+    content = (
+        "from celery.schedules import crontab\n"
+        "app.conf.beat_schedule = {\n"
+        "    'early-sync': {\n"
+        "        'task': 'orders.tasks.sync',\n"
+        "        'schedule': crontab(hour='1'),\n"
+        "    },\n"
+        "    'late-sync': {\n"
+        "        'task': 'orders.tasks.sync',\n"
+        "        'schedule': crontab(hour='2'),\n"
+        "    },\n"
+        "}\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces(
+        {path: parsed},
+        {path: content},
+        api_endpoints=[
+            {
+                "method": "POST",
+                "path": "/orders/reconcile",
+                "file": path,
+            }
+        ],
+    )
+    schedulers = [
+        item for item in runtime.schedulers if item.scheduler_type == "beat"
+    ]
+
+    assert len(schedulers) == 2
+    assert all(
+        item.linked_endpoints == ["POST /orders/reconcile"]
+        for item in schedulers
+    )
 
 
 def test_runtime_scan_links_only_structural_dispatch_evidence() -> None:
@@ -2091,6 +2283,200 @@ def test_runtime_scan_links_only_structural_dispatch_evidence() -> None:
         "handlers/orders.py"
     ]
     assert runtime.scan_stats["link_candidate_files"] == 1
+
+
+def test_python_runtime_discovery_requires_framework_bound_ast_declarations() -> None:
+    """Raw decorator/connect text and malformed Python cannot create runtime facts."""
+    sources = {
+        "workers/faux.py": (
+            "@faux.task\n"
+            "def unrelated(value):\n"
+            "    return value\n"
+            "unrelated.delay(value)\n"
+        ),
+        "workers/quoted.py": (
+            'example = """\n'
+            "@shared_task\n"
+            "def ghost(value):\n"
+            "    return value\n"
+            '"""\n'
+        ),
+        "workers/broken.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def broken(\n"
+        ),
+        "signals/generic.py": "socket.connect(callback)\n",
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.tasks == []
+    assert runtime.dispatch_evidence == []
+
+
+def test_python_celery_aliases_multiline_decorators_and_bound_app_are_discovered() -> None:
+    """Valid AST-bound Celery forms remain surfaces without raw decorator matching."""
+    path = "workers/tasks.py"
+    source = (
+        "from celery import shared_task as background\n"
+        "import celery as celery_lib\n"
+        "app = celery_lib.Celery('workers')\n\n"
+        "@background(\n"
+        "    queue='critical',\n"
+        "    retry_backoff=True,\n"
+        ")\n"
+        "def aliased(value):\n"
+        "    return value\n\n"
+        "@app.task\n"
+        "def app_task(value):\n"
+        "    return value\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+    tasks = {task.name: task for task in runtime.tasks}
+
+    assert sorted(tasks) == ["aliased", "app_task"]
+    assert tasks["aliased"].queue == "critical"
+    assert tasks["aliased"].retry_policy == "retry_backoff"
+    assert tasks["app_task"].decorator == "app.task"
+
+
+def test_python_dispatch_binding_obeys_exact_statement_order() -> None:
+    """Imports bind only after their exact statement position, not their line."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual(value):\n"
+            "    return value\n"
+        ),
+        "pkg/before.py": "actual.delay(1); from .tasks import actual\n",
+        "pkg/after.py": "from .tasks import actual; actual.delay(1)\n",
+        "pkg/rebound.py": (
+            "from .tasks import actual; actual = dynamic_task(); actual.delay(1)\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.file_path, item.relation) for item in runtime.dispatch_evidence] == [
+        ("pkg/after.py", "direct")
+    ]
+    assert task.producer_files == ["pkg/after.py"]
+
+
+def test_python_signal_binding_obeys_exact_statement_order() -> None:
+    """A signal send before its same-line import cannot establish evidence."""
+    sources = {
+        "signals/before.py": (
+            "post_save.send(sender=object); "
+            "from django.db.models.signals import post_save\n"
+        ),
+        "signals/after.py": (
+            "from django.db.models.signals import post_save; "
+            "post_save.send(sender=object)\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [(item.file_path, item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("signals/after.py", "signal", ("post_save",)),
+    ]
+
+
+def test_python_module_imports_and_bare_annotations_preserve_task_bindings() -> None:
+    """Normal dotted imports and annotations do not erase proven task values."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual(value):\n"
+            "    return value\n"
+        ),
+        "pkg/module_import.py": "import pkg.tasks\npkg.tasks.actual.delay(1)\n",
+        "pkg/annotation.py": (
+            "from .tasks import actual\n"
+            "actual: object\n"
+            "actual.delay(1)\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+    task = next(item for item in runtime.tasks if item.name == "actual")
+
+    assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("pkg/module_import.py", ("pkg.tasks.actual", "actual")),
+        ("pkg/annotation.py", ("actual",)),
+    ]
+    assert task.producer_files == ["pkg/module_import.py", "pkg/annotation.py"]
+
+
+def test_python_binding_history_uses_one_indexed_probe_per_dispatch(monkeypatch) -> None:
+    """Large rebinding histories do not trigger a linear scan for each call."""
+    calls: list[tuple[int, tuple[int, int]]] = []
+    original_bisect = runtime_parser.bisect_right
+
+    def counted_bisect(
+        positions: tuple[tuple[int, int], ...], position: tuple[int, int]
+    ) -> int:
+        calls.append((len(positions), position))
+        return original_bisect(positions, position)
+
+    monkeypatch.setattr(runtime_parser, "bisect_right", counted_bisect)
+    source_lines = ["from .tasks import actual"]
+    for index in range(64):
+        source_lines.extend(
+            [
+                f"actual.delay({index})",
+                "actual = dynamic_task()",
+                "from .tasks import actual",
+            ]
+        )
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual(value):\n"
+            "    return value\n"
+        ),
+        "pkg/api.py": "\n".join(source_lines) + "\n",
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert len(runtime.dispatch_evidence) == 64
+    assert len(calls) == 64
+    assert max(history_length for history_length, _ in calls) >= 129
 
 
 def test_python_dispatch_requires_a_resolved_task_binding() -> None:
@@ -2401,6 +2787,58 @@ def test_js_aliased_node_cron_schedule_bindings_are_discovered() -> None:
     ]
 
 
+def test_js_destructuring_from_a_proven_default_module_binds_runtime_exports() -> None:
+    """A default module binding can safely feed a renamed local export binding."""
+    path = "jobs/cron-alias.ts"
+    content = (
+        "import cron from 'node-cron';\n"
+        "const { schedule: later } = cron;\n"
+        "later('* * * * *', syncReports);\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [(item.scheduler_type, item.invoked_targets) for item in runtime.schedulers] == [
+        ("node_cron", ["syncReports"])
+    ]
+
+
+def test_js_static_import_bindings_are_hoisted_for_runtime_calls() -> None:
+    """Static ES imports exist for the whole module, not only after their text."""
+    path = "jobs/hoisted-schedule.ts"
+    content = (
+        "schedule('* * * * *', syncReports);\n"
+        "import { schedule } from 'node-cron';\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [(item.scheduler_type, item.invoked_targets) for item in runtime.schedulers] == [
+        ("node_cron", ["syncReports"])
+    ]
+
+
+def test_typescript_import_equals_require_binds_runtime_module_exports() -> None:
+    """TypeScript `import x = require()` is a runtime module binding, not only a shadow."""
+    path = "jobs/import-equals.ts"
+    content = (
+        "import cron = require('node-cron');\n"
+        "cron.schedule('* * * * *', syncReports);\n"
+    )
+    parsed = parse_file(Path(path), content)
+    assert parsed is not None
+
+    runtime = discover_runtime_surfaces({path: parsed}, {path: content})
+
+    assert [(item.scheduler_type, item.invoked_targets) for item in runtime.schedulers] == [
+        ("node_cron", ["syncReports"])
+    ]
+
+
 def test_js_named_node_cron_schedule_bindings_are_discovered() -> None:
     """Named and CommonJS-member scheduler bindings survive prefiltering."""
     sources = {
@@ -2475,6 +2913,39 @@ def test_js_runtime_bindings_follow_lexical_write_history() -> None:
     ]
     assert runtime.dispatch_evidence == []
     assert runtime.realtime_consumers == []
+
+
+def test_js_non_guaranteed_writes_do_not_prove_queue_receivers() -> None:
+    """Nested or conditional Queue writes cannot authenticate an outer `.add()`."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/uninvoked.js": (
+            "const { Queue } = require('bullmq');\n"
+            "let queue = { add() {} };\n"
+            "function configure() { queue = new Queue('orders'); }\n"
+            "queue.add('not-an-orders-job', {});\n"
+        ),
+        "producers/conditional.js": (
+            "const { Queue } = require('bullmq');\n"
+            "let queue = { add() {} };\n"
+            "if (enabled) { queue = new Queue('orders'); }\n"
+            "queue.add('not-an-orders-job', {});\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    worker = next(item for item in runtime.tasks if item.file_path == "workers/orders.js")
+    assert worker.producer_files == []
 
 
 def test_js_dynamic_object_destructuring_invalidates_bound_receiver() -> None:

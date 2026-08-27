@@ -30,6 +30,14 @@ class PhpDispatch:
     target: str
 
 
+@dataclass(frozen=True)
+class PhpClassDeclaration:
+    """A parser-proven PHP class name and its canonical lexical FQCN."""
+
+    name: str
+    target: str
+
+
 def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
     """Return structural Laravel `dispatch`/`event` target expressions only.
 
@@ -52,25 +60,25 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
         node,
         import_aliases: dict[str, str],
         shadowed_helpers: frozenset[str],
+        namespace: str,
     ) -> None:
         if node.type == "namespace_definition":
-            namespace_aliases = _php_import_aliases(node)
-            namespace_shadows = _php_shadowed_helpers(node)
             body = node.child_by_field_name("body")
             if body is not None:
-                visit(body, namespace_aliases, namespace_shadows)
-            else:
-                for child in node.named_children:
-                    if child.type != "namespace_name":
-                        visit(child, namespace_aliases, namespace_shadows)
+                scope_nodes = tuple(body.named_children)
+                aliases = _php_import_aliases_from_nodes(scope_nodes)
+                shadows = _php_shadowed_helpers_from_nodes(scope_nodes)
+                nested_namespace = _php_namespace_name(node)
+                for child in scope_nodes:
+                    visit(child, aliases, shadows, nested_namespace)
             return
         if node.type == "scoped_call_expression":
             name = node.child_by_field_name("name")
             target = (
-                _php_class_target(node.named_children[0], import_aliases)
+                _php_class_target(node.named_children[0], import_aliases, namespace)
                 if node.named_children
                 and name is not None
-                and name.text == b"dispatch"
+                and name.text.lower() == b"dispatch"
                 else ""
             )
             if target:
@@ -84,14 +92,44 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
                 and arguments.named_children
             ):
                 target = _php_dispatch_argument_target(
-                    arguments.named_children[0], import_aliases
+                    arguments.named_children[0], import_aliases, namespace
                 )
                 if target:
                     found.append(PhpDispatch(target))
         for child in node.named_children:
-            visit(child, import_aliases, shadowed_helpers)
+            visit(child, import_aliases, shadowed_helpers, namespace)
 
-    visit(root, _php_import_aliases(root), _php_shadowed_helpers(root))
+    for namespace, scope_nodes in _php_top_level_scopes(root):
+        aliases = _php_import_aliases_from_nodes(scope_nodes)
+        shadows = _php_shadowed_helpers_from_nodes(scope_nodes)
+        for node in scope_nodes:
+            visit(node, aliases, shadows, namespace)
+    return tuple(found)
+
+
+def php_class_declarations(content: str) -> tuple[PhpClassDeclaration, ...]:
+    """Return strict parser-proven top-level PHP class identities by namespace."""
+    if not _TS_AVAILABLE:
+        return ()
+    parser = Parser(PHP_LANGUAGE)  # type: ignore[possibly-unbound]
+    root = parser.parse(content.encode("utf8")).root_node
+    if root.has_error:
+        return ()
+    found: list[PhpClassDeclaration] = []
+    for namespace, scope_nodes in _php_top_level_scopes(root):
+        for node in scope_nodes:
+            if node.type != "class_declaration":
+                continue
+            name = node.child_by_field_name("name")
+            if name is None:
+                continue
+            target = _php_class_target(name, {}, namespace)
+            if target:
+                found.append(
+                    PhpClassDeclaration(
+                        name=name.text.decode("utf8", "replace"), target=target
+                    )
+                )
     return tuple(found)
 
 
@@ -106,9 +144,42 @@ def _php_scope_children(scope):
     return scope.named_children
 
 
+def _php_namespace_name(node) -> str:
+    """Canonical namespace text for one tree-sitter namespace definition."""
+    name = node.child_by_field_name("name")
+    return name.text.decode("utf8", "replace").strip().lstrip("\\") if name else ""
+
+
+def _php_top_level_scopes(root) -> tuple[tuple[str, tuple], ...]:
+    """Segment global, braced, and semicolon namespaces into lexical ranges."""
+    scopes: list[tuple[str, tuple]] = []
+    current_namespace = ""
+    current: list = []
+    for child in root.named_children:
+        if child.type != "namespace_definition":
+            current.append(child)
+            continue
+        body = child.child_by_field_name("body")
+        if current:
+            scopes.append((current_namespace, tuple(current)))
+            current = []
+        if body is not None:
+            scopes.append((_php_namespace_name(child), tuple(body.named_children)))
+            current_namespace = ""
+        else:
+            current_namespace = _php_namespace_name(child)
+    if current:
+        scopes.append((current_namespace, tuple(current)))
+    return tuple(scopes)
+
+
 def _php_import_aliases(scope) -> dict[str, str]:
     """Validated class-import aliases owned directly by one PHP namespace scope."""
-    candidates = _php_scope_children(scope)
+    return _php_import_aliases_from_nodes(_php_scope_children(scope))
+
+
+def _php_import_aliases_from_nodes(candidates) -> dict[str, str]:
+    """Validated class-import aliases for an already-isolated lexical scope."""
     aliases: dict[str, str] = {}
     for node in candidates:
         if node.type != "namespace_use_declaration":
@@ -170,8 +241,12 @@ def _php_import_aliases(scope) -> dict[str, str]:
 
 def _php_shadowed_helpers(scope) -> frozenset[str]:
     """Laravel helper names rebound by imports or declarations in this namespace."""
+    return _php_shadowed_helpers_from_nodes(_php_scope_children(scope))
+
+
+def _php_shadowed_helpers_from_nodes(children) -> frozenset[str]:
+    """Laravel helper shadows within an already-isolated lexical scope."""
     shadows: set[str] = set()
-    children = _php_scope_children(scope)
     for node in children:
         if node.type == "namespace_use_declaration":
             shadows.update(_php_function_import_aliases(node))
@@ -235,34 +310,52 @@ def _php_function_import_aliases(declaration) -> set[str]:
 
 
 def _php_unshadowed_helper_name(function, shadows: frozenset[str]) -> str:
-    """The Laravel global helper only when the bare name was not rebound."""
-    if function is None or function.type != "name":
+    """A bare unshadowed or explicitly rooted Laravel global helper name."""
+    if function is None:
         return ""
-    name = function.text.decode("utf8", "replace").strip().lower()
+    raw_name = function.text.decode("utf8", "replace").strip()
+    if function.type == "qualified_name" and raw_name.startswith("\\"):
+        rooted = raw_name.lstrip("\\").lower()
+        return rooted if rooted in _LARAVEL_HELPER_NAMES else ""
+    if function.type != "name":
+        return ""
+    name = raw_name.lower()
     return name if name in _LARAVEL_HELPER_NAMES and name not in shadows else ""
 
 
-def _php_dispatch_argument_target(node, import_aliases: dict[str, str]) -> str:
-    """Class target in a global `dispatch(...)`/`event(...)` first argument."""
+def _php_dispatch_argument_target(
+    node, import_aliases: dict[str, str], namespace: str
+) -> str:
+    """Canonical class target in a Laravel helper's first argument."""
     while node.type == "argument" and node.named_children:
         node = node.named_children[0]
     if node.type == "class_constant_access_expression":
         children = node.named_children
-        if len(children) >= 2 and children[-1].text == b"class":
-            return _php_class_target(children[0], import_aliases)
+        if len(children) >= 2 and children[-1].text.lower() == b"class":
+            return _php_class_target(children[0], import_aliases, namespace)
     if node.type == "object_creation_expression" and node.named_children:
-        return _php_class_target(node.named_children[0], import_aliases)
+        return _php_class_target(node.named_children[0], import_aliases, namespace)
     return ""
 
 
-def _php_class_target(node, import_aliases: dict[str, str]) -> str:
-    """A lexical PHP class name, canonicalized through a validated `use` alias."""
+def _php_class_target(
+    node, import_aliases: dict[str, str], namespace: str = ""
+) -> str:
+    """Canonical PHP class identity through imports and lexical namespace."""
     if node.type not in {"name", "qualified_name"}:
         return ""
-    target = node.text.decode("utf8", "replace").strip().lstrip("\\")
+    raw_target = node.text.decode("utf8", "replace").strip()
+    absolute = raw_target.startswith("\\")
+    target = raw_target.lstrip("\\")
     if not target:
         return ""
-    return import_aliases.get(target.lower()) or target
+    parts = target.split("\\")
+    alias_target = import_aliases.get(parts[0].lower())
+    if alias_target:
+        return "\\".join((alias_target, *parts[1:]))
+    if absolute or not namespace:
+        return target
+    return f"{namespace}\\{target}"
 
 
 def parse_php(path: Path, content: str, language: str) -> ParsedFile:

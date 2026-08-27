@@ -94,10 +94,11 @@ def _produced_role(call: JsBoundCall) -> str:
 
 
 class _Declaration(NamedTuple):
-    """One lexical binding identity, keyed by declaration byte and scope."""
+    """One lexical binding identity plus the function/program execution region."""
 
     start: int
     scope: tuple[int, int]
+    execution_scope: tuple[int, int]
 
 
 class _ResolvedValue(NamedTuple):
@@ -174,6 +175,35 @@ _SCOPE_TYPES = frozenset(
         "for_statement",
         "for_in_statement",
         "switch_body",
+    }
+)
+# A binding can be established only by a direct write in the same executable
+# program/function region. A conditional or nested closure write may happen,
+# but cannot prove the receiver's role at a later unrelated call.
+_EXECUTION_SCOPE_TYPES = frozenset(
+    {
+        "program",
+        "arrow_function",
+        "function",
+        "function_declaration",
+        "function_expression",
+        "generator_function",
+        "generator_function_declaration",
+        "method_definition",
+    }
+)
+_UNCERTAIN_WRITE_ANCESTORS = frozenset(
+    {
+        "if_statement",
+        "switch_statement",
+        "for_statement",
+        "for_in_statement",
+        "while_statement",
+        "do_statement",
+        "try_statement",
+        "catch_clause",
+        "finally_clause",
+        "ternary_expression",
     }
 )
 # Wrappers that pass a value through unchanged: `await x`, `(x)`, `x!`, `x as T`.
@@ -292,7 +322,9 @@ class _Binder:
     ) -> None:
         name = _text(name_node)
         declaration = _Declaration(
-            name_node.start_byte, scope if scope is not None else _decl_scope(name_node)
+            name_node.start_byte,
+            scope if scope is not None else _decl_scope(name_node),
+            _execution_scope(name_node),
         )
         entries = self._decls.setdefault(name, [])
         if declaration not in entries:
@@ -316,23 +348,56 @@ class _Binder:
         ]
         return narrowest[0] if len(narrowest) == 1 else None
 
-    def _record_write(self, name_node, value: _ResolvedValue | None) -> None:
+    def _record_write(
+        self,
+        name_node,
+        value: _ResolvedValue | None,
+        *,
+        at: int | None = None,
+    ) -> None:
         """Record a trusted value or explicit invalidation for one local name."""
+        write_at = name_node.start_byte if at is None else at
         declaration = self._declaration_for(name_node)
         if declaration is None:
             # `require = customLoader` mutates the global loader binding. We do
             # not model a path back to trust, so every later require call fails
             # closed unless a real local declaration already shadows it.
-            self._global_writes.setdefault(_text(name_node), []).append(
-                name_node.start_byte
-            )
+            self._global_writes.setdefault(_text(name_node), []).append(write_at)
             return
+        if value is not None and not (
+            _is_definite_binding_write(name_node, declaration)
+            or _is_deferred_export_initializer_write(name_node, declaration)
+        ):
+            # Preserve the write's source-order invalidation, but never turn a
+            # conditional or nested-closure assignment into role proof.
+            value = None
         self._writes.setdefault(declaration, []).append(
-            _BindingWrite(name_node.start_byte, value)
+            _BindingWrite(write_at, value)
         )
 
     def _bind_import(self, node) -> None:
         if _is_type_only_import(node):
+            return
+        require_clause = next(
+            (
+                child
+                for child in node.named_children
+                if child.type == "import_require_clause"
+            ),
+            None,
+        )
+        if require_clause is not None:
+            children = require_clause.named_children
+            if (
+                len(children) == 2
+                and children[0].type == "identifier"
+                and children[1].type == "string"
+            ):
+                module = self._match(_unquote(children[1]))
+                if module:
+                    self._record_write(
+                        children[0], _ResolvedValue(module, _MODULE_EXPORT), at=-1
+                    )
             return
         source = node.child_by_field_name("source")
         module = self._match(_unquote(source)) if source is not None else ""
@@ -341,11 +406,13 @@ class _Binder:
                 continue
             for child in clause.named_children:
                 if child.type == "identifier":  # import X from "m"
-                    self._record_write(child, _ResolvedValue(module, _MODULE_EXPORT))
+                    self._record_write(
+                        child, _ResolvedValue(module, _MODULE_EXPORT), at=-1
+                    )
                 elif child.type == "namespace_import":  # import * as X from "m"
                     for name_node in child.named_children:
                         self._record_write(
-                            name_node, _ResolvedValue(module, _MODULE_EXPORT)
+                            name_node, _ResolvedValue(module, _MODULE_EXPORT), at=-1
                         )
                 elif child.type == "named_imports":
                     for spec in child.named_children:
@@ -360,6 +427,7 @@ class _Binder:
                             self._record_write(
                                 alias or name_node,
                                 _ResolvedValue(module, _text(name_node)),
+                                at=-1,
                             )
 
     def _bind_value(self, node) -> None:
@@ -371,9 +439,16 @@ class _Binder:
             return
         module = self._require_module(value)
         if target.type == "object_pattern":  # const { Worker } = require("m")
-            if module:
+            source_value = (
+                _ResolvedValue(module, _MODULE_EXPORT)
+                if module
+                else self._resolve(value)
+            )
+            if source_value is not None and source_value.member == _MODULE_EXPORT:
                 for name_node, member in _destructured_members(target):
-                    self._record_write(name_node, _ResolvedValue(module, member))
+                    self._record_write(
+                        name_node, _ResolvedValue(source_value.module, member)
+                    )
             elif not declares:
                 for name_node in _pattern_names(target):
                     self._record_write(name_node, None)
@@ -515,6 +590,89 @@ class _Binder:
             _arg_tokens(node),
             receiver_identity,
         )
+
+
+def _execution_scope(name_node) -> tuple[int, int]:
+    """Nearest program/function body whose statements share execution order."""
+    node = name_node
+    while node is not None:
+        if node.type in _EXECUTION_SCOPE_TYPES:
+            return node.start_byte, node.end_byte
+        node = node.parent
+    return (0, 0)
+
+
+def _is_definite_binding_write(name_node, declaration: _Declaration) -> bool:
+    """Whether this source write can prove the declaration's role at lookup."""
+    execution_scope = _execution_scope(name_node)
+    if execution_scope != declaration.execution_scope:
+        return False
+    node = name_node.parent
+    while node is not None:
+        if (node.start_byte, node.end_byte) == execution_scope:
+            return True
+        if node.type in _UNCERTAIN_WRITE_ANCESTORS:
+            return False
+        if node.type == "binary_expression" and (
+            "&&" in _text(node) or "||" in _text(node)
+        ):
+            return False
+        node = node.parent
+    return False
+
+
+def _is_deferred_export_initializer_write(
+    name_node, declaration: _Declaration
+) -> bool:
+    """Allow a direct awaited setup write inside an exported async initializer.
+
+    This is the narrow module-startup shape used by real AMQP clients: a public
+    async initializer establishes an outer connection/channel which later
+    runtime declarations consume. It deliberately excludes unexported helpers,
+    synchronous assignments, and control-flow-dependent writes.
+    """
+    program = name_node
+    while program.parent is not None:
+        program = program.parent
+    program_scope = (program.start_byte, program.end_byte)
+    if declaration.execution_scope != program_scope:
+        return False
+    function = name_node.parent
+    while function is not None and function.type not in _EXECUTION_SCOPE_TYPES - {"program"}:
+        function = function.parent
+    if (
+        function is None
+        or function.type not in {"function_declaration", "generator_function_declaration"}
+        or function.parent is None
+        or function.parent.type != "export_statement"
+        or not any(child.type == "async" for child in function.children)
+    ):
+        return False
+    assignment = name_node.parent
+    if assignment is None or assignment.type != "assignment_expression":
+        return False
+    right = assignment.child_by_field_name("right")
+    if right is None or not any(
+        child.type == "await_expression"
+        for child in _node_and_descendants(right)
+    ):
+        return False
+    node = name_node.parent
+    while node is not None and node is not function:
+        if node.type in _UNCERTAIN_WRITE_ANCESTORS:
+            return False
+        if node.type == "binary_expression" and (
+            "&&" in _text(node) or "||" in _text(node)
+        ):
+            return False
+        node = node.parent
+    return True
+
+
+def _node_and_descendants(node):
+    yield node
+    for child in node.named_children:
+        yield from _node_and_descendants(child)
 
 
 def _decl_scope(name_node) -> tuple[int, int]:
@@ -683,6 +841,9 @@ def _runtime_import_names(node) -> list:
     """Local value names introduced by a parsed, non-type import declaration."""
     names = []
     for clause in node.named_children:
+        if clause.type == "import_require_clause":
+            if clause.named_children and clause.named_children[0].type == "identifier":
+                names.append(clause.named_children[0])
         if clause.type != "import_clause":
             continue
         for child in clause.named_children:

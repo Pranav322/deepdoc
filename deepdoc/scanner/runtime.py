@@ -1,4 +1,8 @@
+import re
+from pathlib import Path
+
 from .common import *
+from ..parser.base import ParsedFile
 from ..parser.registry import language_for_extension
 from ..source_metadata import classify_source_kind, is_low_trust_source_kind
 

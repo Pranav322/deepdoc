@@ -10,6 +10,7 @@ from ..llm import ModelCapabilityError, fit_prompt_sections
 from ..telemetry import RunTelemetry
 from ..manifest import file_hash
 from .common import *
+from .common import console
 
 
 def _record_scan_timing(

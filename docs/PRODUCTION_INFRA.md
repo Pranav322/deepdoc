@@ -88,9 +88,68 @@ convenient, it's not load-bearing.
    `deepdoc-gen-job` execution — its own isolated 4 vCPU / 8 GiB container.
 3. `job.py` dequeues the one message (1-hr visibility lease), runs the shared
    `pipeline.py` (clone → `deepdoc generate` → `deepdoc deploy`), uploads the
-   site + `jobs/{id}/status.json` to R2, deletes the message, exits.
+   site + `jobs/{id}/status.json` to R2, then (since 2026-08-27, `deepdoc-runner:v9`)
+   calls `pipeline.notify_completion()` — a best-effort
+   `POST /api/internal/reconcile` telling Cloudflare a terminal status now
+   exists in R2 — before deleting the message and exiting.
 4. The Worker reads status from `jobs/{id}/status.json` and serves the site
    from R2 — it never talks to a container directly.
+
+## D1 status reconciliation (added 2026-08-27)
+
+`projects.status` in D1 is a **copy** of the real status in R2
+(`jobs/{id}/status.json`); it existed only to make `GET /api/projects` and the
+dashboard cheap to render. The one thing that refreshed that copy used to be
+`GET /api/projects` itself — scoped to the calling user's own rows, and only
+when they happened to load the page. A job whose owner never looked again
+left its row wrong forever. Found live: `usestrix/strix`, `laluka-osk`'s
+`shopware/shopware`, and `tss-pranavkumar/orgraph` sat stale from 9 minutes to
+28 days — two of the three had actually finished successfully.
+
+Two pieces fix this:
+
+- **`POST /api/internal/reconcile`** (`web/src/pages/cloud/api/internal/reconcile.ts`) —
+  auth'd by the `RECONCILE_SECRET` shared secret (`X-Reconcile-Secret` header;
+  set via `wrangler pages secret put` on the Cloudflare side and as a
+  Container App Job secret named `reconcile-secret` on the Azure side —
+  **the same value on both**, no key exchange protocol). Sweeps every
+  `projects` row not in `('done','failed')`, re-reads `fetchJobStatus` for
+  each, writes back whatever changed. Same logic `api/projects/index.ts`
+  already had, just not scoped to one user. Capped at 100 rows/call
+  (`ORDER BY created_at ASC`, oldest first) so a large backlog drains over
+  a few calls rather than one slow request.
+  - Requires `Content-Type` (or an `Origin` header) on the POST — Astro's
+    default CSRF `checkOrigin` protection 403s a bare POST with neither. Not
+    specific to this route: `POST /api/logout` hits the same wall from curl.
+  - **Manual trigger** (debug, or to force an immediate sweep):
+    ```bash
+    curl -X POST https://cloud.deepdoc.tech/api/internal/reconcile \
+      -H "X-Reconcile-Secret: $(cat <secret>)" -H "Content-Type: application/json"
+    ```
+- **`pipeline.notify_completion()`** (`hosted-runner/pipeline.py`) — the real
+  fix, called from `job.py`'s `main()` right after `run_generation` returns
+  (`result['status']` is always terminal there). Pings the endpoint above so
+  Cloudflare corrects D1 within seconds of a job finishing, instead of
+  whenever (if ever) someone happens to look. Deliberately a bare "go check
+  R2" ping rather than `{job_id, status}` — no payload contract to keep in
+  sync between the two sides, one shared idea of "the truth is in R2." No-ops
+  silently if `RECONCILE_SECRET` isn't set (local dev) or the call fails
+  (network blip) — same best-effort contract as `write_status()`; a stale D1
+  row is a UI inconvenience, re-running a whole generation because a
+  notification ping failed would not be a fair trade.
+
+An earlier draft of this fix was a standalone Container Apps Job polling the
+sweep endpoint on a 15-minute cron. Scrapped once it was clear the runner
+container can just tell Cloudflare directly the moment it knows — push beats
+poll here: zero staleness window instead of up to 15 minutes, and zero
+recurring compute cost instead of a job running every 15 minutes forever.
+Confirmed (empirically, via the Pages project's own config API, not from
+memory) that Cloudflare Pages has no native Cron Triggers — if a
+poll-based fallback is ever needed again, it has to live on the Azure side.
+
+The sweep endpoint remains useful on its own even with the push in place: it
+catches anything that finished before `v9`, any ping that failed to land, and
+serves as the manual escape hatch above.
 
 ## Maintenance / inspection commands
 
@@ -109,6 +168,18 @@ cd /path/to/codewiki
 az acr build -r deepdocacr -t deepdoc-runner:v6 -f hosted-runner/Dockerfile .
 az containerapp job update -n deepdoc-gen-job -g deepdoc-main --image deepdocacr.azurecr.io/deepdoc-runner:v6
 ```
+`--image` only swaps the image; existing secrets/env vars (`reconcile-secret`
+→ `RECONCILE_SECRET` included) survive across this. Only needed once, when
+`reconcile-secret` doesn't exist yet:
+```bash
+az containerapp job secret set -n deepdoc-gen-job -g deepdoc-main --secrets "reconcile-secret=<value>"
+az containerapp job update -n deepdoc-gen-job -g deepdoc-main --set-env-vars "RECONCILE_SECRET=secretref:reconcile-secret"
+```
+If `RECONCILE_SECRET` is ever rotated, update it in **both** places — it must
+be the same value on the Cloudflare Pages secret (`wrangler pages secret put
+RECONCILE_SECRET`) and this Container App Job secret, or `notify_completion()`
+silently 401s (best-effort — it won't surface as a job failure, just as D1
+drifting stale again).
 
 **Manually enqueue a job** (debug — base64 the JSON to match `job.py`):
 ```bash
@@ -161,3 +232,23 @@ npx wrangler r2 bucket delete deepdoc-hosted-sites
 - No automated cleanup of expired D1 sessions/oauth_states beyond the inline
   login-time cleanup, of `jobs/{id}/status.json` objects, or of R2 site objects
   when a project is deleted (delete only removes the D1 bookkeeping row).
+- **Foundry `DeepSeek-V4-Flash` quota is the real concurrency ceiling, not
+  Container Apps.** The env's core quota is 100 (10 executions × 4 vCPU max
+  10), plenty for several concurrent generations. But the deployment is
+  capped at 250 RPM / 250K TPM, `max_parallel_workers: 6` per generation, and
+  a single large-repo classify prompt can burn well over half that in one
+  call. `MAX_RETRIES = 3` on a 429 with backoff capped at 20s
+  (`deepdoc/generator/generation.py`), and `deepdoc deploy` refuses the whole
+  site if even one page failed — so sustained throttling under concurrent
+  load doesn't degrade gracefully, it kills the site outright. This is how
+  `shopware/shopware` failed (`stub docs present: core`). Honest concurrent
+  capacity today is 2-3 simultaneous generations, not the 6-7 the compute
+  ceiling would suggest. Raising the Flash deployment's capacity, or
+  spreading load across `DeepSeek-V4-Flash-0731` / `gpt-5-mini` (both
+  provisioned on `deepdoc-foundry` already, far higher TPM), is the fix if
+  concurrent usage grows.
+- **No per-user concurrency gate.** `api/generate.ts` only enforces per-repo
+  dedup, `MAX_SAVED_PROJECTS = 2`, and `MAX_STARTS_PER_DAY = 2` — a user can
+  start two different repos at once and both generate in parallel. Verified
+  live: `laluka-osk` holds exactly two projects, both self-started
+  concurrently.

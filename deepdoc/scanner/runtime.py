@@ -7,6 +7,7 @@ from .common import *
 from .common import RealtimeConsumer, RuntimeScan, RuntimeScheduler, RuntimeTask
 from ..parser.base import ParsedFile
 from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
+from ..parser.php_parser import php_dispatches
 from ..parser.registry import language_for_extension
 from ..parser.vue_parser import _extract_script_block
 from ..source_metadata import classify_source_kind, is_low_trust_source_kind
@@ -119,8 +120,19 @@ def _collect_dispatch_evidence(
     """Collect only language-structural dispatch evidence from eligible source."""
     evidence: list[DispatchEvidence] = []
     for file_path, content in file_contents.items():
-        if languages.get(file_path) == "python":
+        language = languages.get(file_path)
+        if language == "python":
             evidence.extend(_python_dispatch_evidence(file_path, content))
+        elif language == "php":
+            evidence.extend(
+                DispatchEvidence(
+                    file_path=file_path,
+                    language="php",
+                    relation="direct",
+                    target_aliases=_target_aliases(dispatch.target),
+                )
+                for dispatch in php_dispatches(content)
+            )
     return evidence
 
 

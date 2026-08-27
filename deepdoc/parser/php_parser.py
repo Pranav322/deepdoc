@@ -7,6 +7,7 @@ PHP 8 attribute extraction, visibility modifiers, and Laravel route detection.
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
@@ -20,6 +21,76 @@ try:
     _TS_AVAILABLE = True
 except Exception:
     _TS_AVAILABLE = False
+
+
+@dataclass(frozen=True)
+class PhpDispatch:
+    """A Laravel dispatch target proven by the PHP Tree-sitter grammar."""
+
+    target: str
+
+
+def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
+    """Return structural Laravel `dispatch`/`event` target expressions only.
+
+    The helper deliberately accepts just the grammar shapes DeepDoc can prove:
+    ``Class::dispatch(...)``, ``dispatch(Class::class)``, and
+    ``dispatch/event(new Class(...))``. Comments, strings, dynamic values, and
+    arbitrary methods never reach the runtime linker.
+    """
+    if not _TS_AVAILABLE:
+        return ()
+    parser = Parser(PHP_LANGUAGE)
+    root = parser.parse(content.encode("utf8")).root_node
+    found: list[PhpDispatch] = []
+    stack = [root]
+    while stack:
+        node = stack.pop()
+        if node.type == "scoped_call_expression":
+            name = node.child_by_field_name("name")
+            target = (
+                _php_class_target(node.named_children[0])
+                if node.named_children
+                and name is not None
+                and name.text == b"dispatch"
+                else ""
+            )
+            if target:
+                found.append(PhpDispatch(target))
+        elif node.type == "function_call_expression":
+            function = node.child_by_field_name("function")
+            arguments = node.child_by_field_name("arguments")
+            if (
+                function is not None
+                and function.text in {b"dispatch", b"event"}
+                and arguments is not None
+                and arguments.named_children
+            ):
+                target = _php_dispatch_argument_target(arguments.named_children[0])
+                if target:
+                    found.append(PhpDispatch(target))
+        stack.extend(reversed(node.named_children))
+    return tuple(found)
+
+
+def _php_dispatch_argument_target(node) -> str:
+    """Class target in a global `dispatch(...)`/`event(...)` first argument."""
+    while node.type == "argument" and node.named_children:
+        node = node.named_children[0]
+    if node.type == "class_constant_access_expression":
+        children = node.named_children
+        if len(children) >= 2 and children[-1].text == b"class":
+            return _php_class_target(children[0])
+    if node.type == "object_creation_expression" and node.named_children:
+        return _php_class_target(node.named_children[0])
+    return ""
+
+
+def _php_class_target(node) -> str:
+    """A static/new class target that is a lexical PHP name, never a variable."""
+    if node.type not in {"name", "qualified_name"}:
+        return ""
+    return node.text.decode("utf8", "replace")
 
 
 def parse_php(path: Path, content: str, language: str) -> ParsedFile:

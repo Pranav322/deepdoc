@@ -1595,3 +1595,40 @@ def test_python_dispatch_evidence_uses_executable_ast_calls() -> None:
         ("direct", ("sync",)),
         ("signal", ("post_save",)),
     ]
+
+
+def test_php_dispatch_evidence_links_fqcn_and_short_discovered_targets() -> None:
+    """Structural PHP dispatches normalize leading-root and short-name aliases."""
+    path = "app/Http/OrderController.php"
+    source = """<?php
+    \\App\\Jobs\\SyncOrders::dispatch($order);
+    dispatch(\\App\\Jobs\\SyncOrders::class);
+    dispatch(new App\\Jobs\\SyncOrders($order));
+    event(new \\App\\Events\\OrderShipped($order));
+    """
+    runtime = RuntimeScan(
+        tasks=[
+            RuntimeTask(
+                name="SyncOrders",
+                file_path="app/Jobs/SyncOrders.php",
+                runtime_kind="laravel_job",
+            ),
+            RuntimeTask(
+                name="OrderShipped",
+                file_path="app/Events/OrderShipped.php",
+                runtime_kind="laravel_event",
+            ),
+        ]
+    )
+
+    evidence = _collect_dispatch_evidence({path: source}, {path: "php"})
+    _link_runtime_evidence(runtime, evidence, [])
+
+    assert [(item.relation, item.target_aliases) for item in evidence] == [
+        ("direct", (r"App\Jobs\SyncOrders", "SyncOrders")),
+        ("direct", (r"App\Jobs\SyncOrders", "SyncOrders")),
+        ("direct", (r"App\Jobs\SyncOrders", "SyncOrders")),
+        ("direct", (r"App\Events\OrderShipped", "OrderShipped")),
+    ]
+    assert runtime.tasks[0].producer_files == [path]
+    assert runtime.tasks[1].producer_files == [path]

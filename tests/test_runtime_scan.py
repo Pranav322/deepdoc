@@ -473,6 +473,31 @@ def test_php_reassigned_or_closure_shadowed_schedule_cannot_create_scheduler() -
     ] == []
 
 
+def test_php_destructured_schedule_rebind_cannot_create_scheduler() -> None:
+    """Destructuring assignment replaces the trusted Schedule parameter binding."""
+    path = "app/Console/DestructuredKernel.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+        "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+        "class Kernel extends ConsoleKernel {\n"
+        "    protected function schedule(Schedule $schedule): void {\n"
+        "        [$schedule] = [new FakeScheduler()];\n"
+        "        $schedule->command('forged:destructure')->daily();\n"
+        "    }\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
 def test_php_condition_only_schedule_chain_creates_no_scheduler() -> None:
     """A Laravel conditional modifier is not a scheduling cadence."""
     path = "app/Console/Kernel.php"
@@ -3213,6 +3238,40 @@ def test_python_exception_and_match_captures_revoke_imported_task_proof() -> Non
     assert runtime.dispatch_evidence == []
 
 
+def test_python_function_exception_and_match_captures_shadow_imported_task() -> None:
+    """Function-local captures cannot authenticate an imported task receiver."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    pass\n"
+        ),
+        "pkg/except_api.py": (
+            "from .tasks import actual\n"
+            "def run():\n"
+            "    try:\n"
+            "        raise RuntimeError()\n"
+            "    except RuntimeError as actual:\n"
+            "        pass\n"
+            "    actual.delay()\n"
+        ),
+        "pkg/match_api.py": (
+            "from .tasks import actual\n"
+            "def run(subject):\n"
+            "    match subject:\n"
+            "        case actual:\n"
+            "            pass\n"
+            "    actual.delay()\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert runtime.dispatch_evidence == []
+
+
 def test_python_task_receiver_mutation_or_globals_rebind_revokes_dispatch_proof() -> None:
     """Task receiver authority cannot survive direct or reflective mutation."""
     sources = {
@@ -3239,6 +3298,36 @@ def test_python_task_receiver_mutation_or_globals_rebind_revokes_dispatch_proof(
     )
 
     assert runtime.dispatch_evidence == []
+
+
+def test_python_dispatch_before_later_receiver_mutation_remains_evidence() -> None:
+    """Later reflective/member mutation cannot erase an already-run dispatch."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    pass\n"
+        ),
+        "pkg/member_api.py": (
+            "from .tasks import actual\n"
+            "actual.delay()\n"
+            "actual.delay = lambda *args: None\n"
+        ),
+        "pkg/global_api.py": (
+            "from .tasks import actual\n"
+            "actual.delay()\n"
+            "globals()['actual'] = object()\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("pkg/member_api.py", ("actual",)),
+        ("pkg/global_api.py", ("actual",)),
+    ]
 
 
 def test_python_framework_member_writes_revoke_celery_and_signal_proof() -> None:
@@ -3309,6 +3398,60 @@ def test_python_dynamic_setattr_revokes_all_framework_runtime_proof() -> None:
             "from celery.schedules import crontab\n"
             "member = '__call__'\n"
             "setattr(crontab, member, object())\n"
+            "SCHEDULE = crontab(minute='*')\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+    assert runtime.realtime_consumers == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "crontab"
+    ] == []
+
+
+def test_python_nested_dynamic_setattr_revokes_all_framework_runtime_proof() -> None:
+    """A nested bare setattr still mutates its framework root."""
+    sources = {
+        "workers/faux.py": (
+            "import celery\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = 'shared_task'\n"
+            "consume(setattr(celery, member, object()))\n"
+            "@celery.shared_task\n"
+            "def forged():\n"
+            "    return None\n"
+        ),
+        "signals/faux.py": (
+            "from django.db.models import signals\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = 'post_save'\n"
+            "consume(setattr(signals, member, object()))\n"
+            "def forged(*args):\n"
+            "    return None\n"
+            "signals.post_save.connect(forged)\n"
+        ),
+        "realtime/consumers.py": (
+            "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = 'forged'\n"
+            "consume(setattr(AsyncWebsocketConsumer, member, object()))\n"
+            "class Forged(AsyncWebsocketConsumer):\n"
+            "    pass\n"
+        ),
+        "schedules/faux.py": (
+            "from celery.schedules import crontab\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = '__call__'\n"
+            "consume(setattr(crontab, member, object()))\n"
             "SCHEDULE = crontab(minute='*')\n"
         ),
     }
@@ -3457,6 +3600,26 @@ def test_python_command_assignment_or_delete_revokes_django_command() -> None:
     assert [task for task in runtime.tasks if task.runtime_kind == "django_command"] == []
 
 
+def test_python_control_flow_command_rebind_revokes_django_command() -> None:
+    """Any nested module write can replace the final Django `Command` binding."""
+    prefix = (
+        "from django.core.management.base import BaseCommand\n"
+        "class Command(BaseCommand):\n"
+        "    pass\n"
+    )
+    sources = {
+        "app/management/commands/assigned.py": prefix + "if True:\n    Command = object\n",
+        "app/management/commands/deleted.py": prefix + "if True:\n    del Command\n",
+        "app/management/commands/imported.py": prefix + "if True:\n    from somewhere import Command\n",
+        "app/management/commands/function.py": prefix + "if True:\n    def Command():\n        pass\n",
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "django_command"] == []
+
+
 def test_python_channels_local_route_and_auth_shadows_create_no_metadata() -> None:
     """Function-local lookalikes cannot add Channels routes or auth evidence."""
     path = "realtime/consumers.py"
@@ -3492,6 +3655,22 @@ def test_python_channels_route_and_auth_imports_require_prior_source_position() 
     assert [(item.name, item.routes, item.auth_hints) for item in runtime.realtime_consumers] == [
         ("Valid", [], [])
     ]
+
+
+def test_python_channels_auth_requires_imported_receiver_identity() -> None:
+    """An unrelated `.AuthMiddlewareStack` spelling is not Channels auth proof."""
+    path = "realtime/consumers.py"
+    source = (
+        "from channels.auth import AuthMiddlewareStack\n"
+        "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+        "class Valid(AsyncWebsocketConsumer):\n"
+        "    pass\n"
+        "bogus.AuthMiddlewareStack(None)\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    consumer = next(item for item in runtime.realtime_consumers if item.name == "Valid")
+    assert "AuthMiddlewareStack" not in consumer.auth_hints
 
 
 def test_python_crontab_parameter_shadow_cannot_create_scheduler() -> None:

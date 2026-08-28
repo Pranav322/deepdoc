@@ -253,6 +253,18 @@ def _php_laravel_schedule_methods(node, aliases: dict[str, str], namespace: str)
 _PHP_NESTED_FUNCTION_TYPES = frozenset({"anonymous_function", "arrow_function"})
 
 
+def _php_schedule_target_is_rebound(target) -> bool:
+    """Whether one assignment target writes the trusted `$schedule` binding."""
+    if target.type == "variable_name":
+        return target.text.lower() == b"$schedule"
+    if target.type == "list_literal":
+        return any(
+            _php_schedule_target_is_rebound(child)
+            for child in target.named_children
+        )
+    return False
+
+
 def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
     """Direct-method writes that revoke the typed `$schedule` parameter."""
     positions: list[int] = []
@@ -262,7 +274,7 @@ def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
             return
         if current.type == "assignment_expression":
             target = current.child_by_field_name("left")
-            if target is not None and target.type == "variable_name" and target.text.lower() == b"$schedule":
+            if target is not None and _php_schedule_target_is_rebound(target):
                 positions.append(current.start_byte)
         for child in current.named_children:
             visit(child)

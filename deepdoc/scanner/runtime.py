@@ -298,7 +298,9 @@ def _python_dispatch_evidence(
         file_path, tree, task_definitions_by_path, task_exports_by_path
     )
     local_shadows_by_call = _python_local_shadows_by_call(tree)
-    tainted_roots, taint_all_receivers = _python_dispatch_mutation_roots(tree)
+    mutation_positions_by_root, taint_all_positions = _python_dispatch_mutation_positions(
+        tree
+    )
     calls = sorted(
         (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
         key=lambda node: (node.lineno, node.col_offset),
@@ -313,7 +315,14 @@ def _python_dispatch_evidence(
         ):
             continue
         receiver_root = _python_dotted_name(func.value).split(".", 1)[0]
-        if taint_all_receivers or receiver_root in tainted_roots:
+        call_position = _python_node_position(call)
+        root_mutations = mutation_positions_by_root.get(receiver_root, ())
+        if (
+            taint_all_positions
+            and bisect_right(taint_all_positions, call_position) > 0
+        ) or (
+            root_mutations and bisect_right(root_mutations, call_position) > 0
+        ):
             continue
         if func.attr in {"delay", "apply_async"}:
             target = _python_bound_task_target(
@@ -350,20 +359,25 @@ def _python_dispatch_evidence(
     return evidence
 
 
-def _python_dispatch_mutation_roots(tree: ast.Module) -> tuple[frozenset[str], bool]:
-    """Receiver roots made unsafe by direct or reflective mutation in one file."""
-    roots: set[str] = set()
-    taint_all = False
+def _python_dispatch_mutation_positions(
+    tree: ast.Module,
+) -> tuple[dict[str, tuple[tuple[int, int], ...]], tuple[tuple[int, int], ...]]:
+    """Source-ordered receiver mutations that invalidate later dispatch proof."""
+    root_positions: dict[str, list[tuple[int, int]]] = {}
+    taint_all_positions: list[tuple[int, int]] = []
 
-    def record_target(target: ast.expr) -> None:
-        nonlocal taint_all
+    def record_root(name: str, position: tuple[int, int]) -> None:
+        if name:
+            root_positions.setdefault(name, []).append(position)
+
+    def record_target(target: ast.expr, position: tuple[int, int]) -> None:
         if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Call):
             if isinstance(target.value.func, ast.Name) and target.value.func.id == "globals":
                 name = _python_string_literal(target.slice)
                 if name:
-                    roots.add(name)
+                    record_root(name, position)
                 else:
-                    taint_all = True
+                    taint_all_positions.append(position)
                 return
         if isinstance(target, ast.Name):
             return
@@ -371,22 +385,27 @@ def _python_dispatch_mutation_roots(tree: ast.Module) -> tuple[frozenset[str], b
         while isinstance(root, (ast.Attribute, ast.Subscript)):
             root = root.value
         if isinstance(root, ast.Name):
-            roots.add(root.id)
+            record_root(root.id, position)
 
     for node in ast.walk(tree):
+        position = _python_node_position(node)
         if isinstance(node, ast.Assign):
             for target in node.targets:
-                record_target(target)
+                record_target(target, position)
         elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
-            record_target(node.target)
+            record_target(node.target, position)
         elif isinstance(node, ast.Delete):
             for target in node.targets:
-                record_target(target)
+                record_target(target, position)
         elif isinstance(node, ast.Call):
-            root = _python_setattr_root(node)
-            if root:
-                roots.add(root)
-    return frozenset(roots), taint_all
+            record_root(_python_setattr_root(node), position)
+    return (
+        {
+            name: tuple(sorted(positions))
+            for name, positions in root_positions.items()
+        },
+        tuple(sorted(taint_all_positions)),
+    )
 
 
 @dataclass(frozen=True)
@@ -538,6 +557,8 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
             root = _python_setattr_root(current)
             if root:
                 writes.append((root, _python_node_position(current)))
+            for child in ast.iter_child_nodes(current):
+                visit(child)
             return
         if isinstance(current, ast.Delete):
             for name in _python_delete_names(current):
@@ -714,6 +735,11 @@ def _python_scope_bound_names(
                 if alias.name != "*":
                     names.add(alias.asname or alias.name)
             return
+        if isinstance(node, ast.ExceptHandler) and node.name:
+            names.add(node.name)
+        if isinstance(node, ast.Match):
+            for case in node.cases:
+                names.update(_python_match_capture_names(case.pattern))
         if isinstance(node, ast.Name) and isinstance(node.ctx, (ast.Store, ast.Del)):
             names.add(node.id)
         if isinstance(node, (ast.Global, ast.Nonlocal)):
@@ -1689,9 +1715,14 @@ def _discover_django_file_runtime(
             revoke({node.name})
             continue
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            root = _python_setattr_root(node.value)
-            if root:
-                revoke({root})
+            setattr_roots = {
+                root
+                for call in ast.walk(node.value)
+                if isinstance(call, ast.Call)
+                and (root := _python_setattr_root(call))
+            }
+            if setattr_roots:
+                revoke(setattr_roots)
                 continue
             signal, handler = _python_signal_connect(
                 node.value, signal_names, signal_module_names
@@ -1707,7 +1738,9 @@ def _discover_django_file_runtime(
                     )
                 )
             continue
-        rebound_names = _python_assignment_names_if_any(node)
+        rebound_names = {
+            name for name, _ in _python_module_write_events(node)
+        }
         for name in rebound_names:
             commands_by_name.pop(name, None)
         revoke(rebound_names)
@@ -2282,6 +2315,7 @@ def _discover_python_realtime_consumers(
         route_name_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
         route_module_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
         auth_name_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
+        auth_module_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
         class_nodes: dict[str, tuple[str, ast.ClassDef]] = {}
 
         def record(
@@ -2297,6 +2331,9 @@ def _discover_python_realtime_consumers(
             consumer_modules.discard(name)
             for events in (route_name_events, route_module_events, auth_name_events):
                 record(events, name, position, False)
+            for module_name in tuple(auth_module_events):
+                if module_name == name or module_name.startswith(f"{name}."):
+                    record(auth_module_events, module_name, position, False)
 
         for node in tree.body:
             position = _python_node_position(node)
@@ -2331,7 +2368,8 @@ def _discover_python_realtime_consumers(
                     elif alias.name in _DJANGO_ROUTE_MODULES:
                         record(route_module_events, local, position, True)
                     elif alias.name == "channels.auth":
-                        record(auth_name_events, local, position, True)
+                        auth_module = alias.asname or alias.name
+                        record(auth_module_events, auth_module, position, True)
                 continue
             if isinstance(node, ast.ClassDef):
                 revoke(node.name, position)
@@ -2365,7 +2403,9 @@ def _discover_python_realtime_consumers(
                 call, call.func, local_shadows_by_call
             )
             and _python_channels_auth_call(
-                call, names_at(auth_name_events, _python_node_position(call))
+                call,
+                names_at(auth_name_events, _python_node_position(call)),
+                names_at(auth_module_events, _python_node_position(call)),
             )
             for call in ast.walk(tree)
             if isinstance(call, ast.Call)
@@ -2481,10 +2521,14 @@ def _python_channels_groups(node: ast.ClassDef) -> set[str]:
     return groups
 
 
-def _python_channels_auth_call(call: ast.Call, auth_names: set[str]) -> bool:
+def _python_channels_auth_call(
+    call: ast.Call, auth_names: set[str], auth_modules: set[str]
+) -> bool:
     """Whether a call resolves to an imported Channels auth middleware."""
     dotted = _python_dotted_name(call.func)
-    return dotted in auth_names or dotted.endswith(".AuthMiddlewareStack") and bool(auth_names)
+    return dotted in auth_names or any(
+        dotted == f"{module}.AuthMiddlewareStack" for module in auth_modules
+    )
 
 
 def _python_channels_scope_user(node: ast.ClassDef) -> bool:

@@ -23,6 +23,24 @@ def _record_scan_timing(
     if telemetry is not None:
         telemetry.record_duration(f"scan.{name}", elapsed)
 
+
+def _build_repo_model_if_wanted(scan: RepoScan, repo_root: str, cfg: dict[str, Any]) -> None:
+    """Construct a RepositoryModel from the completed scan and attach it to the scan.
+
+    Controlled by ``scan.build_repo_model`` config key (default: True).
+    The model is additive — never alters the scan itself.
+    """
+    if not cfg.get("scan", {}).get("build_repo_model", True):
+        return
+    try:
+        from ..repo_model import build_repo_model_from_scan
+
+        model = build_repo_model_from_scan(scan, repo_root)
+        scan._repo_model = model  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
 
@@ -1307,7 +1325,7 @@ def scan_repo(
             if telemetry is not None:
                 telemetry.record_duration(f"scan.{phase_name}", 0.0)
 
-    return RepoScan(
+    repo_scan = RepoScan(
         file_tree=dict(file_tree),
         file_summaries=file_summaries,
         api_endpoints=api_endpoints,
@@ -1333,6 +1351,10 @@ def scan_repo(
         unsupported_extensions=dict(unsupported_extensions),
         skipped_source_files=dict(skipped_source_files),
     )
+
+    _build_repo_model_if_wanted(repo_scan, str(repo_root), cfg)
+
+    return repo_scan
 
 
 def _detect_service_boundaries(repo_root: Path, cfg: dict[str, Any]) -> list[dict[str, Any]]:

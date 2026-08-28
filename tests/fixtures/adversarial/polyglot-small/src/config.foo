@@ -1,0 +1,7 @@
+This is a file with extension .foo — a completely unknown format.
+DeepDoc must:
+1. Discover this file in the walk
+2. Not attempt to parse it (no parser registered)
+3. Classify it as "unknown" language with parse_status=INVENTORY_ONLY
+4. Include it in the coverage report
+5. NEVER fabricate symbols or claims about its content

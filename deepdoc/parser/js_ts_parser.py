@@ -303,6 +303,7 @@ class _Binder:
                 self._calls.append(node)
             elif node.type == "new_expression":
                 self._calls.append(node)
+        self._record_hoisted_direct_eval_invocations(nodes)
         found = (self._bound_call(node) for node in self._calls)
         return tuple(call for call in found if call is not None)
 
@@ -447,6 +448,16 @@ class _Binder:
         for base in _member_write_bases(target):
             self._record_value_mutation(base, target.start_byte)
 
+    def _is_unshadowed_global_object(self, node) -> bool:
+        """Whether one identifier is the built-in global `Object` binding."""
+        return bool(
+            node is not None
+            and node.type == "identifier"
+            and _text(node) == "Object"
+            and not self._is_locally_declared(node)
+            and not self._global_name_was_written(node)
+        )
+
     def _is_object_assign_expression(self, node) -> bool:
         """Whether one expression is unshadowed static `Object.assign`."""
         if node is None:
@@ -461,22 +472,24 @@ class _Binder:
             member = _unquote(index) if index is not None and index.type == "string" else ""
         else:
             return False
-        return (
-            obj is not None
-            and obj.type == "identifier"
-            and _text(obj) == "Object"
-            and member == "assign"
-            and not self._is_locally_declared(obj)
-            and not self._global_name_was_written(obj)
-        )
+        return self._is_unshadowed_global_object(obj) and member == "assign"
 
     def _record_object_assign_alias(self, target, value) -> None:
         """Track a lexical alias of static `Object.assign` in source order."""
+        value_is_alias = self._is_object_assign_expression(value) or (
+            value is not None
+            and value.type == "identifier"
+            and self._is_object_assign_alias(value)
+        )
+        self._record_object_assign_alias_value(target, value_is_alias)
+
+    def _record_object_assign_alias_value(self, target, value_is_alias: bool) -> None:
+        """Record one source-ordered truth value for an assign-alias binding."""
         declaration = self._declaration_for(target)
         if declaration is None:
             return
         position = target.start_byte
-        value_is_alias = self._is_object_assign_expression(value) and _is_definite_binding_write(
+        value_is_alias = value_is_alias and _is_definite_binding_write(
             target, declaration
         )
         positions = self._object_assign_alias_positions.setdefault(declaration, [])
@@ -523,16 +536,20 @@ class _Binder:
         """Whether a prior member write invalidated this resolved object value."""
         return bisect_right(self._value_mutation_positions.get(value, ()), position) > 0
 
+    def _is_unshadowed_direct_eval(self, node) -> bool:
+        """Whether a call is the built-in direct `eval`, not a local lookalike."""
+        callee = node.child_by_field_name("function")
+        return bool(
+            callee is not None
+            and callee.type == "identifier"
+            and _text(callee) == "eval"
+            and not self._is_locally_declared(callee)
+            and not self._global_name_was_written(callee)
+        )
+
     def _record_direct_eval(self, node) -> None:
         """Fail closed after an unshadowed direct `eval` in one execution scope."""
-        callee = node.child_by_field_name("function")
-        if (
-            callee is None
-            or callee.type != "identifier"
-            or _text(callee) != "eval"
-            or self._is_locally_declared(callee)
-            or self._global_name_was_written(callee)
-        ):
+        if not self._is_unshadowed_direct_eval(node):
             return
         scope = _execution_scope(node)
         positions = self._dynamic_scope_positions.setdefault(scope, [])
@@ -542,6 +559,43 @@ class _Binder:
         else:
             positions.insert(bisect_right(positions, position), position)
         if not _execution_scope_is_program(node):
+            nested = self._nested_direct_eval_positions
+            if not nested or position >= nested[-1]:
+                nested.append(position)
+            else:
+                nested.insert(bisect_right(nested, position), position)
+
+    def _record_hoisted_direct_eval_invocations(self, nodes) -> None:
+        """Move a called function declaration's direct-eval effect to its call site."""
+        functions_by_scope: dict[tuple[int, int], _Declaration] = {}
+        for function in nodes:
+            if function.type not in {
+                "function_declaration",
+                "generator_function_declaration",
+            }:
+                continue
+            name = function.child_by_field_name("name")
+            declaration = self._declaration_for(name) if name is not None else None
+            if declaration is not None:
+                functions_by_scope[_execution_scope(function)] = declaration
+        eval_functions = {
+            functions_by_scope[_execution_scope(call)]
+            for call in nodes
+            if call.type == "call_expression"
+            and _execution_scope(call) in functions_by_scope
+            and self._is_unshadowed_direct_eval(call)
+        }
+        for call in nodes:
+            if call.type != "call_expression" or not _is_proven_top_level_execution(call):
+                continue
+            callee = call.child_by_field_name("function")
+            if (
+                callee is None
+                or callee.type != "identifier"
+                or self._declaration_for(callee) not in eval_functions
+            ):
+                continue
+            position = call.start_byte
             nested = self._nested_direct_eval_positions
             if not nested or position >= nested[-1]:
                 nested.append(position)
@@ -632,6 +686,14 @@ class _Binder:
         if target.type == "object_pattern":  # const { Worker } = require("m")
             if not declares:
                 self._record_member_mutation(target)
+            if self._is_unshadowed_global_object(value):
+                for name_node, member in _destructured_members(target):
+                    self._record_object_assign_alias_value(
+                        name_node, member == "assign"
+                    )
+                    if not declares:
+                        self._record_write(name_node, None)
+                return
             source_value = (
                 _ResolvedValue(module, _MODULE_EXPORT)
                 if module

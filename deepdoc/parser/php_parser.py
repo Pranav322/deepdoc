@@ -257,7 +257,7 @@ def _php_schedule_target_is_rebound(target) -> bool:
     """Whether one assignment target writes the trusted `$schedule` binding."""
     if target.type == "variable_name":
         return target.text.lower() == b"$schedule"
-    if target.type == "list_literal":
+    if target.type in {"list_literal", "pair", "by_ref"}:
         return any(
             _php_schedule_target_is_rebound(child)
             for child in target.named_children
@@ -272,6 +272,14 @@ def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
     def visit(current) -> None:
         if current.type in _PHP_NESTED_FUNCTION_TYPES:
             return
+        if current.type == "foreach_statement":
+            body = current.child_by_field_name("body")
+            bindings = [
+                child for child in current.named_children if child != body
+            ]
+            target = bindings[-1] if len(bindings) >= 2 else None
+            if target is not None and _php_schedule_target_is_rebound(target):
+                positions.append(current.start_byte)
         if current.type == "assignment_expression":
             target = current.child_by_field_name("left")
             if target is not None and _php_schedule_target_is_rebound(target):

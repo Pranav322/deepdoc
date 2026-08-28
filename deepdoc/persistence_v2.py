@@ -68,7 +68,7 @@ STATE_FILE = "state.json"
 SYNC_RECEIPT_FILE = "sync_receipt.json"
 CHANGELOG_FILE = "changelog.json"
 CHANGELOG_MAX_ENTRIES = 50
-ENGINE_FINGERPRINT = "planning_units_namespaced_routes_semantic_boundaries_runtime_evidence_v8"
+ENGINE_FINGERPRINT = "planning_units_namespaced_routes_semantic_boundaries_runtime_evidence_v9"
 LOCK_FILE = "run.lock"
 
 # Legacy top-level files (kept for backwards-compat)

@@ -498,6 +498,31 @@ def test_php_destructured_schedule_rebind_cannot_create_scheduler() -> None:
     ] == []
 
 
+def test_php_foreach_schedule_rebind_cannot_create_scheduler() -> None:
+    """A foreach value variable replaces the typed Schedule parameter binding."""
+    path = "app/Console/ForeachKernel.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+        "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+        "class Kernel extends ConsoleKernel {\n"
+        "    protected function schedule(Schedule $schedule): void {\n"
+        "        foreach ([new FakeScheduler()] as $schedule) {}\n"
+        "        $schedule->command('forged:foreach')->daily();\n"
+        "    }\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
 def test_php_condition_only_schedule_chain_creates_no_scheduler() -> None:
     """A Laravel conditional modifier is not a scheduling cadence."""
     path = "app/Console/Kernel.php"
@@ -1143,6 +1168,38 @@ def test_js_computed_or_aliased_object_assign_taints_queue_receiver() -> None:
     assert worker.producer_files == []
 
 
+def test_js_destructured_or_transitive_object_assign_alias_taints_queue() -> None:
+    """Static Object.assign aliases remain tainted through destructuring and copies."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/destructured.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "const { assign: merge } = Object;\n"
+            "merge(queue, { add: fakeAdd });\n"
+            "queue.add('forged-destructure', {});\n"
+        ),
+        "producers/transitive.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "const merge = Object.assign;\n"
+            "const mergeAgain = merge;\n"
+            "mergeAgain(queue, { add: fakeAdd });\n"
+            "queue.add('forged-transitive', {});\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="javascript") for path in sources}, sources
+    )
+
+    assert runtime.dispatch_evidence == []
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
+
+
 def test_js_nested_direct_eval_revokes_later_outer_queue_proof() -> None:
     """An invoked nested direct eval can mutate a captured queue receiver."""
     sources = {
@@ -1156,6 +1213,30 @@ def test_js_nested_direct_eval_revokes_later_outer_queue_proof() -> None:
             "function poison() { eval('queue.add = fakeAdd'); }\n"
             "poison();\n"
             "queue.add('job', {});\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="javascript") for path in sources}, sources
+    )
+
+    assert runtime.dispatch_evidence == []
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == []
+
+
+def test_js_hoisted_direct_eval_revokes_later_outer_queue_proof() -> None:
+    """A called function declaration executes before its later textual eval body."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/hoisted-eval.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "poison();\n"
+            "queue.add('forged', {});\n"
+            "function poison() { eval('queue.add = fakeAdd'); }\n"
         ),
     }
     runtime = discover_runtime_surfaces(
@@ -3452,6 +3533,60 @@ def test_python_nested_dynamic_setattr_revokes_all_framework_runtime_proof() -> 
             "    return None\n"
             "member = '__call__'\n"
             "consume(setattr(crontab, member, object()))\n"
+            "SCHEDULE = crontab(minute='*')\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+    assert runtime.realtime_consumers == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "crontab"
+    ] == []
+
+
+def test_python_assignment_wrapped_nested_setattr_revokes_framework_proof() -> None:
+    """A nested setattr in an assignment RHS still executes and taints its root."""
+    sources = {
+        "workers/faux.py": (
+            "import celery\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = 'shared_task'\n"
+            "sink = consume(setattr(celery, member, object()))\n"
+            "@celery.shared_task\n"
+            "def forged():\n"
+            "    return None\n"
+        ),
+        "signals/faux.py": (
+            "from django.db.models import signals\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = 'post_save'\n"
+            "sink = consume(setattr(signals, member, object()))\n"
+            "def forged(*args):\n"
+            "    return None\n"
+            "signals.post_save.connect(forged)\n"
+        ),
+        "realtime/consumers.py": (
+            "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = 'forged'\n"
+            "sink = consume(setattr(AsyncWebsocketConsumer, member, object()))\n"
+            "class Forged(AsyncWebsocketConsumer):\n"
+            "    pass\n"
+        ),
+        "schedules/faux.py": (
+            "from celery.schedules import crontab\n"
+            "def consume(value):\n"
+            "    return None\n"
+            "member = '__call__'\n"
+            "sink = consume(setattr(crontab, member, object()))\n"
             "SCHEDULE = crontab(minute='*')\n"
         ),
     }

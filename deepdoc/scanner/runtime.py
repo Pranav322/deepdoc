@@ -569,6 +569,9 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
                 return
             for name in _python_assignment_names(current):
                 writes.append((name, _python_node_position(current)))
+            value = current.value
+            if value is not None:
+                visit(value)
             return
         if isinstance(current, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
             writes.append((current.name, _python_node_position(current)))
@@ -1331,7 +1334,7 @@ def _discover_celery_file_runtime(
             continue
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             is_beat_schedule = _python_is_beat_schedule_assignment(node, app_names)
-            names = _python_assignment_names(node)
+            names = {name for name, _ in _python_module_write_events(node)}
             if names and _python_is_celery_app_factory(
                 _python_assignment_value(node), constructor_names, celery_module_names
             ):

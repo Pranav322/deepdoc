@@ -255,7 +255,10 @@ class _Binder:
         self._global_writes: dict[str, list[int]] = {}
         self._nested_global_writes: set[str] = set()
         self._value_mutation_positions: dict[_ResolvedValue, list[int]] = {}
+        self._object_assign_alias_positions: dict[_Declaration, list[int]] = {}
+        self._object_assign_alias_values: dict[_Declaration, list[bool]] = {}
         self._dynamic_scope_positions: dict[tuple[int, int], list[int]] = {}
+        self._nested_direct_eval_positions: list[int] = []
         self._calls: list = []
 
     def run(self, root) -> tuple[JsBoundCall, ...]:
@@ -444,21 +447,60 @@ class _Binder:
         for base in _member_write_bases(target):
             self._record_value_mutation(base, target.start_byte)
 
-    def _record_reflective_mutation(self, node) -> None:
-        """Taint an unshadowed ``Object.assign(target, ...)`` receiver."""
-        callee = node.child_by_field_name("function")
-        if callee is None or callee.type != "member_expression":
+    def _is_object_assign_expression(self, node) -> bool:
+        """Whether one expression is unshadowed static `Object.assign`."""
+        if node is None:
+            return False
+        if node.type == "member_expression":
+            obj = node.child_by_field_name("object")
+            prop = node.child_by_field_name("property")
+            member = _text(prop) if prop is not None else ""
+        elif node.type == "subscript_expression":
+            obj = node.child_by_field_name("object")
+            index = node.child_by_field_name("index")
+            member = _unquote(index) if index is not None and index.type == "string" else ""
+        else:
+            return False
+        return (
+            obj is not None
+            and obj.type == "identifier"
+            and _text(obj) == "Object"
+            and member == "assign"
+            and not self._is_locally_declared(obj)
+            and not self._global_name_was_written(obj)
+        )
+
+    def _record_object_assign_alias(self, target, value) -> None:
+        """Track a lexical alias of static `Object.assign` in source order."""
+        declaration = self._declaration_for(target)
+        if declaration is None:
             return
-        obj = callee.child_by_field_name("object")
-        prop = callee.child_by_field_name("property")
-        if (
-            obj is None
-            or obj.type != "identifier"
-            or _text(obj) != "Object"
-            or prop is None
-            or _text(prop) != "assign"
-            or self._is_locally_declared(obj)
-            or self._global_name_was_written(obj)
+        position = target.start_byte
+        value_is_alias = self._is_object_assign_expression(value) and _is_definite_binding_write(
+            target, declaration
+        )
+        positions = self._object_assign_alias_positions.setdefault(declaration, [])
+        values = self._object_assign_alias_values.setdefault(declaration, [])
+        index = bisect_right(positions, position)
+        positions.insert(index, position)
+        values.insert(index, value_is_alias)
+
+    def _is_object_assign_alias(self, node) -> bool:
+        """Whether an identifier currently resolves to a static assign alias."""
+        declaration = self._declaration_for(node)
+        if declaration is None:
+            return False
+        positions = self._object_assign_alias_positions.get(declaration, ())
+        values = self._object_assign_alias_values.get(declaration, ())
+        index = bisect_right(positions, node.start_byte) - 1
+        return bool(index >= 0 and values[index])
+
+    def _record_reflective_mutation(self, node) -> None:
+        """Taint a receiver mutated through static `Object.assign` forms."""
+        callee = node.child_by_field_name("function")
+        if callee is None or not (
+            self._is_object_assign_expression(callee)
+            or callee.type == "identifier" and self._is_object_assign_alias(callee)
         ):
             return
         args = node.child_by_field_name("arguments")
@@ -497,15 +539,25 @@ class _Binder:
         position = node.start_byte
         if not positions or position >= positions[-1]:
             positions.append(position)
-            return
-        positions.insert(bisect_right(positions, position), position)
+        else:
+            positions.insert(bisect_right(positions, position), position)
+        if not _execution_scope_is_program(node):
+            nested = self._nested_direct_eval_positions
+            if not nested or position >= nested[-1]:
+                nested.append(position)
+            else:
+                nested.insert(bisect_right(nested, position), position)
 
     def _scope_has_direct_eval(self, node) -> bool:
         """Whether an earlier direct eval can alter this node's lexical scope."""
-        return bisect_right(
-            self._dynamic_scope_positions.get(_execution_scope(node), ()),
-            node.start_byte,
-        ) > 0
+        return (
+            bisect_right(self._nested_direct_eval_positions, node.start_byte) > 0
+            or bisect_right(
+                self._dynamic_scope_positions.get(_execution_scope(node), ()),
+                node.start_byte,
+            )
+            > 0
+        )
 
     def _bind_import(self, node) -> None:
         if _is_type_only_import(node):
@@ -528,7 +580,7 @@ class _Binder:
                 module = self._match(_unquote(children[1]))
                 if module:
                     self._record_write(
-                        children[0], _ResolvedValue(module, _MODULE_EXPORT), at=-1
+                        children[0], _ResolvedValue(module, _MODULE_EXPORT)
                     )
             return
         source = node.child_by_field_name("source")
@@ -606,6 +658,7 @@ class _Binder:
             resolved = self._resolve(value)
         # A None value is not ignored: it revokes a previous trusted write to
         # this same declaration, preventing stale queue/socket evidence.
+        self._record_object_assign_alias(target, value)
         self._record_write(target, resolved)
 
     # ── resolution ──────────────────────────────────────────────────────────
@@ -777,13 +830,32 @@ def _is_in_dynamic_scope(node) -> bool:
 _UNPROVEN_CALL_ANCESTORS = _UNCERTAIN_WRITE_ANCESTORS | frozenset(
     _EXECUTION_SCOPE_TYPES - {"program"}
 ) | frozenset({"class", "class_declaration", "class_static_block"})
+_LAZY_BINARY_OPERATORS = frozenset({"&&", "||", "??"})
+
+
+def _is_lazy_binary_rhs(node, binary) -> bool:
+    """Whether a node sits in a short-circuiting binary expression's RHS."""
+    operator = binary.child_by_field_name("operator")
+    right = binary.child_by_field_name("right")
+    return (
+        operator is not None
+        and _text(operator) in _LAZY_BINARY_OPERATORS
+        and right is not None
+        and right.start_byte <= node.start_byte
+        and node.end_byte <= right.end_byte
+    )
 
 
 def _is_proven_top_level_execution(node) -> bool:
     """Whether a call is evaluated unconditionally during module initialization."""
+    candidate = node
     current = node.parent
     while current is not None:
         if current.type in _UNPROVEN_CALL_ANCESTORS:
+            return False
+        if current.type == "binary_expression" and _is_lazy_binary_rhs(
+            candidate, current
+        ):
             return False
         if current.type == "program":
             return True

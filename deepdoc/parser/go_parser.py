@@ -122,6 +122,23 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
                 return events[index][1]
         return ""
 
+    def binding_scope_for_assignment(
+        scopes: tuple[tuple[str, int, int], ...], name: str, position: int
+    ) -> tuple[str, int, int]:
+        """Return the lexical binding an ordinary assignment mutates.
+
+        A Go ``=`` assignment never introduces a new local name.  Recording it
+        in the innermost block would let a stale outer scheduler receiver
+        survive after an inner block or closure reassigns that receiver.
+        Unknown targets remain in the innermost scope so they cannot fall back
+        to a trusted outer/import binding.
+        """
+        for scope in scopes:
+            events = bindings.get((scope, name), ())
+            if bisect_right(events, (position, "\uffff")):
+                return scope
+        return scopes[0]
+
     def all_nodes(node):
         yield node
         for child in node.named_children:
@@ -206,8 +223,13 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
     for node in writes:
         scopes = scope_chain_for(node)
         for name, value in write_pairs(node):
+            scope = (
+                binding_scope_for_assignment(scopes, name, node.start_byte)
+                if node.type == "assignment_statement"
+                else scopes[0]
+            )
             add_binding(
-                scopes[0],
+                scope,
                 name,
                 node.start_byte,
                 constructor_role(value, scopes, node.start_byte),

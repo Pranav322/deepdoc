@@ -182,7 +182,13 @@ def php_schedules(content: str) -> tuple[PhpSchedule, ...]:
             for method in _php_laravel_schedule_methods(declaration, aliases, namespace):
                 body = method.child_by_field_name("body")
                 if body is not None:
-                    _php_collect_schedule_calls(body, aliases, namespace, found)
+                    _php_collect_schedule_calls(
+                        body,
+                        aliases,
+                        namespace,
+                        found,
+                        _php_schedule_reassignment_positions(body),
+                    )
     return tuple(found)
 
 
@@ -244,16 +250,49 @@ def _php_laravel_schedule_methods(node, aliases: dict[str, str], namespace: str)
     return tuple(methods)
 
 
+_PHP_NESTED_FUNCTION_TYPES = frozenset({"anonymous_function", "arrow_function"})
+
+
+def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
+    """Direct-method writes that revoke the typed `$schedule` parameter."""
+    positions: list[int] = []
+
+    def visit(current) -> None:
+        if current.type in _PHP_NESTED_FUNCTION_TYPES:
+            return
+        if current.type == "assignment_expression":
+            target = current.child_by_field_name("left")
+            if target is not None and target.type == "variable_name" and target.text.lower() == b"$schedule":
+                positions.append(current.start_byte)
+        for child in current.named_children:
+            visit(child)
+
+    visit(node)
+    return tuple(sorted(positions))
+
+
 def _php_collect_schedule_calls(
-    node, aliases: dict[str, str], namespace: str, found: list[PhpSchedule]
+    node,
+    aliases: dict[str, str],
+    namespace: str,
+    found: list[PhpSchedule],
+    reassignment_positions: tuple[int, ...],
 ) -> None:
-    """Collect complete schedule chains from one already-proven Kernel method."""
-    if node.type == "member_call_expression" and not _php_is_chained_member_call(node):
+    """Collect chains through the original, un-reassigned Kernel parameter."""
+    if node.type in _PHP_NESTED_FUNCTION_TYPES:
+        return
+    if (
+        node.type == "member_call_expression"
+        and not _php_is_chained_member_call(node)
+        and not any(position < node.start_byte for position in reassignment_positions)
+    ):
         schedule = _php_schedule_from_call(node, aliases, namespace)
         if schedule is not None:
             found.append(schedule)
     for child in node.named_children:
-        _php_collect_schedule_calls(child, aliases, namespace, found)
+        _php_collect_schedule_calls(
+            child, aliases, namespace, found, reassignment_positions
+        )
 
 
 def _php_class_interfaces(node, aliases: dict[str, str], namespace: str) -> tuple[str, ...]:
@@ -410,8 +449,12 @@ def _php_first_argument(arguments):
 
 
 def _php_string_literal(node) -> str:
-    """One parser-proven quoted PHP string literal, without delimiters."""
-    if node is None or node.type != "string":
+    """One parser-proven static PHP string literal, without delimiters."""
+    if node is None or node.type not in {"string", "encapsed_string"}:
+        return ""
+    if node.type == "encapsed_string" and any(
+        child.type != "string_content" for child in node.named_children
+    ):
         return ""
     text = node.text.decode("utf8", "replace")
     return text[1:-1] if len(text) >= 2 and text[0] in "\"'" else ""

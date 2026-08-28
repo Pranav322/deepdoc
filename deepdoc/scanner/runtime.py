@@ -298,6 +298,7 @@ def _python_dispatch_evidence(
         file_path, tree, task_definitions_by_path, task_exports_by_path
     )
     local_shadows_by_call = _python_local_shadows_by_call(tree)
+    tainted_roots, taint_all_receivers = _python_dispatch_mutation_roots(tree)
     calls = sorted(
         (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
         key=lambda node: (node.lineno, node.col_offset),
@@ -310,6 +311,9 @@ def _python_dispatch_evidence(
         if _python_call_root_is_shadowed(
             call, func.value, local_shadows_by_call
         ):
+            continue
+        receiver_root = _python_dotted_name(func.value).split(".", 1)[0]
+        if taint_all_receivers or receiver_root in tainted_roots:
             continue
         if func.attr in {"delay", "apply_async"}:
             target = _python_bound_task_target(
@@ -344,6 +348,45 @@ def _python_dispatch_evidence(
             )
         )
     return evidence
+
+
+def _python_dispatch_mutation_roots(tree: ast.Module) -> tuple[frozenset[str], bool]:
+    """Receiver roots made unsafe by direct or reflective mutation in one file."""
+    roots: set[str] = set()
+    taint_all = False
+
+    def record_target(target: ast.expr) -> None:
+        nonlocal taint_all
+        if isinstance(target, ast.Subscript) and isinstance(target.value, ast.Call):
+            if isinstance(target.value.func, ast.Name) and target.value.func.id == "globals":
+                name = _python_string_literal(target.slice)
+                if name:
+                    roots.add(name)
+                else:
+                    taint_all = True
+                return
+        if isinstance(target, ast.Name):
+            return
+        root = target
+        while isinstance(root, (ast.Attribute, ast.Subscript)):
+            root = root.value
+        if isinstance(root, ast.Name):
+            roots.add(root.id)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                record_target(target)
+        elif isinstance(node, (ast.AnnAssign, ast.AugAssign)):
+            record_target(node.target)
+        elif isinstance(node, ast.Delete):
+            for target in node.targets:
+                record_target(target)
+        elif isinstance(node, ast.Call):
+            root = _python_setattr_root(node)
+            if root:
+                roots.add(root)
+    return frozenset(roots), taint_all
 
 
 @dataclass(frozen=True)
@@ -474,8 +517,25 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     writes: list[tuple[str, tuple[int, int]]] = []
 
     def visit(current: ast.AST) -> None:
+        if isinstance(current, ast.ExceptHandler):
+            if current.name:
+                writes.append((current.name, _python_after_node_position(current)))
+            for child in ast.iter_child_nodes(current):
+                visit(child)
+            return
+        if isinstance(current, ast.Match):
+            capture_names = {
+                name
+                for case in current.cases
+                for name in _python_match_capture_names(case.pattern)
+            }
+            for child in ast.iter_child_nodes(current):
+                visit(child)
+            for name in capture_names:
+                writes.append((name, _python_after_node_position(current)))
+            return
         if isinstance(current, ast.Call):
-            root = _python_literal_setattr_root(current)
+            root = _python_setattr_root(current)
             if root:
                 writes.append((root, _python_node_position(current)))
             return
@@ -516,13 +576,12 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     return writes
 
 
-def _python_literal_setattr_root(node: ast.Call) -> str:
-    """Root object changed by a literal ``setattr(receiver, member, value)``."""
+def _python_setattr_root(node: ast.Call) -> str:
+    """Root object changed by direct ``setattr(receiver, member, value)``."""
     if (
         not isinstance(node.func, ast.Name)
         or node.func.id != "setattr"
         or len(node.args) < 2
-        or not _python_string_literal(node.args[1])
     ):
         return ""
     target = node.args[0]
@@ -1232,14 +1291,13 @@ def _discover_celery_file_runtime(
                     constructor_names.add(local)
                 elif module == "celery" and alias.name == "current_app":
                     app_names.add(local)
-                elif module.startswith("celery.") and alias.name in _CELERY_DECORATOR_MEMBERS:
-                    decorator_names.add(local)
+
             continue
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".", 1)[0]
                 revoke({local})
-                if alias.name == "celery" or alias.name.startswith("celery."):
+                if alias.name == "celery":
                     celery_module_names.add(local)
             continue
         if isinstance(node, ast.AnnAssign) and node.value is None:
@@ -1485,6 +1543,14 @@ def _python_node_position(node: ast.AST) -> tuple[int, int]:
     return (getattr(node, "lineno", 0), getattr(node, "col_offset", 0))
 
 
+def _python_after_node_position(node: ast.AST) -> tuple[int, int]:
+    """First source position after one AST node's lexical execution scope."""
+    return (
+        getattr(node, "end_lineno", getattr(node, "lineno", 0)),
+        getattr(node, "end_col_offset", getattr(node, "col_offset", 0)),
+    )
+
+
 def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
     """Top-level names that are structurally imported from Celery schedules."""
     bindings: dict[str, tuple[int, int]] = {}
@@ -1509,7 +1575,7 @@ def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
                 if alias.name == "celery.schedules":
                     bindings[f"{local}.crontab"] = _python_node_position(node)
             continue
-        for name in _python_assignment_names_if_any(node):
+        for name, _ in _python_module_write_events(node):
             bindings.pop(name, None)
             bindings.pop(f"{name}.crontab", None)
     return bindings
@@ -1565,6 +1631,7 @@ def _discover_django_file_runtime(
                 if alias.name == "*":
                     continue
                 local = alias.asname or alias.name
+                commands_by_name.pop(local, None)
                 revoke({local})
                 if module == "django.dispatch" and alias.name == "receiver":
                     receiver_names.add(local)
@@ -1584,6 +1651,7 @@ def _discover_django_file_runtime(
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".", 1)[0]
+                commands_by_name.pop(local, None)
                 revoke({local})
                 if alias.name == "django.db.models.signals":
                     signal_module_names.add(local)
@@ -1604,6 +1672,7 @@ def _discover_django_file_runtime(
             revoke({node.name})
             continue
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            commands_by_name.pop(node.name, None)
             signal = _python_receiver_signal(
                 node, receiver_names, signal_names, signal_module_names
             )
@@ -1620,7 +1689,7 @@ def _discover_django_file_runtime(
             revoke({node.name})
             continue
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
-            root = _python_literal_setattr_root(node.value)
+            root = _python_setattr_root(node.value)
             if root:
                 revoke({root})
                 continue
@@ -1638,7 +1707,10 @@ def _discover_django_file_runtime(
                     )
                 )
             continue
-        revoke(_python_assignment_names_if_any(node))
+        rebound_names = _python_assignment_names_if_any(node)
+        for name in rebound_names:
+            commands_by_name.pop(name, None)
+        revoke(rebound_names)
     return [*tasks, *commands_by_name.values()]
 
 
@@ -1862,6 +1934,12 @@ def _js_bound_runtime_calls(
         calls = js_bound_calls(
             Path(file_path), source, language, JS_BOUND_RUNTIME_MODULES
         )
+        if calls is None:
+            # A Vue SFC compiles its executable script blocks as one component;
+            # an invalid companion block means no block can be runtime proof.
+            if Path(file_path).suffix.lower() == ".vue":
+                return ()
+            continue
         if calls:
             found.extend((language, call) for call in calls)
     return tuple(found)
@@ -2201,26 +2279,34 @@ def _discover_python_realtime_consumers(
             continue
         consumer_names: dict[str, str] = {}
         consumer_modules: set[str] = set()
-        route_names: set[str] = set()
-        route_modules: set[str] = set()
-        auth_names: set[str] = set()
+        route_name_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
+        route_module_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
+        auth_name_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
         class_nodes: dict[str, tuple[str, ast.ClassDef]] = {}
 
-        def revoke(name: str) -> None:
+        def record(
+            events: dict[str, list[tuple[tuple[int, int], bool]]],
+            name: str,
+            position: tuple[int, int],
+            available: bool,
+        ) -> None:
+            events.setdefault(name, []).append((position, available))
+
+        def revoke(name: str, position: tuple[int, int]) -> None:
             consumer_names.pop(name, None)
             consumer_modules.discard(name)
-            route_names.discard(name)
-            route_modules.discard(name)
-            auth_names.discard(name)
+            for events in (route_name_events, route_module_events, auth_name_events):
+                record(events, name, position, False)
 
         for node in tree.body:
+            position = _python_node_position(node)
             if isinstance(node, ast.ImportFrom):
                 module = node.module or ""
                 for alias in node.names:
                     if alias.name == "*":
                         continue
                     local = alias.asname or alias.name
-                    revoke(local)
+                    revoke(local, position)
                     if (
                         module == _CHANNELS_WEBSOCKET_MODULE
                         and alias.name in _CHANNELS_CONSUMER_TYPES
@@ -2232,23 +2318,23 @@ def _discover_python_realtime_consumers(
                         "path",
                         "re_path",
                     }:
-                        route_names.add(local)
+                        record(route_name_events, local, position, True)
                     elif module == "channels.auth" and alias.name == "AuthMiddlewareStack":
-                        auth_names.add(local)
+                        record(auth_name_events, local, position, True)
                 continue
             if isinstance(node, ast.Import):
                 for alias in node.names:
                     local = alias.asname or alias.name.split(".", 1)[0]
-                    revoke(local)
+                    revoke(local, position)
                     if alias.name == _CHANNELS_WEBSOCKET_MODULE:
                         consumer_modules.add(local)
                     elif alias.name in _DJANGO_ROUTE_MODULES:
-                        route_modules.add(local)
+                        record(route_module_events, local, position, True)
                     elif alias.name == "channels.auth":
-                        auth_names.add(local)
+                        record(auth_name_events, local, position, True)
                 continue
             if isinstance(node, ast.ClassDef):
-                revoke(node.name)
+                revoke(node.name, position)
                 class_nodes.pop(node.name, None)
                 consumer_type = _python_channels_consumer_type(
                     node, consumer_names, consumer_modules
@@ -2256,8 +2342,21 @@ def _discover_python_realtime_consumers(
                 if consumer_type:
                     class_nodes[node.name] = (consumer_type, node)
                 continue
-            for name, _ in _python_module_write_events(node):
-                revoke(name)
+            for name, write_position in _python_module_write_events(node):
+                revoke(name, write_position)
+
+        def names_at(
+            events: dict[str, list[tuple[tuple[int, int], bool]]],
+            position: tuple[int, int],
+        ) -> set[str]:
+            available: set[str] = set()
+            for name, history in events.items():
+                for event_position, enabled in reversed(history):
+                    if event_position <= position:
+                        if enabled:
+                            available.add(name)
+                        break
+            return available
 
         local_shadows_by_call = _python_local_shadows_by_call(tree)
         routes_by_consumer = {name: set() for name in class_nodes}
@@ -2265,7 +2364,9 @@ def _discover_python_realtime_consumers(
             not _python_call_root_is_shadowed(
                 call, call.func, local_shadows_by_call
             )
-            and _python_channels_auth_call(call, auth_names)
+            and _python_channels_auth_call(
+                call, names_at(auth_name_events, _python_node_position(call))
+            )
             for call in ast.walk(tree)
             if isinstance(call, ast.Call)
         )
@@ -2276,7 +2377,9 @@ def _discover_python_realtime_consumers(
                     call, call.func, local_shadows_by_call
                 )
                 or not _python_channels_route_call(
-                    call, route_names, route_modules
+                    call,
+                    names_at(route_name_events, _python_node_position(call)),
+                    names_at(route_module_events, _python_node_position(call)),
                 )
             ):
                 continue

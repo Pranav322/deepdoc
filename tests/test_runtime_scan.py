@@ -718,6 +718,30 @@ def test_go_shadowed_or_reassigned_scheduler_bindings_create_no_facts() -> None:
     ] == []
 
 
+def test_go_inner_block_scheduler_binding_cannot_escape_its_scope() -> None:
+    """A scheduler receiver declared in an inner block is undefined outside it."""
+    path = "internal/escaped_scope.go"
+    source = (
+        "package internal\n"
+        "import cron \"github.com/robfig/cron/v3\"\n"
+        "func task() {}\n"
+        "func boot() {\n"
+        "    { c := cron.New(); _ = c }\n"
+        "    c.AddFunc(\"@every 1m\", task)\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="go")}, {path: source}
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "go_worker"] == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type in {"go_cron", "go_schedule"}
+    ] == []
+
+
 def test_generic_js_process_and_consume_are_not_queue_workers() -> None:
     """`.process(`/`.consume(` are ordinary method names without a queue import."""
     parsed_files = {

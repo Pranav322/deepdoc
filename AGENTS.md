@@ -209,7 +209,7 @@ DeepDoc can parse a number of source formats, but parsing is not the same as ful
 - Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
 - If a change touches persisted state or freshness semantics, audit plan, ledger, sync state, manifest, and stale detection together.
 - Freshness treats a missing tracked path as a deletion only when that path had a recorded generation hash. Never-existing LLM artifact hints are not allowed to make a freshly generated bucket immediately stale.
-- If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
+- If route behavior or runtime-evidence semantics change materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 - CLI-facing failures should raise `click.ClickException` or print a clear Rich message.
 - If CLI behavior changes, update `README.md` and root `CHANGELOG.md` in the same task.
 - The version compatibility warning compares major versions only (`generated_major < cli_major`); message says "run `deepdoc generate`", not "upgrade the CLI".

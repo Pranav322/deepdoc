@@ -3,7 +3,7 @@ from bisect import bisect_left, bisect_right
 from dataclasses import dataclass
 import re
 from pathlib import Path
-from typing import Any, Sequence
+from typing import AbstractSet, Any, Optional, Sequence
 
 from .common import (
     DispatchEvidence,
@@ -616,7 +616,7 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     return writes
 
 
-def _python_is_globals_call(node: ast.AST | None) -> bool:
+def _python_is_globals_call(node: Optional[ast.AST]) -> bool:
     """A bare ``globals()`` call, which exposes the module binding namespace."""
     return (
         isinstance(node, ast.Call)
@@ -2501,7 +2501,7 @@ def _discover_python_realtime_consumers(
 
 
 def _python_imported_module_member(
-    dotted: str, module_paths: set[str], members: frozenset[str] | set[str]
+    dotted: str, module_paths: set[str], members: AbstractSet[str]
 ) -> str:
     """Exact member reached through a proven `import <module path>` binding.
 

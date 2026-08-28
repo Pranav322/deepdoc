@@ -626,9 +626,10 @@ class _Binder:
             if callee is None or callee.type != "identifier":
                 continue
             declaration = self._declaration_for(callee)
-            if declaration in reaches_eval:
-                invoked.add(declaration)
-                self._record_nested_eval_effect(call.start_byte)
+            if declaration is None or declaration not in reaches_eval:
+                continue
+            invoked.add(declaration)
+            self._record_nested_eval_effect(call.start_byte)
         if unresolved_eval or reaches_eval - invoked:
             # An eval that may run at an unknown time makes the file unsafe.
             self._record_nested_eval_effect(0)

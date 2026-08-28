@@ -1065,9 +1065,13 @@ def test_js_short_circuit_rhs_cannot_create_runtime_evidence() -> None:
         "producers/short.js": (
             "const { Queue, Worker } = require('bullmq');\n"
             "const queue = new Queue('orders');\n"
+            "const trustedQueue = new Queue('orders');\n"
+            "let conditionalQueue;\n"
             "false && queue.add('job', {});\n"
             "true || new Worker('or-never', handle);\n"
             "value ?? new Worker('nullish-never', handle);\n"
+            "value ?? (conditionalQueue = trustedQueue);\n"
+            "conditionalQueue.add('lazy-alias-job', {});\n"
         ),
     }
     runtime = discover_runtime_surfaces(

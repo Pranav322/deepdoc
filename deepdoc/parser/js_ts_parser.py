@@ -883,8 +883,8 @@ def _is_definite_binding_write(name_node, declaration: _Declaration) -> bool:
             return True
         if node.type in _UNCERTAIN_WRITE_ANCESTORS:
             return False
-        if node.type == "binary_expression" and (
-            "&&" in _text(node) or "||" in _text(node)
+        if node.type == "binary_expression" and _is_lazy_binary_rhs(
+            name_node, node
         ):
             return False
         node = node.parent

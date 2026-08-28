@@ -3811,6 +3811,68 @@ def test_python_dynamic_reflected_global_write_suppresses_framework_proof() -> N
     assert [task for task in runtime.tasks if task.name == "forged"] == []
 
 
+def test_python_plain_module_import_cannot_shorten_runtime_receivers() -> None:
+    """`import a.b.c` binds only `a`; a shortened receiver proves nothing."""
+    sources = {
+        "realtime/consumers.py": (
+            "import channels.generic.websocket\n"
+            "class Forged(channels.AsyncWebsocketConsumer):\n"
+            "    pass\n"
+        ),
+        "schedules/faux.py": (
+            "import celery.schedules\n"
+            "SCHEDULE = celery.crontab(hour=1)\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert runtime.realtime_consumers == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "crontab"
+    ] == []
+
+
+def test_python_exact_module_import_receivers_are_preserved() -> None:
+    """The full dotted path and an explicit alias both stay valid receivers."""
+    sources = {
+        "realtime/dotted.py": (
+            "import channels.generic.websocket\n"
+            "class Dotted(channels.generic.websocket.AsyncWebsocketConsumer):\n"
+            "    pass\n"
+        ),
+        "realtime/aliased.py": (
+            "import channels.generic.websocket as websocket\n"
+            "class Aliased(websocket.AsyncWebsocketConsumer):\n"
+            "    pass\n"
+        ),
+        "schedules/dotted.py": (
+            "import celery.schedules\n"
+            "SCHEDULE = celery.schedules.crontab(hour=1)\n"
+        ),
+        "schedules/aliased.py": (
+            "import celery.schedules as schedules\n"
+            "SCHEDULE = schedules.crontab(hour=1)\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert sorted(item.name for item in runtime.realtime_consumers) == [
+        "Aliased",
+        "Dotted",
+    ]
+    assert sorted(
+        scheduler.file_path
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "crontab"
+    ) == ["schedules/aliased.py", "schedules/dotted.py"]
+
+
 def test_python_direct_exec_suppresses_celery_runtime_proof() -> None:
     """Unknown direct execution makes the module's framework bindings unsafe."""
     path = "workers/faux.py"

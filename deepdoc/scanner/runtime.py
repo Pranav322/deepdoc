@@ -1619,6 +1619,15 @@ def _python_after_node_position(node: ast.AST) -> tuple[int, int]:
     )
 
 
+def _python_revoke_crontab_bindings(
+    bindings: dict[str, tuple[int, int]], name: str
+) -> None:
+    """Drop every crontab receiver reached through a now-rebound module name."""
+    for binding in tuple(bindings):
+        if binding == name or binding.startswith(f"{name}."):
+            del bindings[binding]
+
+
 def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
     """Top-level names that are structurally imported from Celery schedules."""
     bindings: dict[str, tuple[int, int]] = {}
@@ -1629,7 +1638,7 @@ def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
                 if alias.name == "*":
                     continue
                 local = alias.asname or alias.name
-                bindings.pop(local, None)
+                _python_revoke_crontab_bindings(bindings, local)
                 if module == "celery.schedules" and alias.name == "crontab":
                     bindings[local] = _python_node_position(node)
                 elif module == "celery" and alias.name == "schedules":
@@ -1638,14 +1647,13 @@ def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".", 1)[0]
-                bindings.pop(local, None)
-                bindings.pop(f"{local}.crontab", None)
+                _python_revoke_crontab_bindings(bindings, local)
                 if alias.name == "celery.schedules":
-                    bindings[f"{local}.crontab"] = _python_node_position(node)
+                    binding = alias.asname or alias.name
+                    bindings[f"{binding}.crontab"] = _python_node_position(node)
             continue
         for name, _ in _python_module_write_events(node):
-            bindings.pop(name, None)
-            bindings.pop(f"{name}.crontab", None)
+            _python_revoke_crontab_bindings(bindings, name)
     return bindings
 
 
@@ -2370,12 +2378,15 @@ def _discover_python_realtime_consumers(
 
         def revoke(name: str, position: tuple[int, int]) -> None:
             consumer_names.pop(name, None)
-            consumer_modules.discard(name)
-            for events in (route_name_events, route_module_events, auth_name_events):
-                record(events, name, position, False)
-            for module_name in tuple(auth_module_events):
-                if module_name == name or module_name.startswith(f"{name}."):
-                    record(auth_module_events, module_name, position, False)
+            for module_path in tuple(consumer_modules):
+                if module_path == name or module_path.startswith(f"{name}."):
+                    consumer_modules.discard(module_path)
+            record(route_name_events, name, position, False)
+            record(auth_name_events, name, position, False)
+            for events in (route_module_events, auth_module_events):
+                for module_name in tuple(events):
+                    if module_name == name or module_name.startswith(f"{name}."):
+                        record(events, module_name, position, False)
 
         for node in tree.body:
             position = _python_node_position(node)
@@ -2405,13 +2416,13 @@ def _discover_python_realtime_consumers(
                 for alias in node.names:
                     local = alias.asname or alias.name.split(".", 1)[0]
                     revoke(local, position)
+                    module_binding = alias.asname or alias.name
                     if alias.name == _CHANNELS_WEBSOCKET_MODULE:
-                        consumer_modules.add(local)
+                        consumer_modules.add(module_binding)
                     elif alias.name in _DJANGO_ROUTE_MODULES:
-                        record(route_module_events, local, position, True)
+                        record(route_module_events, module_binding, position, True)
                     elif alias.name == "channels.auth":
-                        auth_module = alias.asname or alias.name
-                        record(auth_module_events, auth_module, position, True)
+                        record(auth_module_events, module_binding, position, True)
                 continue
             if isinstance(node, ast.ClassDef):
                 revoke(node.name, position)
@@ -2489,6 +2500,22 @@ def _discover_python_realtime_consumers(
     return _dedupe_consumers(consumers)
 
 
+def _python_imported_module_member(
+    dotted: str, module_paths: set[str], members: frozenset[str] | set[str]
+) -> str:
+    """Exact member reached through a proven `import <module path>` binding.
+
+    `import a.b.c` exposes `a.b.c.member`, never `a.member`; only the local
+    dotted path Python actually binds may prove a framework receiver.
+    """
+    for prefix in module_paths:
+        if dotted.startswith(f"{prefix}."):
+            member = dotted[len(prefix) + 1 :]
+            if member in members:
+                return member
+    return ""
+
+
 def _python_channels_consumer_type(
     node: ast.ClassDef,
     consumer_names: dict[str, str],
@@ -2499,13 +2526,11 @@ def _python_channels_consumer_type(
         dotted = _python_dotted_name(base)
         if dotted in consumer_names:
             return consumer_names[dotted]
-        parts = dotted.split(".") if dotted else []
-        if (
-            len(parts) == 2
-            and parts[0] in consumer_modules
-            and parts[1] in _CHANNELS_CONSUMER_TYPES
-        ):
-            return parts[1]
+        member = _python_imported_module_member(
+            dotted, consumer_modules, _CHANNELS_CONSUMER_TYPES
+        )
+        if member:
+            return member
     return ""
 
 
@@ -2518,11 +2543,8 @@ def _python_channels_route_call(
     dotted = _python_dotted_name(call.func)
     if dotted in route_names:
         return True
-    parts = dotted.split(".") if dotted else []
-    return (
-        len(parts) == 2
-        and parts[0] in route_modules
-        and parts[1] in {"path", "re_path"}
+    return bool(
+        _python_imported_module_member(dotted, route_modules, {"path", "re_path"})
     )
 
 

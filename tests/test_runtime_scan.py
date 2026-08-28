@@ -473,6 +473,88 @@ def test_php_reassigned_or_closure_shadowed_schedule_cannot_create_scheduler() -
     ] == []
 
 
+def test_php_reference_rebound_schedule_cannot_create_scheduler() -> None:
+    """A by-reference rebind replaces the trusted Schedule parameter binding."""
+    path = "app/Console/ReferenceKernel.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+        "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+        "class Kernel extends ConsoleKernel {\n"
+        "    protected function schedule(Schedule $schedule): void {\n"
+        "        $other = new FakeScheduler();\n"
+        "        $schedule =& $other;\n"
+        "        $schedule->command('forged:reference')->daily();\n"
+        "    }\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
+def test_php_by_reference_closure_invocation_revokes_schedule_binding() -> None:
+    """An invoked closure capturing `&$schedule` mutates the outer binding."""
+    path = "app/Console/IifeKernel.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+        "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+        "class Kernel extends ConsoleKernel {\n"
+        "    protected function schedule(Schedule $schedule): void {\n"
+        "        (function () use (&$schedule) {\n"
+        "            $schedule = new FakeScheduler();\n"
+        "        })();\n"
+        "        $schedule->command('forged:iife')->daily();\n"
+        "    }\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
+def test_php_by_value_closure_invocation_preserves_schedule_binding() -> None:
+    """A by-value capture cannot rebind the caller's Schedule parameter."""
+    path = "app/Console/ByValueKernel.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+        "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+        "class Kernel extends ConsoleKernel {\n"
+        "    protected function schedule(Schedule $schedule): void {\n"
+        "        (function () use ($schedule) {\n"
+        "            $schedule = new FakeScheduler();\n"
+        "        })();\n"
+        "        $schedule->command(\"orders:sync\")->daily();\n"
+        "    }\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    laravel = [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ]
+    assert len(laravel) == 1
+    assert laravel[0].invoked_targets == ["orders:sync"]
+
+
 def test_php_destructured_schedule_rebind_cannot_create_scheduler() -> None:
     """Destructuring assignment replaces the trusted Schedule parameter binding."""
     path = "app/Console/DestructuredKernel.php"

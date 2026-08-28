@@ -265,6 +265,35 @@ def _php_schedule_target_is_rebound(target) -> bool:
     return False
 
 
+def _php_invoked_by_ref_schedule_closure(node) -> bool:
+    """An immediately invoked closure that can rebind the caller's `$schedule`.
+
+    Only a `use (&$schedule)` capture reaches the outer binding; a by-value
+    capture or an uninvoked closure leaves the typed parameter intact.
+    """
+    if node.type != "function_call_expression":
+        return False
+    callee = node.child_by_field_name("function")
+    if callee is None or callee.type != "parenthesized_expression":
+        return False
+    closure = next(
+        (child for child in callee.named_children if child.type == "anonymous_function"),
+        None,
+    )
+    if closure is None:
+        return False
+    captured_by_ref = any(
+        capture.type == "by_ref" and _php_schedule_target_is_rebound(capture)
+        for clause in closure.named_children
+        if clause.type == "anonymous_function_use_clause"
+        for capture in clause.named_children
+    )
+    body = closure.child_by_field_name("body")
+    if not captured_by_ref or body is None:
+        return False
+    return bool(_php_schedule_reassignment_positions(body))
+
+
 def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
     """Direct-method writes that revoke the typed `$schedule` parameter."""
     positions: list[int] = []
@@ -272,6 +301,8 @@ def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
     def visit(current) -> None:
         if current.type in _PHP_NESTED_FUNCTION_TYPES:
             return
+        if _php_invoked_by_ref_schedule_closure(current):
+            positions.append(current.start_byte)
         if current.type == "foreach_statement":
             body = current.child_by_field_name("body")
             bindings = [
@@ -280,7 +311,7 @@ def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
             target = bindings[-1] if len(bindings) >= 2 else None
             if target is not None and _php_schedule_target_is_rebound(target):
                 positions.append(current.start_byte)
-        if current.type == "assignment_expression":
+        if current.type in {"assignment_expression", "reference_assignment_expression"}:
             target = current.child_by_field_name("left")
             if target is not None and _php_schedule_target_is_rebound(target):
                 positions.append(current.start_byte)

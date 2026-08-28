@@ -14,8 +14,14 @@ from .common import (
 )
 from .utils import endpoint_owned_files
 from ..parser.base import ParsedFile
+from ..parser.go_parser import go_runtime_facts
 from ..parser.js_ts_parser import JsBoundCall, js_bound_calls
-from ..parser.php_parser import php_class_declarations, php_dispatches, php_schedules
+from ..parser.php_parser import (
+    PhpClassDeclaration,
+    php_class_declarations,
+    php_dispatches,
+    php_schedules,
+)
 from ..parser.registry import language_for_extension
 from ..parser.vue_parser import _extract_script_blocks
 from ..source_metadata import classify_source_kind, is_low_trust_source_kind
@@ -154,6 +160,16 @@ def _python_ast_trees(file_contents: dict[str, str]) -> dict[str, ast.Module]:
         except SyntaxError:
             continue
     return trees
+
+
+def _python_has_direct_exec(tree: ast.Module) -> bool:
+    """Whether unmodelled direct execution can mutate module runtime bindings."""
+    return any(
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "exec"
+        for node in ast.walk(tree)
+    )
 
 
 def _php_runtime_target_identities(tasks: list[RuntimeTask]) -> frozenset[str]:
@@ -370,6 +386,8 @@ def _python_runtime_bindings(
     task_exports_by_path: dict[str, set[str]],
 ) -> _PythonRuntimeBindings:
     """Exact-position module binding histories for task and signal receivers."""
+    if _python_has_direct_exec(tree):
+        return _PythonRuntimeBindings({})
     raw_histories: dict[str, list[tuple[tuple[int, int], _PythonBindingEvent]]] = {}
 
     def record(
@@ -456,6 +474,11 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     writes: list[tuple[str, tuple[int, int]]] = []
 
     def visit(current: ast.AST) -> None:
+        if isinstance(current, ast.Call):
+            root = _python_literal_setattr_root(current)
+            if root:
+                writes.append((root, _python_node_position(current)))
+            return
         if isinstance(current, ast.Delete):
             for name in _python_delete_names(current):
                 writes.append((name, _python_node_position(current)))
@@ -493,6 +516,21 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     return writes
 
 
+def _python_literal_setattr_root(node: ast.Call) -> str:
+    """Root object changed by a literal ``setattr(receiver, member, value)``."""
+    if (
+        not isinstance(node.func, ast.Name)
+        or node.func.id != "setattr"
+        or len(node.args) < 2
+        or not _python_string_literal(node.args[1])
+    ):
+        return ""
+    target = node.args[0]
+    while isinstance(target, (ast.Attribute, ast.Subscript)):
+        target = target.value
+    return target.id if isinstance(target, ast.Name) else ""
+
+
 def _python_binding_at(
     bindings: _PythonRuntimeBindings, name: str, position: tuple[int, int]
 ) -> _PythonBindingEvent | None:
@@ -507,6 +545,33 @@ def _python_local_shadows_by_call(tree: ast.Module) -> dict[int, frozenset[str]]
     def visit(node: ast.AST, scopes: tuple[frozenset[str], ...]) -> None:
         if isinstance(node, ast.Call):
             shadows_by_call[id(node)] = frozenset().union(*scopes)
+        if isinstance(node, ast.Match):
+            visit(node.subject, scopes)
+            for case in node.cases:
+                case_scope = _python_match_capture_names(case.pattern)
+                if case.guard is not None:
+                    visit(case.guard, (*scopes, case_scope))
+                for statement in case.body:
+                    visit(statement, (*scopes, case_scope))
+            return
+        if isinstance(node, ast.ExceptHandler):
+            if node.type is not None:
+                visit(node.type, scopes)
+            handler_scope = frozenset({node.name}) if node.name else frozenset()
+            for statement in node.body:
+                visit(statement, (*scopes, handler_scope))
+            return
+        if isinstance(
+            node, (ast.ListComp, ast.SetComp, ast.DictComp, ast.GeneratorExp)
+        ):
+            comprehension_scope = frozenset(
+                _python_write_target_names(
+                    tuple(generator.target for generator in node.generators)
+                )
+            )
+            for child in ast.iter_child_nodes(node):
+                visit(child, (*scopes, comprehension_scope))
+            return
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             for decorator in node.decorator_list:
                 visit(decorator, scopes)
@@ -543,6 +608,19 @@ def _python_local_shadows_by_call(tree: ast.Module) -> dict[int, frozenset[str]]
 
     visit(tree, ())
     return shadows_by_call
+
+
+def _python_match_capture_names(pattern: ast.pattern) -> frozenset[str]:
+    """Names a structural pattern binds inside one match case."""
+    names: set[str] = set()
+    for node in ast.walk(pattern):
+        if isinstance(node, ast.MatchAs) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchStar) and node.name:
+            names.add(node.name)
+        elif isinstance(node, ast.MatchMapping) and node.rest:
+            names.add(node.rest)
+    return frozenset(names)
 
 
 def _python_scope_bound_names(
@@ -1122,6 +1200,8 @@ def _discover_celery_file_runtime(
     set[tuple[str, tuple[int, int]]],
 ]:
     """Celery facts for one valid module in exact top-level source order."""
+    if _python_has_direct_exec(tree):
+        return [], [], set(), set()
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
     decorator_names: set[str] = set()
@@ -1166,6 +1246,7 @@ def _discover_celery_file_runtime(
             # A bare module annotation does not evaluate or rebind the name.
             continue
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
+            is_beat_schedule = _python_is_beat_schedule_assignment(node, app_names)
             names = _python_assignment_names(node)
             if names and _python_is_celery_app_factory(
                 _python_assignment_value(node), constructor_names, celery_module_names
@@ -1174,7 +1255,7 @@ def _discover_celery_file_runtime(
                 app_names.update(names)
             else:
                 revoke(names)
-            if _python_is_beat_schedule_assignment(node):
+            if is_beat_schedule:
                 for target, schedule in _python_beat_entries(
                     _python_assignment_value(node), content
                 ):
@@ -1327,9 +1408,20 @@ def _python_string_literal(node: ast.AST | None) -> str:
     return node.value if isinstance(node, ast.Constant) and isinstance(node.value, str) else ""
 
 
-def _python_is_beat_schedule_assignment(node: ast.Assign | ast.AnnAssign) -> bool:
+def _python_is_beat_schedule_assignment(
+    node: ast.Assign | ast.AnnAssign, app_names: set[str]
+) -> bool:
+    """Whether a proven Celery app receives a literal beat schedule mapping."""
     targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
-    return any(isinstance(target, ast.Attribute) and target.attr == "beat_schedule" for target in targets)
+    for target in targets:
+        if not isinstance(target, ast.Attribute) or target.attr != "beat_schedule":
+            continue
+        receiver = target.value
+        while isinstance(receiver, (ast.Attribute, ast.Subscript)):
+            receiver = receiver.value
+        if isinstance(receiver, ast.Name) and receiver.id in app_names:
+            return True
+    return False
 
 
 def _python_beat_entries(value: ast.expr | None, content: str) -> list[tuple[str, str]]:
@@ -1359,12 +1451,19 @@ def _discover_schedulers(
     """Discover proven Celery ``crontab(...)`` calls from valid Python ASTs."""
     schedulers: list[RuntimeScheduler] = []
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
+        if _python_has_direct_exec(tree):
+            continue
         bindings = _python_crontab_bindings(tree)
+        local_shadows_by_call = _python_local_shadows_by_call(tree)
         count = 0
         for call in sorted(
             (node for node in ast.walk(tree) if isinstance(node, ast.Call)),
             key=_python_node_position,
         ):
+            if _python_call_root_is_shadowed(
+                call, call.func, local_shadows_by_call
+            ):
+                continue
             dotted = _python_dotted_name(call.func)
             binding = bindings.get(dotted)
             if binding is None or binding > _python_node_position(call):
@@ -1443,7 +1542,10 @@ def _discover_django_file_runtime(
     file_path: str, tree: ast.Module
 ) -> list[RuntimeTask]:
     """Django module facts in source order, rejecting generic lookalikes."""
+    if _python_has_direct_exec(tree):
+        return []
     tasks: list[RuntimeTask] = []
+    commands_by_name: dict[str, RuntimeTask] = {}
     receiver_names: set[str] = set()
     signal_names: dict[str, str] = {}
     signal_module_names: set[str] = set()
@@ -1487,18 +1589,17 @@ def _discover_django_file_runtime(
                     signal_module_names.add(local)
             continue
         if isinstance(node, ast.ClassDef):
+            commands_by_name.pop(node.name, None)
             if any(
                 _python_dotted_name(base) in base_command_names
                 for base in node.bases
             ):
-                tasks.append(
-                    RuntimeTask(
-                        name=Path(file_path).stem.replace("_", "-"),
-                        file_path=file_path,
-                        runtime_kind="django_command",
-                        decorator="BaseCommand",
-                        triggers=["manage.py"],
-                    )
+                commands_by_name[node.name] = RuntimeTask(
+                    name=Path(file_path).stem.replace("_", "-"),
+                    file_path=file_path,
+                    runtime_kind="django_command",
+                    decorator="BaseCommand",
+                    triggers=["manage.py"],
                 )
             revoke({node.name})
             continue
@@ -1519,6 +1620,10 @@ def _discover_django_file_runtime(
             revoke({node.name})
             continue
         if isinstance(node, ast.Expr) and isinstance(node.value, ast.Call):
+            root = _python_literal_setattr_root(node.value)
+            if root:
+                revoke({root})
+                continue
             signal, handler = _python_signal_connect(
                 node.value, signal_names, signal_module_names
             )
@@ -1534,7 +1639,7 @@ def _discover_django_file_runtime(
                 )
             continue
         revoke(_python_assignment_names_if_any(node))
-    return tasks
+    return [*tasks, *commands_by_name.values()]
 
 
 def _python_receiver_signal(
@@ -1587,20 +1692,48 @@ def _python_django_signal_name(
     return ""
 
 
+_LARAVEL_SHOULD_QUEUE = r"Illuminate\Contracts\Queue\ShouldQueue"
+
+
 def _discover_laravel_runtime(
     file_contents: dict[str, str],
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
+    event_declarations: list[tuple[str, PhpClassDeclaration]] = []
+    event_dispatch_targets = {
+        dispatch.target.lower()
+        for content in file_contents.values()
+        for dispatch in php_dispatches(content)
+        if dispatch.relation == "event"
+    }
 
     for file_path, content in file_contents.items():
-        lower_file = file_path.lower()
         for declaration in php_class_declarations(content):
+            event_declarations.append((file_path, declaration))
             is_queued = any(
-                interface.rsplit("\\", 1)[-1].lower() == "shouldqueue"
+                interface.strip().lstrip("\\").lower()
+                == _LARAVEL_SHOULD_QUEUE.lower()
                 for interface in declaration.interfaces
             )
-            if is_queued or "/jobs/" in lower_file:
+            is_listener = (
+                is_queued
+                and declaration.has_handle
+                and declaration.handle_event.lower() in event_dispatch_targets
+            )
+            if is_listener:
+                tasks.append(
+                    RuntimeTask(
+                        name=declaration.name,
+                        file_path=file_path,
+                        runtime_kind="laravel_listener",
+                        decorator="ShouldQueue.handle",
+                        queue=declaration.queue,
+                        triggers=[declaration.handle_event.rsplit("\\", 1)[-1]],
+                        target_identities=(declaration.target,),
+                    )
+                )
+            elif is_queued:
                 tasks.append(
                     RuntimeTask(
                         name=declaration.name,
@@ -1611,38 +1744,10 @@ def _discover_laravel_runtime(
                         target_identities=(declaration.target,),
                     )
                 )
-            if "/listeners/" in lower_file and declaration.has_handle:
-                tasks.append(
-                    RuntimeTask(
-                        name=declaration.name,
-                        file_path=file_path,
-                        runtime_kind="laravel_listener",
-                        decorator="listener",
-                        queue=declaration.queue,
-                        triggers=[declaration.handle_event.rsplit("\\", 1)[-1]]
-                        if declaration.handle_event
-                        else [],
-                        target_identities=(declaration.target,),
-                    )
-                )
-            if "/events/" in lower_file:
-                tasks.append(
-                    RuntimeTask(
-                        name=declaration.name,
-                        file_path=file_path,
-                        runtime_kind="laravel_event",
-                        decorator="event",
-                        target_identities=(declaration.target,),
-                    )
-                )
         schedule_counts: dict[str, int] = {}
         for schedule in php_schedules(content):
             schedule_counts[schedule.kind] = schedule_counts.get(schedule.kind, 0) + 1
-            target = (
-                schedule.target.rsplit("\\", 1)[-1]
-                if schedule.kind == "job"
-                else schedule.target
-            )
+            target = schedule.target
             schedulers.append(
                 RuntimeScheduler(
                     name=f"laravel-{schedule.kind}-{schedule_counts[schedule.kind]}",
@@ -1653,6 +1758,18 @@ def _discover_laravel_runtime(
                 )
             )
 
+    for file_path, declaration in event_declarations:
+        if declaration.target.lower() not in event_dispatch_targets:
+            continue
+        tasks.append(
+            RuntimeTask(
+                name=declaration.name,
+                file_path=file_path,
+                runtime_kind="laravel_event",
+                decorator="listener_handle_type",
+                target_identities=(declaration.target,),
+            )
+        )
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 
 
@@ -2026,70 +2143,43 @@ def _discover_nestjs_runtime(file_contents: dict[str, str]) -> list[RuntimeTask]
 def _discover_go_runtime(
     file_contents: dict[str, str],
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
+    """Discover only parser-proven Go goroutines and scheduler registrations."""
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
-    goroutine_pattern = re.compile(r"\bgo\s+([A-Za-z_][A-Za-z0-9_]*)\s*\(")
-    add_func_pattern = re.compile(
-        r"\.AddFunc\(\s*['\"]([^'\"]+)['\"]\s*,\s*([A-Za-z_][A-Za-z0-9_]*)",
-    )
-    every_pattern = re.compile(
-        r"\.Every\(\s*([0-9]+\s*\*\s*time\.[A-Za-z_]+)\s*\)\.Do\(\s*([A-Za-z_][A-Za-z0-9_]*)",
-    )
-
     for file_path, content in file_contents.items():
         if not file_path.endswith(".go"):
             continue
-
-        for worker_name in goroutine_pattern.findall(content):
-            tasks.append(
-                RuntimeTask(
-                    name=worker_name,
-                    file_path=file_path,
-                    runtime_kind="go_worker",
-                    decorator="goroutine",
+        for fact in go_runtime_facts(content):
+            if fact.kind == "goroutine":
+                tasks.append(
+                    RuntimeTask(
+                        name=fact.target,
+                        file_path=file_path,
+                        runtime_kind="go_worker",
+                        decorator="goroutine",
+                    )
                 )
-            )
-
-        for cron_expr, target in add_func_pattern.findall(content):
+                continue
+            scheduler_type = fact.kind
+            decorator = "cron.AddFunc" if scheduler_type == "go_cron" else "Every.Do"
             schedulers.append(
                 RuntimeScheduler(
-                    name=target,
+                    name=fact.target,
                     file_path=file_path,
-                    scheduler_type="go_cron",
-                    cron=cron_expr,
-                    invoked_targets=[target],
+                    scheduler_type=scheduler_type,
+                    cron=fact.schedule,
+                    invoked_targets=[fact.target],
                 )
             )
             tasks.append(
                 RuntimeTask(
-                    name=target,
+                    name=fact.target,
                     file_path=file_path,
                     runtime_kind="go_worker",
-                    decorator="cron.AddFunc",
-                    schedule_sources=[cron_expr],
+                    decorator=decorator,
+                    schedule_sources=[fact.schedule],
                 )
             )
-
-        for cadence, target in every_pattern.findall(content):
-            schedulers.append(
-                RuntimeScheduler(
-                    name=target,
-                    file_path=file_path,
-                    scheduler_type="go_schedule",
-                    cron=cadence,
-                    invoked_targets=[target],
-                )
-            )
-            tasks.append(
-                RuntimeTask(
-                    name=target,
-                    file_path=file_path,
-                    runtime_kind="go_worker",
-                    decorator="Every.Do",
-                    schedule_sources=[cadence],
-                )
-            )
-
     return _dedupe_runtime_tasks(tasks), _dedupe_schedulers(schedulers)
 
 
@@ -2107,6 +2197,8 @@ def _discover_python_realtime_consumers(
     """Discover Channels consumers only through AST-proven framework bindings."""
     consumers: list[RealtimeConsumer] = []
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
+        if _python_has_direct_exec(tree):
+            continue
         consumer_names: dict[str, str] = {}
         consumer_modules: set[str] = set()
         route_names: set[str] = set()
@@ -2156,6 +2248,7 @@ def _discover_python_realtime_consumers(
                         auth_names.add(local)
                 continue
             if isinstance(node, ast.ClassDef):
+                revoke(node.name)
                 class_nodes.pop(node.name, None)
                 consumer_type = _python_channels_consumer_type(
                     node, consumer_names, consumer_modules
@@ -2166,15 +2259,25 @@ def _discover_python_realtime_consumers(
             for name, _ in _python_module_write_events(node):
                 revoke(name)
 
+        local_shadows_by_call = _python_local_shadows_by_call(tree)
         routes_by_consumer = {name: set() for name in class_nodes}
         auth_used = any(
-            _python_channels_auth_call(call, auth_names)
+            not _python_call_root_is_shadowed(
+                call, call.func, local_shadows_by_call
+            )
+            and _python_channels_auth_call(call, auth_names)
             for call in ast.walk(tree)
             if isinstance(call, ast.Call)
         )
         for call in ast.walk(tree):
-            if not isinstance(call, ast.Call) or not _python_channels_route_call(
-                call, route_names, route_modules
+            if (
+                not isinstance(call, ast.Call)
+                or _python_call_root_is_shadowed(
+                    call, call.func, local_shadows_by_call
+                )
+                or not _python_channels_route_call(
+                    call, route_names, route_modules
+                )
             ):
                 continue
             consumer_name = _python_channels_route_consumer(call)

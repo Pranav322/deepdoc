@@ -519,7 +519,7 @@ def test_engine_fingerprint_records_semantic_boundary_refinement():
 
 def test_engine_fingerprint_records_runtime_evidence_contract():
     """Runtime-evidence semantic changes invalidate persisted scan state."""
-    assert ENGINE_FINGERPRINT.endswith("runtime_evidence_v6")
+    assert ENGINE_FINGERPRINT.endswith("runtime_evidence_v7")
 
 
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):

@@ -93,6 +93,7 @@ def test_runtime_and_database_discovery_extracts_runtime_graphql_and_knex_surfac
         ),
         "orders/tasks.py": (
             "from celery import shared_task\n"
+            "from celery import current_app as app\n"
             "from celery.schedules import crontab\n\n"
             "@shared_task(queue='critical', autoretry_for=(Exception,), retry_backoff=True)\n"
             "def sync_orders(order_id):\n"
@@ -301,6 +302,9 @@ def test_runtime_discovery_extracts_django_and_laravel_surfaces() -> None:
         "app/Events/OrderShipped.php": _parsed_file(
             "app/Events/OrderShipped.php", language="php"
         ),
+        "app/Http/OrderController.php": _parsed_file(
+            "app/Http/OrderController.php", language="php"
+        ),
         "app/Console/Kernel.php": _parsed_file(
             "app/Console/Kernel.php", language="php"
         ),
@@ -337,10 +341,19 @@ def test_runtime_discovery_extracts_django_and_laravel_surfaces() -> None:
             "}\n"
         ),
         "app/Events/OrderShipped.php": ("<?php\nclass OrderShipped\n{\n}\n"),
+        "app/Http/OrderController.php": "<?php\nevent(new OrderShipped());\n",
         "app/Console/Kernel.php": (
             "<?php\n"
-            "$schedule->command('orders:sync')->dailyAt('02:00');\n"
-            "$schedule->job(new SyncOrders)->everyFiveMinutes();\n"
+            "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+            "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+            "class Kernel extends ConsoleKernel\n"
+            "{\n"
+            "    protected function schedule(Schedule $schedule): void\n"
+            "    {\n"
+            "        $schedule->command('orders:sync')->dailyAt('02:00');\n"
+            "        $schedule->job(new SyncOrders)->everyFiveMinutes();\n"
+            "    }\n"
+            "}\n"
         ),
     }
 
@@ -369,6 +382,161 @@ def test_runtime_discovery_extracts_django_and_laravel_surfaces() -> None:
     assert any(
         scheduler.invoked_targets == ["SyncOrders"] for scheduler in laravel_schedulers
     )
+
+
+def test_php_non_laravel_shouldqueue_interface_cannot_create_job() -> None:
+    """A matching terminal interface name is not Laravel framework proof."""
+    path = "app/Worker.php"
+    source = (
+        "<?php\n"
+        "namespace Vendor;\n"
+        "class Worker implements Contracts\\ShouldQueue {}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "laravel_job"] == []
+
+
+def test_php_shouldqueue_job_with_typed_service_handle_is_not_listener() -> None:
+    """A queued job dependency is not proof that its `handle()` receives an event."""
+    path = "app/Jobs/Archive.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+        "class Archive implements ShouldQueue {\n"
+        "    public function handle(Mailer $mailer) {}\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        (task.name, task.runtime_kind, task.triggers)
+        for task in runtime.tasks
+        if task.name == "Archive"
+    ] == [("Archive", "laravel_job", [])]
+
+
+def test_php_unbound_schedule_parameter_cannot_create_laravel_scheduler() -> None:
+    """A generic PHP parameter named `$schedule` is not Laravel proof."""
+    path = "app/Schedule.php"
+    source = "<?php\nfunction run($schedule) { $schedule->command('not:laravel')->daily(); }\n"
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
+def test_php_condition_only_schedule_chain_creates_no_scheduler() -> None:
+    """A Laravel conditional modifier is not a scheduling cadence."""
+    path = "app/Console/Kernel.php"
+    source = (
+        "<?php\n"
+        "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+        "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+        "class Kernel extends ConsoleKernel {\n"
+        "    protected function schedule(Schedule $schedule): void {\n"
+        "        $schedule->command('orders:sync')->when(fn () => true);\n"
+        "    }\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
+def test_php_canonical_scheduled_job_target_links_its_endpoint() -> None:
+    """Laravel job scheduling preserves the parser-proven FQCN for linking."""
+    job_path = "app/Jobs/SyncOrders.php"
+    kernel_path = "app/Console/Kernel.php"
+    controller_path = "app/Http/OrderController.php"
+    sources = {
+        job_path: (
+            "<?php\n"
+            "namespace App\\Jobs;\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class SyncOrders implements ShouldQueue {}\n"
+        ),
+        kernel_path: (
+            "<?php\n"
+            "namespace App\\Console;\n"
+            "use App\\Jobs\\SyncOrders;\n"
+            "use Illuminate\\Console\\Scheduling\\Schedule;\n"
+            "use Illuminate\\Foundation\\Console\\Kernel as ConsoleKernel;\n"
+            "class Kernel extends ConsoleKernel {\n"
+            "    protected function schedule(Schedule $schedule): void {\n"
+            "        $schedule->job(new SyncOrders())->daily();\n"
+            "    }\n"
+            "}\n"
+        ),
+        controller_path: (
+            "<?php\n"
+            "namespace App\\Http;\n"
+            "use App\\Jobs\\SyncOrders;\n"
+            "dispatch(new SyncOrders());\n"
+        ),
+    }
+    parsed = {
+        path: _parsed_file(path, language="php") for path in sources
+    }
+    runtime = discover_runtime_surfaces(
+        parsed,
+        sources,
+        api_endpoints=[
+            {
+                "method": "POST",
+                "path": "/orders/sync",
+                "file": controller_path,
+                "handler_file": controller_path,
+                "route_file": controller_path,
+            }
+        ],
+    )
+    scheduler = next(
+        item
+        for item in runtime.schedulers
+        if item.scheduler_type == "laravel_schedule"
+    )
+
+    assert scheduler.invoked_targets == [r"App\Jobs\SyncOrders"]
+    assert scheduler.linked_endpoints == ["POST /orders/sync"]
+    assert runtime.scan_stats["link_scheduler_checks"] == 1
+
+
+def test_php_listener_path_and_handle_without_laravel_role_create_no_listener() -> None:
+    """Directory conventions and a method spelling are not Laravel evidence."""
+    path = "app/Listeners/Fake.php"
+    source = "<?php\nclass Fake { public function handle(Event $event) {} }\n"
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")}, {path: source}
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "laravel_listener"] == []
+
+
+def test_php_event_path_without_role_proof_creates_no_event() -> None:
+    """A class in an Events directory is not itself Laravel event evidence."""
+    path = "app/Events/Fake.php"
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="php")},
+        {path: "<?php\nclass Fake {}\n"},
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "laravel_event"] == []
 
 
 def test_laravel_comments_strings_and_invalid_php_never_create_runtime_surfaces() -> None:
@@ -421,11 +589,18 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
             "agenda.every('5 minutes', 'nightly-report');\n"
         ),
         "cmd/worker/main.go": (
-            'package main\n\nimport "time"\n\n'
+            "package main\n\n"
+            "import (\n"
+            "    \"time\"\n"
+            "    cron \"github.com/robfig/cron/v3\"\n"
+            "    gocron \"github.com/go-co-op/gocron\"\n"
+            ")\n\n"
             "func syncLoop() {}\nfunc cleanup() {}\n\n"
             "func main() {\n"
+            "    c := cron.New()\n"
+            "    scheduler := gocron.NewScheduler(time.UTC)\n"
             "    go syncLoop()\n"
-            '    c.AddFunc("@every 5m", cleanup)\n'
+            "    c.AddFunc(\"@every 5m\", cleanup)\n"
             "    scheduler.Every(10 * time.Minute).Do(syncLoop)\n"
             "}\n"
         ),
@@ -452,6 +627,95 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
     assert "agenda" in scheduler_types
     assert "go_cron" in scheduler_types
     assert "go_schedule" in scheduler_types
+
+
+def test_go_comments_strings_and_invalid_syntax_never_create_runtime_surfaces() -> None:
+    """Go runtime facts require complete Go AST nodes, never source text markers."""
+    path = "cmd/worker/main.go"
+    source = (
+        "package main\n\n"
+        "// go forgedComment()\n"
+        'var prompt = "go forgedString()"\n'
+        "func broken( {\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="go")}, {path: source}
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "go_worker"] == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type in {"go_cron", "go_schedule"}
+    ] == []
+
+
+def test_go_generic_scheduler_method_names_create_no_runtime_surfaces() -> None:
+    """Local APIs named `AddFunc`/`Every().Do()` are not scheduler proof."""
+    path = "internal/faux.go"
+    source = (
+        "package internal\n\n"
+        "type Faux struct{}\n"
+        "func (Faux) AddFunc(string, func()) {}\n"
+        "func (Faux) Every(int) Faux { return Faux{} }\n"
+        "func (Faux) Do(func()) {}\n"
+        "func task() {}\n"
+        "func boot() {\n"
+        "    var fake Faux\n"
+        "    fake.AddFunc(\"* * * * *\", task)\n"
+        "    fake.Every(5).Do(task)\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="go")}, {path: source}
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "go_worker"] == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type in {"go_cron", "go_schedule"}
+    ] == []
+
+
+def test_go_shadowed_or_reassigned_scheduler_bindings_create_no_facts() -> None:
+    """A local import shadow or later receiver write revokes scheduler proof."""
+    sources = {
+        "internal/shadow.go": (
+            "package internal\n"
+            "import cron \"github.com/robfig/cron/v3\"\n"
+            "type Faux struct{}\n"
+            "func (Faux) AddFunc(string, func()) {}\n"
+            "func task() {}\n"
+            "func boot() {\n"
+            "    cron := Faux{}\n"
+            "    cron.AddFunc(\"@every 1m\", task)\n"
+            "}\n"
+        ),
+        "internal/reassigned.go": (
+            "package internal\n"
+            "import cron \"github.com/robfig/cron/v3\"\n"
+            "type Scheduler interface { AddFunc(string, func()) }\n"
+            "type Faux struct{}\n"
+            "func (Faux) AddFunc(string, func()) {}\n"
+            "func task() {}\n"
+            "func boot() {\n"
+            "    var c Scheduler = cron.New()\n"
+            "    c = Faux{}\n"
+            "    c.AddFunc(\"@every 1m\", task)\n"
+            "}\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="go") for path in sources}, sources
+    )
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "go_worker"] == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type in {"go_cron", "go_schedule"}
+    ] == []
 
 
 def test_generic_js_process_and_consume_are_not_queue_workers() -> None:
@@ -629,8 +893,8 @@ def test_agenda_constructor_without_an_agenda_import_is_not_a_job() -> None:
     assert [s for s in runtime.schedulers if s.scheduler_type == "agenda"] == []
 
 
-def test_same_function_assignment_binds_only_the_real_broker_channel() -> None:
-    """A local awaited channel assignment is proven for calls in that function."""
+def test_uninvoked_broker_function_cannot_create_worker() -> None:
+    """An uninvoked exported broker function is not runtime execution evidence."""
     path = "src/jobs/orderChannel.ts"
     content = (
         'import amqplib from "amqplib";\n'
@@ -649,7 +913,7 @@ def test_same_function_assignment_binds_only_the_real_broker_channel() -> None:
 
     assert [
         task.name for task in runtime.tasks if task.runtime_kind == "js_worker"
-    ] == ["orders-sync"]
+    ] == []
 
 
 def test_uninvoked_exported_initializer_cannot_bind_an_outer_queue() -> None:
@@ -1162,6 +1426,7 @@ def test_unpublished_endpoints_never_link_to_runtime_surfaces() -> None:
     file_contents = {
         path: (
             "from celery import shared_task\n"
+            "from celery import current_app as app\n"
             "from celery.schedules import crontab\n\n"
             "@shared_task(queue='critical')\n"
             "def sync_orders(order_id):\n"
@@ -1301,6 +1566,7 @@ def test_every_task_link_grammar_binds_its_producer_file() -> None:
         "orders/signals.py": "python",
         "app/Jobs/SyncOrders.php": "php",
         "app/Events/OrderShipped.php": "php",
+        "app/Listeners/OrderListener.php": "php",
         "workers/orders.js": "javascript",
         "orders/api.py": "python",
         "orders/batch.py": "python",
@@ -1332,6 +1598,13 @@ def test_every_task_link_grammar_binds_its_producer_file() -> None:
             "class SyncOrders implements ShouldQueue\n{\n}\n"
         ),
         "app/Events/OrderShipped.php": "<?php\nclass OrderShipped\n{\n}\n",
+        "app/Listeners/OrderListener.php": (
+            "<?php\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class OrderListener implements ShouldQueue\n{\n"
+            "    public function handle(OrderShipped $event) {}\n"
+            "}\n"
+        ),
         "workers/orders.js": (
             "const { Worker } = require('bullmq');\n"
             "new Worker('orders-sync', async job => syncOrders(job));\n"
@@ -1469,7 +1742,8 @@ def test_php_same_file_duplicate_short_names_keep_distinct_canonical_tasks() -> 
             "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
             "class Send implements ShouldQueue {}\n"
             "namespace Billing\\Events;\n"
-            "class Send {}\n"
+            "use Illuminate\\Contracts\\Queue\\ShouldQueue;\n"
+            "class Send implements ShouldQueue {}\n"
         ),
         producer_path: "<?php\n\\Billing\\Events\\Send::dispatch($event);\n",
     }
@@ -2454,6 +2728,7 @@ def test_duplicate_scheduler_declarations_keep_their_own_source_endpoint() -> No
     """Distinct same-name beat declarations receive their own owner evidence."""
     path = "orders/schedules.py"
     content = (
+        "from celery import current_app as app\n"
         "from celery.schedules import crontab\n"
         "app.conf.beat_schedule = {\n"
         "    'early-sync': {\n"
@@ -2662,6 +2937,54 @@ def test_python_framework_member_writes_revoke_celery_and_signal_proof() -> None
     assert [task for task in runtime.tasks if task.name in {"ghost", "handler"}] == []
 
 
+def test_python_literal_setattr_revokes_celery_decorator_proof() -> None:
+    """A literal reflective mutation cannot leave `celery.shared_task` trusted."""
+    path = "workers/faux.py"
+    source = (
+        "import celery\n"
+        "setattr(celery, 'shared_task', lambda fn: fn)\n"
+        "@celery.shared_task\n"
+        "def forged():\n"
+        "    return None\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+
+
+def test_python_direct_exec_suppresses_celery_runtime_proof() -> None:
+    """Unknown direct execution makes the module's framework bindings unsafe."""
+    path = "workers/faux.py"
+    source = (
+        "import celery\n"
+        "exec(\"celery.shared_task = fake\")\n"
+        "@celery.shared_task\n"
+        "def forged():\n"
+        "    return None\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+
+
+def test_python_unbound_beat_schedule_cannot_create_celery_surfaces() -> None:
+    """A lookalike config object cannot authenticate Celery beat metadata."""
+    path = "config/schedule.py"
+    source = (
+        "class Fake:\n"
+        "    pass\n"
+        "app = Fake()\n"
+        "app.conf = Fake()\n"
+        "app.conf.beat_schedule = {\n"
+        "    'nightly': {'task': 'forged.task', 'schedule': 1},\n"
+        "}\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "celery"] == []
+    assert [scheduler for scheduler in runtime.schedulers if scheduler.scheduler_type == "beat"] == []
+
+
 def test_python_channels_plain_redefinition_revokes_prior_consumer() -> None:
     """Only the latest AST class binding can establish a Channels consumer."""
     sources = {
@@ -2678,6 +3001,146 @@ def test_python_channels_plain_redefinition_revokes_prior_consumer() -> None:
     runtime = discover_runtime_surfaces(parsed, sources)
 
     assert runtime.realtime_consumers == []
+
+
+def test_python_channels_base_class_redefinition_cannot_authenticate_consumer() -> None:
+    """A same-name plain class cannot retain an imported Channels base role."""
+    path = "realtime/consumers.py"
+    source = (
+        "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+        "class AsyncWebsocketConsumer:\n"
+        "    pass\n"
+        "class Forged(AsyncWebsocketConsumer):\n"
+        "    pass\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert runtime.realtime_consumers == []
+
+
+def test_python_plain_command_redefinition_revokes_django_command() -> None:
+    """Only the final module class binding may establish a Django command."""
+    path = "app/management/commands/demo.py"
+    source = (
+        "from django.core.management.base import BaseCommand\n"
+        "class Command(BaseCommand):\n"
+        "    pass\n"
+        "class Command:\n"
+        "    pass\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "django_command"] == []
+
+
+def test_python_channels_local_route_and_auth_shadows_create_no_metadata() -> None:
+    """Function-local lookalikes cannot add Channels routes or auth evidence."""
+    path = "realtime/consumers.py"
+    source = (
+        "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+        "from channels.auth import AuthMiddlewareStack\n"
+        "from django.urls import path\n"
+        "class RealConsumer(AsyncWebsocketConsumer):\n"
+        "    pass\n"
+        "def configure(path, AuthMiddlewareStack):\n"
+        "    path('forged/', RealConsumer.as_asgi())\n"
+        "    AuthMiddlewareStack(None)\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [(item.routes, item.auth_hints) for item in runtime.realtime_consumers] == [([], [])]
+
+
+def test_python_crontab_parameter_shadow_cannot_create_scheduler() -> None:
+    """A local parameter cannot authenticate the imported `crontab` factory."""
+    path = "schedules/config.py"
+    source = (
+        "from celery.schedules import crontab\n"
+        "def configure(crontab):\n"
+        "    return crontab(hour=1)\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [scheduler for scheduler in runtime.schedulers if scheduler.scheduler_type == "crontab"] == []
+
+
+def test_python_literal_setattr_revokes_django_signal_proof() -> None:
+    """A literal reflective mutation cannot leave a Django signal trusted."""
+    path = "signals/faux.py"
+    source = (
+        "from django.db.models.signals import post_save\n"
+        "setattr(post_save, 'connect', lambda fn: fn)\n"
+        "post_save.connect(forged)\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+
+
+def test_python_direct_exec_suppresses_django_signal_proof() -> None:
+    """Unknown direct execution makes Django signal bindings unsafe."""
+    path = "signals/faux.py"
+    source = (
+        "from django.db.models.signals import post_save\n"
+        "exec(\"post_save.connect = fake\")\n"
+        "post_save.connect(forged)\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+
+
+def test_python_direct_exec_suppresses_scheduler_proof() -> None:
+    """Unknown direct execution makes scheduler factory bindings unsafe."""
+    path = "schedules/faux.py"
+    source = (
+        "from celery.schedules import crontab\n"
+        "exec('crontab = fake')\n"
+        "crontab(hour=1)\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [scheduler for scheduler in runtime.schedulers if scheduler.scheduler_type == "crontab"] == []
+
+
+def test_python_direct_exec_suppresses_channels_consumer_proof() -> None:
+    """Unknown direct execution makes Channels inheritance bindings unsafe."""
+    path = "realtime/consumers.py"
+    source = (
+        "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+        "exec('AsyncWebsocketConsumer = Fake')\n"
+        "class Forged(AsyncWebsocketConsumer):\n"
+        "    pass\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert runtime.realtime_consumers == []
+
+
+def test_python_direct_exec_suppresses_imported_task_dispatch_proof() -> None:
+    """Unknown direct execution makes imported task values unsafe at call sites."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    pass\n"
+        ),
+        "pkg/api.py": (
+            "from .tasks import actual\n"
+            "exec('actual = fake')\n"
+            "actual.delay(1)\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        item = parse_file(Path(path), source)
+        assert item is not None
+        parsed[path] = item
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    assert next(task for task in runtime.tasks if task.name == "actual").producer_files == []
 
 
 def test_python_framework_member_deletes_revoke_runtime_proof() -> None:
@@ -2760,6 +3223,74 @@ def test_python_dispatch_binding_obeys_exact_statement_order() -> None:
         ("pkg/after.py", "direct")
     ]
     assert task.producer_files == ["pkg/after.py"]
+
+
+def test_python_comprehension_binding_cannot_authenticate_imported_task() -> None:
+    """A comprehension target shadows an imported task in its own expression."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    return None\n"
+        ),
+        "pkg/api.py": (
+            "from .tasks import actual\n"
+            "[actual.delay(1) for actual in values]\n"
+        ),
+    }
+    parsed = {path: _parsed_file(path) for path in sources}
+
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert [item for item in runtime.dispatch_evidence if item.file_path == "pkg/api.py"] == []
+
+
+def test_python_exception_target_cannot_authenticate_imported_task() -> None:
+    """An exception target shadows an imported task in its handler body."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    return None\n"
+        ),
+        "pkg/api.py": (
+            "from .tasks import actual\n"
+            "try:\n"
+            "    raise RuntimeError()\n"
+            "except Exception as actual:\n"
+            "    actual.delay(1)\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [item for item in runtime.dispatch_evidence if item.file_path == "pkg/api.py"] == []
+
+
+def test_python_match_capture_cannot_authenticate_imported_task() -> None:
+    """A structural pattern capture shadows an imported task in its case body."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    return None\n"
+        ),
+        "pkg/api.py": (
+            "from .tasks import actual\n"
+            "match subject:\n"
+            "    case actual:\n"
+            "        actual.delay(1)\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [item for item in runtime.dispatch_evidence if item.file_path == "pkg/api.py"] == []
 
 
 def test_python_signal_binding_obeys_exact_statement_order() -> None:
@@ -3349,8 +3880,8 @@ def test_js_named_node_cron_schedule_bindings_are_discovered() -> None:
     ]
 
 
-def test_js_runtime_bindings_follow_lexical_write_history() -> None:
-    """Dynamic writes invalidate a binding without erasing valid sibling scopes."""
+def test_js_runtime_bindings_do_not_assume_uninvoked_sibling_functions() -> None:
+    """Dynamic writes and uninvoked nested functions create no runtime facts."""
     sources = {
         "workers/reassigned.js": (
             "const Queue = require('bullmq').Queue;\n"
@@ -3384,13 +3915,10 @@ def test_js_runtime_bindings_follow_lexical_write_history() -> None:
     runtime = discover_runtime_surfaces(parsed, sources)
 
     assert [
-        (task.file_path, task.name, task.queue)
+        task
         for task in runtime.tasks
         if task.runtime_kind == "js_worker"
-    ] == [
-        ("workers/siblings.js", "first", "first"),
-        ("workers/siblings.js", "second", "second"),
-    ]
+    ] == []
     assert runtime.dispatch_evidence == []
     assert runtime.realtime_consumers == []
 
@@ -3426,6 +3954,98 @@ def test_js_augmented_assignments_invalidate_runtime_bindings() -> None:
     worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
     assert worker.producer_files == []
     assert runtime.realtime_consumers == []
+
+
+def test_js_with_scope_cannot_authenticate_queue_producer() -> None:
+    """A dynamic `with` receiver cannot reuse a lexical Queue binding."""
+    path = "producers/orders.js"
+    source = (
+        "const { Queue } = require('bullmq');\n"
+        "const q = new Queue('orders');\n"
+        "with ({ q: { add() {} } }) q.add('job', {});\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_object_assign_cannot_preserve_mutated_module_role() -> None:
+    """An unshadowed `Object.assign` mutation taints the module export value."""
+    worker_path = "workers/orders.js"
+    producer_path = "producers/orders.js"
+    sources = {
+        worker_path: (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        producer_path: (
+            "const bull = require('bullmq');\n"
+            "Object.assign(bull, { Queue: FakeQueue });\n"
+            "const q = new bull.Queue('orders');\n"
+            "q.add('job', {});\n"
+        ),
+    }
+    parsed = {}
+    for path, source in sources.items():
+        parsed_file = parse_file(Path(path), source)
+        assert parsed_file is not None
+        parsed[path] = parsed_file
+    runtime = discover_runtime_surfaces(parsed, sources)
+
+    assert runtime.dispatch_evidence == []
+    assert next(task for task in runtime.tasks if task.file_path == worker_path).producer_files == []
+
+
+def test_js_destructuring_member_target_cannot_preserve_queue_role() -> None:
+    """A member write nested in a destructuring target taints the queue value."""
+    path = "producers/orders.js"
+    source = (
+        "const { Queue } = require('bullmq');\n"
+        "const q = new Queue('orders');\n"
+        "({ add: q.add } = { add() {} });\n"
+        "q.add('job', {});\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_static_import_is_available_before_its_source_position() -> None:
+    """A hoisted ESM import can prove a top-level preceding initializer."""
+    path = "producers/orders.ts"
+    source = (
+        "const q = new Queue('orders');\n"
+        "q.add('job', {});\n"
+        "import { Queue } from 'bullmq';\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
+        ("queue", ("orders",))
+    ]
+
+
+def test_js_uninvoked_function_body_cannot_create_worker() -> None:
+    """A worker constructor inside an exported function is not executed evidence."""
+    path = "workers/dead.js"
+    source = (
+        "const { Worker } = require('bullmq');\n"
+        "export function never() {\n"
+        "  return;\n"
+        "  new Worker('orders', handleOrders);\n"
+        "}\n"
+    )
+    parsed = parse_file(Path(path), source)
+    assert parsed is not None
+    runtime = discover_runtime_surfaces({path: parsed}, {path: source})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "js_worker"] == []
 
 
 def test_js_member_writes_invalidate_runtime_receivers_and_exports() -> None:

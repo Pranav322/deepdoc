@@ -26,9 +26,10 @@ except Exception:
 
 @dataclass(frozen=True)
 class PhpDispatch:
-    """A Laravel dispatch target proven by the PHP Tree-sitter grammar."""
+    """A Laravel helper/API target and its parser-proven relation."""
 
     target: str
+    relation: str = "dispatch"
 
 
 @dataclass(frozen=True)
@@ -96,20 +97,17 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
                 else ""
             )
             if target:
-                found.append(PhpDispatch(target))
+                found.append(PhpDispatch(target, "dispatch"))
         elif node.type == "function_call_expression":
             function = node.child_by_field_name("function")
             arguments = node.child_by_field_name("arguments")
-            if (
-                _php_unshadowed_helper_name(function, shadowed_helpers)
-                and arguments is not None
-                and arguments.named_children
-            ):
+            helper = _php_unshadowed_helper_name(function, shadowed_helpers)
+            if helper and arguments is not None and arguments.named_children:
                 target = _php_dispatch_argument_target(
                     arguments.named_children[0], import_aliases, namespace
                 )
                 if target:
-                    found.append(PhpDispatch(target))
+                    found.append(PhpDispatch(target, helper))
         for child in node.named_children:
             visit(child, import_aliases, shadowed_helpers, namespace)
 
@@ -153,13 +151,17 @@ def php_class_declarations(content: str) -> tuple[PhpClassDeclaration, ...]:
     return tuple(found)
 
 
-def php_schedules(content: str) -> tuple[PhpSchedule, ...]:
-    """Return only complete structural Laravel `$schedule` chains.
+_LARAVEL_SCHEDULE_TYPE = r"Illuminate\Console\Scheduling\Schedule"
+_LARAVEL_CONSOLE_KERNEL_TYPE = r"Illuminate\Foundation\Console\Kernel"
 
-    PHP comments, strings, and error-recovery trees cannot reach this helper. A
-    schedule requires `$schedule->{command|job|call}(...)` followed by at least
-    one real chained cadence call, matching the previous public surface while
-    moving recognition behind the parser boundary.
+
+def php_schedules(content: str) -> tuple[PhpSchedule, ...]:
+    """Return Laravel schedules from a parser-proven Kernel schedule method.
+
+    A `$schedule` spelling alone proves nothing. Facts require a complete PHP
+    tree, a class extending Laravel's Console Kernel, and a real `schedule()`
+    parameter typed as Laravel's Scheduler. This keeps generic PHP APIs from
+    manufacturing scheduler relationships.
     """
     if not _TS_AVAILABLE or Parser is None:
         return ()
@@ -168,29 +170,90 @@ def php_schedules(content: str) -> tuple[PhpSchedule, ...]:
     if root.has_error:
         return ()
     found: list[PhpSchedule] = []
-
-    def visit(node, aliases: dict[str, str], namespace: str) -> None:
-        if node.type == "namespace_definition":
-            body = node.child_by_field_name("body")
-            if body is not None:
-                scoped = tuple(body.named_children)
-                scoped_aliases = _php_import_aliases_from_nodes(scoped)
-                scoped_namespace = _php_namespace_name(node)
-                for child in scoped:
-                    visit(child, scoped_aliases, scoped_namespace)
-            return
-        if node.type == "member_call_expression" and not _php_is_chained_member_call(node):
-            schedule = _php_schedule_from_call(node, aliases, namespace)
-            if schedule is not None:
-                found.append(schedule)
-        for child in node.named_children:
-            visit(child, aliases, namespace)
-
     for namespace, scope_nodes in _php_top_level_scopes(root):
         aliases = _php_import_aliases_from_nodes(scope_nodes)
-        for node in scope_nodes:
-            visit(node, aliases, namespace)
+        for declaration in scope_nodes:
+            if (
+                declaration.type != "class_declaration"
+                or _php_class_base(declaration, aliases, namespace).lower()
+                != _LARAVEL_CONSOLE_KERNEL_TYPE.lower()
+            ):
+                continue
+            for method in _php_laravel_schedule_methods(declaration, aliases, namespace):
+                body = method.child_by_field_name("body")
+                if body is not None:
+                    _php_collect_schedule_calls(body, aliases, namespace, found)
     return tuple(found)
+
+
+def _php_class_base(node, aliases: dict[str, str], namespace: str) -> str:
+    """Canonical direct class base from one parser-proven `extends` clause."""
+    clause = next(
+        (child for child in node.named_children if child.type == "base_clause"), None
+    )
+    if clause is None:
+        return ""
+    base = next(
+        (
+            child
+            for child in clause.named_children
+            if child.type in {"name", "qualified_name"}
+        ),
+        None,
+    )
+    return _php_class_target(base, aliases, namespace) if base is not None else ""
+
+
+def _php_laravel_schedule_methods(node, aliases: dict[str, str], namespace: str) -> tuple:
+    """Kernel methods with an exact typed Laravel `$schedule` parameter."""
+    methods = []
+    for body in node.named_children:
+        if body.type != "declaration_list":
+            continue
+        for method in body.named_children:
+            if method.type != "method_declaration":
+                continue
+            name = method.child_by_field_name("name")
+            if name is None or name.text.lower() != b"schedule":
+                continue
+            parameters = method.child_by_field_name("parameters")
+            if parameters is None:
+                continue
+            for parameter in parameters.named_children:
+                if parameter.type != "simple_parameter":
+                    continue
+                variable = parameter.child_by_field_name("name")
+                type_node = parameter.child_by_field_name("type")
+                named_type = (
+                    type_node.named_children[0]
+                    if type_node is not None and type_node.named_children
+                    else None
+                )
+                schedule_type = (
+                    _php_class_target(named_type, aliases, namespace)
+                    if named_type is not None
+                    else ""
+                )
+                if (
+                    variable is not None
+                    and variable.text.lower() == b"$schedule"
+                    and schedule_type.lower() == _LARAVEL_SCHEDULE_TYPE.lower()
+                ):
+                    methods.append(method)
+                    break
+    return tuple(methods)
+
+
+def _php_collect_schedule_calls(
+    node, aliases: dict[str, str], namespace: str, found: list[PhpSchedule]
+) -> None:
+    """Collect complete schedule chains from one already-proven Kernel method."""
+    if node.type == "member_call_expression" and not _php_is_chained_member_call(node):
+        schedule = _php_schedule_from_call(node, aliases, namespace)
+        if schedule is not None:
+            found.append(schedule)
+    for child in node.named_children:
+        _php_collect_schedule_calls(child, aliases, namespace, found)
 
 
 def _php_class_interfaces(node, aliases: dict[str, str], namespace: str) -> tuple[str, ...]:
@@ -361,11 +424,51 @@ def _php_schedule_job_target(node, aliases: dict[str, str], namespace: str) -> s
     return _php_class_target(node.named_children[0], aliases, namespace)
 
 
+_LARAVEL_CADENCE_METHODS = frozenset(
+    {
+        "cron",
+        "everysecond",
+        "everytwoseconds",
+        "everyfiveseconds",
+        "everytenseconds",
+        "everyfifteenseconds",
+        "everytwentyseconds",
+        "everythirtyseconds",
+        "everyminute",
+        "everytwominutes",
+        "everythreeminutes",
+        "everyfourminutes",
+        "everyfiveminutes",
+        "everytenminutes",
+        "everyfifteenminutes",
+        "everythirtyminutes",
+        "hourly",
+        "hourlyat",
+        "daily",
+        "dailyat",
+        "twicedaily",
+        "twicedailyat",
+        "weekly",
+        "weeklyon",
+        "monthly",
+        "monthlyon",
+        "twicemonthly",
+        "lastdayofmonth",
+        "quarterly",
+        "quarterlyon",
+        "yearly",
+        "yearlyon",
+    }
+)
+
+
 def _php_schedule_cadence(chain: list[tuple[str, object]]) -> str:
-    """Stable summary of parser-proven schedule cadence methods."""
+    """Stable summary of an explicit, parser-proven Laravel cadence method."""
     for method, arguments in chain:
+        if method not in _LARAVEL_CADENCE_METHODS:
+            continue
         value = _php_string_literal(_php_first_argument(arguments))
-        if method == "cron" and value:
+        if method == "cron":
             return value
         return f"{method}({value})" if value else method
     return ""

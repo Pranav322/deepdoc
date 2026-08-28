@@ -269,10 +269,15 @@ class _Binder:
         # that make a source-order-only binding unsafe.
         for node in nodes:
             self._pre_mark_cross_scope_writes(node)
+        # Static ESM/TypeScript imports are initialized before module body code,
+        # even when their declaration appears textually later.
         for node in nodes:
             if node.type in ("import_statement", "import_declaration"):
                 self._bind_import(node)
-            elif node.type in (
+        for node in nodes:
+            if node.type in ("import_statement", "import_declaration"):
+                continue
+            if node.type in (
                 "variable_declarator",
                 "assignment_expression",
                 "augmented_assignment_expression",
@@ -290,6 +295,7 @@ class _Binder:
                     for name_node in _pattern_names(target):
                         self._record_write(name_node, None)
             elif node.type == "call_expression":
+                self._record_reflective_mutation(node)
                 self._record_direct_eval(node)
                 self._calls.append(node)
             elif node.type == "new_expression":
@@ -434,15 +440,38 @@ class _Binder:
         writes.insert(index, write)
 
     def _record_member_mutation(self, target) -> None:
-        """Taint the resolved object/module behind a member or subscript write."""
-        base = _member_write_base(target)
-        if base is None:
+        """Taint every resolved object/module behind a write target."""
+        for base in _member_write_bases(target):
+            self._record_value_mutation(base, target.start_byte)
+
+    def _record_reflective_mutation(self, node) -> None:
+        """Taint an unshadowed ``Object.assign(target, ...)`` receiver."""
+        callee = node.child_by_field_name("function")
+        if callee is None or callee.type != "member_expression":
             return
+        obj = callee.child_by_field_name("object")
+        prop = callee.child_by_field_name("property")
+        if (
+            obj is None
+            or obj.type != "identifier"
+            or _text(obj) != "Object"
+            or prop is None
+            or _text(prop) != "assign"
+            or self._is_locally_declared(obj)
+            or self._global_name_was_written(obj)
+        ):
+            return
+        args = node.child_by_field_name("arguments")
+        target = args.named_children[0] if args is not None and args.named_children else None
+        if target is not None:
+            self._record_value_mutation(target, node.start_byte)
+
+    def _record_value_mutation(self, base, position: int) -> None:
+        """Record that the resolved value behind `base` was mutated at `position`."""
         value = self._resolve(base)
         if value is None:
             return
         positions = self._value_mutation_positions.setdefault(value, [])
-        position = target.start_byte
         if not positions or position >= positions[-1]:
             positions.append(position)
             return
@@ -549,6 +578,8 @@ class _Binder:
             return
         module = self._require_module(value)
         if target.type == "object_pattern":  # const { Worker } = require("m")
+            if not declares:
+                self._record_member_mutation(target)
             source_value = (
                 _ResolvedValue(module, _MODULE_EXPORT)
                 if module
@@ -598,6 +629,7 @@ class _Binder:
             or callee.type != "identifier"
             or _text(callee) != "require"
             or self._scope_has_direct_eval(node)
+            or _is_in_dynamic_scope(node)
             or self._is_locally_declared(callee)
             or self._global_name_was_written(callee)
         ):
@@ -636,6 +668,7 @@ class _Binder:
             declaration is None
             or declaration in self._cross_scope_invalidations
             or self._scope_has_direct_eval(name_node)
+            or _is_in_dynamic_scope(name_node)
         ):
             return None
         self._binding_lookup_probes += 1
@@ -678,6 +711,8 @@ class _Binder:
         return None
 
     def _bound_call(self, node) -> JsBoundCall | None:
+        if _is_in_dynamic_scope(node) or not _is_proven_top_level_execution(node):
+            return None
         is_new = node.type == "new_expression"
         callee = node.child_by_field_name("constructor" if is_new else "function")
         if callee is None:
@@ -727,6 +762,33 @@ def _execution_scope(name_node) -> tuple[int, int]:
             return node.start_byte, node.end_byte
         node = node.parent
     return (0, 0)
+
+
+def _is_in_dynamic_scope(node) -> bool:
+    """Whether a JavaScript `with` statement can intercept this lookup/call."""
+    current = node
+    while current is not None:
+        if current.type == "with_statement":
+            return True
+        current = current.parent
+    return False
+
+
+_UNPROVEN_CALL_ANCESTORS = _UNCERTAIN_WRITE_ANCESTORS | frozenset(
+    _EXECUTION_SCOPE_TYPES - {"program"}
+) | frozenset({"class", "class_declaration", "class_static_block"})
+
+
+def _is_proven_top_level_execution(node) -> bool:
+    """Whether a call is evaluated unconditionally during module initialization."""
+    current = node.parent
+    while current is not None:
+        if current.type in _UNPROVEN_CALL_ANCESTORS:
+            return False
+        if current.type == "program":
+            return True
+        current = current.parent
+    return False
 
 
 def _execution_scope_is_program(node) -> bool:
@@ -867,6 +929,17 @@ def _member_write_base(node):
         saw_member = True
         current = current.child_by_field_name("object")
     return current if saw_member else None
+
+
+def _member_write_bases(node):
+    """Resolved member roots nested anywhere in an assignment target pattern."""
+    if node.type in {"member_expression", "subscript_expression"}:
+        base = _member_write_base(node)
+        if base is not None:
+            yield base
+        return
+    for child in node.named_children:
+        yield from _member_write_bases(child)
 
 
 def _written_binding_names(node):

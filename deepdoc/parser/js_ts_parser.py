@@ -151,7 +151,7 @@ def js_bound_calls(
 
 
 def _grammar_for(path: Path, language: str):
-    if path.suffix == ".tsx":
+    if path.suffix.lower() == ".tsx":
         return TSX_LANGUAGE
     return TS_LANGUAGE if language == "typescript" else JS_LANGUAGE
 

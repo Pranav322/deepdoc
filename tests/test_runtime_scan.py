@@ -3685,6 +3685,132 @@ def test_python_assignment_wrapped_nested_setattr_revokes_framework_proof() -> N
     ] == []
 
 
+def test_python_reflected_global_writes_revoke_all_framework_runtime_proof() -> None:
+    """`setattr(globals(), ...)` replaces the named module binding it targets."""
+    sources = {
+        "workers/faux.py": (
+            "import celery\n"
+            "setattr(globals(), 'celery', object())\n"
+            "@celery.shared_task\n"
+            "def forged():\n"
+            "    return None\n"
+        ),
+        "signals/faux.py": (
+            "from django.db.models import signals\n"
+            "setattr(globals(), 'signals', object())\n"
+            "def forged(*args):\n"
+            "    return None\n"
+            "signals.post_save.connect(forged)\n"
+        ),
+        "realtime/consumers.py": (
+            "from channels.generic.websocket import AsyncWebsocketConsumer\n"
+            "setattr(globals(), 'AsyncWebsocketConsumer', object())\n"
+            "class Forged(AsyncWebsocketConsumer):\n"
+            "    pass\n"
+        ),
+        "schedules/faux.py": (
+            "from celery.schedules import crontab\n"
+            "setattr(globals(), 'crontab', object())\n"
+            "SCHEDULE = crontab(minute='*')\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+    assert runtime.realtime_consumers == []
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "crontab"
+    ] == []
+
+
+def test_python_nested_reflected_global_write_revokes_framework_proof() -> None:
+    """A reflected global write nested in an assignment RHS still executes."""
+    path = "workers/faux.py"
+    source = (
+        "import celery\n"
+        "def consume(value):\n"
+        "    return None\n"
+        "sink = consume(setattr(globals(), 'celery', object()))\n"
+        "@celery.shared_task\n"
+        "def forged():\n"
+        "    return None\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+
+
+def test_python_reflected_global_write_keeps_earlier_dispatch_evidence() -> None:
+    """Only dispatches after the reflected global write lose their receiver."""
+    sources = {
+        "pkg/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    pass\n"
+        ),
+        "pkg/api.py": (
+            "from .tasks import actual\n"
+            "actual.delay('before')\n"
+            "setattr(globals(), 'actual', object())\n"
+            "actual.delay('after')\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [
+        (item.file_path, item.target_aliases) for item in runtime.dispatch_evidence
+    ] == [("pkg/api.py", ("actual",))]
+
+
+def test_python_nested_reflected_global_rebind_revokes_django_command() -> None:
+    """A nested `globals()['Command']` write replaces the final command binding."""
+    path = "app/management/commands/nested.py"
+    source = (
+        "from django.core.management.base import BaseCommand\n"
+        "class Command(BaseCommand):\n"
+        "    pass\n"
+        "if True:\n"
+        "    globals()['Command'] = object()\n"
+    )
+    runtime = discover_runtime_surfaces({path: _parsed_file(path)}, {path: source})
+
+    assert [task for task in runtime.tasks if task.runtime_kind == "django_command"] == []
+
+
+def test_python_dynamic_reflected_global_write_suppresses_framework_proof() -> None:
+    """An unknown reflected global key can rebind any name, so the module fails closed."""
+    sources = {
+        "workers/subscript.py": (
+            "import celery\n"
+            "member = 'celery'\n"
+            "globals()[member] = object()\n"
+            "@celery.shared_task\n"
+            "def forged():\n"
+            "    return None\n"
+        ),
+        "workers/setattr.py": (
+            "import celery\n"
+            "member = 'celery'\n"
+            "setattr(globals(), member, object())\n"
+            "@celery.shared_task\n"
+            "def forged():\n"
+            "    return None\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path) for path in sources}, sources
+    )
+
+    assert [task for task in runtime.tasks if task.name == "forged"] == []
+
+
 def test_python_direct_exec_suppresses_celery_runtime_proof() -> None:
     """Unknown direct execution makes the module's framework bindings unsafe."""
     path = "workers/faux.py"

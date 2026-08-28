@@ -162,14 +162,30 @@ def _python_ast_trees(file_contents: dict[str, str]) -> dict[str, ast.Module]:
     return trees
 
 
-def _python_has_direct_exec(tree: ast.Module) -> bool:
-    """Whether unmodelled direct execution can mutate module runtime bindings."""
-    return any(
-        isinstance(node, ast.Call)
-        and isinstance(node.func, ast.Name)
-        and node.func.id == "exec"
-        for node in ast.walk(tree)
-    )
+def _python_has_unmodelled_module_mutation(tree: ast.Module) -> bool:
+    """Whether unmodelled execution can rebind arbitrary module runtime names.
+
+    Direct ``exec`` and a reflected module write through a non-literal key both
+    leave every binding in the module unknowable, so the module fails closed.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Call):
+            if isinstance(node.func, ast.Name) and node.func.id == "exec":
+                return True
+            if (
+                isinstance(node.func, ast.Name)
+                and node.func.id == "setattr"
+                and len(node.args) >= 2
+                and _python_is_globals_call(node.args[0])
+                and not _python_string_literal(node.args[1])
+            ):
+                return True
+        if isinstance(node, ast.Subscript) and _python_is_globals_call(node.value):
+            if isinstance(node.ctx, (ast.Store, ast.Del)) and not _python_string_literal(
+                node.slice
+            ):
+                return True
+    return False
 
 
 def _php_runtime_target_identities(tasks: list[RuntimeTask]) -> frozenset[str]:
@@ -448,7 +464,7 @@ def _python_runtime_bindings(
     task_exports_by_path: dict[str, set[str]],
 ) -> _PythonRuntimeBindings:
     """Exact-position module binding histories for task and signal receivers."""
-    if _python_has_direct_exec(tree):
+    if _python_has_unmodelled_module_mutation(tree):
         return _PythonRuntimeBindings({})
     raw_histories: dict[str, list[tuple[tuple[int, int], _PythonBindingEvent]]] = {}
 
@@ -600,8 +616,23 @@ def _python_module_write_events(node: ast.AST) -> list[tuple[str, tuple[int, int
     return writes
 
 
+def _python_is_globals_call(node: ast.AST | None) -> bool:
+    """A bare ``globals()`` call, which exposes the module binding namespace."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "globals"
+        and not node.args
+        and not node.keywords
+    )
+
+
 def _python_setattr_root(node: ast.Call) -> str:
-    """Root object changed by direct ``setattr(receiver, member, value)``."""
+    """Root object changed by direct ``setattr(receiver, member, value)``.
+
+    ``setattr(globals(), "name", value)`` rebinds the module name itself, so a
+    literal member there names the binding it revokes.
+    """
     if (
         not isinstance(node.func, ast.Name)
         or node.func.id != "setattr"
@@ -609,6 +640,8 @@ def _python_setattr_root(node: ast.Call) -> str:
     ):
         return ""
     target = node.args[0]
+    if _python_is_globals_call(target):
+        return _python_string_literal(node.args[1])
     while isinstance(target, (ast.Attribute, ast.Subscript)):
         target = target.value
     return target.id if isinstance(target, ast.Name) else ""
@@ -1288,7 +1321,7 @@ def _discover_celery_file_runtime(
     set[tuple[str, tuple[int, int]]],
 ]:
     """Celery facts for one valid module in exact top-level source order."""
-    if _python_has_direct_exec(tree):
+    if _python_has_unmodelled_module_mutation(tree):
         return [], [], set(), set()
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
@@ -1414,6 +1447,12 @@ def _python_write_target_names(targets: Sequence[ast.expr]) -> set[str]:
         if isinstance(item, ast.Name) and isinstance(item.ctx, (ast.Store, ast.Del))
     }
     for target in targets:
+        # `globals()["name"] = ...` rebinds the module name, not a container member.
+        if isinstance(target, ast.Subscript) and _python_is_globals_call(target.value):
+            literal = _python_string_literal(target.slice)
+            if literal:
+                names.add(literal)
+            continue
         root = target
         while isinstance(root, (ast.Attribute, ast.Subscript)):
             root = root.value
@@ -1538,7 +1577,7 @@ def _discover_schedulers(
     """Discover proven Celery ``crontab(...)`` calls from valid Python ASTs."""
     schedulers: list[RuntimeScheduler] = []
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
-        if _python_has_direct_exec(tree):
+        if _python_has_unmodelled_module_mutation(tree):
             continue
         bindings = _python_crontab_bindings(tree)
         local_shadows_by_call = _python_local_shadows_by_call(tree)
@@ -1637,7 +1676,7 @@ def _discover_django_file_runtime(
     file_path: str, tree: ast.Module
 ) -> list[RuntimeTask]:
     """Django module facts in source order, rejecting generic lookalikes."""
-    if _python_has_direct_exec(tree):
+    if _python_has_unmodelled_module_mutation(tree):
         return []
     tasks: list[RuntimeTask] = []
     commands_by_name: dict[str, RuntimeTask] = {}
@@ -2311,7 +2350,7 @@ def _discover_python_realtime_consumers(
     """Discover Channels consumers only through AST-proven framework bindings."""
     consumers: list[RealtimeConsumer] = []
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
-        if _python_has_direct_exec(tree):
+        if _python_has_unmodelled_module_mutation(tree):
             continue
         consumer_names: dict[str, str] = {}
         consumer_modules: set[str] = set()

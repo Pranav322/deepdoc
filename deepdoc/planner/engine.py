@@ -7,8 +7,9 @@ from dataclasses import dataclass
 import click
 
 from ..llm import ModelCapabilityError, fit_prompt_sections
-from ..telemetry import RunTelemetry
 from ..manifest import file_hash
+from ..language_support import language_name_for_extension
+from ..telemetry import RunTelemetry
 from .common import *
 
 
@@ -1041,20 +1042,7 @@ def scan_repo(
     )
     file_services: dict[str, str] = {}
 
-    ext_to_lang = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".go": "go",
-        ".php": "php",
-        ".mjs": "javascript",
-        ".cjs": "javascript",
-        ".vue": "vue",
-    }
-
-    # First pass: collect all files
+    # Phase 1: collect all files
     step_start = time.perf_counter()
     all_files_to_scan: list[Path] = []
     for root, dirs, files in os.walk(repo_root):
@@ -1185,7 +1173,7 @@ def scan_repo(
                 progress.advance(task)
                 continue
 
-            lang = ext_to_lang.get(fpath.suffix.lower(), "")
+            lang = language_name_for_extension(fpath.suffix.lower())
             if lang:
                 lang_counts[lang] += 1
 

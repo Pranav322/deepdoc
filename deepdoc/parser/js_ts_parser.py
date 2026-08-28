@@ -558,15 +558,24 @@ class _Binder:
             positions.append(position)
         else:
             positions.insert(bisect_right(positions, position), position)
-        if not _execution_scope_is_program(node):
-            nested = self._nested_direct_eval_positions
-            if not nested or position >= nested[-1]:
-                nested.append(position)
-            else:
-                nested.insert(bisect_right(nested, position), position)
+
+    def _record_nested_eval_effect(self, position: int) -> None:
+        """Record where a nested direct eval actually alters the module scope."""
+        nested = self._nested_direct_eval_positions
+        if not nested or position >= nested[-1]:
+            nested.append(position)
+        else:
+            nested.insert(bisect_right(nested, position), position)
 
     def _record_hoisted_direct_eval_invocations(self, nodes) -> None:
-        """Move a called function declaration's direct-eval effect to its call site."""
+        """Place each nested direct-eval effect at its proven invocation position.
+
+        A function body's text position is not when its eval runs, so effects are
+        summarized per named function declaration, propagated through
+        parser-proven synchronous named calls in the same file, and applied at
+        unconditional top-level call sites. A nested eval that cannot be tied to
+        such a call site is unknowable and taints the whole module instead.
+        """
         functions_by_scope: dict[tuple[int, int], _Declaration] = {}
         for function in nodes:
             if function.type not in {
@@ -578,29 +587,51 @@ class _Binder:
             declaration = self._declaration_for(name) if name is not None else None
             if declaration is not None:
                 functions_by_scope[_execution_scope(function)] = declaration
-        eval_functions = {
-            functions_by_scope[_execution_scope(call)]
-            for call in nodes
-            if call.type == "call_expression"
-            and _execution_scope(call) in functions_by_scope
-            and self._is_unshadowed_direct_eval(call)
-        }
+        # Callee -> enclosing named functions that synchronously call it.
+        callers: dict[_Declaration, set[_Declaration]] = {}
+        reaches_eval: set[_Declaration] = set()
+        unresolved_eval = False
+        for call in nodes:
+            if call.type != "call_expression":
+                continue
+            scope = _execution_scope(call)
+            enclosing = functions_by_scope.get(scope)
+            if self._is_unshadowed_direct_eval(call) and not _execution_scope_is_program(
+                call
+            ):
+                if enclosing is None:
+                    unresolved_eval = True
+                else:
+                    reaches_eval.add(enclosing)
+                continue
+            callee = call.child_by_field_name("function")
+            if callee is None or callee.type != "identifier" or enclosing is None:
+                continue
+            target = self._declaration_for(callee)
+            if target is not None and target in functions_by_scope.values():
+                callers.setdefault(target, set()).add(enclosing)
+        # Bounded backwards fixpoint over the intrafile named-call edges.
+        pending = list(reaches_eval)
+        while pending:
+            target = pending.pop()
+            for caller in callers.get(target, ()):
+                if caller not in reaches_eval:
+                    reaches_eval.add(caller)
+                    pending.append(caller)
+        invoked: set[_Declaration] = set()
         for call in nodes:
             if call.type != "call_expression" or not _is_proven_top_level_execution(call):
                 continue
             callee = call.child_by_field_name("function")
-            if (
-                callee is None
-                or callee.type != "identifier"
-                or self._declaration_for(callee) not in eval_functions
-            ):
+            if callee is None or callee.type != "identifier":
                 continue
-            position = call.start_byte
-            nested = self._nested_direct_eval_positions
-            if not nested or position >= nested[-1]:
-                nested.append(position)
-            else:
-                nested.insert(bisect_right(nested, position), position)
+            declaration = self._declaration_for(callee)
+            if declaration in reaches_eval:
+                invoked.add(declaration)
+                self._record_nested_eval_effect(call.start_byte)
+        if unresolved_eval or reaches_eval - invoked:
+            # An eval that may run at an unknown time makes the file unsafe.
+            self._record_nested_eval_effect(0)
 
     def _scope_has_direct_eval(self, node) -> bool:
         """Whether an earlier direct eval can alter this node's lexical scope."""

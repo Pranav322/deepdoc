@@ -1330,6 +1330,62 @@ def test_js_hoisted_direct_eval_revokes_later_outer_queue_proof() -> None:
     assert worker.producer_files == []
 
 
+def test_js_transitive_direct_eval_chain_revokes_later_queue_proof() -> None:
+    """A synchronous named-call chain reaching direct eval taints its call site."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/chain.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "invoke();\n"
+            "queue.add('later', {});\n"
+            "function invoke() { poison(); }\n"
+            "function poison() { eval('queue.add = fakeAdd'); }\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="javascript") for path in sources}, sources
+    )
+
+    assert runtime.dispatch_evidence == []
+
+
+def test_js_direct_eval_body_before_its_invocation_keeps_prior_dispatch() -> None:
+    """An eval body's text position is not when the eval executes."""
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/before.js": (
+            "function poison() { eval('queue.add = fakeAdd'); }\n"
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "queue.add('prior', {});\n"
+            "poison();\n"
+        ),
+        "producers/after.js": (
+            "function poison() { eval('queue.add = fakeAdd'); }\n"
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "poison();\n"
+            "queue.add('later', {});\n"
+        ),
+    }
+    runtime = discover_runtime_surfaces(
+        {path: _parsed_file(path, language="javascript") for path in sources}, sources
+    )
+
+    assert [item.file_path for item in runtime.dispatch_evidence] == [
+        "producers/before.js"
+    ]
+    worker = next(task for task in runtime.tasks if task.file_path == "workers/orders.js")
+    assert worker.producer_files == ["producers/before.js"]
+
+
 def test_typescript_import_equals_requires_prior_source_position() -> None:
     """`import = require` executes in source order, not as an ESM-hoisted binding."""
     sources = {

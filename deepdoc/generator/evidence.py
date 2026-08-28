@@ -125,12 +125,14 @@ class EvidenceAssembler:
     COMPRESSED_CARD_TARGET = 60_000
 
     def __init__(
-        self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any]
+        self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any],
+        persistent_index: Any | None = None,
     ):
         self.repo_root = repo_root
         self.scan = scan
         self.plan = plan
         self.cfg = cfg
+        self._persistent_index = persistent_index
         llm_cfg = cfg.get("llm", {}) or {}
         def _token_value(value: Any, default: int) -> int:
             if value is None or (

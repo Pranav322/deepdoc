@@ -73,3 +73,6 @@ include = ["deepdoc*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "slow: memory-intensive tests that should only run with --run-slow",
+]

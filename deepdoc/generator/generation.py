@@ -435,7 +435,7 @@ class BucketGenerationEngine:
         self.plan = plan
         self.contract_plan = plan
         self.output_dir = output_dir
-        self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
+        self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg, persistent_index=self._load_persistent_index(repo_root, cfg))
         self.generator = PageGenerator(llm, cfg, repo_root)
         self.validator = PageValidator(repo_root, scan)
         self.max_workers = cfg.get("max_parallel_workers", MAX_PARALLEL_WORKERS)
@@ -1429,6 +1429,23 @@ Re-run `deepdoc generate` to retry.
             result[bucket.slug] = (sitemap, deps)
 
         return result
+
+    def _load_persistent_index(self, repo_root: Path, cfg: dict[str, Any]) -> Any | None:
+        """Open a PersistentIndex if the config allows and the DB exists.
+
+        Returns None when the index isn't available — evidence assembly falls
+        back to RepoScan dicts transparently.
+        """
+        if not cfg.get("scan", {}).get("persistent_index", True):
+            return None
+        db_path = repo_root / ".deepdoc" / "index.db"
+        if not db_path.is_file():
+            return None
+        try:
+            from ..persistent_index import PersistentIndex
+            return PersistentIndex(repo_root)
+        except Exception:
+            return None
 
     def _planned_doc_pages(self) -> list[tuple[str, str]]:
         """Return planned titles mapped to their eventual site URLs."""

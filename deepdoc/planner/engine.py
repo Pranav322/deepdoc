@@ -42,6 +42,57 @@ def _build_repo_model_if_wanted(scan: RepoScan, repo_root: str, cfg: dict[str, A
         pass
 
 
+def _persist_scan_index(repo_root: Path, scan: RepoScan, cfg: dict[str, Any]) -> None:
+    """Write scan results to the persistent index and content store.
+
+    Controlled by ``scan.persistent_index`` config key (default: True).
+    RepoScan dicts remain fully populated — this is an additive write,
+    not a replacement.
+    """
+    if not cfg.get("scan", {}).get("persistent_index", True):
+        return
+    try:
+        from ..content_store import ContentStore
+        from ..persistent_index import PersistentIndex
+
+        content_store = ContentStore(repo_root)
+        with PersistentIndex(repo_root) as index:
+            for rel_path, content in getattr(scan, "file_contents", {}).items():
+                content_hash = content_store.put(content)
+
+                rel_path_str = str(rel_path)
+                source_kind = getattr(scan, "source_kind_by_file", {}).get(rel_path_str, "product")
+                parsed = getattr(scan, "parsed_files", {}).get(rel_path_str)
+                line_count = getattr(scan, "file_line_counts", {}).get(rel_path_str, 0)
+
+                if parsed is not None:
+                    parse_status = "full"
+                    language = parsed.language
+                    file_id = index.upsert_file(
+                        rel_path=rel_path_str,
+                        language=language,
+                        source_kind=source_kind,
+                        parse_status=parse_status,
+                        line_count=line_count,
+                        byte_count=len(content.encode("utf-8")),
+                        content_hash=content_hash,
+                    )
+                    index.upsert_symbols(file_id, parsed.symbols)
+                    index.upsert_imports(file_id, parsed.imports)
+                else:
+                    index.upsert_file(
+                        rel_path=rel_path_str,
+                        language="",
+                        source_kind=source_kind,
+                        parse_status="inventory_only",
+                        line_count=line_count,
+                        byte_count=len(content.encode("utf-8")),
+                        content_hash=content_hash,
+                    )
+    except Exception:
+        pass
+
+
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
 
@@ -1341,6 +1392,8 @@ def scan_repo(
     )
 
     _build_repo_model_if_wanted(repo_scan, str(repo_root), cfg)
+
+    _persist_scan_index(repo_root, repo_scan, cfg)
 
     return repo_scan
 

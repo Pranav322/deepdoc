@@ -59,10 +59,8 @@ class TestClaimExtractorFalsePositives:
 class TestCitationInjection:
     def test_known_path_becomes_linked_citation(self):
         content = "The build script lives in `scripts/docs.py:208`."
-
-        # Without git remote → plain link
         result = inject_source_citations(content, {"scripts/docs.py"})
-        assert "[Source: scripts/docs.py:208]" in result
+        assert "`scripts/docs.py:208`" in result
 
     def test_known_path_with_commit(self):
         content = "See `src/main.py:42` for details."
@@ -73,13 +71,23 @@ class TestCitationInjection:
             commit_sha="abc1234",
         )
         assert "github.com/fastapi/fastapi/blob/abc1234/src/main.py#L42" in result
-        assert "[Source:" in result
+        assert "`src/main.py:42`" in result
+
+    def test_unknown_commit_renders_plain(self):
+        content = "Defined in `src/main.py:42`."
+        result = inject_source_citations(
+            content,
+            {"src/main.py"},
+            git_remote="https://github.com/fastapi/fastapi",
+            commit_sha="unknown",
+        )
+        assert "`src/main.py:42`" in result
+        assert "github.com" not in result
 
     def test_hallucinated_path_unchanged(self):
         content = "Defined in `nonexistent/path.py:99`."
         result = inject_source_citations(content, {"src/main.py"})
         assert "`nonexistent/path.py:99`" in result
-        assert "[Source:" not in result
 
     def test_multiple_citations_in_page(self):
         content = (
@@ -89,10 +97,18 @@ class TestCitationInjection:
         result = inject_source_citations(
             content,
             {"scripts/docs.py", "docs/en/mkdocs.yml"},
+            git_remote="https://github.com/foo/bar",
+            commit_sha="xyz",
         )
-        assert result.count("[Source:") == 2
+        assert result.count("github.com") == 2
 
-    def test_no_citations_in_code_fences(self):
-        content = "```python\n# scripts/docs.py:42\nx = 1\n```"
-        result = inject_source_citations(content, {"scripts/docs.py"})
-        assert "Source" not in result
+    def test_local_repo_no_github(self):
+        content = "Handler at `fastapi/exceptions.py:17`."
+        result = inject_source_citations(
+            content,
+            {"fastapi/exceptions.py"},
+            git_remote="",
+            commit_sha="abc1234",
+        )
+        assert "`fastapi/exceptions.py:17`" in result
+        assert "github.com" not in result

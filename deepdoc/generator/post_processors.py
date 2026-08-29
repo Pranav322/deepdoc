@@ -912,26 +912,34 @@ def link_glossary_terms(content: str, terms: list[tuple[str, str]]) -> str:
 
 
 def inject_source_citations(content: str, known_paths: set[str], git_remote: str = "", commit_sha: str = "") -> str:
-    """Convert bare `path:line` backtick references into linked [Source: ...] citations.
+    """Convert bare `path:line` backtick references into linked source citations.
 
     Only files that exist in the repository are cited. Hallucinated paths are
-    left unchanged. Links are commit-pinned GitHub blob URLs when remote and
-    commit are known.
+    left unchanged. Links use commit-pinned GitHub blob URLs when remote and
+    commit are known and the commit is not ``"unknown"``.  Otherwise inline
+    plain ``path:line`` text is rendered.
     """
     PAT = re.compile(r"`([^`]+):(\d+)`")
+    _valid_commit = bool(commit_sha and commit_sha not in ("unknown", ""))
+
+    def _github_url(remote: str, path: str, line: str) -> str | None:
+        if not _valid_commit:
+            return None
+        remote = remote.strip().rstrip("/")
+        if "github.com/" not in remote:
+            return None
+        repo = remote.split("github.com/", 1)[-1].rstrip("/")
+        return f"https://github.com/{repo}/blob/{commit_sha}/{path}#L{line}"
 
     def _replace(m: re.Match) -> str:
         path = m.group(1)
         line = m.group(2)
         if path not in known_paths:
             return m.group(0)
-        if git_remote and commit_sha:
-            remote = git_remote.rstrip("/").replace("https://github.com/", "")
-            return (
-                f"[Source: {path}:{line}]"
-                f"(https://github.com/{remote}/blob/{commit_sha}/{path}#L{line})"
-            )
-        return f"[Source: {path}:{line}]"
+        url = _github_url(git_remote, path, line)
+        if url:
+            return f"[`{path}:{line}`]({url})"
+        return f"[`{path}:{line}`]"
 
     return PAT.sub(_replace, content)
 

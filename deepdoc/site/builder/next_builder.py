@@ -109,15 +109,37 @@ def _build_nav(plan: DocPlan, has_openapi: bool) -> list[dict]:
         })
 
     # ── nav sections ─────────────────────────────────────────────────────────
-    for section_name, slugs in nav_structure.items():
-        items = []
-        for slug in slugs:
-            if slug == overview_slug:
-                continue  # already added as top-level
-            title = slug_to_title.get(slug, _slug_to_title(slug))
-            items.append({"title": title, "slug": slug})
-        if items:
-            nav.append({"type": "section", "title": section_name, "items": items})
+    for section_name, items in nav_structure.items():
+        nav_items = []
+        for entry in items:
+            if isinstance(entry, dict):
+                parent_title = entry.get("display_title", _slug_to_title(entry["parent_slug"]))
+                parent_slug = entry["parent_slug"]
+                children = []
+                for child_slug in entry.get("children", []):
+                    if child_slug == overview_slug:
+                        continue
+                    children.append({
+                        "title": slug_to_title.get(child_slug, _slug_to_title(child_slug)),
+                        "slug": child_slug,
+                    })
+                if children:
+                    nav_items.append({
+                        "type": "section",
+                        "title": parent_title,
+                        "slug": parent_slug,
+                        "items": children,
+                    })
+            elif isinstance(entry, str):
+                slug = entry
+                if slug == overview_slug:
+                    continue
+                nav_items.append({
+                    "title": slug_to_title.get(slug, _slug_to_title(slug)),
+                    "slug": slug,
+                })
+        if nav_items:
+            nav.append({"type": "section", "title": section_name, "items": nav_items})
 
     # ── What's Changed (always present if it exists) ──────────────────────────
     if not _slug_in_nav(nav, "whats-changed"):

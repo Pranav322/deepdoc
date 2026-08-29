@@ -32,7 +32,11 @@ DEFAULT_CONFIG: dict[str, Any] = {
     },
     "scan": {
         "max_workers": 8,
-        "max_source_bytes": 1_000_000,  # files above this are skipped, not read/parsed/clustered
+        "max_source_bytes": 1_000_000,
+        "max_repo_files": 0,       # 0 = unlimited; warn when exceeded
+        "timeout_seconds": 0,      # 0 = unlimited; abort scan with partial results when exceeded
+        "build_repo_model": True,
+        "persistent_index": True,
     },
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose

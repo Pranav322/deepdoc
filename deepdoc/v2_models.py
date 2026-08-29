@@ -168,6 +168,7 @@ class RepoScan:
     scan_scope: list[str] = field(default_factory=list)
     unsupported_extensions: dict[str, int] = field(default_factory=dict)
     skipped_source_files: dict[str, int] = field(default_factory=dict)
+    partial: bool = False
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:

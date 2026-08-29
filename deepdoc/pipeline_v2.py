@@ -694,6 +694,13 @@ class PipelineV2:
                 f"file(s) without reading/parsing: {named_reasons}[/dim]"
             )
 
+        if getattr(scan, "partial", False):
+            console.print(
+                "[yellow]⚠ Scan was interrupted (timeout/limit reached) — "
+                "results are partial. Re-run with increased "
+                "scan.timeout_seconds or scan.max_repo_files.[/yellow]"
+            )
+
     def _print_coverage(self, scan: RepoScan, plan) -> None:
         """Surface how much of the repo actually made it into documentation.
 

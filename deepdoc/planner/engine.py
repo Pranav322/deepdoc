@@ -1083,8 +1083,13 @@ def scan_repo(
     skipped_source_files: dict[str, int] = {}
     scan_cfg = cfg.get("scan", {}) or {}
     max_source_bytes = int(scan_cfg.get("max_source_bytes", 1_000_000))
+    max_repo_files = int(scan_cfg.get("max_repo_files", 0))
+    timeout_seconds = float(scan_cfg.get("timeout_seconds", 0))
     scan_timings: dict[str, float] = {}
     step_start = time.perf_counter()
+    from ..scale_utils import TimeoutGuard
+    timeout_guard = TimeoutGuard(timeout_seconds) if timeout_seconds > 0 else None
+    scan_partial = False
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
     _record_scan_timing(
         scan_timings,
@@ -1142,7 +1147,20 @@ def scan_repo(
             "[dim]Scanning files...[/dim]", total=len(all_files_to_scan)
         )
 
+        if max_repo_files > 0 and len(all_files_to_scan) > max_repo_files:
+            console.print(
+                f"[yellow]⚠ {len(all_files_to_scan)} files discovered, "
+                f"exceeding scan.max_repo_files limit of {max_repo_files}. "
+                f"Scan will proceed but may use significant memory.[/yellow]"
+            )
+
         for fpath in all_files_to_scan:
+            if timeout_guard is not None and timeout_guard.check():
+                console.print(
+                    "[yellow]⚠ Scan timeout reached — returning partial results.[/yellow]"
+                )
+                scan_partial = True
+                break
             fname = fpath.name
             rel = fpath.relative_to(repo_root).as_posix()
             rel_dir = (
@@ -1417,6 +1435,7 @@ def scan_repo(
         scan_scope=sorted(normalized_scan_paths),
         unsupported_extensions=dict(unsupported_extensions),
         skipped_source_files=dict(skipped_source_files),
+        partial=scan_partial,
     )
 
     _build_repo_model_if_wanted(repo_scan, str(repo_root), cfg)

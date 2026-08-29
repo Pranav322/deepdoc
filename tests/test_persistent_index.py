@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import tempfile
-import textwrap
 from pathlib import Path
 
 import pytest
@@ -265,58 +264,12 @@ class TestScanIntegration:
 # ---------------------------------------------------------------------------
 
 
+from tests.fixtures.generate_large import generate_5k_files, generate_50k_files
+
+
 def _generate_5k_files(tmp_root: Path) -> None:
-    """Generate a realistic polyglot repo with ~5000 source files."""
-    src = tmp_root / "src"
-    templates = {
-        "py": textwrap.dedent("""\
-            def {name}_{i}(value: int) -> int:
-                \"\"\"Processing function {i}.\"\"\"
-                return value * 2
-
-
-            class {Name}{i}:
-                def __init__(self, data):
-                    self.data = data
-
-                def process(self):
-                    return self.data
-        """),
-        "ts": textwrap.dedent("""\
-            export function {name}{i}(value: number): number {{
-                return value * 2;
-            }}
-
-            export class {Name}{i} {{
-                data: any;
-                constructor(data: any) {{
-                    this.data = data;
-                }}
-                process(): any {{
-                    return this.data;
-                }}
-            }}
-        """),
-        "go": textwrap.dedent("""\
-            package src
-
-            func {Name}{i}(value int) int {{
-                return value * 2
-            }}
-
-            type {Name}{i}Model struct {{
-                Data string
-            }}
-        """),
-    }
-    names = ["process", "handle", "compute", "resolve", "validate", "transform", "execute", "fetch", "aggregate", "normalize"]
-    for lang in ("py", "ts", "go"):
-        d = src / lang
-        d.mkdir(parents=True, exist_ok=True)
-        for i in range(1667 if lang == "py" else 1667 if lang == "ts" else 1666):
-            name = names[i % len(names)]
-            tpl = templates[lang].format(name=name, Name=name.capitalize(), i=i)
-            (d / f"{name}_{i}.{lang}").write_text(tpl)
+    """Alias kept for backward compat — delegates to shared utility."""
+    generate_5k_files(tmp_root)
 
 
 class TestMemoryProfile:

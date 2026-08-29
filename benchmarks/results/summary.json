@@ -1,0 +1,260 @@
+{
+  "total": 16,
+  "passed": 16,
+  "failed": 0,
+  "pass_rate": 1.0,
+  "results": [
+    {
+      "fixture": "broken-imports",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "kind:src/main.py": "product",
+        "imports": 3
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.005135749997862149
+    },
+    {
+      "fixture": "copy-paste-trap",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "files": 3,
+        "kind:src/auth.py": "product",
+        "kind:src/payment.py": "product",
+        "kind:src/storage.py": "product",
+        "symbols": 6
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0024892910005291924
+    },
+    {
+      "fixture": "fixture-trap",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "kind:tests/fixtures/payment_api.py": "fixture",
+        "status:tests/fixtures/payment_api.py": "full",
+        "route_records": 0
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0015946670027915388
+    },
+    {
+      "fixture": "generated-trap",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "kind:src/generated/models.generated.ts": "generated",
+        "status:src/generated/models.generated.ts": "full"
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.005036458998802118
+    },
+    {
+      "fixture": "name-collision",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "files": 5,
+        "kind:src/user_service.py": "product",
+        "kind:src/order_service.py": "product",
+        "kind:src/product_service.py": "product",
+        "kind:src/payment_service.py": "product",
+        "kind:src/notification_service.py": "product",
+        "symbols": 5
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.002670582995051518
+    },
+    {
+      "fixture": "polyglot-small",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "files": 4,
+        "parsed_files": 2,
+        "kind:src/main.py": "product",
+        "kind:src/server.ts": "product",
+        "kind:src/legacy.rb": "product",
+        "kind:src/config.foo": "product",
+        "status:src/main.py": "full",
+        "status:src/server.ts": "full",
+        "status:src/legacy.rb": "inventory_only",
+        "status:src/config.foo": "inventory_only",
+        "unsupported_languages": [
+          "Ruby",
+          "foo"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.003051792002224829
+    },
+    {
+      "fixture": "test-file-trap",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "kind:tests/app/controllers.py": "test",
+        "status:tests/app/controllers.py": "full",
+        "route_records": 0
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0011105829980806448
+    },
+    {
+      "fixture": "unknown-foo",
+      "category": "A",
+      "passed": true,
+      "metrics": {
+        "files": 1,
+        "status:src/README": "unknown"
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0008719999968889169
+    },
+    {
+      "fixture": "django_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "files": 2,
+        "parsed_files": 1,
+        "route_records": 8,
+        "frameworks": [
+          "django"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.004990708002878819
+    },
+    {
+      "fixture": "express_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "files": 2,
+        "parsed_files": 1,
+        "route_records": 3,
+        "frameworks": [
+          "express"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0032020830039982684
+    },
+    {
+      "fixture": "falcon_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "files": 2,
+        "parsed_files": 2,
+        "route_records": 3,
+        "frameworks": [
+          "falcon"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.002953999995952472
+    },
+    {
+      "fixture": "fastify_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "files": 2,
+        "parsed_files": 1,
+        "route_records": 2,
+        "frameworks": [
+          "fastify"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0025162910023937
+    },
+    {
+      "fixture": "go_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "files": 2,
+        "parsed_files": 1,
+        "route_records": 3,
+        "frameworks": [
+          "gin",
+          "go"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.003555957999196835
+    },
+    {
+      "fixture": "java_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "files": 4,
+        "symbols": 15,
+        "frameworks": []
+      },
+      "failures": [],
+      "warnings": [
+        "Framework java not detected (found: [])"
+      ],
+      "scan_time_s": 0.003872082997986581
+    },
+    {
+      "fixture": "rust_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "overall_parse_rate": 1.0,
+        "files": 1,
+        "symbols": 4,
+        "frameworks": []
+      },
+      "failures": [],
+      "warnings": [
+        "Framework rust not detected (found: [])"
+      ],
+      "scan_time_s": 0.003940957998565864
+    },
+    {
+      "fixture": "vue_app",
+      "category": "B",
+      "passed": true,
+      "metrics": {
+        "files": 2,
+        "parsed_files": 1,
+        "frameworks": [
+          "vue"
+        ]
+      },
+      "failures": [],
+      "warnings": [],
+      "scan_time_s": 0.0033458750040153973
+    }
+  ]
+}

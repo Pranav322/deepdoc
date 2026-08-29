@@ -30,7 +30,8 @@ from pathlib import Path
 import re
 from typing import Any
 
-from .parser.base import ParsedFile, Symbol
+from ..parser.base import ParsedFile, Symbol
+from . import get_extractor
 
 # ── Edge kinds ────────────────────────────────────────────────────────────────
 CALL_KIND_LOCAL = "local"           # calls a repo-local function
@@ -445,17 +446,18 @@ def build_call_graph(
             if not body.strip():
                 continue
 
-            if lang == "python":
-                caller_class = _enclosing_class(sym, file_classes.get(file_path, []))
-                _extract_py_calls(
-                    graph, file_path, sym.name, body, ctx, celery_task_names, caller_class
-                )
-            elif lang in ("javascript", "typescript"):
-                _extract_js_calls(graph, file_path, sym.name, body, ctx)
-            elif lang == "go":
-                _extract_go_calls(graph, file_path, sym.name, body, ctx)
-            elif lang == "php":
-                _extract_php_calls(graph, file_path, sym.name, body, ctx)
+            extractor = get_extractor(lang)
+            if extractor is not None:
+                if lang == "python":
+                    caller_class = _enclosing_class(sym, file_classes.get(file_path, []))
+                    extractor.extract_calls(
+                        graph, file_path, sym.name, body, ctx, caller_class=caller_class,
+                        celery_tasks=celery_task_names,
+                    )
+                else:
+                    extractor.extract_calls(
+                        graph, file_path, sym.name, body, ctx,
+                    )
 
     _add_framework_overlay_relations(graph, parsed_files, api_endpoints or [])
     return graph

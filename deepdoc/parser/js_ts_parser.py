@@ -648,6 +648,7 @@ class _Binder:
         such a call site is unknowable and taints the whole module instead.
         """
         functions_by_scope: dict[tuple[int, int], _Declaration] = {}
+        generator_scopes: set[tuple[int, int]] = set()
         for function in nodes:
             if function.type not in {
                 "function_declaration",
@@ -656,6 +657,9 @@ class _Binder:
                 continue
             name = function.child_by_field_name("name")
             declaration = self._declaration_for(name) if name is not None else None
+            if function.type == "generator_function_declaration":
+                generator_scopes.add(_execution_scope(function))
+                continue
             if declaration is not None:
                 functions_by_scope[_execution_scope(function)] = declaration
         # Callee -> enclosing named functions that synchronously call it.
@@ -666,6 +670,8 @@ class _Binder:
             if call.type != "call_expression":
                 continue
             scope = _execution_scope(call)
+            if scope in generator_scopes:
+                continue
             enclosing = functions_by_scope.get(scope)
             if self._is_unshadowed_direct_eval(call) and not _execution_scope_is_program(
                 call
@@ -991,17 +997,28 @@ class _Binder:
             return None
         if node.type == "identifier":
             return self._lookup(node)
-        if node.type == "member_expression":
+        if node.type in {"member_expression", "subscript_expression"}:
             obj = node.child_by_field_name("object")
-            prop = node.child_by_field_name("property")
+            prop = (
+                node.child_by_field_name("property")
+                if node.type == "member_expression"
+                else node.child_by_field_name("index")
+            )
+            member = (
+                _text(prop)
+                if prop is not None and node.type == "member_expression"
+                else _unquote(prop)
+                if prop is not None and prop.type == "string"
+                else ""
+            )
             base = self._resolve(obj) if obj is not None else None
-            if base is None or prop is None:
+            if base is None or not member:
                 return None
             # A literal requested module may expose a named export directly
             # (`require('bullmq').Worker`). Arbitrary members of a produced
             # value never create a fresh module binding.
             return (
-                _ResolvedValue(base.module, _text(prop))
+                _ResolvedValue(base.module, member)
                 if base.member == _MODULE_EXPORT
                 else None
             )
@@ -1029,16 +1046,26 @@ class _Binder:
             if resolved is None:
                 return None
             module, symbol, receiver = resolved.module, resolved.member, ""
-        elif callee.type == "member_expression":
+        elif callee.type in {"member_expression", "subscript_expression"}:
             obj = callee.child_by_field_name("object")
-            prop = callee.child_by_field_name("property")
+            prop = (
+                callee.child_by_field_name("property")
+                if callee.type == "member_expression"
+                else callee.child_by_field_name("index")
+            )
             base = self._resolve(obj) if obj is not None else None
-            if base is None or prop is None:
+            symbol = (
+                _text(prop)
+                if prop is not None and callee.type == "member_expression"
+                else _unquote(prop)
+                if prop is not None and prop.type == "string"
+                else ""
+            )
+            if base is None or not symbol:
                 return None
             module, member = base.module, base.member
             # A member of the module export is the imported symbol itself, so
             # `new amqp.Worker()` and an imported `new Worker()` are one role.
-            symbol = _text(prop)
             receiver = "" if member == _MODULE_EXPORT else member
             receiver_identity = base.identity if receiver else ""
         elif callee.type == "call_expression":
@@ -1321,6 +1348,11 @@ def _arg_tokens(node) -> tuple[tuple[str, str], ...]:
 def _arg_token(node) -> tuple[str, str]:
     if node.type == "string":
         return ("str", _unquote(node))
+    if node.type == "template_string" and not any(
+        child.type == "template_substitution" for child in node.named_children
+    ):
+        value = _text(node)
+        return ("str", value[1:-1] if len(value) >= 2 else "")
     if node.type == "identifier":
         return ("name", _text(node))
     if node.type in ("function_expression", "function_declaration"):

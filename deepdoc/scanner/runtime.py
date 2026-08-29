@@ -174,6 +174,8 @@ def _python_has_unmodelled_module_mutation(tree: ast.Module) -> bool:
     Direct ``exec`` and a reflected module write through a non-literal key both
     leave every binding in the module unknowable, so the module fails closed.
     """
+    if _python_has_module_locals_mutation(tree):
+        return True
     for node in ast.walk(tree):
         if isinstance(node, ast.Call):
             if isinstance(node.func, ast.Name) and node.func.id == "exec":
@@ -198,6 +200,27 @@ def _python_has_unmodelled_module_mutation(tree: ast.Module) -> bool:
             ):
                 return True
     return False
+
+
+def _python_has_module_locals_mutation(tree: ast.Module) -> bool:
+    """Whether module-level ``locals()`` is used as a mutable globals alias."""
+    def visit(node: ast.AST) -> bool:
+        if node is not tree and isinstance(
+            node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)
+        ):
+            return False
+        if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+            if (
+                node.func.attr in {"update", "setdefault", "pop", "__setitem__"}
+                and _python_is_locals_call(node.func.value)
+            ):
+                return True
+        if isinstance(node, ast.Subscript) and _python_is_locals_call(node.value):
+            if isinstance(node.ctx, (ast.Store, ast.Del)):
+                return True
+        return any(visit(child) for child in ast.iter_child_nodes(node))
+
+    return visit(tree)
 
 
 def _php_runtime_target_identities(tasks: list[RuntimeTask]) -> frozenset[str]:
@@ -659,6 +682,17 @@ def _python_is_globals_call(node: Optional[ast.AST]) -> bool:
         isinstance(node, ast.Call)
         and isinstance(node.func, ast.Name)
         and node.func.id == "globals"
+        and not node.args
+        and not node.keywords
+    )
+
+
+def _python_is_locals_call(node: Optional[ast.AST]) -> bool:
+    """A bare module ``locals()`` candidate; caller establishes module scope."""
+    return (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "locals"
         and not node.args
         and not node.keywords
     )
@@ -1785,12 +1819,20 @@ def _discover_django_file_runtime(
     receiver_names: set[str] = set()
     signal_names: dict[str, str] = {}
     signal_module_names: set[str] = set()
+    signal_module_paths: set[str] = set()
     base_command_names: set[str] = set()
+    base_command_modules: set[str] = set()
 
     def revoke(names: set[str]) -> None:
         receiver_names.difference_update(names)
         signal_module_names.difference_update(names)
         base_command_names.difference_update(names)
+        for module_path in tuple(signal_module_paths):
+            if module_path.split(".", 1)[0] in names:
+                signal_module_paths.discard(module_path)
+        for module_path in tuple(base_command_modules):
+            if module_path.split(".", 1)[0] in names:
+                base_command_modules.discard(module_path)
         for name in names:
             signal_names.pop(name, None)
 
@@ -1825,11 +1867,19 @@ def _discover_django_file_runtime(
                 revoke({local})
                 if alias.name == "django.db.models.signals":
                     signal_module_names.add(local)
+                    signal_module_paths.add(alias.name)
+                elif alias.name == "django.core.management.base":
+                    base_command_modules.add(alias.name)
             continue
         if isinstance(node, ast.ClassDef):
             commands_by_name.pop(node.name, None)
             if any(
                 _python_dotted_name(base) in base_command_names
+                or (
+                    _python_dotted_name(base).rsplit(".", 1)[0]
+                    in base_command_modules
+                    and _python_dotted_name(base).endswith(".BaseCommand")
+                )
                 for base in node.bases
             ):
                 commands_by_name[node.name] = RuntimeTask(
@@ -1844,7 +1894,10 @@ def _discover_django_file_runtime(
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             commands_by_name.pop(node.name, None)
             signal = _python_receiver_signal(
-                node, receiver_names, signal_names, signal_module_names
+                node,
+                receiver_names,
+                signal_names,
+                signal_module_names | signal_module_paths,
             )
             if signal:
                 tasks.append(
@@ -1869,7 +1922,7 @@ def _discover_django_file_runtime(
                 revoke(setattr_roots)
                 continue
             signal, handler = _python_signal_connect(
-                node.value, signal_names, signal_module_names
+                node.value, signal_names, signal_module_names | signal_module_paths
             )
             if signal and handler and handler in defined_functions:
                 tasks.append(
@@ -1932,12 +1985,10 @@ def _python_django_signal_name(
     if dotted in signal_names:
         return signal_names[dotted]
     parts = dotted.split(".") if dotted else []
-    if (
-        len(parts) == 2
-        and parts[0] in signal_module_names
-        and parts[1] in _PYTHON_DJANGO_SIGNAL_NAMES
-    ):
-        return parts[1]
+    if parts and parts[-1] in _PYTHON_DJANGO_SIGNAL_NAMES:
+        module_path = ".".join(parts[:-1])
+        if module_path in signal_module_names:
+            return parts[-1]
     return ""
 
 
@@ -2099,7 +2150,7 @@ JS_BOUND_RUNTIME_MODULES = (
 # that were never candidates while retaining legal whitespace before `(`.
 JS_EVIDENCE_TOKENS = tuple(sorted(JS_BOUND_RUNTIME_MODULES))
 JS_CALL_SHAPE_RE = re.compile(
-    r"\bworker\b|\bschedule\s*\(|\.\s*(?:process|consume|define|every|schedule|on|add)\s*\(",
+    r"\bworker\b|\bschedule\s*\(|(?:\.\s*|\[\s*['\"])(?:process|consume|define|every|schedule|on|add)(?:['\"]\s*\])?\s*\(",
     re.IGNORECASE,
 )
 
@@ -2484,7 +2535,7 @@ def _discover_python_realtime_consumers(
 ) -> list[RealtimeConsumer]:
     """Discover Channels consumers only through AST-proven framework bindings."""
     consumers: list[RealtimeConsumer] = []
-    imported_routes: dict[str, set[str]] = {}
+    imported_routes: dict[tuple[str, str], set[str]] = {}
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
         if _python_has_unmodelled_module_mutation(tree):
             continue
@@ -2494,6 +2545,9 @@ def _discover_python_realtime_consumers(
         route_module_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
         auth_name_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
         auth_module_events: dict[str, list[tuple[tuple[int, int], bool]]] = {}
+        consumer_import_events: dict[
+            str, list[tuple[tuple[int, int], tuple[str, str] | None]]
+        ] = {}
         class_nodes: dict[str, tuple[str, ast.ClassDef]] = {}
 
         def record(
@@ -2511,6 +2565,7 @@ def _discover_python_realtime_consumers(
                     consumer_modules.discard(module_path)
             record(route_name_events, name, position, False)
             record(auth_name_events, name, position, False)
+            consumer_import_events.setdefault(name, []).append((position, None))
             for events in (route_module_events, auth_module_events):
                 for module_name in tuple(events):
                     if module_name == name or module_name.startswith(f"{name}."):
@@ -2539,6 +2594,14 @@ def _discover_python_realtime_consumers(
                         record(route_name_events, local, position, True)
                     elif module == "channels.auth" and alias.name == "AuthMiddlewareStack":
                         record(auth_name_events, local, position, True)
+                    else:
+                        imported_path = _python_import_module_file(
+                            file_path, module, node.level
+                        )
+                        if imported_path:
+                            consumer_import_events.setdefault(local, []).append(
+                                (position, (imported_path, alias.name))
+                            )
                 continue
             if isinstance(node, ast.Import):
                 for alias in node.names:
@@ -2577,6 +2640,14 @@ def _discover_python_realtime_consumers(
                         break
             return available
 
+        def imported_consumer_at(
+            name: str, position: tuple[int, int]
+        ) -> tuple[str, str] | None:
+            for event_position, target in reversed(consumer_import_events.get(name, ())):
+                if event_position <= position:
+                    return target
+            return None
+
         local_shadows_by_call = _python_local_shadows_by_call(tree)
         routes_by_consumer = {name: set() for name in class_nodes}
         auth_used = any(
@@ -2608,10 +2679,17 @@ def _discover_python_realtime_consumers(
             route = _python_string_literal(call.args[0]) if call.args else ""
             if not consumer_name or not route:
                 continue
-            if consumer_name in routes_by_consumer:
+            call_position = _python_node_position(call)
+            local_consumer = class_nodes.get(consumer_name)
+            if (
+                local_consumer is not None
+                and _python_node_position(local_consumer[1]) <= call_position
+            ):
                 routes_by_consumer[consumer_name].add(route)
             else:
-                imported_routes.setdefault(consumer_name, set()).add(route)
+                target = imported_consumer_at(consumer_name, call_position)
+                if target is not None:
+                    imported_routes.setdefault(target, set()).add(route)
 
         for name, (consumer_type, class_node) in class_nodes.items():
             auth_hints: list[str] = []
@@ -2630,7 +2708,7 @@ def _discover_python_realtime_consumers(
                 )
             )
     for consumer in consumers:
-        extra = imported_routes.get(consumer.name)
+        extra = imported_routes.get((consumer.file_path, consumer.name))
         if extra:
             consumer.routes = sorted(set(consumer.routes) | extra)[:10]
     return _dedupe_consumers(consumers)

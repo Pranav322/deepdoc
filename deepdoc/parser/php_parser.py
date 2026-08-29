@@ -8,6 +8,7 @@ PHP 8 attribute extraction, visibility modifiers, and Laravel route detection.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from functools import lru_cache
 from pathlib import Path
 import re
 
@@ -54,6 +55,15 @@ class PhpSchedule:
     cron: str
 
 
+@lru_cache(maxsize=256)
+def _php_root(content: str):
+    """One bounded, complete PHP syntax tree shared by runtime extractors."""
+    if not _TS_AVAILABLE or Parser is None:
+        return None
+    root = Parser(PHP_LANGUAGE).parse(content.encode("utf8")).root_node
+    return None if root.has_error else root
+
+
 def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
     """Return structural Laravel `dispatch`/`event` target expressions only.
 
@@ -62,13 +72,10 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
     ``dispatch/event(new Class(...))``. Comments, strings, dynamic values, and
     arbitrary methods never reach the runtime linker.
     """
-    if not _TS_AVAILABLE or Parser is None:
-        return ()
-    parser = Parser(PHP_LANGUAGE)
-    root = parser.parse(content.encode("utf8")).root_node
+    root = _php_root(content)
     # Error-recovery syntax does not prove a PHP dispatch, even when it happens
     # to contain a recognizable partial call subtree.
-    if root.has_error:
+    if root is None:
         return ()
     found: list[PhpDispatch] = []
 
@@ -122,11 +129,8 @@ def php_dispatches(content: str) -> tuple[PhpDispatch, ...]:
 
 def php_class_declarations(content: str) -> tuple[PhpClassDeclaration, ...]:
     """Return strict parser-proven PHP classes with structural runtime metadata."""
-    if not _TS_AVAILABLE or Parser is None:
-        return ()
-    parser = Parser(PHP_LANGUAGE)
-    root = parser.parse(content.encode("utf8")).root_node
-    if root.has_error:
+    root = _php_root(content)
+    if root is None:
         return ()
     found: list[PhpClassDeclaration] = []
     for namespace, scope_nodes in _php_top_level_scopes(root):
@@ -167,11 +171,8 @@ def php_schedules(content: str) -> tuple[PhpSchedule, ...]:
     parameter typed as Laravel's Scheduler. This keeps generic PHP APIs from
     manufacturing scheduler relationships.
     """
-    if not _TS_AVAILABLE or Parser is None:
-        return ()
-    parser = Parser(PHP_LANGUAGE)
-    root = parser.parse(content.encode("utf8")).root_node
-    if root.has_error:
+    root = _php_root(content)
+    if root is None:
         return ()
     found: list[PhpSchedule] = []
     for namespace, scope_nodes in _php_top_level_scopes(root):

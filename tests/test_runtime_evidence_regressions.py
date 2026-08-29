@@ -163,6 +163,22 @@ def test_js_deep_member_chain_does_not_abort_runtime_scan() -> None:
     assert worker.name == "orders"
 
 
+def test_js_static_computed_members_and_templates_are_proven() -> None:
+    sources = {
+        "workers/orders.js": (
+            "const Worker = require('bullmq')['Worker'];\n"
+            "new Worker(`orders`, handleOrders);\n"
+        ),
+        "producers/orders.js": (
+            "const Queue = require('bullmq')['Queue'];\n"
+            "const queue = new Queue(`orders`);\n"
+            "queue['add'](`job`, {});\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "javascript" for path in sources})
+    assert _queue_aliases(runtime) == [("producers/orders.js", ("orders",))]
+
+
 def test_python_task_module_rejects_inserted_attributes() -> None:
     sources = {
         "jobs/tasks.py": (
@@ -204,6 +220,25 @@ def test_python_globals_update_fails_closed() -> None:
         "jobs/producer.py": (
             "from jobs.tasks import actual\n"
             "globals().update({'actual': fake})\n"
+            "actual.delay()\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "python" for path in sources})
+    task = next(item for item in runtime.tasks if item.name == "actual")
+    assert task.producer_files == []
+
+
+def test_python_module_locals_mutation_fails_closed() -> None:
+    sources = {
+        "jobs/tasks.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def actual():\n"
+            "    return 1\n"
+        ),
+        "jobs/producer.py": (
+            "from jobs.tasks import actual\n"
+            "locals().update({'actual': fake})\n"
             "actual.delay()\n"
         ),
     }
@@ -342,6 +377,18 @@ def test_python_dotted_django_signal_import_is_proven() -> None:
     assert _signal_aliases(runtime) == [
         ("handlers/signals.py", ("post_save",))
     ]
+
+
+def test_python_dotted_basecommand_import_is_proven() -> None:
+    sources = {
+        "orders/management/commands/sync_orders.py": (
+            "import django.core.management.base\n"
+            "class Command(django.core.management.base.BaseCommand):\n"
+            "    pass\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "python" for path in sources})
+    assert [task.runtime_kind for task in runtime.tasks] == ["django_command"]
 
 
 def _laravel_kernel(body: str) -> str:

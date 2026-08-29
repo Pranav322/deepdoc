@@ -34,6 +34,7 @@ from .chatbot.settings import chatbot_enabled
 from .generator import summarize_generation_results
 from .llm import LLMClient
 from .manifest import Manifest
+from .output_safety import assert_safe_for_generation, resolve_output_paths
 from .parser import supported_extensions
 from .changelog_writer import record_and_write as _record_changelog
 from .persistence_v2 import (
@@ -174,7 +175,7 @@ class SmartUpdater:
     def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
-        self.output_dir = repo_root / cfg.get("output_dir", "docs")
+        self.output_dir = resolve_output_paths(repo_root, cfg).output_dir
         self.telemetry = RunTelemetry(repo_root, "update")
         self.llm = LLMClient(cfg, telemetry=self.telemetry)
         self.manifest = Manifest(self.output_dir)
@@ -182,6 +183,7 @@ class SmartUpdater:
     def update(
         self, since: str = "HEAD~1", force_replan: bool = False
     ) -> dict[str, Any]:
+        assert_safe_for_generation(self.repo_root, self.cfg)
         try:
             with deepdoc_state_lock(self.repo_root):
                 stats = self._update_locked(
@@ -1302,8 +1304,8 @@ class SmartUpdater:
             return False
 
         managed_dirs = [
-            self.cfg.get("output_dir", "docs").strip("/"),
-            self.cfg.get("site_dir", "site").strip("/"),
+            self.cfg.get("output_dir", "deepdoc-docs").strip("/"),
+            self.cfg.get("site_dir", "deepdoc-site").strip("/"),
             ".deepdoc",
             "chatbot_backend",
         ]
@@ -1564,7 +1566,10 @@ class SmartUpdater:
             from .pipeline_v2 import stage_openapi_assets
             from .site.builder import build_next_from_plan
 
-            has_openapi = stage_openapi_assets(self.repo_root)
+            has_openapi = stage_openapi_assets(
+                self.repo_root,
+                site_dir=self.repo_root / str(self.cfg.get("site_dir") or "deepdoc-site"),
+            )
             build_next_from_plan(
                 self.repo_root, self.output_dir, self.cfg, plan, has_openapi
             )

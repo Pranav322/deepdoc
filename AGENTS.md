@@ -13,7 +13,7 @@ Guidance for coding agents working in this repository.
 - CLI entrypoint: `deepdoc = deepdoc.cli:main`
 - Test runner: `pytest`
 - Main implementation path is the v2 bucket-based pipeline.
-- Generated docs live in `docs/` (configurable); the generated site scaffold (Next.js + Fumadocs) lives in `site/`, and `next build` in `site/` outputs static HTML to `site/out/`.
+- Generated docs live in `deepdoc-docs/` by default (configurable); the generated site scaffold (Next.js + Fumadocs) lives in `deepdoc-site/` by default, and `next build` outputs static HTML to `<site_dir>/out/`.
 - Repo also contains a VS Code extension at `vscode-extension/` (Node/TypeScript, independent release track) and a Remotion marketing video project at `deepdoc/video/` (not part of the Python pipeline).
 
 ## Important Paths
@@ -63,8 +63,8 @@ Guidance for coding agents working in this repository.
 - `deepdoc/chatbot/scaffold.py` — chatbot `chatbot_backend/` scaffolding generator
 
 ### Site builder (Next.js + Fumadocs)
-- `deepdoc/site/builder/next_builder.py` — **canonical site builder**: `build_next_from_plan()` copies the Next.js + Fumadocs shell template from `next_template/` into `site/`, writes `site/deepdoc.config.json` (nav tree, brand colors, chatbot URL, project name) and `site/app/globals.css` (brand CSS vars). `mkdocs_builder.py` is kept for compatibility but no longer called by the pipeline.
-- `deepdoc/site/builder/next_template/` — shipped as package-data; contains the full Next.js + Fumadocs shell (`package.json`, `app/layout.tsx`, `app/[[...slug]]/page.tsx`, `lib/docs.ts`, `lib/nav.ts`, `components/chatbot.tsx`, etc.). Content (`docs/*.md`) is read at build time by `lib/docs.ts` via a **remark/rehype pipeline only** — no MDX JSX compiler ever runs on LLM-generated content, so `{`, `<Tag>` etc. in code blocks cannot crash a build.
+- `deepdoc/site/builder/next_builder.py` — **canonical site builder**: `build_next_from_plan()` copies the Next.js + Fumadocs shell template from `next_template/` into configured `site_dir` (`deepdoc-site/` by default), writes `deepdoc.config.json`, `app/globals.css`, and `.env.local` pointing at configured `output_dir`. `mkdocs_builder.py` is kept for compatibility but no longer called by the pipeline.
+- `deepdoc/site/builder/next_template/` — shipped as package-data; contains the full Next.js + Fumadocs shell (`package.json`, `app/layout.tsx`, `app/[[...slug]]/page.tsx`, `lib/docs.ts`, `lib/nav.ts`, `components/chatbot.tsx`, etc.). Content from configured `output_dir` is read at build time by `lib/docs.ts` via a **remark/rehype pipeline only** — no MDX JSX compiler ever runs on LLM-generated content, so `{`, `<Tag>` etc. in code blocks cannot crash a build.
 - `MermaidRunner` must select `HTMLElement` nodes (`querySelectorAll<HTMLElement>`) because current Mermaid types reject a generic `NodeListOf<Element>`.
 - `deepdoc/site/builder/mdx_utils.py` — frontmatter helpers (operate on generated `*.md`)
 - Generated pages are plain CommonMark `.md`. The LLM emits GitHub Alert callouts (`> [!NOTE]`, `> [!WARNING]`) and native HTML `<details>` for accordions — no MkDocs pymdownx blocks, no JSX.
@@ -80,7 +80,7 @@ Guidance for coding agents working in this repository.
 - `deepdoc/openapi.py` — `find_openapi_specs()`, OpenAPI/Swagger spec parser and importer
 - `deepdoc/source_metadata.py` — `SOURCE_KIND_CORE`, `SOURCE_KIND_SUPPORTING`, `LOW_TRUST_SOURCE_KINDS`, `FRAMEWORK_PRIORITIES`, `KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS` (descriptive-only map used by the CLI coverage warning, e.g. `.java`/`.rs`/`.cs` — never wired into scan gating)
 - `deepdoc/benchmark_v2.py` — `BenchmarkResult`; planner quality scorecard harness
-- `deepdoc/changelog_writer.py` — `record_and_write` appends to `.deepdoc/changelog.json` and regenerates `docs/whats-changed.md`; generates commit metadata tables, bulleted page lists, and strategy explanation blocks; `_ensure_in_nav` injects `whats-changed` into `Start Here`
+- `deepdoc/changelog_writer.py` — `record_and_write` appends to `.deepdoc/changelog.json` and regenerates `<output_dir>/whats-changed.md`; generates commit metadata tables, bulleted page lists, and strategy explanation blocks; `_ensure_in_nav` injects `whats-changed` into `Start Here`
 - `deepdoc/updater_v2.py` — `UpdaterV2`; legacy V1-era file-map updater (kept for compatibility)
 - `deepdoc/_legacy_types.py` — compatibility type shims
 - `deepdoc/prompts/__init__.py` — re-export facade; import all prompt constants from here (there is no `prompts_v2.py`)
@@ -120,7 +120,7 @@ The planner no longer sends a compressed file tree to the LLM. Instead:
 - `_append_changelog()` must be called before `_rebuild_nav()` in `smart_update_v2.py` so the `whats-changed` page appears in nav on first run.
 - `pipeline_v2._build_site()` must be called after `_record_changelog()` for the same reason.
 - `CrossBucketConsistencyPass.run()` must be called after `engine.generate_all()` and before `summarize_generation_results()` so injected callouts are counted before downstream site build. `generate_all()` now owns in-memory manifest updates and final checkpoint persistence; do not restore a redundant `update_manifest()` caller pass.
-- After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `docs/whats-changed.md` is regenerated. Do not skip these calls when adding new execution paths.
+- After every non-noop `update` run and every `generate` run, a changelog entry is appended to `.deepdoc/changelog.json` and `<output_dir>/whats-changed.md` is regenerated. Do not skip these calls when adding new execution paths.
 - Targeted replans merge by stable bucket identity (`semantic_id`) and preserve existing slugs when the same concept is rediscovered.
 - Bucket slug collision guard: fallback slug generation appends `-2`, `-3`, … suffixes; a bucket that has already absorbed another cannot be absorbed again in the same consolidation pass (`merge_target_slugs` set).
 - `_decompose_buckets` is canonical in `bucket_refinement.py` only — the duplicate was removed from `heuristics.py`.
@@ -206,7 +206,7 @@ DeepDoc can parse a number of source formats, but parsing is not the same as ful
 - Prefer extending `_v2` modules over creating new parallel flows.
 - Keep `deepdoc/parser/api_detector.py` as a compatibility facade.
 - Put repo-aware route fixes in `deepdoc/parser/routes/repo_resolver.py`, not planner code.
-- Fix generated output by changing generators/builders, not by hand-editing `docs/`, `site/`, or `.deepdoc/` state.
+- Fix generated output by changing generators/builders, not by hand-editing configured DeepDoc output/site roots or `.deepdoc/` state.
 - If a change touches persisted state or freshness semantics, audit plan, ledger, sync state, manifest, and stale detection together.
 - Freshness treats a missing tracked path as a deletion only when that path had a recorded generation hash. Never-existing LLM artifact hints are not allowed to make a freshly generated bucket immediately stale.
 - If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
@@ -223,7 +223,7 @@ Treat as generated/persisted outputs — do not hand-edit:
 - `.deepdoc/` — all state, plan, ledger, sync baseline
 - `.deepdoc/changelog.json` — append-only run log written by `changelog_writer.py`
 - `.deepdoc/scan_cache.json`, `.deepdoc/generation_quality.json`, `.deepdoc/consistency_warnings.json`
-- `docs/`, `site/`, `site/public/`, `site/out/`
+- configured `output_dir` (`deepdoc-docs/` by default) and configured `site_dir` (`deepdoc-site/` by default). These are ownership-aware: never assume a repository's existing `docs/` or `site/` root is DeepDoc output.
 - `build/`, `dist/`, `deepdoc.egg-info/`, `codewiki.egg-info/`, `__pycache__/`, `.pytest_cache/`
 - `vscode-extension/out/`, `vscode-extension/*.vsix`, `vscode-extension/node_modules/`
 - `deepdoc/generator/mdx_validator/node_modules/`
@@ -268,14 +268,14 @@ deepdoc benchmark
 ```
 
 Notes:
-- `deepdoc clean` — removes `.deepdoc.yaml`, generated docs, and saved state; prompts for confirmation unless `--yes`.
+- `deepdoc clean` — removes `.deepdoc.yaml`, saved state, and exact DeepDoc-owned output artifacts; preserves authored/unmanaged files and prompts unless `--yes`.
 - `deepdoc status` — shows all generated pages, staleness, and quality status.
 - `deepdoc performance` — shows the latest sanitized generate/update timing and LLM usage record from the 10 MB rotating local history.
 - `deepdoc benchmark` — runs the planner quality scorecard against a gold manifest catalog.
-- `deepdoc deploy` — runs `npm install` (if needed) + `next build` inside `site/` and exports static HTML to `site/out/`; blocked by the quality gate if failed/invalid/stub pages exist. Requires Node.js ≥18 (no Python site deps needed).
-- `deepdoc serve` and `deepdoc deploy` assume generated site files already exist under `site/`.
+- `deepdoc deploy` — runs `npm install` (if needed) + `next build` inside configured `site_dir` and exports static HTML to `<site_dir>/out/`; blocked by the quality gate if failed/invalid/stub pages exist. Requires Node.js ≥18 (no Python site deps needed).
+- `deepdoc serve` and `deepdoc deploy` assume generated site files already exist under configured `site_dir`.
 - `deepdoc update` is commit-based: diffs `.deepdoc/state.json`'s last synced commit against `HEAD`, compares saved scan cache for semantic endpoint changes, then refreshes docs and chatbot state.
-- Avoid `deepdoc generate --clean --yes` unless a clean rebuild is explicitly required.
+- `deepdoc generate --clean --yes` performs a managed rebuild only: it removes exact DeepDoc-owned files, preserves authored files, and refuses remaining output collisions.
 - DeepDoc state writes under `.deepdoc/` use atomic persistence helpers in `persistence_v2.py`; generate/update runs acquire the state lock to prevent concurrent corruption.
 
 ## Lint, Type Check, And Test Commands

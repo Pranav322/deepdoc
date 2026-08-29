@@ -7,6 +7,12 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Added
+- **Safe generated-output defaults and ownership-aware cleanup.** New projects write generated Markdown to `deepdoc-docs/` and the Next.js scaffold to `deepdoc-site/`. DeepDoc now classifies exact generated paths, refuses tracked or unmanaged output/site collisions before writing, and makes `--clean` remove only DeepDoc-owned artifacts rather than recursively deleting an entire configured directory.
+
+### Fixed
+- **`generate --clean` could delete repository-owned documentation and site content.** Output and site roots are now validated before generation, cleaning, deployment, and site building; configured `site_dir` is honored across the builder, OpenAPI staging, serve, deploy, and update paths.
+
 ## [0.5.4] - 2026-08-25
 
 ### Added

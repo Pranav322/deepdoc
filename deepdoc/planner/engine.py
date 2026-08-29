@@ -1054,9 +1054,9 @@ def scan_repo(
     # user config — scanning these produces noise and giant-file false positives.
     _DEEPDOC_GENERATED = {
         ".deepdoc",
-        "site",
+        str(cfg.get("site_dir") or "deepdoc-site"),
         "chatbot_backend",
-        str(cfg.get("output_dir") or "docs"),  # configurable docs output dir
+        str(cfg.get("output_dir") or "deepdoc-docs"),  # configurable docs output dir
     }
     for _d in _DEEPDOC_GENERATED:
         if _d not in exclude:

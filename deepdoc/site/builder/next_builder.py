@@ -8,6 +8,7 @@ Entry point: build_next_from_plan()
 from __future__ import annotations
 
 import json
+import os
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -41,31 +42,33 @@ def build_next_from_plan(
     cfg: dict[str, Any],
     plan: DocPlan,
     has_openapi: bool = False,
-) -> None:
+) -> set[Path]:
     """Generate the Next.js + Fumadocs site scaffold and per-run config files.
 
     Args:
-        repo_root:   Repository root (parent of ``site/`` and ``docs/``).
-        output_dir:  Path to the generated docs directory (``docs/``).
+        repo_root:   Repository root.
+        output_dir:  Path to the generated docs directory.
         cfg:         Full ``.deepdoc.yaml`` config dict.
         plan:        Planned documentation structure with nav_structure.
         has_openapi: Whether an OpenAPI spec was staged (adds API nav entry).
     """
-    site_dir = repo_root / "site"
+    site_dir = repo_root / str(cfg.get("site_dir") or "deepdoc-site")
     site_dir.mkdir(parents=True, exist_ok=True)
 
-    _copy_template_files(site_dir)
-    _write_deepdoc_config(site_dir, cfg, plan, has_openapi)
-    _write_globals_css(site_dir, cfg)
-    _cleanup_mkdocs_artifacts(site_dir)
+    written = _copy_template_files(site_dir)
+    written.add(_write_deepdoc_config(site_dir, cfg, plan, has_openapi))
+    written.add(_write_globals_css(site_dir, cfg))
+    written.add(_write_docs_env(site_dir, output_dir))
+    return written
 
 
 # ── template scaffolding ──────────────────────────────────────────────────────
 
 
-def _copy_template_files(site_dir: Path) -> None:
-    """Copy next_template/ → site/, skipping files that already exist unless
+def _copy_template_files(site_dir: Path) -> set[Path]:
+    """Copy next_template/ → configured site_dir, skipping files that already exist unless
     they are in _ALWAYS_OVERWRITE (those are managed by the builder)."""
+    written: set[Path] = set()
     for src in _TEMPLATE_DIR.rglob("*"):
         if src.is_dir():
             continue
@@ -75,6 +78,8 @@ def _copy_template_files(site_dir: Path) -> None:
             continue
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
+        written.add(dst)
+    return written
 
 
 # ── deepdoc.config.json ───────────────────────────────────────────────────────
@@ -158,7 +163,7 @@ def _write_deepdoc_config(
     cfg: dict[str, Any],
     plan: DocPlan,
     has_openapi: bool,
-) -> None:
+) -> Path:
     colors = cfg.get("site", {}).get("colors", {})
     chatbot_cfg = cfg.get("chatbot", {})
     chatbot_enabled = bool(chatbot_cfg.get("enabled"))
@@ -184,7 +189,9 @@ def _write_deepdoc_config(
         "generated_at": datetime.now(timezone.utc).strftime("%b %d, %Y"),
         "commit_sha": _head_commit_sha(site_dir.parent),
     }
-    _write_json(site_dir / "deepdoc.config.json", config)
+    path = site_dir / "deepdoc.config.json"
+    _write_json(path, config)
+    return path
 
 
 def _head_commit_sha(repo_root: Path) -> str:
@@ -200,7 +207,7 @@ def _head_commit_sha(repo_root: Path) -> str:
 # ── globals.css ───────────────────────────────────────────────────────────────
 
 
-def _write_globals_css(site_dir: Path, cfg: dict[str, Any]) -> None:
+def _write_globals_css(site_dir: Path, cfg: dict[str, Any]) -> Path:
     """Write app/globals.css with the project's brand color variables."""
     colors = cfg.get("site", {}).get("colors", {})
     primary = colors.get("primary", _DEFAULT_PRIMARY)
@@ -213,6 +220,7 @@ def _write_globals_css(site_dir: Path, cfg: dict[str, Any]) -> None:
     css_path = site_dir / "app" / "globals.css"
     css_path.parent.mkdir(parents=True, exist_ok=True)
     css_path.write_text(patched)
+    return css_path
 
 
 def _patch_brand_vars(css: str, primary: str, light: str, dark: str) -> str:
@@ -236,15 +244,12 @@ def _patch_brand_vars(css: str, primary: str, light: str, dark: str) -> str:
     return patched if patched != css else css
 
 
-# ── cleanup ───────────────────────────────────────────────────────────────────
-
-
-def _cleanup_mkdocs_artifacts(site_dir: Path) -> None:
-    """Remove leftover MkDocs files from previous builds."""
-    for name in ("mkdocs.yml",):
-        p = site_dir / name
-        if p.exists():
-            p.unlink()
+def _write_docs_env(site_dir: Path, output_dir: Path) -> Path:
+    """Tell the Next scaffold where generated Markdown lives at build time."""
+    relative_docs = os.path.relpath(output_dir, site_dir).replace("\\", "/")
+    path = site_dir / ".env.local"
+    path.write_text(f"DEEPDOC_DOCS_DIR={relative_docs}\n", encoding="utf-8")
+    return path
 
 
 # ── helpers ───────────────────────────────────────────────────────────────────

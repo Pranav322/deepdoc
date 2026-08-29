@@ -18,6 +18,7 @@ from rich.panel import Panel
 from .persistence_v2 import DocPage
 from .llm import LLMClient
 from .manifest import Manifest, file_hash
+from .output_safety import assert_safe_for_generation, resolve_output_paths
 from .parser import parse_file, supported_extensions
 from .persistence_v2 import (
     find_stale_buckets,
@@ -42,7 +43,7 @@ class UpdaterV2:
     def __init__(self, repo_root: Path, cfg: dict[str, Any]) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
-        self.output_dir = repo_root / cfg.get("output_dir", "docs")
+        self.output_dir = resolve_output_paths(repo_root, cfg).output_dir
         self.llm = LLMClient(cfg)
         self.manifest = Manifest(self.output_dir)
 
@@ -52,6 +53,7 @@ class UpdaterV2:
         Routes to bucket-aware update if the saved plan is v2_buckets,
         otherwise falls back to legacy page-level update.
         """
+        assert_safe_for_generation(self.repo_root, self.cfg)
         # Step 1: Load saved plan (determines which code path to take)
         plan = load_plan(self.repo_root)
 
@@ -132,7 +134,10 @@ class UpdaterV2:
         from .pipeline_v2 import stage_openapi_assets
         from .site.builder import build_next_from_plan
         if plan:
-            has_openapi = stage_openapi_assets(self.repo_root)
+            has_openapi = stage_openapi_assets(
+                self.repo_root,
+                site_dir=self.repo_root / str(self.cfg.get("site_dir") or "deepdoc-site"),
+            )
             build_next_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} page(s)[/bold green]")
@@ -316,7 +321,10 @@ class UpdaterV2:
         # Step 5: Rebuild nav
         from .pipeline_v2 import stage_openapi_assets
         from .site.builder import build_next_from_plan
-        has_openapi = stage_openapi_assets(self.repo_root)
+        has_openapi = stage_openapi_assets(
+            self.repo_root,
+            site_dir=self.repo_root / str(self.cfg.get("site_dir") or "deepdoc-site"),
+        )
         build_next_from_plan(self.repo_root, self.output_dir, self.cfg, plan, has_openapi)
 
         console.print(f"\n[bold green]✓ Updated {updated} bucket page(s)[/bold green]")

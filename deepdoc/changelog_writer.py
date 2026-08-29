@@ -47,7 +47,7 @@ def record_and_write(
 
 
 def write_whats_changed_page(repo_root: Path, output_dir: Path) -> None:
-    """Write docs/whats-changed.md from .deepdoc/changelog.json."""
+    """Write output_dir/whats-changed.md from .deepdoc/changelog.json."""
     entries = load_changelog(repo_root)
     content = _build_md(entries)
     output_dir.mkdir(parents=True, exist_ok=True)

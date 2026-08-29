@@ -183,6 +183,7 @@ def test_patch_brand_vars_unchanged_when_no_block():
 def _minimal_cfg(primary: str = "#eb3e25") -> dict[str, Any]:
     return {
         "project_name": "Test Docs",
+        "site_dir": "site",
         "site": {"colors": {"primary": primary, "light": "#ef624e", "dark": "#c1331f"}},
         "chatbot": {"enabled": False},
     }
@@ -192,6 +193,19 @@ def test_build_next_from_plan_creates_site_dir(tmp_path: Path):
     plan = _make_plan()
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
     assert (tmp_path / "site").is_dir()
+
+
+def test_build_next_from_plan_honors_configured_site_dir(tmp_path: Path):
+    plan = _make_plan()
+    cfg = _minimal_cfg()
+    cfg["site_dir"] = "deepdoc-site"
+    build_next_from_plan(tmp_path, tmp_path / "deepdoc-docs", cfg, plan)
+    assert (tmp_path / "deepdoc-site" / "package.json").is_file()
+    assert not (tmp_path / "site").exists()
+    assert (
+        (tmp_path / "deepdoc-site" / ".env.local").read_text().strip()
+        == "DEEPDOC_DOCS_DIR=../deepdoc-docs"
+    )
 
 
 def test_build_next_from_plan_writes_deepdoc_config(tmp_path: Path):
@@ -229,13 +243,13 @@ def test_build_next_from_plan_writes_globals_css(tmp_path: Path):
     assert "--brand: #aabbcc;" in css
 
 
-def test_build_next_from_plan_removes_mkdocs_yml(tmp_path: Path):
+def test_build_next_from_plan_preserves_mkdocs_yml(tmp_path: Path):
     site_dir = tmp_path / "site"
     site_dir.mkdir()
     (site_dir / "mkdocs.yml").write_text("site_name: old\n")
     plan = _make_plan()
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
-    assert not (site_dir / "mkdocs.yml").exists()
+    assert (site_dir / "mkdocs.yml").exists()
 
 
 def test_build_next_from_plan_does_not_overwrite_custom_files(tmp_path: Path):
@@ -262,6 +276,7 @@ def test_build_next_from_plan_always_overwrites_config(tmp_path: Path):
 def test_build_next_from_plan_chatbot_config(tmp_path: Path):
     cfg = {
         "project_name": "Chatbot Docs",
+        "site_dir": "site",
         "site": {"colors": {}},
         "chatbot": {
             "enabled": True,

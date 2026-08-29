@@ -266,7 +266,7 @@ deepdoc init
 deepdoc init --provider openai --model gpt-4o
 deepdoc init --provider ollama --model ollama/llama3.2
 deepdoc init --provider azure --model azure/gpt-4o
-deepdoc init --output-dir documentation
+deepdoc init --output-dir documentation --site-dir documentation-site
 deepdoc init --with-chatbot
 deepdoc init --provider openai --with-chatbot
 ```
@@ -279,7 +279,8 @@ deepdoc init --provider openai --with-chatbot
 | `--description` | empty | Short project description |
 | `--provider` | `anthropic` | LLM provider: `anthropic`, `openai`, `ollama`, `azure` |
 | `--model` | provider default | Model name |
-| `--output-dir` | `docs` | Where generated docs are written |
+| `--output-dir` | `deepdoc-docs` | Where generated docs are written |
+| `--site-dir` | `deepdoc-site` | Where the generated Next.js site is written |
 | `--with-chatbot` | off | Enable chatbot scaffolding and indexing (see [Chatbot](#chatbot) section) |
 
 ### `deepdoc generate`
@@ -289,7 +290,7 @@ Full documentation generation. This is the first-run or explicit full-refresh co
 ```bash
 deepdoc generate
 deepdoc generate --force           # Full refresh of DeepDoc-managed docs
-deepdoc generate --clean --yes     # Wipe output + state and rebuild from scratch
+deepdoc generate --clean --yes     # Remove DeepDoc-owned output + state and rebuild
 deepdoc generate --deploy          # Generate + export the static site
 deepdoc generate --batch-size 3    # Smaller batches for rate-limited APIs
 deepdoc generate --include "src/**" --include "lib/**"
@@ -301,14 +302,15 @@ deepdoc generate --exclude "tests/**"
 - `deepdoc generate`
   - intended for the first run
   - refuses to run if DeepDoc docs/state already exist
-  - refuses to write into a non-DeepDoc `docs/` folder unless you explicitly clean it
+  - refuses to write into tracked or unmanaged output/site directories
 - `deepdoc generate --force`
   - re-runs the full pipeline
   - regenerates all DeepDoc-managed pages even if they are not stale
   - removes stale generated pages that no longer belong in the new plan
   - preserves non-DeepDoc files
 - `deepdoc generate --clean --yes`
-  - deletes the output dir and DeepDoc state
+  - removes DeepDoc-owned output and state only
+  - preserves authored and unknown files, then refuses regeneration if they still collide with the selected output path
   - rebuilds everything from scratch
 
 **What happens under the hood (5-phase pipeline):**
@@ -317,14 +319,14 @@ deepdoc generate --exclude "tests/**"
 2. **Phase 2: Plan** — Run the multi-step bucket planner. It classifies the repo, proposes bucket candidates, and assigns files/symbols/artifacts to the final doc structure. Prints a coverage panel — source files scanned vs. documented vs. orphaned/skipped, and a coverage % — so a partially-invisible repo is surfaced instead of silently shipped.
 3. **Phase 3: Generate** — Generate bucket pages in batches with parallel workers. High-level buckets are AI-planned; scanned endpoints enrich grouped API-reference pages instead of creating one page per route. Each page passes through Python-side Markdown repair, grounding validation, and bounded quality retries before being written to disk.
 4. **Phase 4: API Ref** — Stage OpenAPI specs and render them on a single interactive Swagger UI page when a spec exists.
-5. **Phase 5: Build** — Write the Next.js + Fumadocs site scaffold (`site/`), nav config, and brand stylesheet from the generated plan.
+5. **Phase 5: Build** — Write the Next.js + Fumadocs site scaffold (`deepdoc-site/` by default), nav config, and brand stylesheet from the generated plan.
 
 **Options:**
 
 | Flag | Default | Description |
 |------|---------|-------------|
 | `--force` | off | Full refresh of DeepDoc-managed docs and cleanup of stale generated pages |
-| `--clean` | off | Delete output dir and DeepDoc state, then regenerate from scratch |
+| `--clean` | off | Remove DeepDoc-owned output and state, then regenerate from scratch |
 | `--yes` | off | Skip destructive confirmation for `--clean` |
 | `--include` | all files | Glob patterns to include (can be repeated) |
 | `--exclude` | see config | Additional glob patterns to exclude |
@@ -602,8 +604,8 @@ The `.deepdoc.yaml` file in your repo root controls everything:
 ```yaml
 project_name: my-app
 description: "A web application for managing tasks"
-output_dir: docs
-site_dir: site
+output_dir: deepdoc-docs
+site_dir: deepdoc-site
 
 llm:
   provider: anthropic
@@ -674,8 +676,8 @@ site:
 |-----|---------|-------------|
 | `project_name` | directory name | Project name used in site title |
 | `description` | `""` | Short project description |
-| `output_dir` | `docs` | Where generated markdown pages are written |
-| `site_dir` | `site` | Where the generated Next.js site shell lives |
+| `output_dir` | `deepdoc-docs` | Where generated markdown pages are written |
+| `site_dir` | `deepdoc-site` | Where the generated Next.js site shell lives |
 | **LLM** | | |
 | `llm.provider` | `anthropic` | `anthropic`, `openai`, `azure`, `ollama`, or any LiteLLM alias |
 | `llm.model` | `claude-3-5-sonnet-20241022` | Model name (use provider prefix for non-Anthropic, e.g. `azure/gpt-4.1`) |

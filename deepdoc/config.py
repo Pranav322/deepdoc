@@ -11,8 +11,8 @@ import yaml
 DEFAULT_CONFIG: dict[str, Any] = {
     "project_name": "",
     "description": "",
-    "output_dir": "docs",
-    "site_dir": "site",
+    "output_dir": "deepdoc-docs",
+    "site_dir": "deepdoc-site",
     "max_pages": 0,  # 0 = no cap, let LLM decide; set a number to limit
     # ── Generation mode ──────────────────────────────────────────────────
     "generation_mode": "feature_buckets",  # "feature_buckets" (v2) | "file_centric" (v1 legacy)
@@ -162,6 +162,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
         ".terraform",
         # ── DeepDoc generated outputs (never scan our own scaffold/state) ───
         ".deepdoc",
+        # Static build output from repository documentation systems is derived
+        # content, not authored documentation input.
         "site",
         "chatbot_backend",
         # ── Project-specific ───────────────────────────────────────────────

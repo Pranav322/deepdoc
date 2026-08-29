@@ -79,6 +79,8 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
     if root.has_error:
         return ()
     facts: list[GoRuntimeFact] = []
+    registrations: list[tuple[str, str, str, str]] = []
+    started_receivers: set[str] = set()
     program_scope = (root.type, root.start_byte, root.end_byte)
     bindings: dict[tuple[tuple[str, int, int], str], list[tuple[int, str]]] = {}
 
@@ -149,8 +151,12 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
 
     def write_pairs(node) -> tuple[tuple[str, object], ...]:
         if node.type == "parameter_declaration":
-            name = node.child_by_field_name("name")
-            return ((text(name), None),) if name is not None else ()
+            type_node = node.child_by_field_name("type")
+            return tuple(
+                (text(child), None)
+                for child in node.named_children
+                if child != type_node and child.type == "identifier"
+            )
         if node.type == "var_spec":
             values = next(
                 (child for child in node.named_children if child.type == "expression_list"),
@@ -194,6 +200,10 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
             return binding_role(scopes, name, position)
         return constructor_role(value, scopes, position)
 
+    def range_uses_assignment(node) -> bool:
+        """Whether a range clause uses ``=`` rather than ``:=``."""
+        return any(child.type == "=" for child in node.children)
+
     for node in all_nodes(root):
         if node.type != "import_spec":
             continue
@@ -226,13 +236,14 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
             scope = (
                 binding_scope_for_assignment(scopes, name, node.start_byte)
                 if node.type == "assignment_statement"
+                or node.type == "range_clause" and range_uses_assignment(node)
                 else scopes[0]
             )
             add_binding(
                 scope,
                 name,
                 node.start_byte,
-                constructor_role(value, scopes, node.start_byte),
+                value_role(value, scopes, node.start_byte),
             )
 
     def call_parts(node) -> tuple[str, object, tuple]:
@@ -264,15 +275,22 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
         elif node.type == "call_expression":
             method, receiver, arguments = call_parts(node)
             scopes = scope_chain_for(node)
+            receiver_name = target_name(receiver)
+            receiver_role = value_role(receiver, scopes, node.start_byte)
+            if (
+                method in {"Start", "StartAsync", "StartBlocking"}
+                and receiver_name
+                and receiver_role in {"receiver:robfig_cron", "receiver:gocron"}
+            ):
+                started_receivers.add(receiver_name)
             if (
                 method == "AddFunc"
-                and value_role(receiver, scopes, node.start_byte)
-                == "receiver:robfig_cron"
+                and receiver_role == "receiver:robfig_cron"
                 and len(arguments) >= 2
             ):
                 schedule, target = literal(arguments[0]), target_name(arguments[1])
                 if schedule and target:
-                    facts.append(GoRuntimeFact("go_cron", target, schedule))
+                    registrations.append(("go_cron", target, schedule, receiver_name))
             elif method == "Do" and arguments:
                 outer_function = node.child_by_field_name("function")
                 outer_object = (
@@ -293,11 +311,18 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
                 ):
                     cadence = text(every_args[0]).strip()
                     if cadence:
-                        facts.append(GoRuntimeFact("go_schedule", target, cadence))
+                        registrations.append(
+                            ("go_schedule", target, cadence, target_name(every_receiver))
+                        )
         for child in node.named_children:
             visit(child)
 
     visit(root)
+    facts.extend(
+        GoRuntimeFact(kind, target, schedule)
+        for kind, target, schedule, receiver_name in registrations
+        if receiver_name and receiver_name in started_receivers
+    )
     return tuple(facts)
 
 

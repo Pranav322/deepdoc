@@ -25,7 +25,7 @@ GO_IMPORT_RE = re.compile(r'"([^"]+)"')
 
 PHP_USE_RE = re.compile(r"use\s+([\w\\]+)")
 
-FILE_EXT_RE = re.compile(r"\.(py|ts|js|tsx|jsx|go|php|mjs|cjs)$")
+FILE_EXT_RE = re.compile(r"\.(py|ts|js|tsx|jsx|go|php|mjs|cjs|vue)$")
 
 WORD_TOKEN_RE = re.compile(r"[\w]+")
 

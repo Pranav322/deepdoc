@@ -807,6 +807,8 @@ def test_runtime_discovery_extracts_js_and_go_workers() -> None:
             "    go syncLoop()\n"
             "    c.AddFunc(\"@every 5m\", cleanup)\n"
             "    scheduler.Every(10 * time.Minute).Do(syncLoop)\n"
+            "    c.Start()\n"
+            "    scheduler.StartAsync()\n"
             "}\n"
         ),
     }
@@ -2649,7 +2651,7 @@ def test_python_dispatch_evidence_uses_executable_ast_calls() -> None:
     )
 
     assert [(item.relation, item.target_aliases) for item in evidence] == [
-        ("direct", ("sync",)),
+        ("direct", ("handlers/tasks.py::sync", "sync")),
         ("signal", ("post_save",)),
     ]
 
@@ -3544,8 +3546,8 @@ def test_python_dispatch_before_later_receiver_mutation_remains_evidence() -> No
     )
 
     assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
-        ("pkg/member_api.py", ("actual",)),
-        ("pkg/global_api.py", ("actual",)),
+        ("pkg/member_api.py", ("pkg/tasks.py::actual", "actual")),
+        ("pkg/global_api.py", ("pkg/tasks.py::actual", "actual")),
     ]
 
 
@@ -3822,7 +3824,7 @@ def test_python_reflected_global_write_keeps_earlier_dispatch_evidence() -> None
 
     assert [
         (item.file_path, item.target_aliases) for item in runtime.dispatch_evidence
-    ] == [("pkg/api.py", ("actual",))]
+    ] == [("pkg/api.py", ("pkg/tasks.py::actual", "actual"))]
 
 
 def test_python_nested_reflected_global_rebind_revokes_django_command() -> None:
@@ -4427,8 +4429,8 @@ def test_python_module_imports_and_bare_annotations_preserve_task_bindings() -> 
     task = next(item for item in runtime.tasks if item.name == "actual")
 
     assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
-        ("pkg/module_import.py", ("pkg.tasks.actual", "actual")),
-        ("pkg/annotation.py", ("actual",)),
+        ("pkg/module_import.py", ("pkg/tasks.py::actual", "actual")),
+        ("pkg/annotation.py", ("pkg/tasks.py::actual", "actual")),
     ]
     assert task.producer_files == ["pkg/module_import.py", "pkg/annotation.py"]
 
@@ -4451,7 +4453,7 @@ def test_python_bare_annotation_does_not_revoke_decorated_task_export() -> None:
     task = next(item for item in runtime.tasks if item.name == "actual")
 
     assert [(item.file_path, item.target_aliases) for item in runtime.dispatch_evidence] == [
-        ("orders/api.py", ("actual",))
+        ("orders/api.py", ("orders/tasks.py::actual", "actual"))
     ]
     assert task.producer_files == ["orders/api.py"]
 
@@ -4599,7 +4601,7 @@ def test_python_dispatch_requires_a_resolved_task_binding() -> None:
     task = next(item for item in runtime.tasks if item.name == "actual")
 
     assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
-        ("direct", ("actual",))
+        ("direct", ("orders/tasks.py::actual", "actual"))
     ]
     assert task.producer_files == ["orders/api.py"]
 
@@ -4631,7 +4633,7 @@ def test_python_imported_task_survives_unrelated_inner_shadow() -> None:
     task = next(item for item in runtime.tasks if item.name == "actual")
 
     assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
-        ("direct", ("actual",))
+        ("direct", ("orders/tasks.py::actual", "actual"))
     ]
     assert task.producer_files == ["orders/api.py"]
 
@@ -4661,7 +4663,7 @@ def test_python_dispatch_before_later_module_rebind_remains_evidence() -> None:
     task = next(item for item in runtime.tasks if item.name == "actual")
 
     assert [(item.relation, item.target_aliases) for item in runtime.dispatch_evidence] == [
-        ("direct", ("actual",))
+        ("direct", ("orders/tasks.py::actual", "actual"))
     ]
     assert task.producer_files == ["orders/api.py"]
 
@@ -4711,7 +4713,7 @@ def test_python_qualified_dispatch_alias_links_short_task_name() -> None:
 
     _link_runtime_evidence(RuntimeScan(tasks=[task]), evidence, [])
 
-    assert evidence[0].target_aliases == ("tasks.sync", "sync")
+    assert evidence[0].target_aliases == ("tasks.py::sync", "sync")
     assert task.producer_files == [path]
 
 

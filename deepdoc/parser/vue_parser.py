@@ -107,7 +107,7 @@ def _vue_attr_value(attrs: str, name: str) -> str:
 
 def _is_executable_vue_script(attrs: str) -> bool:
     """Whether an inline SFC script can contribute JS/TS runtime evidence."""
-    if re.search(r"\bsrc\s*=", attrs, re.I):
+    if re.search(r"(?<![\w:-])src(?:\s*=|\s|$)", attrs, re.I):
         return False
     script_type = _vue_attr_value(attrs, "type").split(";", 1)[0].strip().lower()
     if script_type and script_type not in _VUE_EXECUTABLE_SCRIPT_TYPES:
@@ -153,7 +153,17 @@ def _top_level_vue_script_blocks(content: str):
     stack: list[str] = []
     position = 0
     while position < len(content):
+        interpolation_start = content.find("{{", position)
         tag_start = content.find("<", position)
+        if interpolation_start >= 0 and (
+            tag_start < 0 or interpolation_start < tag_start
+        ):
+            interpolation_end = content.find("}}", interpolation_start + 2)
+            if interpolation_end >= 0 and (
+                tag_start < 0 or interpolation_end >= tag_start
+            ):
+                position = interpolation_end + 2
+                continue
         if tag_start < 0:
             return
         if lowered.startswith("<!--", tag_start):

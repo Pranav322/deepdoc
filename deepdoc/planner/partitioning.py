@@ -323,6 +323,9 @@ def _filter_runtime_scan(runtime_scan, files: set[str]):
         tasks=_filter_runtime_tasks(runtime_scan.tasks, files),
         schedulers=_filter_by_attr(runtime_scan.schedulers, files, "file_path"),
         realtime_consumers=_filter_by_attr(runtime_scan.realtime_consumers, files, "file_path"),
+        dispatch_evidence=_filter_by_attr(
+            runtime_scan.dispatch_evidence, files, "file_path"
+        ),
     )
 
 

@@ -104,11 +104,17 @@ class _Declaration(NamedTuple):
 
 
 class _ResolvedValue(NamedTuple):
-    """A proven module value plus an optional literal produced-object identity."""
+    """A proven module value plus an optional literal produced-object identity.
+
+    ``origin`` distinguishes separately constructed objects that share a
+    literal identity (two ``new Queue('orders')`` calls) so a mutation of
+    one cannot taint the other.
+    """
 
     module: str
     member: str
     identity: str = ""
+    origin: int = 0
 
 
 class _BindingWrite(NamedTuple):
@@ -118,10 +124,10 @@ class _BindingWrite(NamedTuple):
     value: _ResolvedValue | None
 
 
-def _produced_value(call: JsBoundCall) -> _ResolvedValue:
+def _produced_value(call: JsBoundCall, origin: int = 0) -> _ResolvedValue:
     """Value a trusted call/new expression produces for a later local binding."""
     identity = _literal_arg(call.args, 0) if not call.receiver else ""
-    return _ResolvedValue(call.module, _produced_role(call), identity)
+    return _ResolvedValue(call.module, _produced_role(call), identity, origin)
 
 
 def js_bound_calls(
@@ -147,7 +153,10 @@ def js_bound_calls(
     root = tree.root_node
     if root.type == "ERROR" or root.has_error:
         return None
-    return _Binder(modules).run(root)
+    try:
+        return _Binder(modules).run(root)
+    except RecursionError:
+        return None
 
 
 def _grammar_for(path: Path, language: str):
@@ -220,6 +229,17 @@ _VALUE_WRAPPERS = frozenset(
         "type_assertion",
     }
 )
+
+
+def _unwrap_value(node):
+    """Strip wrappers that do not change the proven runtime value."""
+    current = node
+    while current is not None and current.type in _VALUE_WRAPPERS:
+        children = current.named_children
+        current = children[0] if children else None
+    return current
+
+
 # Name-introducing node types, mapped to the field holding the bound pattern.
 _DECL_FIELDS = {
     "variable_declarator": "name",
@@ -297,13 +317,24 @@ class _Binder:
                     self._record_member_mutation(target)
                     for name_node in _pattern_names(target):
                         self._record_write(name_node, None)
+            elif (
+                node.type == "unary_expression"
+                and _text(node.child_by_field_name("operator") or node).strip()
+                == "delete"
+                and _is_proven_top_level_execution(node)
+            ):
+                argument = node.child_by_field_name("argument")
+                if argument is not None:
+                    self._record_member_mutation(argument)
             elif node.type == "call_expression":
-                self._record_reflective_mutation(node)
-                self._record_direct_eval(node)
+                if _is_proven_top_level_execution(node):
+                    self._record_reflective_mutation(node)
+                    self._record_direct_eval(node)
                 self._calls.append(node)
             elif node.type == "new_expression":
                 self._calls.append(node)
         self._record_hoisted_direct_eval_invocations(nodes)
+        self._record_hoisted_nested_mutations(nodes)
         found = (self._bound_call(node) for node in self._calls)
         return tuple(call for call in found if call is not None)
 
@@ -448,15 +479,19 @@ class _Binder:
         for base in _member_write_bases(target):
             self._record_value_mutation(base, target.start_byte)
 
-    def _is_unshadowed_global_object(self, node) -> bool:
-        """Whether one identifier is the built-in global `Object` binding."""
+    def _is_unshadowed_global_name(self, node, name: str) -> bool:
+        """Whether one identifier is the built-in global binding `name`."""
         return bool(
             node is not None
             and node.type == "identifier"
-            and _text(node) == "Object"
+            and _text(node) == name
             and not self._is_locally_declared(node)
             and not self._global_name_was_written(node)
         )
+
+    def _is_unshadowed_global_object(self, node) -> bool:
+        """Whether one identifier is the built-in global `Object` binding."""
+        return self._is_unshadowed_global_name(node, "Object")
 
     def _is_object_assign_expression(self, node) -> bool:
         """Whether one expression is unshadowed static `Object.assign`."""
@@ -508,13 +543,40 @@ class _Binder:
         index = bisect_right(positions, node.start_byte) - 1
         return bool(index >= 0 and values[index])
 
+    def _is_static_mutation_call(self, callee) -> bool:
+        """Whether a callee is a static object-mutation API or Object.assign alias."""
+        callee = _unwrap_value(callee)
+        if callee is None:
+            return False
+        if callee.type == "identifier" and self._is_object_assign_alias(callee):
+            return True
+        if callee.type not in ("member_expression", "subscript_expression"):
+            return False
+        obj = callee.child_by_field_name("object")
+        if callee.type == "member_expression":
+            prop = callee.child_by_field_name("property")
+            member = _text(prop) if prop is not None else ""
+        else:
+            index = callee.child_by_field_name("index")
+            member = (
+                _unquote(index) if index is not None and index.type == "string" else ""
+            )
+        if self._is_unshadowed_global_name(obj, "Object") and member in {
+            "assign",
+            "defineProperty",
+            "defineProperties",
+        }:
+            return True
+        return self._is_unshadowed_global_name(obj, "Reflect") and member in {
+            "set",
+            "defineProperty",
+            "deleteProperty",
+        }
+
     def _record_reflective_mutation(self, node) -> None:
-        """Taint a receiver mutated through static `Object.assign` forms."""
+        """Taint a receiver mutated through static object-mutation APIs."""
         callee = node.child_by_field_name("function")
-        if callee is None or not (
-            self._is_object_assign_expression(callee)
-            or callee.type == "identifier" and self._is_object_assign_alias(callee)
-        ):
+        if callee is None or not self._is_static_mutation_call(callee):
             return
         args = node.child_by_field_name("arguments")
         target = args.named_children[0] if args is not None and args.named_children else None
@@ -522,8 +584,17 @@ class _Binder:
             self._record_value_mutation(target, node.start_byte)
 
     def _record_value_mutation(self, base, position: int) -> None:
-        """Record that the resolved value behind `base` was mutated at `position`."""
-        value = self._resolve(base)
+        """Record that the resolved value behind `base` was mutated at `position`.
+
+        Nested mutation effects are applied at the proven invocation byte, so
+        lookup of an identifier target uses that position rather than the
+        function-body text offset of the mutation spelling.
+        """
+        value = (
+            self._lookup_at(base, position)
+            if base is not None and base.type == "identifier"
+            else self._resolve(base)
+        )
         if value is None:
             return
         positions = self._value_mutation_positions.setdefault(value, [])
@@ -630,9 +701,90 @@ class _Binder:
                 continue
             invoked.add(declaration)
             self._record_nested_eval_effect(call.start_byte)
-        if unresolved_eval or reaches_eval - invoked:
-            # An eval that may run at an unknown time makes the file unsafe.
+        if unresolved_eval:
+            # A nested eval that cannot be tied to a named function declaration
+            # may run at an unknown time, so the file is unsafe.
             self._record_nested_eval_effect(0)
+
+    def _named_functions_by_scope(self, nodes) -> dict[tuple[int, int], _Declaration]:
+        functions_by_scope: dict[tuple[int, int], _Declaration] = {}
+        for function in nodes:
+            if function.type not in {
+                "function_declaration",
+                "generator_function_declaration",
+            }:
+                continue
+            name = function.child_by_field_name("name")
+            declaration = self._declaration_for(name) if name is not None else None
+            if declaration is not None:
+                functions_by_scope[_execution_scope(function)] = declaration
+        return functions_by_scope
+
+    def _record_hoisted_nested_mutations(self, nodes) -> None:
+        """Apply nested Object.assign/delete mutations at proven invocation sites."""
+        functions_by_scope = self._named_functions_by_scope(nodes)
+        callers: dict[_Declaration, set[_Declaration]] = {}
+        mutates: set[_Declaration] = set()
+        pending_effects: dict[_Declaration, list] = {}
+        for node in nodes:
+            scope = _execution_scope(node)
+            enclosing = functions_by_scope.get(scope)
+            if enclosing is None:
+                continue
+            is_mutation = False
+            if node.type == "call_expression" and self._is_static_mutation_call(
+                node.child_by_field_name("function")
+            ):
+                is_mutation = True
+            elif (
+                node.type == "unary_expression"
+                and _text(node.child_by_field_name("operator") or node).strip()
+                == "delete"
+            ):
+                is_mutation = True
+            if is_mutation:
+                mutates.add(enclosing)
+                pending_effects.setdefault(enclosing, []).append(node)
+            if node.type != "call_expression":
+                continue
+            callee = node.child_by_field_name("function")
+            if callee is None or callee.type != "identifier":
+                continue
+            target = self._declaration_for(callee)
+            if target is not None and target in functions_by_scope.values():
+                callers.setdefault(target, set()).add(enclosing)
+        pending = list(mutates)
+        while pending:
+            target = pending.pop()
+            for caller in callers.get(target, ()):
+                if caller not in mutates:
+                    mutates.add(caller)
+                    pending.append(caller)
+        for call in nodes:
+            if call.type != "call_expression" or not _is_proven_top_level_execution(call):
+                continue
+            callee = call.child_by_field_name("function")
+            if callee is None or callee.type != "identifier":
+                continue
+            declaration = self._declaration_for(callee)
+            if declaration is None or declaration not in mutates:
+                continue
+            for effect in pending_effects.get(declaration, ()):
+                if effect.type == "call_expression":
+                    self._record_reflective_mutation_at(effect, call.start_byte)
+                else:
+                    argument = effect.child_by_field_name("argument")
+                    if argument is not None:
+                        self._record_value_mutation(argument, call.start_byte)
+
+    def _record_reflective_mutation_at(self, node, position: int) -> None:
+        callee = node.child_by_field_name("function")
+        if callee is None or not self._is_static_mutation_call(callee):
+            return
+        args = node.child_by_field_name("arguments")
+        target = args.named_children[0] if args is not None and args.named_children else None
+        if target is not None:
+            self._record_value_mutation(target, position)
 
     def _scope_has_direct_eval(self, node) -> bool:
         """Whether an earlier direct eval can alter this node's lexical scope."""
@@ -810,6 +962,10 @@ class _Binder:
 
     def _lookup(self, name_node) -> _ResolvedValue | None:
         """The most recent proven write for this lexical declaration."""
+        return self._lookup_at(name_node, name_node.start_byte)
+
+    def _lookup_at(self, name_node, position: int) -> _ResolvedValue | None:
+        """Lookup a lexical name as of `position` rather than the node's byte."""
         declaration = self._declaration_for(name_node)
         if (
             declaration is None
@@ -822,17 +978,17 @@ class _Binder:
         positions = self._write_positions.get(declaration, ())
         writes = self._writes.get(declaration, ())
         self._binding_history_steps += 1
-        index = bisect_right(positions, name_node.start_byte) - 1
+        index = bisect_right(positions, position) - 1
         value = writes[index].value if index >= 0 else None
-        if value is None or self._value_was_mutated(value, name_node.start_byte):
+        if value is None or self._value_was_mutated(value, position):
             return None
         return value
 
     def _resolve(self, node) -> _ResolvedValue | None:
         """The proven module value this expression evaluates to, if any."""
-        if node.type in _VALUE_WRAPPERS:
-            children = node.named_children
-            return self._resolve(children[0]) if children else None
+        node = _unwrap_value(node)
+        if node is None:
+            return None
         if node.type == "identifier":
             return self._lookup(node)
         if node.type == "member_expression":
@@ -854,7 +1010,9 @@ class _Binder:
             if module:
                 return _ResolvedValue(module, _MODULE_EXPORT)
             call = self._bound_call(node)
-            return _produced_value(call) if call is not None else None
+            return (
+                _produced_value(call, node.start_byte) if call is not None else None
+            )
         return None
 
     def _bound_call(self, node) -> JsBoundCall | None:
@@ -862,6 +1020,7 @@ class _Binder:
             return None
         is_new = node.type == "new_expression"
         callee = node.child_by_field_name("constructor" if is_new else "function")
+        callee = _unwrap_value(callee)
         if callee is None:
             return None
         receiver_identity = ""

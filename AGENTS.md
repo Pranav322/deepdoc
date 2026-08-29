@@ -91,6 +91,7 @@ Guidance for coding agents working in this repository.
 - `deepdoc/prompts/selectors.py` — `get_prompt_for_bucket`, `get_prompt_for_page_type`
 - `deepdoc/parser/routes/` — per-framework route detection and repo-aware resolution (`repo_resolver.py`)
 - `deepdoc/scanner/` — runtime, integration, artifact, database extraction
+- `deepdoc/scanner/runtime.py` — runtime evidence is fail-closed: Python imports retain exact defining-file identities, PHP schedule rebinding is source ordered, Go registrations require a proven `Start` call, and JS/Vue evidence must come from executable syntax. `dispatch_evidence` is file-scoped and must be filtered in planning sub-scans. The regex-only `_discover_nestjs_runtime()` remains intentionally unwired; see GitHub issue #18 for a syntax-backed implementation.
 - `tests/` — pytest suite; shared fixtures in `tests/conftest.py`
 
 ### Release and infrastructure

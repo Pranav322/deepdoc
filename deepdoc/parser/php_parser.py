@@ -42,6 +42,7 @@ class PhpClassDeclaration:
     queue: str = ""
     has_handle: bool = False
     handle_event: str = ""
+    uses_dispatchable: bool = False
 
 
 @dataclass(frozen=True)
@@ -146,6 +147,9 @@ def php_class_declarations(content: str) -> tuple[PhpClassDeclaration, ...]:
                         queue=_php_class_queue(node),
                         has_handle=_php_has_handle(node),
                         handle_event=_php_handle_event(node, aliases, namespace),
+                        uses_dispatchable=_php_class_uses_dispatchable(
+                            node, aliases, namespace
+                        ),
                     )
                 )
     return tuple(found)
@@ -274,14 +278,22 @@ def _php_invoked_by_ref_schedule_closure(node) -> bool:
     if node.type != "function_call_expression":
         return False
     callee = node.child_by_field_name("function")
-    if callee is None or callee.type != "parenthesized_expression":
-        return False
-    closure = next(
-        (child for child in callee.named_children if child.type == "anonymous_function"),
-        None,
-    )
+    closure = _php_unwrap_anonymous_function(callee)
     if closure is None:
         return False
+    return _php_by_ref_schedule_closure_rebinds(closure)
+
+
+def _php_unwrap_anonymous_function(node):
+    """The anonymous function behind any number of grouping parentheses."""
+    current = node
+    while current is not None and current.type == "parenthesized_expression":
+        current = next(iter(current.named_children), None)
+    return current if current is not None and current.type == "anonymous_function" else None
+
+
+def _php_by_ref_schedule_closure_rebinds(closure) -> bool:
+    """Whether an anonymous closure captures and rebinds outer ``$schedule``."""
     captured_by_ref = any(
         capture.type == "by_ref" and _php_schedule_target_is_rebound(capture)
         for clause in closure.named_children
@@ -297,12 +309,29 @@ def _php_invoked_by_ref_schedule_closure(node) -> bool:
 def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
     """Direct-method writes that revoke the typed `$schedule` parameter."""
     positions: list[int] = []
+    closure_bindings: set[bytes] = set()
 
     def visit(current) -> None:
         if current.type in _PHP_NESTED_FUNCTION_TYPES:
             return
         if _php_invoked_by_ref_schedule_closure(current):
             positions.append(current.start_byte)
+        if current.type == "function_call_expression":
+            function = current.child_by_field_name("function")
+            if function is not None and function.type == "variable_name":
+                if function.text.lower() in closure_bindings:
+                    positions.append(current.start_byte)
+            elif function is not None and function.text.lower() == b"call_user_func":
+                arguments = current.child_by_field_name("arguments")
+                first = arguments.named_children[0] if arguments and arguments.named_children else None
+                candidate = (
+                    first.named_children[0]
+                    if first is not None and first.type == "argument" and first.named_children
+                    else first
+                )
+                closure = _php_unwrap_anonymous_function(candidate)
+                if closure is not None and _php_by_ref_schedule_closure_rebinds(closure):
+                    positions.append(current.start_byte)
         if current.type == "foreach_statement":
             body = current.child_by_field_name("body")
             bindings = [
@@ -314,7 +343,25 @@ def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
         if current.type in {"assignment_expression", "reference_assignment_expression"}:
             target = current.child_by_field_name("left")
             if target is not None and _php_schedule_target_is_rebound(target):
+                # The RHS executes before the assignment changes `$schedule`.
+                positions.append(current.end_byte)
+            value = current.child_by_field_name("right")
+            closure = _php_unwrap_anonymous_function(value)
+            if (
+                target is not None
+                and target.type == "variable_name"
+                and closure is not None
+                and _php_by_ref_schedule_closure_rebinds(closure)
+            ):
+                closure_bindings.add(target.text.lower())
+        if current.type == "catch_clause":
+            name = current.child_by_field_name("name")
+            if name is not None and _php_schedule_target_is_rebound(name):
                 positions.append(current.start_byte)
+        if current.type in {"unset_statement", "global_declaration"} and any(
+            _php_schedule_target_is_rebound(child) for child in current.named_children
+        ):
+            positions.append(current.start_byte)
         for child in current.named_children:
             visit(child)
 
@@ -344,6 +391,23 @@ def _php_collect_schedule_calls(
         _php_collect_schedule_calls(
             child, aliases, namespace, found, reassignment_positions
         )
+
+
+def _php_class_uses_dispatchable(node, aliases: dict[str, str], namespace: str) -> bool:
+    """Whether a class uses Laravel's Dispatchable trait."""
+    for body in node.named_children:
+        if body.type != "declaration_list":
+            continue
+        for declaration in body.named_children:
+            if declaration.type != "use_declaration":
+                continue
+            for trait in declaration.named_children:
+                if (
+                    _php_class_target(trait, aliases, namespace).lower()
+                    == r"Illuminate\Foundation\Events\Dispatchable".lower()
+                ):
+                    return True
+    return False
 
 
 def _php_class_interfaces(node, aliases: dict[str, str], namespace: str) -> tuple[str, ...]:

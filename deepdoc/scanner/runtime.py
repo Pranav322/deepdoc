@@ -53,10 +53,16 @@ def discover_runtime_surfaces(
     """
     runtime = RuntimeScan()
     eligible = _eligible_contents(file_contents, source_kind_by_file)
+    kinds = source_kind_by_file or {}
     runtime.scan_stats = {
         "input_files": len(file_contents),
         "eligible_files": len(eligible),
-        "low_trust_files_skipped": len(file_contents) - len(eligible),
+        "low_trust_files_skipped": sum(
+            bool(content)
+            and is_low_trust_source_kind(kinds.get(path) or classify_source_kind(path))
+            for path, content in file_contents.items()
+        ),
+        "empty_files_skipped": sum(not content for content in file_contents.values()),
     }
     languages = _language_index(eligible, parsed_files)
     python_files = _by_language(eligible, languages, PYTHON_LANGUAGES)
@@ -178,6 +184,12 @@ def _python_has_unmodelled_module_mutation(tree: ast.Module) -> bool:
                 and len(node.args) >= 2
                 and _python_is_globals_call(node.args[0])
                 and not _python_string_literal(node.args[1])
+            ):
+                return True
+            if (
+                isinstance(node.func, ast.Attribute)
+                and node.func.attr in {"update", "setdefault", "pop", "__setitem__"}
+                and _python_is_globals_call(node.func.value)
             ):
                 return True
         if isinstance(node, ast.Subscript) and _python_is_globals_call(node.value):
@@ -503,14 +515,19 @@ def _python_runtime_bindings(
                     continue
                 local = alias.asname or alias.name
                 if alias.name in imported_tasks:
-                    record(local, position, _PYTHON_TASK_ROLE, alias.name)
+                    record(
+                        local,
+                        position,
+                        _PYTHON_TASK_ROLE,
+                        f"{task_path}::{alias.name}",
+                    )
                 elif (
                     module == "django.db.models.signals"
                     and alias.name in _PYTHON_DJANGO_SIGNAL_NAMES
                 ):
                     record(local, position, _PYTHON_SIGNAL_ROLE, alias.name)
                 elif module == "django.db.models" and alias.name == "signals":
-                    record(local, position, _PYTHON_SIGNAL_MODULE_ROLE)
+                    record(local, position, _PYTHON_SIGNAL_MODULE_ROLE, local)
                 else:
                     module_path = _python_import_module_file(
                         file_path,
@@ -518,7 +535,12 @@ def _python_runtime_bindings(
                         node.level,
                     )
                     if module_path in task_exports_by_path:
-                        record(local, position, _PYTHON_TASK_MODULE_ROLE, module_path)
+                        record(
+                            local,
+                            position,
+                            _PYTHON_TASK_MODULE_ROLE,
+                            f"{module_path}::{local}",
+                        )
                     else:
                         record(local, position)
             continue
@@ -526,16 +548,31 @@ def _python_runtime_bindings(
             for alias in node.names:
                 local = alias.asname or alias.name.split(".", 1)[0]
                 if alias.name == "django.db.models.signals":
-                    record(local, position, _PYTHON_SIGNAL_MODULE_ROLE)
+                    record(local, position, _PYTHON_SIGNAL_MODULE_ROLE, alias.name)
                     continue
                 task_path = _python_import_module_file(file_path, alias.name, 0)
                 if task_path in task_exports_by_path:
-                    record(local, position, _PYTHON_TASK_MODULE_ROLE, task_path)
+                    record(
+                        local,
+                        position,
+                        _PYTHON_TASK_MODULE_ROLE,
+                        f"{task_path}::{alias.asname or alias.name}",
+                    )
                 else:
                     record(local, position)
             continue
         for name, write_position in _python_module_write_events(node):
             record(name, write_position)
+
+    global_stores = _python_function_global_stores(tree)
+    for node in tree.body:
+        if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+            continue
+        func = node.value.func
+        if not isinstance(func, ast.Name):
+            continue
+        for name in global_stores.get(func.id, ()):
+            record(name, _python_node_position(node.value))
 
     histories: dict[str, _PythonBindingHistory] = {}
     for name, events in raw_histories.items():
@@ -835,8 +872,17 @@ def _python_bound_task_target(
         return binding.target if binding.role == _PYTHON_TASK_ROLE else ""
     if binding.role != _PYTHON_TASK_MODULE_ROLE:
         return ""
+    if "::" not in binding.target:
+        return ""
+    task_path, module_prefix = binding.target.split("::", 1)
     candidate = parts[-1]
-    return dotted if candidate in task_exports_by_path.get(binding.target, set()) else ""
+    if ".".join(parts[:-1]) != module_prefix:
+        return ""
+    return (
+        f"{task_path}::{candidate}"
+        if candidate in task_exports_by_path.get(task_path, set())
+        else ""
+    )
 
 
 def _python_bound_signal_target(
@@ -853,13 +899,14 @@ def _python_bound_signal_target(
         return ""
     if len(parts) == 1:
         return binding.target if binding.role == _PYTHON_SIGNAL_ROLE else ""
+    if binding.role != _PYTHON_SIGNAL_MODULE_ROLE:
+        return ""
     candidate = parts[-1]
-    return (
-        candidate
-        if binding.role == _PYTHON_SIGNAL_MODULE_ROLE
-        and candidate in _PYTHON_DJANGO_SIGNAL_NAMES
-        else ""
-    )
+    prefix = binding.target or parts[0]
+    module_path = ".".join(parts[:-1])
+    if module_path != prefix:
+        return ""
+    return candidate if candidate in _PYTHON_DJANGO_SIGNAL_NAMES else ""
 
 
 def _python_dotted_name(node: ast.expr) -> str:
@@ -872,7 +919,10 @@ def _python_dotted_name(node: ast.expr) -> str:
 
 
 def _python_target_aliases(target: str) -> tuple[str, ...]:
-    """Preserve a dotted task reference plus its terminal callable name."""
+    """Preserve a defining-file task key, a dotted path, or a short name."""
+    if "::" in target:
+        short = target.rsplit("::", 1)[-1]
+        return (target, short) if short and short != target else (target,)
     aliases = list(_target_aliases(target))
     terminal = target.rsplit(".", 1)[-1]
     if terminal and terminal not in aliases:
@@ -923,6 +973,9 @@ def _link_runtime_evidence(
                 if normalized:
                     _add_exact_candidate(php_tasks_by_identity, normalized, task)
         else:
+            _add_exact_candidate(
+                tasks_by_alias, f"{task.file_path}::{task.name}", task
+            )
             for alias in _target_aliases(task.name):
                 _add_exact_candidate(tasks_by_alias, alias, task)
         for trigger in task.triggers:
@@ -1367,14 +1420,15 @@ def _discover_celery_file_runtime(
             continue
         if isinstance(node, (ast.Assign, ast.AnnAssign)):
             is_beat_schedule = _python_is_beat_schedule_assignment(node, app_names)
-            names = {name for name, _ in _python_module_write_events(node)}
-            if names and _python_is_celery_app_factory(
+            direct_names = _python_direct_store_names(node)
+            write_names = {name for name, _ in _python_module_write_events(node)}
+            if direct_names and _python_is_celery_app_factory(
                 _python_assignment_value(node), constructor_names, celery_module_names
             ):
-                revoke(names)
-                app_names.update(names)
-            else:
-                revoke(names)
+                revoke(write_names)
+                app_names.update(direct_names)
+            elif not is_beat_schedule:
+                revoke(write_names)
             if is_beat_schedule:
                 for target, schedule in _python_beat_entries(
                     _python_assignment_value(node), content
@@ -1467,6 +1521,39 @@ def _python_assignment_names(
     """Names whose runtime binding is changed by an assignment target."""
     targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
     return _python_write_target_names(targets)
+
+
+def _python_function_global_stores(tree: ast.Module) -> dict[str, tuple[str, ...]]:
+    """Names each top-level function assigns through a ``global`` declaration."""
+    stores: dict[str, tuple[str, ...]] = {}
+    for node in tree.body:
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        declared: set[str] = set()
+        assigned: set[str] = set()
+        for child in ast.walk(node):
+            if isinstance(child, ast.Global):
+                declared.update(child.names)
+            elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
+                assigned.add(child.id)
+        rebound = tuple(sorted(declared & assigned))
+        if rebound:
+            stores[node.name] = rebound
+    return stores
+
+
+def _python_direct_store_names(node: ast.Assign | ast.AnnAssign) -> set[str]:
+    """Bare names rebound by this assignment, not attribute/subscript roots."""
+    targets = node.targets if isinstance(node, ast.Assign) else (node.target,)
+    names: set[str] = set()
+    for target in targets:
+        if isinstance(target, ast.Name):
+            names.add(target.id)
+        elif isinstance(target, ast.Tuple):
+            for elt in target.elts:
+                if isinstance(elt, ast.Name):
+                    names.add(elt.id)
+    return names
 
 
 def _python_delete_names(node: ast.Delete) -> set[str]:
@@ -1579,7 +1666,7 @@ def _discover_schedulers(
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
         if _python_has_unmodelled_module_mutation(tree):
             continue
-        bindings = _python_crontab_bindings(tree)
+        bindings, revokes = _python_crontab_bindings(tree)
         local_shadows_by_call = _python_local_shadows_by_call(tree)
         count = 0
         for call in sorted(
@@ -1592,7 +1679,14 @@ def _discover_schedulers(
                 continue
             dotted = _python_dotted_name(call.func)
             binding = bindings.get(dotted)
-            if binding is None or binding > _python_node_position(call):
+            call_position = _python_node_position(call)
+            if binding is None or binding > call_position:
+                continue
+            root = dotted.split(".", 1)[0]
+            if any(
+                binding < write <= call_position
+                for write in revokes.get(root, ())
+            ):
                 continue
             count += 1
             source = ast.get_source_segment(file_contents[file_path], call) or ""
@@ -1619,18 +1713,12 @@ def _python_after_node_position(node: ast.AST) -> tuple[int, int]:
     )
 
 
-def _python_revoke_crontab_bindings(
-    bindings: dict[str, tuple[int, int]], name: str
-) -> None:
-    """Drop every crontab receiver reached through a now-rebound module name."""
-    for binding in tuple(bindings):
-        if binding == name or binding.startswith(f"{name}."):
-            del bindings[binding]
-
-
-def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
-    """Top-level names that are structurally imported from Celery schedules."""
+def _python_crontab_bindings(
+    tree: ast.Module,
+) -> tuple[dict[str, tuple[int, int]], dict[str, tuple[tuple[int, int], ...]]]:
+    """Top-level crontab imports plus later writes that revoke them after that point."""
     bindings: dict[str, tuple[int, int]] = {}
+    revoke_positions: dict[str, list[tuple[int, int]]] = {}
     for node in tree.body:
         if isinstance(node, ast.ImportFrom):
             module = node.module or ""
@@ -1638,7 +1726,6 @@ def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
                 if alias.name == "*":
                     continue
                 local = alias.asname or alias.name
-                _python_revoke_crontab_bindings(bindings, local)
                 if module == "celery.schedules" and alias.name == "crontab":
                     bindings[local] = _python_node_position(node)
                 elif module == "celery" and alias.name == "schedules":
@@ -1647,14 +1734,16 @@ def _python_crontab_bindings(tree: ast.Module) -> dict[str, tuple[int, int]]:
         if isinstance(node, ast.Import):
             for alias in node.names:
                 local = alias.asname or alias.name.split(".", 1)[0]
-                _python_revoke_crontab_bindings(bindings, local)
                 if alias.name == "celery.schedules":
                     binding = alias.asname or alias.name
                     bindings[f"{binding}.crontab"] = _python_node_position(node)
             continue
-        for name, _ in _python_module_write_events(node):
-            _python_revoke_crontab_bindings(bindings, name)
-    return bindings
+        for name, write_position in _python_module_write_events(node):
+            revoke_positions.setdefault(name, []).append(write_position)
+    return bindings, {
+        name: tuple(sorted(positions))
+        for name, positions in revoke_positions.items()
+    }
 
 
 def _python_assignment_names_if_any(node: ast.AST) -> set[str]:
@@ -1687,6 +1776,11 @@ def _discover_django_file_runtime(
     if _python_has_unmodelled_module_mutation(tree):
         return []
     tasks: list[RuntimeTask] = []
+    defined_functions = {
+        item.name
+        for item in tree.body
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
     commands_by_name: dict[str, RuntimeTask] = {}
     receiver_names: set[str] = set()
     signal_names: dict[str, str] = {}
@@ -1777,7 +1871,7 @@ def _discover_django_file_runtime(
             signal, handler = _python_signal_connect(
                 node.value, signal_names, signal_module_names
             )
-            if signal and handler:
+            if signal and handler and handler in defined_functions:
                 tasks.append(
                     RuntimeTask(
                         name=handler,
@@ -1855,17 +1949,42 @@ def _discover_laravel_runtime(
 ) -> tuple[list[RuntimeTask], list[RuntimeScheduler]]:
     tasks: list[RuntimeTask] = []
     schedulers: list[RuntimeScheduler] = []
-    event_declarations: list[tuple[str, PhpClassDeclaration]] = []
-    event_dispatch_targets = {
-        dispatch.target.lower()
+    declarations = [
+        (file_path, declaration)
+        for file_path, content in file_contents.items()
+        for declaration in php_class_declarations(content)
+    ]
+    declarations_by_target = {
+        declaration.target.lower(): declaration for _, declaration in declarations
+    }
+    dispatches = [
+        dispatch
         for content in file_contents.values()
         for dispatch in php_dispatches(content)
-        if dispatch.relation == "event"
+    ]
+    event_dispatch_targets = {
+        dispatch.target.lower() for dispatch in dispatches if dispatch.relation == "event"
     }
+    event_dispatch_targets.update(
+        dispatch.target.lower()
+        for dispatch in dispatches
+        if dispatch.relation == "dispatch"
+        and (
+            declaration := declarations_by_target.get(dispatch.target.lower())
+        ) is not None
+        and declaration.uses_dispatchable
+        and not any(
+            interface.strip().lstrip("\\").lower() == _LARAVEL_SHOULD_QUEUE.lower()
+            for interface in declaration.interfaces
+        )
+    )
 
     for file_path, content in file_contents.items():
-        for declaration in php_class_declarations(content):
-            event_declarations.append((file_path, declaration))
+        for declaration in (
+            declaration
+            for declaration_path, declaration in declarations
+            if declaration_path == file_path
+        ):
             is_queued = any(
                 interface.strip().lstrip("\\").lower()
                 == _LARAVEL_SHOULD_QUEUE.lower()
@@ -1875,6 +1994,7 @@ def _discover_laravel_runtime(
                 is_queued
                 and declaration.has_handle
                 and declaration.handle_event.lower() in event_dispatch_targets
+                and "listeners" in {part.lower() for part in Path(file_path).parts}
             )
             if is_listener:
                 tasks.append(
@@ -1913,7 +2033,7 @@ def _discover_laravel_runtime(
                 )
             )
 
-    for file_path, declaration in event_declarations:
+    for file_path, declaration in declarations:
         if declaration.target.lower() not in event_dispatch_targets:
             continue
         tasks.append(
@@ -1997,15 +2117,19 @@ def _js_str_arg(call: JsBoundCall, index: int) -> str:
     return value if kind == "str" else ""
 
 
-def _js_parse_inputs(file_path: str, content: str) -> tuple[tuple[str, str], ...]:
+def _js_parse_inputs(file_path: str, content: str) -> tuple[tuple[str, str, str], ...]:
     """Independent executable JS/TS scopes for one source file or Vue SFC."""
     suffix = Path(file_path).suffix.lower()
     if suffix == ".vue":
         return tuple(
-            (script, "typescript" if lang in ("ts", "tsx") else "javascript")
+            (
+                script,
+                "typescript" if lang in ("ts", "tsx") else "javascript",
+                lang,
+            )
             for script, lang, _ in _extract_script_blocks(content)
         )
-    return ((content, language_for_extension(suffix)),)
+    return ((content, language_for_extension(suffix), ""),)
 
 
 def _js_bound_runtime_calls(
@@ -2013,9 +2137,12 @@ def _js_bound_runtime_calls(
 ) -> tuple[tuple[str, JsBoundCall], ...]:
     """Bound calls from each real script scope, never merged across Vue blocks."""
     found: list[tuple[str, JsBoundCall]] = []
-    for source, language in _js_parse_inputs(file_path, content):
+    for source, language, source_lang in _js_parse_inputs(file_path, content):
+        path = Path(file_path)
+        if source_lang == "tsx":
+            path = path.with_suffix(".tsx")
         calls = js_bound_calls(
-            Path(file_path), source, language, JS_BOUND_RUNTIME_MODULES
+            path, source, language, JS_BOUND_RUNTIME_MODULES
         )
         if calls is None:
             # A Vue SFC compiles its executable script blocks as one component;
@@ -2357,6 +2484,7 @@ def _discover_python_realtime_consumers(
 ) -> list[RealtimeConsumer]:
     """Discover Channels consumers only through AST-proven framework bindings."""
     consumers: list[RealtimeConsumer] = []
+    imported_routes: dict[str, set[str]] = {}
     for file_path, tree in (trees or _python_ast_trees(file_contents)).items():
         if _python_has_unmodelled_module_mutation(tree):
             continue
@@ -2478,8 +2606,12 @@ def _discover_python_realtime_consumers(
                 continue
             consumer_name = _python_channels_route_consumer(call)
             route = _python_string_literal(call.args[0]) if call.args else ""
-            if consumer_name in routes_by_consumer and route:
+            if not consumer_name or not route:
+                continue
+            if consumer_name in routes_by_consumer:
                 routes_by_consumer[consumer_name].add(route)
+            else:
+                imported_routes.setdefault(consumer_name, set()).add(route)
 
         for name, (consumer_type, class_node) in class_nodes.items():
             auth_hints: list[str] = []
@@ -2497,6 +2629,10 @@ def _discover_python_realtime_consumers(
                     auth_hints=auth_hints,
                 )
             )
+    for consumer in consumers:
+        extra = imported_routes.get(consumer.name)
+        if extra:
+            consumer.routes = sorted(set(consumer.routes) | extra)[:10]
     return _dedupe_consumers(consumers)
 
 

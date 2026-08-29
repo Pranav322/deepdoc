@@ -38,6 +38,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "build_repo_model": True,
         "persistent_index": True,
     },
+    # ── Documentation handling ───────────────────────────────────────────
+    "docs": {
+        "mode": "separate",       # "separate" | "augment" | "catalog"
+        "output_subdir": "_deepdoc",
+        "exclude_ai_derived": True,
+    },
     # ── Concurrency ─────────────────────────────────────────────────────
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)

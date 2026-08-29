@@ -11,6 +11,7 @@ from ..manifest import file_hash
 from ..language_support import language_name_for_extension
 from ..source_metadata import KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS
 from ..telemetry import RunTelemetry
+from ..docs_system import classify_doc_role, DocRole
 from .common import *
 
 
@@ -1052,11 +1053,13 @@ def scan_repo(
 
     # Always exclude DeepDoc's own generated/state directories regardless of
     # user config — scanning these produces noise and giant-file false positives.
+    output_dir_str = str(cfg.get("output_dir") or "deepdoc-docs")
+    site_dir_str = str(cfg.get("site_dir") or "deepdoc-site")
     _DEEPDOC_GENERATED = {
         ".deepdoc",
-        str(cfg.get("site_dir") or "deepdoc-site"),
+        site_dir_str,
         "chatbot_backend",
-        str(cfg.get("output_dir") or "deepdoc-docs"),  # configurable docs output dir
+        output_dir_str,
     }
     for _d in _DEEPDOC_GENERATED:
         if _d not in exclude:
@@ -1078,6 +1081,9 @@ def scan_repo(
     doc_contexts: dict[str, str] = {}
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
+    doc_role_by_file: dict[str, str] = {}
+    ai_derived_exports: list[str] = []
+    built_outputs: list[str] = []
     file_frameworks: dict[str, list[str]] = {}
     unsupported_extensions: dict[str, int] = {}
     skipped_source_files: dict[str, int] = {}
@@ -1171,6 +1177,21 @@ def scan_repo(
 
             progress.update(task, description=f"[dim]Scanning {rel}[/dim]")
             source_kind_by_file[rel] = classify_source_kind(rel)
+            doc_role = classify_doc_role(
+                rel,
+                source_kind=source_kind_by_file[rel],
+                output_dir=output_dir_str,
+                site_dir=site_dir_str,
+            )
+            if doc_role:
+                doc_role_by_file[rel] = doc_role
+                if doc_role == "ai_derived_export":
+                    ai_derived_exports.append(rel)
+                elif doc_role == "built_docs_site":
+                    built_outputs.append(rel)
+            # For files that might be AI-derived but need content inspection,
+            # defer to the post-read phase (see below). The path-based
+            # classification above catches the unambiguous cases.
             service = _service_for_path(rel, service_boundaries)
             if service:
                 file_services[rel] = service
@@ -1410,6 +1431,24 @@ def scan_repo(
             if telemetry is not None:
                 telemetry.record_duration(f"scan.{phase_name}", 0.0)
 
+    # Post-scan doc role refinement: check file contents for AI-derived
+    # markers that were not detectable from path alone.
+    for rel, content in file_contents.items():
+        if rel not in doc_role_by_file or doc_role_by_file[rel] == DocRole.UNKNOWN:
+            doc_role = classify_doc_role(
+                rel,
+                content=content,
+                source_kind=source_kind_by_file.get(rel, "product"),
+                output_dir=output_dir_str,
+                site_dir=site_dir_str,
+            )
+            if doc_role:
+                doc_role_by_file[rel] = doc_role
+                if doc_role == "ai_derived_export":
+                    ai_derived_exports.append(rel)
+                elif doc_role == "built_docs_site":
+                    built_outputs.append(rel)
+
     repo_scan = RepoScan(
         file_tree=dict(file_tree),
         file_summaries=file_summaries,
@@ -1436,6 +1475,9 @@ def scan_repo(
         unsupported_extensions=dict(unsupported_extensions),
         skipped_source_files=dict(skipped_source_files),
         partial=scan_partial,
+        doc_role_by_file=doc_role_by_file,
+        ai_derived_exports=ai_derived_exports,
+        built_outputs=built_outputs,
     )
 
     _build_repo_model_if_wanted(repo_scan, str(repo_root), cfg)
@@ -1741,6 +1783,22 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
             console.print(f"    • {sig.signal_type}: {sig.name}")
     else:
         console.print("  [dim]No debug signals detected[/dim]")
+
+    # 2.8 Documentation system detection
+    try:
+        from ..docs_system import detect_docs_system
+
+        scan.docs_system = detect_docs_system(
+            repo_root,
+            scan.file_tree,
+            scan.file_contents,
+            scan.source_kind_by_file,
+            getattr(scan, "doc_role_by_file", {}),
+            scan.config_files,
+            ci_artifacts=getattr(scan.artifact_scan, "ci_artifacts", []) if scan.artifact_scan else None,
+        )
+    except Exception:
+        scan.docs_system = None
 
     return scan
 

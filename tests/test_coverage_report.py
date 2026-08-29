@@ -23,13 +23,13 @@ def _scan(**overrides) -> RepoScan:
 
 
 def test_print_scan_warns_on_known_unsupported_languages(monkeypatch, capsys) -> None:
-    scan = _scan(unsupported_extensions={".java": 2, ".md": 5})
+    scan = _scan(unsupported_extensions={".rb": 2, ".md": 5})
     pipeline = object.__new__(pipeline_v2.PipelineV2)
     pipeline._print_scan(scan)
 
     out = capsys.readouterr().out
-    assert "Java" in out
-    assert ".java" in out
+    assert "Ruby" in out
+    assert ".rb" in out
     # .md is not a known-unsupported-language extension — must not be flagged.
     assert ".md" not in out.split("Unsupported")[-1] if "Unsupported" in out else True
 

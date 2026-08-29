@@ -9,6 +9,7 @@ import click
 from ..llm import ModelCapabilityError, fit_prompt_sections
 from ..manifest import file_hash
 from ..language_support import language_name_for_extension
+from ..source_metadata import KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS
 from ..telemetry import RunTelemetry
 from .common import *
 
@@ -1204,9 +1205,36 @@ def scan_repo(
 
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
-                if fpath.suffix:
-                    ext = fpath.suffix.lower()
+                ext = fpath.suffix.lower() if fpath.suffix else ""
+                if ext:
                     unsupported_extensions[ext] = unsupported_extensions.get(ext, 0) + 1
+
+                skip_reason = _skip_reason_for_source_file(fpath, rel, max_source_bytes)
+                if skip_reason:
+                    skipped_source_files[f"unsupported_{skip_reason}"] = (
+                        skipped_source_files.get(f"unsupported_{skip_reason}", 0) + 1
+                    )
+                    progress.advance(task)
+                    continue
+
+                # Read unsupported file for inventory — no parsing
+                try:
+                    content = fpath.read_text(encoding="utf-8", errors="replace")
+                    file_contents[rel] = content
+                    file_line_counts[rel] = content.count("\n") + 1
+                    content_hash = file_hash(content)
+                    file_content_hashes[rel] = content_hash
+                    lang_name = KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS.get(ext, ext.lstrip(".")) if ext else "unknown"
+                    file_summaries[rel] = (
+                        f"Unsupported file ({lang_name}) — inventory only\n"
+                        f"Lines: {file_line_counts[rel]}\n"
+                        f"Size: {len(content)} bytes\n"
+                    )
+                    if telemetry is not None:
+                        telemetry.counter("scan.unsupported_files_read")
+                        telemetry.counter("scan.unsupported_bytes_read", len(content.encode("utf-8")))
+                except Exception:
+                    pass
                 progress.advance(task)
                 continue
 

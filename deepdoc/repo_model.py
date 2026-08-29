@@ -61,10 +61,8 @@ LOW_TRUST_SOURCE_KINDS: set[SourceKind] = {
 # Extended from source_metadata.py to provide forward-looking coverage for
 # languages we plan to support in future slices.
 KNOWN_UNSUPPORTED_LANGUAGES: dict[str, str] = {
-    ".java": "Java",
     ".kt": "Kotlin",
     ".kts": "Kotlin",
-    ".rs": "Rust",
     ".cs": "C#",
     ".rb": "Ruby",
     ".swift": "Swift",

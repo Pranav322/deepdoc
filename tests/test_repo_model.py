@@ -158,14 +158,19 @@ class TestCoverageReport:
         lang_names = {lc.language for lc in report.languages}
         assert "python" in lang_names
         assert "typescript" in lang_names
-        # Ruby and .foo are not in the current scan (Slice 0 — unsupported extensions
-        # are not yet tracked as inventory; that's Slice 4's job)
+        # Python and TypeScript should be fully parsed
+        for lc in report.languages:
+            if lc.language in ("python", "typescript"):
+                assert lc.parse_rate == 1.0, f"{lc.language} should be 100% parsed"
+            elif lc.language == "Ruby":
+                assert lc.parse_rate == 0.0
+                assert lc.inventory_only == 1
 
-    def test_no_unsupported_languages_in_current_scan(self):
-        # Slice 0: unsupported files aren't tracked yet. This test documents that fact.
-        # Slice 4 will add them and then this test will change.
+    def test_unsupported_languages_now_tracked(self):
+        # Slice 4: unsupported files now appear as inventory_only in coverage
         _, model = _scan_and_model("polyglot-small")
-        assert not model.coverage.has_unsupported_languages
+        assert model.coverage.has_unsupported_languages
+        assert "Ruby" in model.coverage.unsupported_languages
 
     def test_overall_parse_rate(self):
         _, model = _scan_and_model("broken-imports")
@@ -226,11 +231,13 @@ class TestConvenienceProperties:
         assert len(py_files) == 1
         assert len(ts_files) == 1
 
-    def test_no_unsupported_files_yet(self):
-        # Slice 0: unsupported extensions are not tracked. Slice 4 will add them.
+    def test_unsupported_files_visible(self):
+        # Slice 4: unsupported files now appear in the model
         _, model = _scan_and_model("polyglot-small")
         unsup = model.unsupported_files()
-        assert len(unsup) == 0
+        paths = {f.path for f in unsup}
+        assert "src/legacy.rb" in paths
+        assert "src/config.foo" in paths
 
     def test_get_file(self):
         _, model = _scan_and_model("broken-imports")

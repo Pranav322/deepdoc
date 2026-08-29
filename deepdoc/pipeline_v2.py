@@ -624,26 +624,30 @@ class PipelineV2:
     _SUPPORTED_LANGUAGES = ("python", "javascript", "typescript", "go", "php", "vue")
 
     def _guard_supported_source_files(self, scan: RepoScan) -> None:
-        """Fail clearly if the scan found no documentable source file.
-
-        Without this, an empty or unsupported-only repo reaches planning with
-        an empty inventory and dies with an opaque PlanContractError instead
-        of a message that names what DeepDoc can actually parse.
-        """
-        if scan.file_contents:
+        """Fail clearly if the scan found no documentable source file."""
+        parsed = getattr(scan, "parsed_files", None)
+        if parsed is not None and parsed:
             return
+        contents = getattr(scan, "file_contents", None) or {}
         supported = ", ".join(self._SUPPORTED_LANGUAGES)
-        if scan.total_files == 0:
+        total = getattr(scan, "total_files", 0)
+        unsup = sorted(getattr(scan, "unsupported_extensions", {}) or {})
+        if total == 0:
             raise click.ClickException(
                 f"No source files found under {self.repo_root}. "
                 f"DeepDoc documents: {supported}."
             )
-        unsupported = sorted(scan.unsupported_extensions)
-        detail = f" (found: {', '.join(unsupported)})" if unsupported else ""
+        if contents:
+            detail = f" (found: {', '.join(unsup)})" if unsup else ""
+            raise click.ClickException(
+                f"No parseable source files found under {self.repo_root}{detail}. "
+                f"Unsupported files are inventoried but cannot generate documentation. "
+                f"DeepDoc parses: {supported}."
+            )
+        detail = f" (found: {', '.join(unsup)})" if unsup else ""
         raise click.ClickException(
-            f"No supported source files found under {self.repo_root}{detail}. "
-            f"DeepDoc documents: {supported}. See the scan summary above for "
-            f"which extensions were skipped."
+            f"No source files found under {self.repo_root}{detail}. "
+            f"DeepDoc documents: {supported}."
         )
 
     def _print_scan(self, scan: RepoScan) -> None:
@@ -670,11 +674,11 @@ class PipelineV2:
         if unsupported_langs:
             named = ", ".join(
                 f"{KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS[ext]} ({ext}, {count} file"
-                f"{'s' if count != 1 else ''})"
+                f"{'s' if count != 1 else ''}, inventory only)"
                 for ext, count in sorted(unsupported_langs.items(), key=lambda x: -x[1])
             )
             console.print(
-                f"[yellow]⚠ Unsupported languages present, not parsed or documented: "
+                f"[yellow]⚠ Unsupported languages present — inventoried but not documented: "
                 f"{named}[/yellow]"
             )
 

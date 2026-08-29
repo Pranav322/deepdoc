@@ -14,6 +14,7 @@ from .extractor import (
     CallExtractor, LANGUAGE_BUILTINS, _strip_strings_and_comments,
 )
 from .go_extractor import GoCallExtractor
+from .java_extractor import JavaCallExtractor
 from .js_ts_extractor import JSTSCallExtractor
 from .php_extractor import PHPCallExtractor
 from .python_extractor import PythonCallExtractor
@@ -24,6 +25,7 @@ EXTRACTOR_REGISTRY = {
     "typescript": JSTSCallExtractor(),
     "go": GoCallExtractor(),
     "php": PHPCallExtractor(),
+    "java": JavaCallExtractor(),
 }
 
 
@@ -49,7 +51,7 @@ __all__ = [
     "CALL_KIND_EVENT", "CALL_KIND_EXTERNAL",
     "CallExtractor", "get_extractor", "EXTRACTOR_REGISTRY",
     "GoCallExtractor", "JSTSCallExtractor", "PHPCallExtractor",
-    "PythonCallExtractor", "LANGUAGE_BUILTINS", "_strip_strings_and_comments",
+    "PythonCallExtractor", "JavaCallExtractor", "LANGUAGE_BUILTINS", "_strip_strings_and_comments",
     "build_call_graph", "CallGraph",
     "_resolve_bare_call", "_resolve_member_call", "_emit_call",
 ]

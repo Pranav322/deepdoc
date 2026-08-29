@@ -54,6 +54,7 @@ console = Console()
 
 from .evidence import AssembledEvidence, EvidenceAssembler
 from .validation import PageValidator, ValidationResult
+from .claims import ClaimExtractor, ClaimValidator
 from .post_processors import (
     build_internal_doc_link_maps,
     fix_bare_language_markers,
@@ -438,6 +439,13 @@ class BucketGenerationEngine:
         self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg, persistent_index=self._load_persistent_index(repo_root, cfg))
         self.generator = PageGenerator(llm, cfg, repo_root)
         self.validator = PageValidator(repo_root, scan)
+        self.claim_extractor = ClaimExtractor()
+        try:
+            from ..repo_model import build_repo_model_from_scan
+            self._repo_model = build_repo_model_from_scan(scan, str(repo_root))
+        except Exception:
+            self._repo_model = None
+        self.claim_validator = ClaimValidator(scan, self._repo_model) if self._repo_model else None
         self.max_workers = cfg.get("max_parallel_workers", MAX_PARALLEL_WORKERS)
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
         self.rate_limit_pause = cfg.get("rate_limit_pause", RATE_LIMIT_PAUSE)
@@ -1226,6 +1234,19 @@ Re-run `deepdoc generate` to retry.
                     "deepdoc_prompt_omitted_contexts": evidence.prompt_omitted_contexts,
                 }
             )
+        if self.claim_validator is not None:
+            claims = self.claim_extractor.extract(content)
+            claim_result = self.claim_validator.validate(claims)
+            fields["deepdoc_claims"] = {
+                "total": claim_result.total_claims,
+                "grounded": claim_result.grounded_claims,
+                "ungrounded_routes": claim_result.ungrounded_route_claims,
+                "ungrounded_calls": claim_result.ungrounded_call_claims,
+                "hallucinated_files": claim_result.hallucinated_files[:10],
+                "is_valid": claim_result.is_valid,
+            }
+            if claim_result.errors:
+                fields["deepdoc_claim_errors"] = claim_result.errors
         return _merge_frontmatter_fields(content, fields)
 
     def _build_page_evidence_records(self, evidence_files: list[str]) -> list[dict[str, Any]]:

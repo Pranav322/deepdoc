@@ -62,6 +62,7 @@ from .post_processors import (
     fix_file_references,
     fix_frontmatter_description,
     fix_mermaid_diagrams,
+    inject_source_citations,
     inject_source_files_disclosure,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
@@ -828,6 +829,12 @@ class BucketGenerationEngine:
             elapsed = time.time() - start
 
             # Step 8: Write to disk
+            content = inject_source_citations(
+                content,
+                self._repo_file_paths,
+                git_remote=self._git_remote(),
+                commit_sha=self._git_commit_short(),
+            )
             content = strip_leaked_provenance_fields(content)
             if evidence is not None and evidence.evidence_file_paths:
                 content = inject_source_files_disclosure(
@@ -839,6 +846,16 @@ class BucketGenerationEngine:
                 validation,
                 evidence,
             )
+
+            if (
+                validation is not None
+                and '"deepdoc_status": "invalid"' in content
+            ):
+                validation.is_valid = False
+                if "claims invalid" not in validation.warnings:
+                    validation.warnings.append(
+                        "[claims] page has ungrounded evidence claims"
+                    )
 
             doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1247,6 +1264,8 @@ Re-run `deepdoc generate` to retry.
             }
             if claim_result.errors:
                 fields["deepdoc_claim_errors"] = claim_result.errors
+            if not claim_result.is_valid:
+                fields["deepdoc_status"] = "invalid"
         return _merge_frontmatter_fields(content, fields)
 
     def _build_page_evidence_records(self, evidence_files: list[str]) -> list[dict[str, Any]]:
@@ -1273,6 +1292,17 @@ Re-run `deepdoc generate` to retry.
                 }
             )
         return records
+
+    def _git_remote(self) -> str:
+        try:
+            return subprocess.check_output(
+                ["git", "remote", "get-url", "origin"],
+                cwd=self.repo_root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            return ""
 
     def _git_commit_short(self) -> str:
         try:

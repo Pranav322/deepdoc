@@ -909,3 +909,45 @@ def link_glossary_terms(content: str, terms: list[tuple[str, str]]) -> str:
             continue
         out.append(_rewrite_line(line))
     return "\n".join(out)
+
+
+def inject_source_citations(content: str, known_paths: set[str], git_remote: str = "", commit_sha: str = "") -> str:
+    """Convert bare `path:line` backtick references into linked [Source: ...] citations.
+
+    Only files that exist in the repository are cited. Hallucinated paths are
+    left unchanged. Links are commit-pinned GitHub blob URLs when remote and
+    commit are known.
+    """
+    PAT = re.compile(r"`([^`]+):(\d+)`")
+
+    def _replace(m: re.Match) -> str:
+        path = m.group(1)
+        line = m.group(2)
+        if path not in known_paths:
+            return m.group(0)
+        if git_remote and commit_sha:
+            remote = git_remote.rstrip("/").replace("https://github.com/", "")
+            return (
+                f"[Source: {path}:{line}]"
+                f"(https://github.com/{remote}/blob/{commit_sha}/{path}#L{line})"
+            )
+        return f"[Source: {path}:{line}]"
+
+    return PAT.sub(_replace, content)
+
+
+__all__ = [
+    "fix_mermaid_diagrams",
+    "fix_file_references",
+    "normalize_html_code_blocks",
+    "repair_unbalanced_code_fences",
+    "normalize_explanatory_lines_outside_fences",
+    "repair_dangling_plain_fences",
+    "fix_frontmatter_description",
+    "fix_bare_language_markers",
+    "fix_bare_mermaid_fences",
+    "repair_internal_doc_links",
+    "strip_leaked_provenance_fields",
+    "inject_source_files_disclosure",
+    "inject_source_citations",
+]

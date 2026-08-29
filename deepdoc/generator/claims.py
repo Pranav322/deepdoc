@@ -117,11 +117,30 @@ class ClaimExtractor:
         claims: list[Claim] = []
         for m in self._FILE_REF_PATTERN.finditer(body):
             file_path = m.group(1)
+            if _is_false_positive_file_ref(file_path):
+                continue
             claims.append(Claim(
                 claim_type="file_ref",
                 claim_text=f"{file_path}:{m.group(2)}",
             ))
         return claims
+
+
+def _is_false_positive_file_ref(text: str) -> bool:
+    """Return True if text looks like a URL, IP address, bare number, or numeric range, not a file path."""
+    if re.match(r"^\d+$", text):
+        return True
+    if re.match(r"^\d+\.\d+\.\d+\.\d+$", text):
+        return True
+    if re.match(r"^(https?|ftp)://", text):
+        return True
+    if re.match(r"^\d+\.\d+$", text):
+        return True
+    if re.match(r"^[0-9a-fA-F:]+$", text):
+        return True
+    if re.match(r"^\d+-\d+$", text):
+        return True
+    return False
 
 
 # ---------------------------------------------------------------------------

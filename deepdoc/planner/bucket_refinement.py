@@ -55,12 +55,28 @@ def _best_proposal_merge_target(
     return best_target if best_score >= 2 else None
 
 
-def _remove_slug_from_nav(nav_structure: dict[str, list[str]], slug: str) -> None:
-    for section_name, slugs in list(nav_structure.items()):
-        if slug in slugs:
-            nav_structure[section_name] = [s for s in slugs if s != slug]
-            if not nav_structure[section_name]:
-                del nav_structure[section_name]
+def _remove_slug_from_nav(nav_structure: dict[str, list], slug: str) -> None:
+    from .nav_shaping import _flatten_nav_entries
+
+    for section_name, entries in list(nav_structure.items()):
+        flat = _flatten_nav_entries(entries)
+        if slug not in flat:
+            continue
+        new_entries = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                if entry["parent_slug"] == slug:
+                    continue
+                children = [c for c in entry["children"] if c != slug]
+                if children:
+                    entry["children"] = children
+                    new_entries.append(entry)
+            elif entry != slug:
+                new_entries.append(entry)
+        if new_entries:
+            nav_structure[section_name] = new_entries
+        else:
+            del nav_structure[section_name]
 
 
 def _refine_proposal(

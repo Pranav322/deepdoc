@@ -134,6 +134,18 @@ def _shape_plan_nav(
     return plan
 
 
+def _flatten_nav_entries(entries: list) -> list[str]:
+    """Extract all slugs from mixed nav entries (strings + dict groups)."""
+    slugs: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            slugs.append(entry["parent_slug"])
+            slugs.extend(entry.get("children", []))
+        else:
+            slugs.append(entry)
+    return slugs
+
+
 def _build_nav_items(
     slugs: list[str],
     slug_to_bucket: dict[str, DocBucket],

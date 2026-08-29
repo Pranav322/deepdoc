@@ -1535,20 +1535,27 @@ Re-run `deepdoc generate` to retry.
         lines: list[str] = []
         seen: set[str] = set()
 
-        for section, slugs in self.plan.nav_structure.items():
+        for section, entries in self.plan.nav_structure.items():
             section_lines: list[str] = []
-            for slug in slugs:
-                b = slug_to_bucket.get(slug)
-                if not b:
-                    continue
-                seen.add(slug)
-                page_path = self._bucket_url(b)
-                key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
-                if len(b.owned_files) > 4:
-                    key_files += f" +{len(b.owned_files) - 4} more"
-                section_lines.append(f"- [{b.title}]({page_path}) — {b.description}")
-                if key_files:
-                    section_lines.append(f"  *Covers: {key_files}*")
+            for entry in entries:
+                item_slugs: list[str] = []
+                if isinstance(entry, dict):
+                    item_slugs.append(entry["parent_slug"])
+                    item_slugs.extend(entry.get("children", []))
+                else:
+                    item_slugs.append(entry)
+                for slug in item_slugs:
+                    b = slug_to_bucket.get(slug)
+                    if not b:
+                        continue
+                    seen.add(slug)
+                    page_path = self._bucket_url(b)
+                    key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
+                    if len(b.owned_files) > 4:
+                        key_files += f" +{len(b.owned_files) - 4} more"
+                    section_lines.append(f"- [{b.title}]({page_path}) — {b.description}")
+                    if key_files:
+                        section_lines.append(f"  *Covers: {key_files}*")
             if section_lines:
                 lines.append(f"**{section}**")
                 lines.extend(section_lines)

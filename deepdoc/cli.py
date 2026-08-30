@@ -1185,7 +1185,8 @@ def serve(port):
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
-    site_dir = resolve_output_paths(repo_root, cfg).site_dir
+    paths = resolve_output_paths(repo_root, cfg)
+    site_dir = paths.site_dir
 
     pkg_json = site_dir / "package.json"
     if not pkg_json.exists():
@@ -1193,6 +1194,12 @@ def serve(port):
             f"[red]{site_dir.name}/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
+
+    # Re-apply .deepdoc.yaml before starting Next, so config edits show up on
+    # the next `serve` without regenerating any docs. Must run before
+    # _ensure_node_modules, which decides whether to reinstall from the
+    # package.json this rewrites.
+    _resync_site_from_config(repo_root, paths.output_dir, site_dir, cfg)
 
     _ensure_node_installed()
     _ensure_node_modules(site_dir)
@@ -1274,6 +1281,10 @@ def _deploy():
             + "\nRun `deepdoc generate` again after fixing the generation issues."
         )
 
+    # Apply .deepdoc.yaml before building, so a deploy never ships a UI that is
+    # stale relative to the config. Must precede _ensure_node_modules.
+    _resync_site_from_config(repo_root, output_dir, site_dir, cfg)
+
     _ensure_node_installed()
     _ensure_node_modules(site_dir)
 
@@ -1341,15 +1352,113 @@ def _ensure_node_installed() -> None:
         )
 
 
-def _ensure_node_modules(site_dir) -> None:
-    """Run npm install in site_dir if node_modules is missing."""
+# Written fresh on every build; comparing them would report a change every run.
+_VOLATILE_SITE_CONFIG_KEYS = frozenset({"generated_at", "commit_sha"})
+
+
+def _read_site_config(site_dir) -> dict:
     from pathlib import Path
-    nm = Path(site_dir) / "node_modules"
-    if not nm.exists():
-        console.print("[dim]Installing npm dependencies (first run only)…[/dim]")
-        result = subprocess.run(["npm", "install"], cwd=str(site_dir))
-        if result.returncode != 0:
-            raise click.ClickException("npm install failed. Check your Node.js installation.")
+
+    path = Path(site_dir) / "deepdoc.config.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _resync_site_from_config(repo_root, output_dir, site_dir, cfg) -> None:
+    """Rebuild the site's config and scaffold from .deepdoc.yaml + the saved plan.
+
+    Reads ``.deepdoc/plan.json`` rather than re-planning, so this makes no LLM
+    calls and performs no repository scan. That is what lets a user edit
+    ``.deepdoc.yaml`` and see the change on the next ``deepdoc serve`` without
+    regenerating any Markdown.
+    """
+    from .persistence_v2 import load_plan
+    from .site.builder import build_next_from_plan
+
+    plan = load_plan(repo_root)
+    if plan is None:
+        console.print(
+            "[yellow]No saved plan in .deepdoc/ — serving the site as it was generated. "
+            "Run [bold]deepdoc generate[/bold] to enable config-only updates.[/yellow]"
+        )
+        return
+    if not hasattr(plan, "nav_structure"):
+        # A v1 LegacyDocPlan carries no nav structure, so the site builder
+        # cannot rebuild from it. Serve what is on disk rather than fail.
+        console.print(
+            "[yellow]Saved plan predates the current format — serving the site as generated. "
+            "Run [bold]deepdoc generate[/bold] to enable config-only updates.[/yellow]"
+        )
+        return
+
+    before = _read_site_config(site_dir)
+    try:
+        build_next_from_plan(
+            repo_root,
+            output_dir,
+            cfg,
+            plan,
+            has_openapi=(output_dir / "api.md").exists(),
+        )
+    except Exception as exc:
+        # Never block a preview because the config could not be re-applied.
+        console.print(f"[yellow]Could not re-apply .deepdoc.yaml ({exc}). Serving the existing site.[/yellow]")
+        return
+
+    _report_site_config_changes(before, _read_site_config(site_dir))
+
+
+def _report_site_config_changes(before: dict, after: dict) -> None:
+    """Print the settings that changed since the site was last written."""
+    if not before:
+        return
+    changed = [
+        key
+        for key in sorted(set(before) | set(after))
+        if key not in _VOLATILE_SITE_CONFIG_KEYS and before.get(key) != after.get(key)
+    ]
+    if not changed:
+        return
+    console.print(
+        "[green]Applied .deepdoc.yaml changes[/green] "
+        "[dim](no regeneration, no LLM calls):[/dim] " + ", ".join(changed)
+    )
+
+
+def _ensure_node_modules(site_dir) -> None:
+    """Run npm install when node_modules is missing or package.json changed.
+
+    The builder rewrites every template file (package.json included) on each
+    run, so a dependency bump must trigger a reinstall. ``shutil.copy2``
+    preserves the source mtime, which makes timestamp comparison unreliable —
+    compare a content hash instead.
+    """
+    import hashlib
+    from pathlib import Path
+
+    site_dir = Path(site_dir)
+    pkg = site_dir / "package.json"
+    stamp = site_dir / "node_modules" / ".deepdoc-pkg-sha"
+    want = hashlib.sha256(pkg.read_bytes()).hexdigest() if pkg.exists() else ""
+
+    try:
+        if stamp.exists() and stamp.read_text().strip() == want:
+            return
+    except OSError:
+        pass
+
+    console.print("[dim]Installing npm dependencies…[/dim]")
+    result = subprocess.run(["npm", "install"], cwd=str(site_dir))
+    if result.returncode != 0:
+        raise click.ClickException("npm install failed. Check your Node.js installation.")
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(want)
+    except OSError:
+        # A missing stamp only costs a redundant reinstall next run.
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -1791,7 +1900,59 @@ def _lookup_default(keys: list[str]) -> Any:
     return node
 
 
+# Config subtrees whose keys are user-defined, so an unknown key there is
+# legitimate rather than a typo.
+_OPEN_CONFIG_MAPS: tuple[tuple[str, ...], ...] = (
+    ("endpoint_groups",),
+    ("site", "theme", "tokens", "light"),
+    ("site", "theme", "tokens", "dark"),
+    ("site", "nav", "rename"),
+    ("site", "labels"),
+)
+
+
+def _known_config_key(keys: list[str]) -> bool:
+    """True when a dotted config path exists in DEFAULT_CONFIG.
+
+    Guards `config set`, which writes to disk: without this, a misspelled key is
+    silently created and persisted, and the user is left wondering why the
+    setting does nothing.
+    """
+    if any(part.startswith("_") for part in keys):
+        return True  # internal runtime flags
+    if any(tuple(keys[: len(prefix)]) == prefix for prefix in _OPEN_CONFIG_MAPS):
+        return True
+    node: Any = DEFAULT_CONFIG
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return False
+        node = node[key]
+    return True
+
+
+def _flat_config_keys(node: Any = None, prefix: str = "") -> list[str]:
+    """Every dotted leaf path in DEFAULT_CONFIG, for suggestions."""
+    node = DEFAULT_CONFIG if node is None else node
+    paths: list[str] = []
+    for key, value in node.items():
+        path = f"{prefix}{key}"
+        paths.append(path)
+        if isinstance(value, dict) and value:
+            paths.extend(_flat_config_keys(value, f"{path}."))
+    return paths
+
+
 def _set_nested(d: dict, keys: list[str], value: str) -> None:
+    if not _known_config_key(keys):
+        import difflib
+
+        dotted = ".".join(keys)
+        close = difflib.get_close_matches(dotted, _flat_config_keys(), n=3, cutoff=0.5)
+        hint = f"\n\nDid you mean:\n  " + "\n  ".join(close) if close else ""
+        raise click.ClickException(
+            f"Unknown config key: {dotted}{hint}\n\n"
+            "Run `deepdoc config show` to see every available key."
+        )
     for key in keys[:-1]:
         d = d.setdefault(key, {})
     last = keys[-1]

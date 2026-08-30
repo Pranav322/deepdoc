@@ -177,15 +177,75 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # ── Project-specific ───────────────────────────────────────────────
         # Add project-specific excludes here in .deepdoc.yaml under the "exclude:" key.
     ],
+    # ── Generated site appearance ──────────────────────────────────────────
+    # Everything here is applied by `deepdoc serve` / `deepdoc deploy` without
+    # regenerating any documentation — no LLM calls, no repository scan. Every
+    # key is optional; an empty value means "use the built-in default", so an
+    # existing .deepdoc.yaml renders exactly as before.
     "site": {
-        "repo_url": "",  # shown in top-bar of documentation site
-        "favicon": "",
+        "repo_url": "",  # e.g. https://github.com/acme/widgets — adds a repo link
+        "edit_branch": "main",  # branch used by the "edit this page" link
+        "edit_path_prefix": "",  # path inside the repo the docs live under
+        "favicon": "",  # repo-relative image, copied into <site_dir>/public/
         "logo": "",
+        "logo_dark": "",  # optional separate logo for dark mode
         "colors": {
             "primary": "",
-            "light": "",
-            "dark": "",
+            "light": "",  # lighter shade — used as the dark-mode accent
+            "dark": "",  # darker shade — used for link hover
         },
+        "theme": {
+            # One of the built-in palettes, or "" for DeepDoc's own.
+            # neutral | black | vitepress | ocean | catppuccin | dusk | purple | solar | shadcn
+            "preset": "",
+            # Raw Fumadocs design-token overrides — the final word, and the
+            # escape hatch for anything the named keys above don't cover.
+            # Keys are given without the `--color-fd-` prefix, e.g.
+            #   light: {background: "#ffffff", border: "#e5e5e5"}
+            "tokens": {
+                "light": {},
+                "dark": {},
+            },
+            # Google Font family names. Empty means no webfont is loaded and no
+            # external request is made — the site uses system stacks.
+            "fonts": {
+                "sans": "",
+                "mono": "",
+            },
+            # Any Shiki theme name.
+            "code_theme": {
+                "light": "github-light",
+                "dark": "github-dark",
+            },
+        },
+        "chrome": {
+            "sidebar": True,
+            "sidebar_default_open_level": 1,
+            "sidebar_collapsible": True,
+            "toc": True,
+            "toc_style": "clerk",  # clerk | normal
+            "toc_depth": [2, 3],  # heading levels shown in the table of contents
+            "breadcrumb": True,
+            "page_footer": True,  # previous / next page links
+            "edit_link": False,  # requires repo_url
+            "last_update": True,
+            "theme_switch": True,
+            "search": True,
+            "generated_meta": True,  # commit-sha + date strip in the sidebar footer
+            "links": [],  # extra navbar links: [{text, url}]
+        },
+        "nav": {
+            "sections": [],  # explicit order of top-level sections, by title
+            "pin": [],  # page slugs hoisted above all sections
+            "hide": [],  # page slugs removed from the sidebar (still reachable by URL)
+            "rename": {},  # {slug: "New Title"} — also matches section titles
+            "extra": [],  # hand-written pages / external links:
+            #   - {slug: runbook, title: "Runbook", section: "Guides"}
+            #   - {url: "https://...", title: "Releases"}
+        },
+        # Overrides for built-in UI strings (Fumadocs `Translations` keys plus
+        # DeepDoc's callout names), e.g. {toc: "On this page", note: "Heads up"}.
+        "labels": {},
     },
     "compatibility": {
         "deprecated_version_warning": {

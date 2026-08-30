@@ -7,6 +7,140 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Added
+
+- **`site.repo_url` is auto-detected from the git `origin` remote** when left
+  empty, the same way the commit SHA already was. SSH-style remotes are
+  normalised to https, and an explicit config value still wins.
+
+- **UI strings are overridable via `site.labels`.** Covers Fumadocs' own
+  strings (`search`, `toc`, `lastUpdate`, `editOnGithub`, `nextPage`,
+  `previousPage`, `chooseTheme`, …) and DeepDoc's callout headings (`note`,
+  `tip`, `warning`, `danger`, `info`). An unrecognised label warns rather than
+  being silently dropped. No language switcher is added — this is relabelling,
+  not internationalisation.
+
+- **Sidebar navigation is controllable via `site.nav`.** Pin or reorder
+  top-level sections (`sections`), hoist pages above them (`pin`), rename a
+  page or section (`rename`), remove one from the sidebar while leaving it
+  URL-reachable (`hide`), and add entries the planner never produced (`extra`)
+  — either a hand-written Markdown page or an external link.
+  - `extra` closes a real gap: a hand-written `.md` dropped into the output
+    directory already rendered and was reachable by URL, but had no way into
+    the sidebar. Generation now also reports pages in that state.
+  - Everything is derived from the saved plan, so reordering a sidebar costs no
+    LLM call and no repository scan — it applies on the next `deepdoc serve`.
+  - An override naming a page that does not exist warns and is skipped; a stale
+    entry can never break a build.
+
+- **Site chrome is configurable via `site.chrome`.** Sidebar (on/off, default
+  open level, collapsible), table of contents (on/off, `clerk`/`normal` style,
+  heading depth), breadcrumbs, previous/next page footer, edit-this-page,
+  last-updated, theme switch, search toggle, the sidebar commit/date strip, and
+  extra navbar links. A configured `site.logo` replaces the project name in the
+  navbar, with an optional separate dark-mode logo swapped in CSS so it is
+  correct on first paint.
+
+- **Branding: palette presets, fonts, code theme, logo and favicon.**
+  `site.theme.preset` selects one of seven built-in palettes (neutral, black,
+  vitepress, ocean, catppuccin, dusk, purple); `site.theme.tokens` overrides any
+  individual Fumadocs design token in light or dark; `site.theme.code_theme`
+  picks the Shiki theme; and the long-dead `site.logo`, `site.logo_dark`,
+  `site.favicon` and `site.repo_url` keys now do something — assets are copied
+  into the site's `public/` and the repo URL drives the edit-this-page link.
+  - Fonts (`site.theme.fonts`) are opt-in: empty by default, so the site makes
+    no external request unless a family is named. Every stack keeps a real
+    system fallback.
+  - The theme is composed into CSS in Python and injected per request, so it
+    re-applies on `deepdoc serve` with no regeneration. Precedence is
+    preset → brand → explicit token overrides.
+
+- **A configurable site surface in `.deepdoc.yaml`.** New optional `site.theme`,
+  `site.chrome`, `site.nav` and `site.labels` blocks cover palette preset, raw
+  design-token overrides, fonts, code theme, TOC/sidebar/breadcrumb/footer
+  toggles, navbar links, nav ordering and UI labels. Every key is optional and
+  empty means "built-in default", so an existing config renders exactly as
+  before. `site.colors` is unchanged and stays where it is.
+  - Invalid values never fail a build: an unknown preset, a malformed hex, a bad
+    TOC style or depth, a navbar link missing a URL, or an edit link with no
+    `repo_url` each warn and fall back.
+  - Fonts are opt-in — empty by default, so no external font request is made.
+- **`deepdoc config set` now rejects unknown keys** instead of silently creating
+  and persisting them, with a "did you mean" suggestion. User-defined maps
+  (`site.labels`, `site.nav.rename`, `site.theme.tokens.*`, `endpoint_groups`)
+  still accept any key.
+
+- **Search works again.** The generated site rendered Fumadocs' search UI but
+  had no `/api/search` endpoint, so the box opened and could never return a
+  result. The route was lost in the MkDocs migration — the old one used the
+  MDX-era source adapter this template no longer has. Rebuilt on
+  `createSearchAPI` reading the generated Markdown directly, exported as a
+  static index so it works in a fully static site with no server at runtime.
+  Indexed prose is capped per page, which keeps the browser download to
+  ~680 KB for a 48-page repo instead of ~3 MB.
+- **Mermaid diagrams follow the site theme and open full screen.** The
+  renderer hardcoded mermaid's `neutral` theme, which is a *light* theme, so
+  every diagram was unreadable in dark mode. The theme now tracks the live
+  `.dark` class and diagrams re-render when the theme is toggled. Clicking a
+  diagram opens it full screen with wheel zoom, drag to pan, `+`/`-`/`0`
+  shortcuts and Escape to close — previously a large diagram could only be
+  scrolled horizontally, with no way to zoom.
+- **`deepdoc serve` now re-applies `.deepdoc.yaml` before starting the dev
+  server.** Edit your config, run `deepdoc serve`, and the change is live — no
+  regeneration, no LLM calls, no repository scan. The site config and scaffold
+  are rebuilt from the saved `.deepdoc/plan.json`, and changed settings are
+  reported on startup. `deepdoc deploy` does the same, so a deploy can no
+  longer ship a UI that is stale relative to the config.
+  - A missing or pre-v2 saved plan warns and serves the existing site rather
+    than failing.
+  - The resync runs before the npm check, so a dependency change in the
+    refreshed `package.json` triggers a reinstall.
+
+### Fixed
+
+- **Brand colours now actually apply to the generated site.** The template
+  targeted Fumadocs v14 CSS variables (`--fd-*`) while shipping v15, which
+  renamed every colour token to `--color-fd-*` and changed their values to
+  complete colours. 28 references were therefore dead in both directions:
+  `--fd-primary: var(--brand)` set a variable nothing reads, so the configured
+  colour never reached the sidebar, TOC, search or buttons; and 27
+  `hsl(var(--fd-*))` reads were invalid at computed-value time, so table and
+  `<hr>` borders vanished, inline code lost its background, and muted text was
+  not muted. Renamed the tokens and stripped the now-wrong `hsl()` wrapper.
+- **`site.colors.light` and `site.colors.dark` do something.** Both were
+  written into CSS variables that nothing consumed. `light` now drives the
+  dark-mode primary (better contrast on a dark background) and `dark` drives
+  the light-mode link hover.
+- **Empty brand colours no longer emit invalid CSS.** `DEFAULT_CONFIG` ships
+  `site.colors.*` as `""`, so the key exists and `.get(key, default)` returned
+  `""` rather than the default — emitting the invalid declaration
+  `--brand: ;`. Colour resolution is now a single validated owner
+  (`resolve_colors`) that also rejects malformed hex with a warning.
+- **Template fixes now reach already-generated sites.** The builder skipped any
+  template file that already existed, so only `deepdoc.config.json` and
+  `app/globals.css` were ever refreshed — changes to the layouts, `lib/*.ts` or
+  the chatbot never arrived on upgrade. The builder now owns every file in
+  `next_template/`; user-added files, `node_modules/`, `.next/`, `openapi/` and
+  `public/` are untouched.
+- **Non-English pages no longer fail the length gate.** Page word count used
+  `str.split()`, which undercounts Chinese and Japanese by 5-10x and drove
+  every such page below the `< 100 words` validity check — burning a quality
+  retry and a full rewrite each. CJK and kana characters are now counted
+  individually. English counts are unchanged.
+- Aligned two stale in-code config fallbacks with their shipped defaults:
+  `decompose_threshold` (5 → 7) and `consolidation_similarity_threshold`
+  (0.70 → 0.55). Unreachable in production since `load_config` always merges
+  over `DEFAULT_CONFIG`; the defaults themselves are unchanged.
+
+### Changed
+
+- Brand colours are written only to `deepdoc.config.json` and injected into
+  `<head>` at request time; they are no longer baked into `app/globals.css`.
+  This removes a duplicate source of truth and means a colour change applies on
+  `deepdoc serve` without regenerating any Markdown.
+- `_ensure_node_modules` reinstalls when `package.json` content changes, tracked
+  via a `node_modules/.deepdoc-pkg-sha` stamp rather than mtime.
+
 ## [0.5.5] - 2026-08-30
 
 ### Added

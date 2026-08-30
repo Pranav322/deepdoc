@@ -1,13 +1,44 @@
 /* Fumadocs base — must be first */
 @import 'fumadocs-ui/style.css';
 
-/* Brand colors — overwritten by `deepdoc generate` with project values */
+/* Brand colours — fallback defaults only.
+   The live values are injected into <head> by app/layout.tsx from
+   deepdoc.config.json on every request, so editing `site.colors` in
+   .deepdoc.yaml and restarting `deepdoc serve` is enough to see them. */
 :root {
   --brand: #eb3e25;
   --brand-light: #ef624e;
   --brand-dark: #c1331f;
-  --fd-primary: var(--brand);
 }
+
+/* Map the brand onto the Fumadocs v15 design tokens.
+   Fumadocs defines these inside `@layer theme` (light) and `@layer utilities`
+   (dark); unlayered rules beat every layered rule regardless of specificity or
+   source order, so these plain blocks win without !important. */
+:root {
+  --color-fd-primary: var(--brand);
+  --color-fd-ring: var(--brand);
+}
+.dark {
+  /* The lighter variant carries better contrast on a dark background. */
+  --color-fd-primary: var(--brand-light);
+  --color-fd-ring: var(--brand-light);
+}
+
+/* Fonts. --font-sans / --font-mono are emitted into <head> from
+   site.theme.fonts; both always carry a real fallback stack, so this holds
+   even when no webfont is configured (the default). */
+body { font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); }
+code, pre, kbd, samp {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
+/* Navbar logo. Light/dark are swapped in CSS rather than JS so the correct
+   one is right on first paint, with no flash. */
+.dd-logo { height: 1.5rem; width: auto; display: block; }
+.dd-logo-dark { display: none; }
+.dark .dd-logo-light { display: none; }
+.dark .dd-logo-dark { display: block; }
 
 /* ── Callouts ─────────────────────────────────────────────────────────────── */
 .dd-callout {
@@ -37,11 +68,11 @@
 
 /* ── Prose content ────────────────────────────────────────────────────────── */
 .dd-prose {
-  --prose-body: hsl(var(--fd-foreground));
-  --prose-headings: hsl(var(--fd-foreground));
+  --prose-body: var(--color-fd-foreground);
+  --prose-headings: var(--color-fd-foreground);
   --prose-links: var(--brand);
-  --prose-code: hsl(var(--fd-foreground));
-  --prose-borders: hsl(var(--fd-border));
+  --prose-code: var(--color-fd-foreground);
+  --prose-borders: var(--color-fd-border);
   max-width: 100%;
   font-size: 0.9375rem;
   line-height: 1.7;
@@ -60,9 +91,10 @@
 .dd-prose h3 { font-size: 1.125rem; margin: 1.5rem 0 0.75rem; }
 .dd-prose p  { margin: 0.875rem 0; }
 .dd-prose a  { color: var(--prose-links); text-decoration: none; }
-.dd-prose a:hover { text-decoration: underline; }
+.dd-prose a:hover { color: var(--brand-dark); text-decoration: underline; }
+.dark .dd-prose a:hover { color: var(--brand-light); }
 .dd-prose code:not(pre code) {
-  background: hsl(var(--fd-muted));
+  background: var(--color-fd-muted);
   border-radius: 4px;
   padding: 0.15em 0.4em;
   font-size: 0.875em;
@@ -94,7 +126,7 @@
 .dd-prose blockquote {
   border-left: 3px solid var(--prose-borders);
   padding-left: 1rem;
-  color: hsl(var(--fd-muted-foreground));
+  color: var(--color-fd-muted-foreground);
   margin: 1rem 0;
 }
 .dd-prose details {
@@ -121,7 +153,69 @@
 }
 
 /* ── Mermaid ──────────────────────────────────────────────────────────────── */
-.mermaid { overflow-x: auto; margin: 1.25rem 0; text-align: center; }
+.mermaid {
+  overflow-x: auto;
+  margin: 1.25rem 0;
+  text-align: center;
+  cursor: zoom-in;
+  border-radius: 8px;
+  transition: background-color 0.12s;
+}
+.mermaid:hover { background: var(--color-fd-muted); }
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Full-screen diagram viewer */
+.dd-mermaid-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--color-fd-background) 92%, black);
+  backdrop-filter: blur(2px);
+}
+.dd-mermaid-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--color-fd-border);
+  background: var(--color-fd-card, var(--color-fd-background));
+}
+.dd-mermaid-tools button {
+  min-width: 2rem;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--color-fd-foreground);
+  background: var(--color-fd-muted);
+  border: 1px solid var(--color-fd-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.dd-mermaid-tools button:hover { border-color: var(--brand); }
+.dd-mermaid-tools button:last-child { margin-left: auto; }
+.dd-mermaid-scale {
+  min-width: 3.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--color-fd-muted-foreground);
+}
+.dd-mermaid-stage {
+  flex: 1;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.dd-mermaid-stage:active { cursor: grabbing; }
+.dd-mermaid-canvas {
+  transform-origin: center center;
+  will-change: transform;
+}
+.dd-mermaid-canvas svg { max-width: none; height: auto; }
 
 /* ── /ask full-page layout ────────────────────────────────────────────────── */
 .dda-page {
@@ -136,12 +230,12 @@
 .dda-back {
   display: inline-flex; align-items: center; gap: 0.4rem;
   font-size: 0.8125rem; font-weight: 500;
-  color: hsl(var(--fd-muted-foreground));
+  color: var(--color-fd-muted-foreground);
   background: none; border: none; cursor: pointer; padding: 0;
   font-family: inherit;
   transition: color 0.1s;
 }
-.dda-back:hover { color: hsl(var(--fd-foreground)); }
+.dda-back:hover { color: var(--color-fd-foreground); }
 .dda-turns {
   display: flex; flex-direction: column; gap: 2.5rem;
   padding-top: 1rem;
@@ -149,7 +243,7 @@
 .dda-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 0.75rem; padding: 5rem 0;
-  color: hsl(var(--fd-muted-foreground));
+  color: var(--color-fd-muted-foreground);
   font-size: 0.9rem; text-align: center;
 }
 .dda-empty p { margin: 0; }
@@ -157,7 +251,7 @@
 .dda-question-row { display: flex; justify-content: flex-end; }
 .dda-question {
   display: flex; align-items: flex-start; gap: 0.6rem;
-  background: hsl(var(--fd-muted));
+  background: var(--color-fd-muted);
   border-radius: 12px 12px 2px 12px;
   padding: 0.875rem 1.1rem;
   max-width: 85%;
@@ -176,7 +270,7 @@
 }
 .dda-answer {
   font-size: 0.9375rem; line-height: 1.8;
-  color: hsl(var(--fd-foreground));
+  color: var(--color-fd-foreground);
 }
 .dda-answer p { margin: 0.7rem 0; }
 .dda-answer p:first-child { margin-top: 0; }
@@ -186,7 +280,7 @@
 .dda-answer a { color: var(--brand, #eb3e25); text-decoration: none; }
 .dda-answer a:hover { text-decoration: underline; }
 .dda-answer code:not(pre code) {
-  background: hsl(var(--fd-muted));
+  background: var(--color-fd-muted);
   border-radius: 4px; padding: 0.1em 0.4em;
   font-size: 0.85em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
 }
@@ -200,9 +294,9 @@
 .dda-sources-list { display: flex; flex-wrap: wrap; gap: 0.35rem; }
 .dda-source {
   font-size: 0.7rem; font-family: ui-monospace, monospace;
-  background: hsl(var(--fd-muted)); border-radius: 4px;
+  background: var(--color-fd-muted); border-radius: 4px;
   padding: 0.2rem 0.5rem;
-  color: hsl(var(--fd-muted-foreground));
+  color: var(--color-fd-muted-foreground);
 }
 .dda-dots { display: flex; gap: 5px; padding: 0.75rem 0; }
 .dda-dots span {

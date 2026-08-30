@@ -7,7 +7,11 @@ import './globals.css';
 
 export function generateMetadata(): Metadata {
   const cfg = getConfig();
-  return { title: { default: cfg.project_name, template: `%s — ${cfg.project_name}` } };
+  const favicon = cfg.brand?.favicon;
+  return {
+    title: { default: cfg.project_name, template: `%s — ${cfg.project_name}` },
+    ...(favicon ? { icons: { icon: favicon } } : {}),
+  };
 }
 
 export default function RootLayout({ children }: { children: ReactNode }) {
@@ -19,13 +23,34 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <style dangerouslySetInnerHTML={{
-          __html: `:root{--brand:${cfg.colors.primary || '#eb3e25'};--brand-light:${cfg.colors.light || '#ef624e'};--brand-dark:${cfg.colors.dark || '#c1331f'};}`,
-        }} />
+        {/* Theme is composed in Python (see next_builder.theme_css) and read
+            from deepdoc.config.json per request, so editing .deepdoc.yaml and
+            restarting `deepdoc serve` applies it with no regeneration.
+            Precedence is preset -> brand -> explicit token overrides. */}
+        <style dangerouslySetInnerHTML={{ __html: cfg.theme.css }} />
+        {cfg.theme.google_fonts && (
+          <>
+            <link rel="preconnect" href="https://fonts.googleapis.com" />
+            <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="" />
+            <link rel="stylesheet" href={cfg.theme.google_fonts} />
+          </>
+        )}
         <script dangerouslySetInnerHTML={{ __html: `window.__DD_CONFIG__=${clientConfig};` }} />
       </head>
       <body>
-        <RootProvider>
+        <RootProvider
+          {...(Object.keys(cfg.labels?.ui ?? {}).length
+            // `locales` is deliberately omitted: supplying it would render a
+            // language switcher, and this is relabelling, not i18n.
+            ? { i18n: { locale: 'en', translations: cfg.labels.ui } }
+            : {})}
+          search={{
+            // The index is a static asset (see app/api/search/route.ts), so
+            // searching happens in the browser. Without this the client would
+            // call a dynamic endpoint that cannot exist in an exported site.
+            options: { type: 'static' },
+          }}
+        >
           <MermaidRunner />
           {children}
         </RootProvider>

@@ -107,8 +107,8 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
           pointer-events: all;
           width: 100%;
           max-width: 860px;
-          background: hsl(var(--fd-background));
-          border: 1px solid hsl(var(--fd-border));
+          background: var(--color-fd-background);
+          border: 1px solid var(--color-fd-border);
           border-radius: 12px;
           box-shadow: 0 8px 40px rgba(0,0,0,0.14), 0 2px 8px rgba(0,0,0,0.07);
           backdrop-filter: blur(10px);
@@ -124,7 +124,7 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
           left: 1rem;
           right: 1rem;
           pointer-events: none;
-          color: hsl(var(--fd-muted-foreground));
+          color: var(--color-fd-muted-foreground);
           font-size: 0.9375rem;
           line-height: 1.5;
           white-space: nowrap;
@@ -139,7 +139,7 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
           resize: none;
           font-size: 0.9375rem;
           line-height: 1.5;
-          color: hsl(var(--fd-foreground));
+          color: var(--color-fd-foreground);
           font-family: inherit;
           min-height: 2.8rem;
           display: block;
@@ -148,7 +148,7 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          border-top: 0.5px solid hsl(var(--fd-border));
+          border-top: 0.5px solid var(--color-fd-border);
           padding: 0.35rem 0.6rem 0.35rem 0.5rem;
           height: 2.75rem;
         }
@@ -160,7 +160,7 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
           border-radius: 6px;
           border: none;
           background: transparent;
-          color: hsl(var(--fd-muted-foreground));
+          color: var(--color-fd-muted-foreground);
           font-size: 0.8125rem;
           font-weight: 500;
           cursor: pointer;
@@ -168,8 +168,8 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
           transition: background 0.1s, color 0.1s;
         }
         .dd-bar-mode:hover {
-          background: hsl(var(--fd-muted));
-          color: hsl(var(--fd-foreground));
+          background: var(--color-fd-muted);
+          color: var(--color-fd-foreground);
         }
         .dd-bar-send {
           display: flex;
@@ -187,8 +187,8 @@ export function ChatbotWidget({ projectName }: ChatbotWidgetProps) {
         }
         .dd-bar-send:hover:not(:disabled) { transform: scale(1.08); }
         .dd-bar-send:disabled {
-          background: hsl(var(--fd-muted));
-          color: hsl(var(--fd-muted-foreground));
+          background: var(--color-fd-muted);
+          color: var(--color-fd-muted-foreground);
           cursor: default;
         }
         @media (max-width: 640px) {

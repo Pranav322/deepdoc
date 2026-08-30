@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
+import { getConfig } from './config';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
@@ -39,8 +40,10 @@ export interface DocPage {
 // Transform "> [!NOTE]" / "> [!WARNING]" etc. blockquotes into callout divs.
 function rehypeGitHubAlerts() {
   const ALERT_RE = /^\[!(NOTE|TIP|WARNING|DANGER|INFO)\]\n?/;
+  // Overridable via site.labels.{note,tip,warning,danger,info}
   const LABEL: Record<string, string> = {
     NOTE: 'Note', TIP: 'Tip', WARNING: 'Warning', DANGER: 'Danger', INFO: 'Info',
+    ...(getConfig().labels?.callouts ?? {}),
   };
   return (tree: HastRoot) => {
     visit(tree, 'element', (node: Element) => {
@@ -128,7 +131,11 @@ async function getProcessor() {
         .use(rehypeMermaid)
         .use(rehypeBasePath)
         .use(rehypeShiki, {
-          themes: { light: 'github-light', dark: 'github-dark' },
+          // Configurable via site.theme.code_theme in .deepdoc.yaml.
+          themes: {
+            light: getConfig().theme?.code_theme?.light || 'github-light',
+            dark: getConfig().theme?.code_theme?.dark || 'github-dark',
+          },
           fallbackLanguage: 'text',
         })
         .use(rehypeSlug)
@@ -142,7 +149,13 @@ async function getProcessor() {
 
 function extractToc(html: string): TocItem[] {
   const toc: TocItem[] = [];
-  const re = /<h([2-3])\s[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/h[2-3]>/g;
+  // Which heading levels appear in the table of contents, from
+  // site.chrome.toc_depth.
+  const levels = getConfig().chrome?.toc_depth?.length
+    ? getConfig().chrome.toc_depth
+    : [2, 3];
+  const cls = `[${Math.min(...levels)}-${Math.max(...levels)}]`;
+  const re = new RegExp(`<h(${cls})\\s[^>]*id="([^"]+)"[^>]*>([\\s\\S]*?)</h${cls}>`, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const depth = parseInt(m[1], 10);
@@ -161,6 +174,71 @@ export function getAllSlugs(): string[][] {
     .readdirSync(DOCS_DIR)
     .filter(f => f.endsWith('.md'))
     .map(f => (f === 'index.md' ? [] : [f.replace(/\.md$/, '')]));
+}
+
+export interface SearchIndex {
+  title: string;
+  description?: string;
+  content: string;
+  url: string;
+}
+
+// The whole index is downloaded by the browser on first search, and Orama's
+// serialized form grows fast with token positions. Uncapped, a 48-page repo
+// produced a ~3 MB download. Cap the prose per page: what people search for
+// lives in the title and the opening sections, not paragraph 40.
+const MAX_INDEXED_CHARS = 2000;
+
+/** Strip Markdown down to prose for indexing.
+ *
+ * Fenced code is dropped: it is mostly punctuation and identifiers that swamp
+ * the ranking without helping anyone find a page.
+ */
+function toPlainText(markdown: string): string {
+  return markdown
+    .replace(/```[\s\S]*?```/g, ' ')
+    .replace(/`([^`]*)`/g, '$1')
+    .replace(/!\[[^\]]*]\([^)]*\)/g, ' ')
+    .replace(/\[([^\]]*)]\([^)]*\)/g, '$1')
+    .replace(/^\s{0,3}#{1,6}\s+/gm, '')
+    .replace(/^\s{0,3}>\s?/gm, '')
+    .replace(/[*_~|]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Build the search index from the generated Markdown.
+ *
+ * Read straight off disk rather than through a content source, because this
+ * template renders plain .md at runtime and has no fumadocs source adapter.
+ */
+export function getSearchIndexes(): SearchIndex[] {
+  if (!fs.existsSync(DOCS_DIR)) return [];
+  const indexes: SearchIndex[] = [];
+
+  for (const slug of getAllSlugs()) {
+    const filename = slug.length === 0 ? 'index.md' : `${slug.join('/')}.md`;
+    const filepath = path.join(DOCS_DIR, filename);
+    let raw: string;
+    try {
+      raw = fs.readFileSync(filepath, 'utf-8');
+    } catch {
+      continue;
+    }
+    const { data: fm, content } = matter(raw);
+    const h1 = /^\s{0,3}#\s+(.+)$/m.exec(content);
+    indexes.push({
+      title:
+        (fm.title as string | undefined) ||
+        h1?.[1].trim() ||
+        slug[slug.length - 1] ||
+        'Untitled',
+      description: (fm.description as string | undefined) ?? '',
+      content: toPlainText(content).slice(0, MAX_INDEXED_CHARS),
+      url: slug.length === 0 ? '/' : `/${slug.join('/')}`,
+    });
+  }
+  return indexes;
 }
 
 export async function getPage(slug: string[]): Promise<DocPage | null> {

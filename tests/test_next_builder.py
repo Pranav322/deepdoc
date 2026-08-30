@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,11 +11,14 @@ from typing import Any
 import pytest
 
 from deepdoc.site.builder.next_builder import (
+    _DEFAULT_DARK,
+    _DEFAULT_LIGHT,
+    _DEFAULT_PRIMARY,
     _build_nav,
-    _patch_brand_vars,
     _slug_in_nav,
     _slug_to_title,
     build_next_from_plan,
+    resolve_colors,
 )
 
 
@@ -189,35 +193,54 @@ def test_nav_template_recursively_builds_nested_sections():
     assert ".map(buildNode)" in template
 
 
-# ── _patch_brand_vars ─────────────────────────────────────────────────────────
+# ── resolve_colors ────────────────────────────────────────────────────────────
 
 
-_SAMPLE_CSS = """\
-@import "fumadocs-ui/style.css";
-
-/* Brand colors — overwritten by `deepdoc generate` with project values */
-:root {
-  --brand: #eb3e25;
-  --brand-light: #ef624e;
-  --brand-dark: #c1331f;
-}
-
-.dd-prose { color: var(--brand); }
-"""
+def test_resolve_colors_uses_configured_values():
+    cfg = {"site": {"colors": {"primary": "#123456", "light": "#abcdef", "dark": "#000000"}}}
+    assert resolve_colors(cfg) == {
+        "primary": "#123456",
+        "light": "#abcdef",
+        "dark": "#000000",
+    }
 
 
-def test_patch_brand_vars_replaces_colors():
-    patched = _patch_brand_vars(_SAMPLE_CSS, "#123456", "#abcdef", "#000000")
-    assert "--brand: #123456;" in patched
-    assert "--brand-light: #abcdef;" in patched
-    assert "--brand-dark: #000000;" in patched
-    # prose style should be preserved
-    assert ".dd-prose" in patched
+def test_resolve_colors_empty_strings_fall_back_to_defaults():
+    """Regression: DEFAULT_CONFIG ships site.colors.* as "".
+
+    The key exists, so a plain ``.get(key, default)`` returns "" instead of the
+    default and the builder emitted the invalid declaration ``--brand: ;``.
+    """
+    cfg = {"site": {"colors": {"primary": "", "light": "", "dark": ""}}}
+    assert resolve_colors(cfg) == {
+        "primary": _DEFAULT_PRIMARY,
+        "light": _DEFAULT_LIGHT,
+        "dark": _DEFAULT_DARK,
+    }
 
 
-def test_patch_brand_vars_unchanged_when_no_block():
-    css = ".foo { color: red; }"
-    assert _patch_brand_vars(css, "#000", "#111", "#222") == css
+def test_resolve_colors_defaults_from_real_default_config():
+    """The shipped defaults must resolve to real hex, never "" ."""
+    from deepdoc.config import DEFAULT_CONFIG
+
+    for value in resolve_colors(deepcopy(DEFAULT_CONFIG)).values():
+        assert value.startswith("#") and len(value) in (4, 7)
+
+
+def test_resolve_colors_missing_blocks():
+    assert resolve_colors({})["primary"] == _DEFAULT_PRIMARY
+    assert resolve_colors({"site": {}})["primary"] == _DEFAULT_PRIMARY
+    assert resolve_colors({"site": {"colors": None}})["primary"] == _DEFAULT_PRIMARY
+
+
+@pytest.mark.parametrize("bad", ["red", "#ff00", "ff0000", "#gggggg", "rgb(1,2,3)"])
+def test_resolve_colors_rejects_malformed_hex(bad):
+    resolved = resolve_colors({"site": {"colors": {"primary": bad}}})
+    assert resolved["primary"] == _DEFAULT_PRIMARY
+
+
+def test_resolve_colors_accepts_shorthand_hex():
+    assert resolve_colors({"site": {"colors": {"primary": "#f00"}}})["primary"] == "#f00"
 
 
 # ── build_next_from_plan (integration) ───────────────────────────────────────
@@ -279,11 +302,34 @@ def test_build_next_from_plan_copies_package_json(tmp_path: Path):
     assert "fumadocs-ui" in data.get("dependencies", {})
 
 
-def test_build_next_from_plan_writes_globals_css(tmp_path: Path):
+def test_build_next_from_plan_writes_colors_to_config(tmp_path: Path):
+    """Colours live only in deepdoc.config.json now.
+
+    They are injected into <head> from there at request time, so a colour change
+    applies on `deepdoc serve` without regenerating any Markdown.
+    """
     plan = _make_plan()
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg("#aabbcc"), plan)
-    css = (tmp_path / "site" / "app" / "globals.css").read_text()
-    assert "--brand: #aabbcc;" in css
+    cfg = json.loads((tmp_path / "site" / "deepdoc.config.json").read_text())
+    assert cfg["colors"]["primary"] == "#aabbcc"
+
+
+def test_generated_css_has_no_dead_fumadocs_v14_vars(tmp_path: Path):
+    """Guard against the v14 pattern returning.
+
+    Fumadocs v15 renamed colour tokens to --color-fd-* and their values are
+    complete colours, so both `--fd-<colour>` and any `hsl(var(...))` wrapper
+    are dead. Size vars (--fd-sidebar-width etc.) are still valid.
+    """
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+    site = tmp_path / "site"
+    for rel in ("app/globals.css", "app/(main)/layout.tsx", "components/chatbot.tsx"):
+        text = (site / rel).read_text()
+        assert "hsl(var(" not in text, f"{rel} still wraps a token in hsl()"
+        for dead in ("--fd-primary", "--fd-foreground", "--fd-background",
+                     "--fd-border", "--fd-muted", "--fd-sidebar-background"):
+            assert dead not in text, f"{rel} still references {dead}"
 
 
 def test_build_next_from_plan_preserves_mkdocs_yml(tmp_path: Path):
@@ -295,16 +341,40 @@ def test_build_next_from_plan_preserves_mkdocs_yml(tmp_path: Path):
     assert (site_dir / "mkdocs.yml").exists()
 
 
-def test_build_next_from_plan_does_not_overwrite_custom_files(tmp_path: Path):
+def test_build_next_from_plan_refreshes_template_files(tmp_path: Path):
+    """The builder owns every file in next_template/.
+
+    Previously template files were skipped when they already existed, so a fix
+    to a layout, lib/*.ts or the chatbot never reached an already-generated
+    site — only deepdoc.config.json and globals.css were refreshed.
+    """
     plan = _make_plan()
-    # First run — copies template
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
-    # User edits a non-overwrite file
-    custom_layout = tmp_path / "site" / "app" / "layout.tsx"
-    custom_layout.write_text("// custom layout\n")
-    # Second run — should NOT overwrite the custom layout
+
+    layout = tmp_path / "site" / "app" / "layout.tsx"
+    layout.write_text("// stale\n")
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
-    assert custom_layout.read_text() == "// custom layout\n"
+
+    assert layout.read_text() != "// stale\n"
+    assert "RootProvider" in layout.read_text()
+
+
+def test_build_next_from_plan_preserves_user_added_files(tmp_path: Path):
+    """Files the template does not contain are the user's and must survive."""
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+
+    site = tmp_path / "site"
+    mine = site / "app" / "my-page" / "page.tsx"
+    mine.parent.mkdir(parents=True, exist_ok=True)
+    mine.write_text("// mine\n")
+    (site / "public").mkdir(exist_ok=True)
+    (site / "public" / "logo.svg").write_text("<svg/>")
+
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+
+    assert mine.read_text() == "// mine\n"
+    assert (site / "public" / "logo.svg").read_text() == "<svg/>"
 
 
 def test_build_next_from_plan_always_overwrites_config(tmp_path: Path):
@@ -331,3 +401,213 @@ def test_build_next_from_plan_chatbot_config(tmp_path: Path):
     data = json.loads((tmp_path / "site" / "deepdoc.config.json").read_text())
     assert data["chatbot"]["enabled"] is True
     assert data["chatbot"]["backend_url"] == "http://localhost:8100"
+
+
+# ── mermaid rendering (template contract) ─────────────────────────────────────
+
+
+def test_generated_site_ships_mermaid_dark_mode_and_zoom(tmp_path: Path):
+    """Diagrams must follow the site theme and open full screen.
+
+    'neutral' is a light mermaid theme; hardcoding it made diagrams unreadable
+    in dark mode, and there was no way to zoom a large diagram.
+    """
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+    runner = (tmp_path / "site" / "app" / "components" / "mermaid-runner.tsx").read_text()
+
+    # theme follows the live `.dark` class, and re-renders when it flips
+    assert "classList.contains('dark')" in runner
+    assert "MutationObserver" in runner
+    # the graph source is stashed, since mermaid destroys it on first render
+    assert "dataset.src" in runner
+    # click-to-fullscreen with zoom + pan + Escape
+    assert "MermaidLightbox" in runner
+    assert "Escape" in runner
+
+    css = (tmp_path / "site" / "app" / "globals.css").read_text()
+    assert ".dd-mermaid-overlay" in css
+    assert "cursor: zoom-in" in css
+
+
+# ── search (template contract) ────────────────────────────────────────────────
+
+
+def test_generated_site_ships_a_search_endpoint(tmp_path: Path):
+    """Search was silently dead: the route was lost in the MkDocs migration.
+
+    Fumadocs renders its search UI regardless, so the box opened and could
+    never return anything because /api/search did not exist.
+    """
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+    site = tmp_path / "site"
+
+    route = site / "app" / "api" / "search" / "route.ts"
+    assert route.exists(), "no /api/search route in the generated site"
+    body = route.read_text()
+    # static export has no server at runtime, so the index must be prebuilt
+    assert "staticGET" in body
+    assert "force-static" in body
+    assert "createSearchAPI" in body
+
+    # the client must be told to search the static index, not call a server
+    layout = (site / "app" / "layout.tsx").read_text()
+    assert "'static'" in layout
+
+    docs_lib = (site / "lib" / "docs.ts").read_text()
+    assert "getSearchIndexes" in docs_lib
+    # the whole index ships to the browser, so per-page prose is capped
+    assert "MAX_INDEXED_CHARS" in docs_lib
+
+
+# ── chrome (template contract) ────────────────────────────────────────────────
+
+
+def _chrome_cfg(**chrome) -> dict[str, Any]:
+    from copy import deepcopy
+
+    from deepdoc.config import DEFAULT_CONFIG
+
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg.update({"project_name": "Test Docs", "site_dir": "site"})
+    cfg["chatbot"] = {"enabled": False}
+    cfg["site"]["chrome"].update(chrome)
+    return cfg
+
+
+def test_chrome_settings_reach_the_site_config(tmp_path: Path):
+    cfg = _chrome_cfg(toc_style="normal", toc_depth=[2, 3, 4], breadcrumb=False,
+                      page_footer=False, sidebar_collapsible=False)
+    cfg["site"]["repo_url"] = "https://github.com/acme/widgets"
+    build_next_from_plan(tmp_path, tmp_path / "docs", cfg, _make_plan())
+
+    chrome = json.loads((tmp_path / "site" / "deepdoc.config.json").read_text())["chrome"]
+    assert chrome["toc_style"] == "normal"
+    assert chrome["toc_depth"] == [2, 3, 4]
+    assert chrome["breadcrumb"] is False
+    assert chrome["page_footer"] is False
+    assert chrome["sidebar_collapsible"] is False
+
+
+def test_template_threads_chrome_into_fumadocs_props(tmp_path: Path):
+    """Every toggle must actually be passed to a component, not just stored."""
+    build_next_from_plan(tmp_path, tmp_path / "docs", _chrome_cfg(), _make_plan())
+    site = tmp_path / "site"
+
+    layout = (site / "app" / "(main)" / "layout.tsx").read_text()
+    for prop in ("githubUrl", "themeSwitch", "searchToggle", "collapsible",
+                 "defaultOpenLevel", "chrome.links"):
+        assert prop in layout, f"{prop} not wired into DocsLayout"
+
+    page = (site / "app" / "(main)" / "[[...slug]]" / "page.tsx").read_text()
+    for prop in ("tableOfContent", "breadcrumb", "footer", "editOnGithub", "lastUpdate"):
+        assert prop in page, f"{prop} not wired into DocsPage"
+
+    # TOC depth is applied where headings are extracted, not in the component
+    assert "toc_depth" in (site / "lib" / "docs.ts").read_text()
+
+
+def test_edit_link_needs_a_resolvable_repo(tmp_path: Path):
+    """Without owner/name the edit link would be a dead anchor."""
+    page = (tmp_path / "site" / "app" / "(main)" / "[[...slug]]" / "page.tsx")
+    build_next_from_plan(tmp_path, tmp_path / "docs", _chrome_cfg(edit_link=True), _make_plan())
+    assert "repo?.owner && repo?.name" in page.read_text()
+
+
+# ── nav overrides (site.nav) ──────────────────────────────────────────────────
+
+
+def _nav_tree() -> list[dict]:
+    return [
+        {"type": "page", "title": "Overview", "slug": "/"},
+        {"type": "section", "title": "Guides", "items": [
+            {"title": "Auth", "slug": "auth-service"},
+            {"title": "Legacy", "slug": "legacy"},
+        ]},
+        {"type": "section", "title": "API", "items": [{"title": "Routes", "slug": "routes"}]},
+    ]
+
+
+_KNOWN = {"/", "auth-service", "legacy", "routes", "runbook"}
+
+
+def _apply(**nav_cfg):
+    from deepdoc.site.builder.next_builder import apply_nav_overrides
+
+    return apply_nav_overrides(_nav_tree(), nav_cfg, _KNOWN)
+
+
+def test_rename_by_slug_and_by_section_title():
+    nav, warnings = _apply(rename={"auth-service": "Authentication", "API": "API Reference"})
+    titles = [n["title"] for n in nav]
+    assert "API Reference" in titles
+    assert nav[1]["items"][0]["title"] == "Authentication"
+    assert warnings == [], "a successful rename must not warn"
+
+
+def test_hide_removes_a_page():
+    nav, _ = _apply(hide=["legacy"])
+    assert "legacy" not in [i["slug"] for n in nav if n.get("items") for i in n["items"]]
+
+
+def test_hiding_every_page_drops_the_empty_section():
+    nav, _ = _apply(hide=["routes"])
+    assert "API" not in [n["title"] for n in nav]
+
+
+def test_extra_page_joins_an_existing_section():
+    nav, _ = _apply(extra=[{"slug": "runbook", "title": "Runbook", "section": "Guides"}])
+    guides = next(n for n in nav if n["title"] == "Guides")
+    assert "Runbook" in [i["title"] for i in guides["items"]]
+
+
+def test_extra_page_creates_a_missing_section():
+    nav, _ = _apply(extra=[{"slug": "runbook", "title": "Runbook", "section": "Ops"}])
+    assert "Ops" in [n["title"] for n in nav]
+
+
+def test_extra_external_link_keeps_its_url():
+    nav, _ = _apply(extra=[{"url": "https://example.com", "title": "Site"}])
+    assert any(n.get("url") == "https://example.com" for n in nav)
+
+
+def test_sections_pin_the_order():
+    nav, _ = _apply(sections=["API", "Guides"])
+    assert [n["title"] for n in nav][:2] == ["API", "Guides"]
+
+
+def test_pin_hoists_a_page_above_sections():
+    nav, _ = _apply(pin=["/"])
+    assert nav[0]["slug"] == "/"
+
+
+def test_unknown_entries_warn_but_never_raise():
+    """A stale override must not break a build."""
+    nav, warnings = _apply(hide=["ghost"], pin=["nope"], rename={"absent": "X"},
+                           sections=["Missing"])
+    assert nav, "the tree must survive"
+    joined = " ".join(warnings)
+    for term in ("ghost", "nope", "absent", "Missing"):
+        assert term in joined
+
+
+def test_no_overrides_leaves_the_tree_untouched():
+    nav, warnings = _apply()
+    assert nav == _nav_tree()
+    assert warnings == []
+
+
+def test_template_applies_labels(tmp_path: Path):
+    """Both label families must reach the components that render them."""
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), _make_plan())
+    site = tmp_path / "site"
+
+    # Fumadocs UI strings go through the i18n provider, without `locales` —
+    # supplying that would render a language switcher.
+    layout = (site / "app" / "layout.tsx").read_text()
+    assert "translations: cfg.labels.ui" in layout
+    assert "locales:" not in layout, "passing `locales` would add a language switcher"
+
+    # Callout headings override the built-in map.
+    assert "labels?.callouts" in (site / "lib" / "docs.ts").read_text()

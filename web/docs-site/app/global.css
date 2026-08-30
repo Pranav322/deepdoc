@@ -36,16 +36,35 @@
 
 /* Reading column: ~72 characters, sitting next to the sidebar rather than
    floating in the middle of the remaining space. Fumadocs centres the article,
-   which on a wide screen leaves a large dead gap after the sidebar. */
-#nd-page article,
-article.prose {
-  max-width: 46rem;
-  margin-inline-start: 0;
-  margin-inline-end: auto;
+   which on a wide screen leaves a large dead gap after the sidebar.
+
+   Desktop only: below 48rem there is no sidebar, and applying these pushed
+   content past the viewport and clipped it. */
+@media (min-width: 48rem) {
+  #nd-page article,
+  article.prose {
+    max-width: 46rem;
+    margin-inline-start: 0;
+    margin-inline-end: auto;
+  }
+  #nd-page {
+    padding-inline-start: 1.5rem;
+  }
 }
-/* Pull the whole content area closer to the sidebar. */
-#nd-page {
-  padding-inline-start: 2.5rem;
+
+/* Narrow the sidebar and TOC toward Mintlify's proportions.
+   Override Fumadocs' own utility classes inside their own media queries —
+   same element, same specificity, later in source. Setting these at :root
+   would lose to the utilities on desktop AND override the unguarded 0px
+   mobile base that collapses the sidebar off-canvas. */
+@media (min-width: 48rem) {
+  .md\:\[--fd-sidebar-width\:286px\] { --fd-sidebar-width: 252px; }
+}
+@media (min-width: 64rem) {
+  .lg\:\[--fd-sidebar-width\:286px\] { --fd-sidebar-width: 252px; }
+}
+@media (min-width: 80rem) {
+  .xl\:\[--fd-toc-width\:286px\] { --fd-toc-width: 240px; }
 }
 
 /* ── Typography ─────────────────────────────────────────────────────────── */

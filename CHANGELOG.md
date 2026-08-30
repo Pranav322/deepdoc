@@ -9,6 +9,13 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **Mermaid diagrams follow the site theme and open full screen.** The
+  renderer hardcoded mermaid's `neutral` theme, which is a *light* theme, so
+  every diagram was unreadable in dark mode. The theme now tracks the live
+  `.dark` class and diagrams re-render when the theme is toggled. Clicking a
+  diagram opens it full screen with wheel zoom, drag to pan, `+`/`-`/`0`
+  shortcuts and Escape to close — previously a large diagram could only be
+  scrolled horizontally, with no way to zoom.
 - **`deepdoc serve` now re-applies `.deepdoc.yaml` before starting the dev
   server.** Edit your config, run `deepdoc serve`, and the change is live — no
   regeneration, no LLM calls, no repository scan. The site config and scaffold

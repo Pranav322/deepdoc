@@ -401,3 +401,30 @@ def test_build_next_from_plan_chatbot_config(tmp_path: Path):
     data = json.loads((tmp_path / "site" / "deepdoc.config.json").read_text())
     assert data["chatbot"]["enabled"] is True
     assert data["chatbot"]["backend_url"] == "http://localhost:8100"
+
+
+# ── mermaid rendering (template contract) ─────────────────────────────────────
+
+
+def test_generated_site_ships_mermaid_dark_mode_and_zoom(tmp_path: Path):
+    """Diagrams must follow the site theme and open full screen.
+
+    'neutral' is a light mermaid theme; hardcoding it made diagrams unreadable
+    in dark mode, and there was no way to zoom a large diagram.
+    """
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+    runner = (tmp_path / "site" / "app" / "components" / "mermaid-runner.tsx").read_text()
+
+    # theme follows the live `.dark` class, and re-renders when it flips
+    assert "classList.contains('dark')" in runner
+    assert "MutationObserver" in runner
+    # the graph source is stashed, since mermaid destroys it on first render
+    assert "dataset.src" in runner
+    # click-to-fullscreen with zoom + pan + Escape
+    assert "MermaidLightbox" in runner
+    assert "Escape" in runner
+
+    css = (tmp_path / "site" / "app" / "globals.css").read_text()
+    assert ".dd-mermaid-overlay" in css
+    assert "cursor: zoom-in" in css

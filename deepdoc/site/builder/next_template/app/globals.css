@@ -138,7 +138,69 @@
 }
 
 /* ── Mermaid ──────────────────────────────────────────────────────────────── */
-.mermaid { overflow-x: auto; margin: 1.25rem 0; text-align: center; }
+.mermaid {
+  overflow-x: auto;
+  margin: 1.25rem 0;
+  text-align: center;
+  cursor: zoom-in;
+  border-radius: 8px;
+  transition: background-color 0.12s;
+}
+.mermaid:hover { background: var(--color-fd-muted); }
+.mermaid svg { max-width: 100%; height: auto; }
+
+/* Full-screen diagram viewer */
+.dd-mermaid-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  flex-direction: column;
+  background: color-mix(in srgb, var(--color-fd-background) 92%, black);
+  backdrop-filter: blur(2px);
+}
+.dd-mermaid-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.6rem 0.9rem;
+  border-bottom: 1px solid var(--color-fd-border);
+  background: var(--color-fd-card, var(--color-fd-background));
+}
+.dd-mermaid-tools button {
+  min-width: 2rem;
+  padding: 0.25rem 0.6rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--color-fd-foreground);
+  background: var(--color-fd-muted);
+  border: 1px solid var(--color-fd-border);
+  border-radius: 6px;
+  cursor: pointer;
+}
+.dd-mermaid-tools button:hover { border-color: var(--brand); }
+.dd-mermaid-tools button:last-child { margin-left: auto; }
+.dd-mermaid-scale {
+  min-width: 3.5rem;
+  text-align: center;
+  font-size: 0.75rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  color: var(--color-fd-muted-foreground);
+}
+.dd-mermaid-stage {
+  flex: 1;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+  cursor: grab;
+  touch-action: none;
+}
+.dd-mermaid-stage:active { cursor: grabbing; }
+.dd-mermaid-canvas {
+  transform-origin: center center;
+  will-change: transform;
+}
+.dd-mermaid-canvas svg { max-width: none; height: auto; }
 
 /* ── /ask full-page layout ────────────────────────────────────────────────── */
 .dda-page {

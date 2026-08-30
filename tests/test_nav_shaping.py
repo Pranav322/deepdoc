@@ -10,6 +10,7 @@ from deepdoc.planner.nav_shaping import (
     _short_display_title,
     _slug_to_title,
 )
+from deepdoc.planner.bucket_refinement import _remove_slug_from_nav
 
 
 def _bucket(slug, title, parent_slug=None, section="Core", hints=None):
@@ -114,3 +115,17 @@ class TestSlugToTitle:
 
     def test_multi_word(self):
         assert _slug_to_title("database-schema") == "Database Schema"
+
+
+def test_removing_final_group_child_keeps_parent_page():
+    nav = {
+        "Security": [{
+            "parent_slug": "security",
+            "display_title": "Security",
+            "children": ["security-oauth"],
+        }]
+    }
+
+    _remove_slug_from_nav(nav, "security-oauth")
+
+    assert nav == {"Security": ["security"]}

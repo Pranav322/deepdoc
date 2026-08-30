@@ -146,6 +146,49 @@ def test_build_nav_introduction_hint_always_links_root():
     assert [item["slug"] for item in section["items"]] == ["setup"]
 
 
+def test_build_nav_group_keeps_parent_and_child_reachable():
+    pages = [
+        _make_page("security", "Security"),
+        _make_page("security-oauth", "OAuth"),
+    ]
+    plan = _make_plan(
+        nav_structure={
+            "Security": [{
+                "parent_slug": "security",
+                "display_title": "Security",
+                "children": ["security-oauth"],
+            }]
+        },
+        pages=pages,
+    )
+
+    nav = _build_nav(plan, has_openapi=False)
+    top_section = next(entry for entry in nav if entry.get("title") == "Security")
+    group = top_section["items"][0]
+
+    assert group["type"] == "section"
+    assert [item["slug"] for item in group["items"]] == [
+        "security",
+        "security-oauth",
+    ]
+    assert _slug_in_nav(nav, "security")
+    assert _slug_in_nav(nav, "security-oauth")
+
+
+def test_nav_template_recursively_builds_nested_sections():
+    template = (
+        Path(__file__).parents[1]
+        / "deepdoc"
+        / "site"
+        / "builder"
+        / "next_template"
+        / "lib"
+        / "nav.ts"
+    ).read_text()
+    assert "function buildNode" in template
+    assert ".map(buildNode)" in template
+
+
 # ── _patch_brand_vars ─────────────────────────────────────────────────────────
 
 

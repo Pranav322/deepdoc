@@ -71,6 +71,8 @@ def _remove_slug_from_nav(nav_structure: dict[str, list], slug: str) -> None:
                 if children:
                     entry["children"] = children
                     new_entries.append(entry)
+                else:
+                    new_entries.append(entry["parent_slug"])
             elif entry != slug:
                 new_entries.append(entry)
         if new_entries:
@@ -841,6 +843,8 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
                     if children:
                         entry["children"] = children
                         cleaned.append(entry)
+                    else:
+                        cleaned.append(entry["parent_slug"])
             elif entry in remaining_slugs:
                 cleaned.append(entry)
         if cleaned:

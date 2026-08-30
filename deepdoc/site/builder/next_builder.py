@@ -115,21 +115,24 @@ def _build_nav(plan: DocPlan, has_openapi: bool) -> list[dict]:
             if isinstance(entry, dict):
                 parent_title = entry.get("display_title", _slug_to_title(entry["parent_slug"]))
                 parent_slug = entry["parent_slug"]
-                children = []
+                children = [{
+                    "type": "page",
+                    "title": slug_to_title.get(parent_slug, parent_title),
+                    "slug": parent_slug,
+                }]
                 for child_slug in entry.get("children", []):
                     if child_slug == overview_slug:
                         continue
                     children.append({
+                        "type": "page",
                         "title": slug_to_title.get(child_slug, _slug_to_title(child_slug)),
                         "slug": child_slug,
                     })
-                if children:
-                    nav_items.append({
-                        "type": "section",
-                        "title": parent_title,
-                        "slug": parent_slug,
-                        "items": children,
-                    })
+                nav_items.append({
+                    "type": "section",
+                    "title": parent_title,
+                    "items": children,
+                })
             elif isinstance(entry, str):
                 slug = entry
                 if slug == overview_slug:
@@ -170,14 +173,15 @@ def _find_overview_slug(plan: DocPlan) -> str | None:
 
 
 def _slug_in_nav(nav: list[dict], slug: str) -> bool:
-    for entry in nav:
-        if entry.get("type") == "page" and entry.get("slug") == slug:
-            return True
-        if entry.get("type") == "section":
-            for item in entry.get("items", []):
-                if item.get("slug") == slug:
-                    return True
-    return False
+    def walk(entries: list[dict]) -> bool:
+        for entry in entries:
+            if entry.get("slug") == slug and entry.get("type") != "section":
+                return True
+            if entry.get("type") == "section" and walk(entry.get("items", [])):
+                return True
+        return False
+
+    return walk(nav)
 
 
 def _write_deepdoc_config(

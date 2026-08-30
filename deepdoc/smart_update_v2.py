@@ -555,6 +555,8 @@ class SmartUpdater:
                         if children:
                             entry["children"] = children
                             clean_entries.append(entry)
+                        else:
+                            clean_entries.append(entry["parent_slug"])
                     elif entry not in removed_slugs:
                         clean_entries.append(entry)
                 if clean_entries:

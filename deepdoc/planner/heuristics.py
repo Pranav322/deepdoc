@@ -766,6 +766,8 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
                     if children:
                         entry["children"] = children
                         cleaned.append(entry)
+                    else:
+                        cleaned.append(entry["parent_slug"])
             elif entry in remaining_slugs:
                 cleaned.append(entry)
         if cleaned:

@@ -919,6 +919,8 @@ def inject_source_citations(content: str, known_paths: set[str], git_remote: str
     commit are known and the commit is not ``"unknown"``.  Otherwise inline
     plain ``path:line`` text is rendered.
     """
+    from urllib.parse import quote
+
     PAT = re.compile(r"`([^`]+):(\d+)`")
     _valid_commit = bool(commit_sha and commit_sha not in ("unknown", ""))
 
@@ -926,22 +928,58 @@ def inject_source_citations(content: str, known_paths: set[str], git_remote: str
         if not _valid_commit:
             return None
         remote = remote.strip().rstrip("/")
-        if "github.com/" not in remote:
+        if remote.startswith("git@github.com:"):
+            repo = remote.removeprefix("git@github.com:")
+        else:
+            match = re.match(r"(?:https?|ssh)://(?:git@)?github\.com/(.+)$", remote)
+            if not match:
+                return None
+            repo = match.group(1)
+        repo = repo.removesuffix(".git").strip("/")
+        if len(repo.split("/")) != 2:
             return None
-        repo = remote.split("github.com/", 1)[-1].rstrip("/")
-        return f"https://github.com/{repo}/blob/{commit_sha}/{path}#L{line}"
+        return f"https://github.com/{repo}/blob/{commit_sha}/{quote(path, safe='/')}#L{line}"
 
     def _replace(m: re.Match) -> str:
         path = m.group(1)
         line = m.group(2)
         if path not in known_paths:
             return m.group(0)
+        before = m.string[:m.start()]
+        after = m.string[m.end():]
+        if before.endswith("[") and after.startswith("]("):
+            return m.group(0)
         url = _github_url(git_remote, path, line)
         if url:
             return f"[`{path}:{line}`]({url})"
-        return f"[`{path}:{line}`]"
+        return m.group(0)
 
-    return PAT.sub(_replace, content)
+    lines = content.splitlines(keepends=True)
+    rendered: list[str] = []
+    in_frontmatter = False
+    in_fence = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if index == 0 and stripped == "---":
+            in_frontmatter = True
+            rendered.append(line)
+            continue
+        if in_frontmatter:
+            rendered.append(line)
+            if stripped == "---":
+                in_frontmatter = False
+            continue
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            rendered.append(line)
+            continue
+        if in_fence:
+            rendered.append(line)
+            continue
+        rendered.append(PAT.sub(_replace, line))
+
+    return "".join(rendered)
 
 
 __all__ = [

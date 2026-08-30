@@ -140,6 +140,12 @@ def _is_false_positive_file_ref(text: str) -> bool:
         return True
     if re.match(r"^\d+-\d+$", text):
         return True
+    if text.lower() == "localhost":
+        return True
+    if re.match(r"^(?:localhost|[a-z0-9-]+(?:\.[a-z0-9-]+)+)$", text, re.IGNORECASE):
+        return True
+    if re.match(r"^\[[0-9a-f:]+\]$", text, re.IGNORECASE):
+        return True
     return False
 
 

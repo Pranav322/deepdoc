@@ -148,9 +148,6 @@ class PageValidator:
         # 12. Warn on low citation coverage
         self._check_citation_coverage(content, bucket, result)
 
-        # 13. Validate claim provenance (only when claims frontmatter exists)
-        self._check_claim_provenance(content, result)
-
         return result
 
     def _check_placeholder_sections(
@@ -1030,57 +1027,4 @@ class PageValidator:
                 f"Low citation coverage: {len(uncited)}/{len(symbol_mentions)} "
                 f"code-entity mentions have no file:line citation nearby — "
                 f"add `filepath:line` after each function/class mention"
-            )
-
-    def _check_claim_provenance(
-        self, content: str, result: ValidationResult
-    ) -> None:
-        """Validate claims provenance from deepdoc_claims frontmatter.
-
-        Hard-fails when the page has ungrounded claims or hallucinated files.
-        Only runs when claims frontmatter is present (generation already
-        injected it via _add_provenance_frontmatter).
-        """
-        import json, re
-
-        m = re.search(r"deepdoc_claims:\s*(\{.*?\n)", content, re.DOTALL)
-        if not m:
-            return
-
-        try:
-            claim_block = content[m.start():]
-            lines = claim_block.splitlines()
-            yaml_lines = []
-            for line in lines[1:]:
-                if line.startswith("deepdoc_") or line.startswith("---"):
-                    break
-                yaml_lines.append(line)
-            claim_json_text = "\n".join(yaml_lines)
-            claims_data = json.loads(claim_json_text)
-        except (json.JSONDecodeError, ValueError):
-            return
-
-        if not claims_data.get("is_valid", True):
-            errors = claims_data.get("deepdoc_claim_errors", [])
-            if errors:
-                for err in errors[:3]:
-                    result.warnings.append(f"[claims] {err}")
-            result.is_valid = False
-
-        hallucinated = claims_data.get("hallucinated_files", [])
-        if hallucinated:
-            result.warnings.append(
-                f"[claims] Page references {len(hallucinated)} hallucinated files"
-            )
-            result.is_valid = False
-
-        ungrounded = claims_data.get("ungrounded_routes", 0) + claims_data.get(
-            "ungrounded_calls", 0
-        )
-        if ungrounded > 0:
-            total = claims_data.get("total", 1)
-            grounded = claims_data.get("grounded", 0)
-            result.warnings.append(
-                f"[claims] {grounded}/{total} claims grounded in evidence "
-                f"({ungrounded} ungrounded)"
             )

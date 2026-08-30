@@ -1886,6 +1886,32 @@ def test_generated_pages_receive_provenance_frontmatter(tmp_path: Path) -> None:
     assert '  - "repo_docs_context"' in updated
 
 
+def test_claim_invalidity_directly_invalidates_generation_validation(tmp_path: Path) -> None:
+    repo_root = tmp_path / "repo"
+    repo_root.mkdir()
+    bucket = make_bucket("Auth", "auth", ["src/auth.py"])
+    engine = BucketGenerationEngine(
+        repo_root,
+        dict(DEFAULT_CONFIG),
+        SimpleNamespace(),
+        _make_scan(repo_root),
+        make_plan([bucket]),
+        repo_root / "docs",
+    )
+    claim_result = SimpleNamespace(
+        is_valid=False,
+        errors=["Page has 5 ungrounded route claims"],
+    )
+    engine.claim_extractor.extract = lambda content: []
+    engine.claim_validator.validate = lambda claims: claim_result
+
+    validation, returned_claims = engine._validate_page("# Auth\n\n" + "word " * 120, bucket, None)
+
+    assert returned_claims is claim_result
+    assert not validation.is_valid
+    assert "[claims] Page has 5 ungrounded route claims" in validation.warnings
+
+
 def test_generation_coverage_report_counts_files_endpoints_and_symbols(
     tmp_path: Path,
 ) -> None:

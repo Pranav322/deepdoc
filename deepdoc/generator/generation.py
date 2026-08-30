@@ -54,7 +54,7 @@ console = Console()
 
 from .evidence import AssembledEvidence, EvidenceAssembler
 from .validation import PageValidator, ValidationResult
-from .claims import ClaimExtractor, ClaimValidator
+from .claims import ClaimExtractor, ClaimValidation, ClaimValidator
 from .post_processors import (
     build_internal_doc_link_maps,
     fix_bare_language_markers,
@@ -726,7 +726,7 @@ class BucketGenerationEngine:
                 else nullcontext()
             )
             with validation_span:
-                validation = self.validator.validate(content, bucket, evidence)
+                validation, claim_validation = self._validate_page(content, bucket, evidence)
 
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
@@ -768,7 +768,7 @@ class BucketGenerationEngine:
                         else nullcontext()
                     )
                     with validation_span:
-                        validation = self.validator.validate(content, bucket, evidence)
+                        validation, claim_validation = self._validate_page(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -815,7 +815,7 @@ class BucketGenerationEngine:
                         else nullcontext()
                     )
                     with validation_span:
-                        validation = self.validator.validate(content, bucket, evidence)
+                        validation, claim_validation = self._validate_page(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -824,7 +824,7 @@ class BucketGenerationEngine:
                 degraded = True
                 content = self._apply_degradation_fixes(content, bucket, validation)
                 # Re-validate after fixes
-                validation = self.validator.validate(content, bucket, evidence)
+                validation, claim_validation = self._validate_page(content, bucket, evidence)
 
             elapsed = time.time() - start
 
@@ -840,22 +840,14 @@ class BucketGenerationEngine:
                 content = inject_source_files_disclosure(
                     content, sorted(evidence.evidence_file_paths)
                 )
+            validation, claim_validation = self._validate_page(content, bucket, evidence)
             content = self._add_provenance_frontmatter(
                 content,
                 bucket,
                 validation,
                 evidence,
+                claim_validation=claim_validation,
             )
-
-            if (
-                validation is not None
-                and '"deepdoc_status": "invalid"' in content
-            ):
-                validation.is_valid = False
-                if "claims invalid" not in validation.warnings:
-                    validation.warnings.append(
-                        "[claims] page has ungrounded evidence claims"
-                    )
 
             doc_path = self.output_dir / bucket_output_path(bucket)
             doc_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1212,6 +1204,28 @@ Re-run `deepdoc generate` to retry.
 {deps}
 """
 
+    def _validate_page(
+        self,
+        content: str,
+        bucket: DocBucket,
+        evidence: AssembledEvidence | None,
+    ) -> tuple[ValidationResult, ClaimValidation | None]:
+        """Validate page content and propagate claim integrity in memory."""
+        validation = self.validator.validate(content, bucket, evidence)
+        if self.claim_validator is None:
+            return validation, None
+
+        claim_validation = self.claim_validator.validate(
+            self.claim_extractor.extract(content)
+        )
+        if not claim_validation.is_valid:
+            validation.is_valid = False
+            for error in claim_validation.errors:
+                warning = f"[claims] {error}"
+                if warning not in validation.warnings:
+                    validation.warnings.append(warning)
+        return validation, claim_validation
+
     def _add_provenance_frontmatter(
         self,
         content: str,
@@ -1220,6 +1234,7 @@ Re-run `deepdoc generate` to retry.
         evidence: AssembledEvidence | None,
         *,
         status: str | None = None,
+        claim_validation: ClaimValidation | None = None,
     ) -> str:
         """Add or update DeepDoc provenance fields in MDX frontmatter."""
         status_value = status or (
@@ -1251,20 +1266,18 @@ Re-run `deepdoc generate` to retry.
                     "deepdoc_prompt_omitted_contexts": evidence.prompt_omitted_contexts,
                 }
             )
-        if self.claim_validator is not None:
-            claims = self.claim_extractor.extract(content)
-            claim_result = self.claim_validator.validate(claims)
+        if claim_validation is not None:
             fields["deepdoc_claims"] = {
-                "total": claim_result.total_claims,
-                "grounded": claim_result.grounded_claims,
-                "ungrounded_routes": claim_result.ungrounded_route_claims,
-                "ungrounded_calls": claim_result.ungrounded_call_claims,
-                "hallucinated_files": claim_result.hallucinated_files[:10],
-                "is_valid": claim_result.is_valid,
+                "total": claim_validation.total_claims,
+                "grounded": claim_validation.grounded_claims,
+                "ungrounded_routes": claim_validation.ungrounded_route_claims,
+                "ungrounded_calls": claim_validation.ungrounded_call_claims,
+                "hallucinated_files": claim_validation.hallucinated_files[:10],
+                "is_valid": claim_validation.is_valid,
             }
-            if claim_result.errors:
-                fields["deepdoc_claim_errors"] = claim_result.errors
-            if not claim_result.is_valid:
+            if claim_validation.errors:
+                fields["deepdoc_claim_errors"] = claim_validation.errors
+            if not claim_validation.is_valid:
                 fields["deepdoc_status"] = "invalid"
         return _merge_frontmatter_fields(content, fields)
 

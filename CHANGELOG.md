@@ -7,15 +7,25 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.5.5] - 2026-08-30
+
 ### Added
 - **Safe generated-output defaults and ownership-aware cleanup.** New projects write generated Markdown to `deepdoc-docs/` and the Next.js scaffold to `deepdoc-site/`. DeepDoc now classifies exact generated paths, refuses tracked or unmanaged output/site collisions before writing, and makes `--clean` remove only DeepDoc-owned artifacts rather than recursively deleting an entire configured directory.
 - **One-run output overrides.** `deepdoc generate --docs PATH --site PATH` selects safe repository-relative output roots for a single generation without mutating `.deepdoc.yaml`; explicit overrides still refuse authored or unmanaged collisions.
 - **Evidence-safe authored documentation intake.** Existing authored docs are classified before they enter evidence, while DeepDoc/DeepWiki exports, generated references, and built docs sites remain inventoried but cannot become factual generation context.
+- **Universal repository evidence foundation.** DeepDoc now carries a repository model, persistent SQLite symbol/index store, content-addressed source storage, explicit unsupported-language inventory, and 50K-file scale validation.
+- **Java and Rust parser support.** Java and Rust files receive structured symbol extraction; Java additionally has AST-backed call extraction.
+- **Fail-closed runtime evidence.** Python, JS/TS/Vue, PHP/Laravel, and Go runtime facts now require parser-backed API/binding proof, bounded dispatch identities, and product/document-role eligibility. Documentation examples, AI exports, generated references, and built sites cannot create runtime facts.
+- **Evidence provenance and reader citations.** Claim validity now directly controls page/ledger quality state; source citations are reader-visible, commit-pinned when a known GitHub commit is available, and safe around frontmatter and code fences.
+- **Hierarchical site navigation.** Parent-child pages render recursively and retain parent reachability after incremental cleanup.
+- **Product regression and benchmark gates.** Adversarial/framework benchmark coverage and a FastAPI-shaped output-safety product gate are included, with an optional shallow real-FastAPI smoke verifier.
 
 ### Fixed
 - **`generate --clean` could delete repository-owned documentation and site content.** Output and site roots are now validated before generation, cleaning, deployment, and site building; configured `site_dir` is honored across the builder, OpenAPI staging, serve, deploy, and update paths.
 - **Modified generated pages could still be removed by legacy frontmatter adoption.** A changed hash in the ownership manifest now preserves the file, even if it still has DeepDoc provenance fields.
 - **Output migration could leave a generate/update run bound to the old unsafe directory.** Generate and update now rebind their output paths and manifests after safety migration.
+- **Runtime examples could become production architecture facts.** Runtime discovery now excludes all document roles before parser/runtime analysis, including when callers use the public runtime API without supplying precomputed roles.
+- **Runtime proof boundaries could accept transitive mutation, stale Go scheduler, and closure-callback false positives.** JS mutation effects propagate through proven invocations, Go scheduler links use receiver provenance identity, and Laravel schedule proof revokes by-reference callback bindings.
 
 ## [0.5.4] - 2026-08-25
 

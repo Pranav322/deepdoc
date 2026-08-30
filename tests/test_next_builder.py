@@ -459,3 +459,57 @@ def test_generated_site_ships_a_search_endpoint(tmp_path: Path):
     assert "getSearchIndexes" in docs_lib
     # the whole index ships to the browser, so per-page prose is capped
     assert "MAX_INDEXED_CHARS" in docs_lib
+
+
+# ── chrome (template contract) ────────────────────────────────────────────────
+
+
+def _chrome_cfg(**chrome) -> dict[str, Any]:
+    from copy import deepcopy
+
+    from deepdoc.config import DEFAULT_CONFIG
+
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg.update({"project_name": "Test Docs", "site_dir": "site"})
+    cfg["chatbot"] = {"enabled": False}
+    cfg["site"]["chrome"].update(chrome)
+    return cfg
+
+
+def test_chrome_settings_reach_the_site_config(tmp_path: Path):
+    cfg = _chrome_cfg(toc_style="normal", toc_depth=[2, 3, 4], breadcrumb=False,
+                      page_footer=False, sidebar_collapsible=False)
+    cfg["site"]["repo_url"] = "https://github.com/acme/widgets"
+    build_next_from_plan(tmp_path, tmp_path / "docs", cfg, _make_plan())
+
+    chrome = json.loads((tmp_path / "site" / "deepdoc.config.json").read_text())["chrome"]
+    assert chrome["toc_style"] == "normal"
+    assert chrome["toc_depth"] == [2, 3, 4]
+    assert chrome["breadcrumb"] is False
+    assert chrome["page_footer"] is False
+    assert chrome["sidebar_collapsible"] is False
+
+
+def test_template_threads_chrome_into_fumadocs_props(tmp_path: Path):
+    """Every toggle must actually be passed to a component, not just stored."""
+    build_next_from_plan(tmp_path, tmp_path / "docs", _chrome_cfg(), _make_plan())
+    site = tmp_path / "site"
+
+    layout = (site / "app" / "(main)" / "layout.tsx").read_text()
+    for prop in ("githubUrl", "themeSwitch", "searchToggle", "collapsible",
+                 "defaultOpenLevel", "chrome.links"):
+        assert prop in layout, f"{prop} not wired into DocsLayout"
+
+    page = (site / "app" / "(main)" / "[[...slug]]" / "page.tsx").read_text()
+    for prop in ("tableOfContent", "breadcrumb", "footer", "editOnGithub", "lastUpdate"):
+        assert prop in page, f"{prop} not wired into DocsPage"
+
+    # TOC depth is applied where headings are extracted, not in the component
+    assert "toc_depth" in (site / "lib" / "docs.ts").read_text()
+
+
+def test_edit_link_needs_a_resolvable_repo(tmp_path: Path):
+    """Without owner/name the edit link would be a dead anchor."""
+    page = (tmp_path / "site" / "app" / "(main)" / "[[...slug]]" / "page.tsx")
+    build_next_from_plan(tmp_path, tmp_path / "docs", _chrome_cfg(edit_link=True), _make_plan())
+    assert "repo?.owner && repo?.name" in page.read_text()

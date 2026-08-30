@@ -147,7 +147,13 @@ async function getProcessor() {
 
 function extractToc(html: string): TocItem[] {
   const toc: TocItem[] = [];
-  const re = /<h([2-3])\s[^>]*id="([^"]+)"[^>]*>([\s\S]*?)<\/h[2-3]>/g;
+  // Which heading levels appear in the table of contents, from
+  // site.chrome.toc_depth.
+  const levels = getConfig().chrome?.toc_depth?.length
+    ? getConfig().chrome.toc_depth
+    : [2, 3];
+  const cls = `[${Math.min(...levels)}-${Math.max(...levels)}]`;
+  const re = new RegExp(`<h(${cls})\\s[^>]*id="([^"]+)"[^>]*>([\\s\\S]*?)</h${cls}>`, 'g');
   let m: RegExpExecArray | null;
   while ((m = re.exec(html)) !== null) {
     const depth = parseInt(m[1], 10);

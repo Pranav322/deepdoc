@@ -7,14 +7,43 @@ import { ChatbotWidget } from '@/components/chatbot';
 export default function DocsRootLayout({ children }: { children: ReactNode }) {
   const tree = buildPageTree();
   const cfg = getConfig();
-  const hasMeta = cfg.generated_at || cfg.commit_sha;
+  const chrome = cfg.chrome;
+  const logo = cfg.brand?.logo;
+  const hasMeta = chrome.generated_meta && (cfg.generated_at || cfg.commit_sha);
+
+  // A logo replaces the plain project name in the navbar. The dark variant is
+  // swapped with CSS rather than JS so it is correct on first paint.
+  const navTitle = logo ? (
+    <>
+      <img src={logo} alt={cfg.project_name} className="dd-logo dd-logo-light" />
+      <img
+        src={cfg.brand?.logo_dark || logo}
+        alt={cfg.project_name}
+        className="dd-logo dd-logo-dark"
+      />
+    </>
+  ) : (
+    cfg.project_name
+  );
 
   return (
     <>
       <DocsLayout
         tree={tree}
-        nav={{ title: cfg.project_name }}
-        sidebar={{ defaultOpenLevel: 1 }}
+        nav={{ title: navTitle }}
+        sidebar={{
+          enabled: chrome.sidebar,
+          defaultOpenLevel: chrome.sidebar_default_open_level,
+          collapsible: chrome.sidebar_collapsible,
+        }}
+        githubUrl={cfg.repo?.url || undefined}
+        links={chrome.links.map(link => ({
+          type: 'main' as const,
+          text: link.text,
+          url: link.url,
+        }))}
+        themeSwitch={{ enabled: chrome.theme_switch }}
+        searchToggle={{ enabled: chrome.search }}
       >
         {children}
       </DocsLayout>

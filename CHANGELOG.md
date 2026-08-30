@@ -9,6 +9,14 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **Site chrome is configurable via `site.chrome`.** Sidebar (on/off, default
+  open level, collapsible), table of contents (on/off, `clerk`/`normal` style,
+  heading depth), breadcrumbs, previous/next page footer, edit-this-page,
+  last-updated, theme switch, search toggle, the sidebar commit/date strip, and
+  extra navbar links. A configured `site.logo` replaces the project name in the
+  navbar, with an optional separate dark-mode logo swapped in CSS so it is
+  correct on first paint.
+
 - **Branding: palette presets, fonts, code theme, logo and favicon.**
   `site.theme.preset` selects one of seven built-in palettes (neutral, black,
   vitepress, ocean, catppuccin, dusk, purple); `site.theme.tokens` overrides any

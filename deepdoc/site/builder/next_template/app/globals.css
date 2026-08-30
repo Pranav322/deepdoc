@@ -33,6 +33,13 @@ code, pre, kbd, samp {
   font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
 }
 
+/* Navbar logo. Light/dark are swapped in CSS rather than JS so the correct
+   one is right on first paint, with no flash. */
+.dd-logo { height: 1.5rem; width: auto; display: block; }
+.dd-logo-dark { display: none; }
+.dark .dd-logo-light { display: none; }
+.dark .dd-logo-dark { display: block; }
+
 /* ── Callouts ─────────────────────────────────────────────────────────────── */
 .dd-callout {
   border-left: 3px solid;

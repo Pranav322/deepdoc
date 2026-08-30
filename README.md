@@ -1300,10 +1300,12 @@ DeepDoc as the source of truth for that stack.
 |---------|------------------|
 | Celery | Tasks, retry/queue hints, beat schedules, producers |
 | Django | Management commands, signal receivers, Channels websocket consumers |
-| Laravel | Queued jobs, listeners, events, scheduler registrations |
-| JS/TS | `node-cron`, queue workers, agenda jobs, Socket.IO / websocket consumers |
-| Go | Goroutine workers, `AddFunc` cron registrations, scheduler `.Every(...).Do(...)` patterns |
+| Laravel | Parser-proven queued jobs/listeners, listener-derived event types, and Kernel schedule registrations |
+| JS/TS | Top-level unconditional `node-cron`, queue-worker, agenda, Socket.IO / websocket API roles |
+| Go | Syntax-proven goroutine workers, `AddFunc` cron registrations, scheduler `.Every(...).Do(...)` patterns |
 | Generic cron | Python `crontab(...)` style schedule declarations |
+
+Runtime facts are **fail-closed evidence**, not text-marker matches: DeepDoc requires a syntax-valid language node plus a framework/API role proof and bounded identity resolution. Comments, strings, invalid syntax, dynamic scope/reflection, and unprovable nested JS execution do not create runtime links. Laravel schedules require a typed Console Kernel method; JS/TS runtime roles are limited to unconditional module-top-level execution.
 
 ---
 

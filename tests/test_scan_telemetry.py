@@ -2,7 +2,9 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
+from deepdoc.llm import LLMClient
 from deepdoc.planner import run_phase2_scans, scan_repo
 from deepdoc.telemetry import RunTelemetry
 
@@ -91,7 +93,7 @@ def test_phase_two_scans_record_each_family(tmp_path: Path) -> None:
     (tmp_path / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
     telemetry = RunTelemetry(tmp_path, "generate")
     scan = scan_repo(tmp_path, {}, telemetry=telemetry)
-    llm = SimpleNamespace(telemetry=telemetry)
+    llm = cast(LLMClient, SimpleNamespace(telemetry=telemetry))
 
     run_phase2_scans(
         scan,
@@ -107,3 +109,32 @@ def test_phase_two_scans_record_each_family(tmp_path: Path) -> None:
 
     assert PHASE_TWO_SCAN_PHASES <= set(scan.scan_timings)
     assert {f"scan.{name}" for name in PHASE_TWO_SCAN_PHASES} <= set(payload["spans"])
+
+
+def test_phase_two_prints_distinct_artifact_runtime_and_config_labels(
+    tmp_path: Path, capsys
+) -> None:
+    """DD-001: runtime discovery must not hide behind the artifact label."""
+    (tmp_path / "app.py").write_text("def run():\n    return 1\n", encoding="utf-8")
+    telemetry = RunTelemetry(tmp_path, "generate")
+    scan = scan_repo(tmp_path, {}, telemetry=telemetry)
+    llm = cast(LLMClient, SimpleNamespace(telemetry=telemetry))
+    capsys.readouterr()
+
+    run_phase2_scans(
+        scan,
+        {
+            "integration_detection": "off",
+            "include_endpoint_pages": False,
+            "giant_file_lines": 2000,
+        },
+        llm,
+        repo_root=tmp_path,
+    )
+    output = capsys.readouterr().out.lower()
+
+    assert "setup/deploy/test artifacts" in output
+    assert "runtime surfaces" in output
+    assert "config/env impacts" in output
+    for name in ("artifacts", "runtime", "config_impacts"):
+        assert scan.scan_timings[name] >= 0

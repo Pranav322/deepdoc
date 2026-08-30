@@ -1,0 +1,39 @@
+---
+title: What DeepDoc does
+description: Point it at a repository. Get a documentation site you can brand, theme and ship.
+---
+
+DeepDoc reads a codebase and writes the documentation site you would have
+written yourself — then gets out of the way so you can make it yours.
+
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart" description="Install, generate and preview in four commands." />
+  <Card title="Make it yours" href="/docs/theming/colours" description="Colours, logo, fonts and layout — applied without regenerating." />
+  <Card title="Commands" href="/docs/commands" description="What each command does, and what it costs." />
+  <Card title="Configuration" href="/docs/reference/configuration" description="Every key in .deepdoc.yaml." />
+</Cards>
+
+## The shape of it
+
+<Steps>
+  <Step>
+    **Point it at your repo.** `deepdoc init` writes a `.deepdoc.yaml`.
+  </Step>
+  <Step>
+    **Generate.** DeepDoc scans the code, plans a structure, and writes Markdown.
+    This is the only step that calls an LLM.
+  </Step>
+  <Step>
+    **Make it yours.** Set your colours, logo and navigation. These apply on the
+    next `deepdoc serve` — no regeneration, no further LLM calls.
+  </Step>
+  <Step>
+    **Ship it.** `deepdoc deploy` produces a static site for any host.
+  </Step>
+</Steps>
+
+<Callout title="Changing how it looks is free">
+  Generation is the only step that costs LLM calls. Themes, fonts, navigation
+  order and labels are re-applied from your saved plan, so you can iterate on
+  the look as much as you like without paying for it again.
+</Callout>

@@ -68,6 +68,16 @@ web/*
 !web/nginx/
 !web/nginx/**
 !web/content/**
+# hand-written docs site (Next + Fumadocs, static-exported into web/public/docs)
+!web/docs-site/
+!web/docs-site/**
+web/docs-site/node_modules/
+web/docs-site/.next/
+web/docs-site/out/
+web/docs-site/.source/
+web/docs-site/*.tsbuildinfo
+# the built output is generated, never committed
+web/public/docs/
 !web/app/
 !web/app/**
 !web/lib/

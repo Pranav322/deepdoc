@@ -1,0 +1,23 @@
+{
+  "name": "deepdoc-docs",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3100",
+    "build": "next build && node scripts/copy-to-web-public.mjs"
+  },
+  "dependencies": {
+    "fumadocs-core": "15.7.9",
+    "fumadocs-mdx": "^11.9.0",
+    "fumadocs-ui": "15.7.11",
+    "next": "^15.3.3",
+    "react": "^19.1.0",
+    "react-dom": "^19.1.0"
+  },
+  "devDependencies": {
+    "@types/mdx": "^2.0.13",
+    "@types/node": "^22.0.0",
+    "@types/react": "^19.1.0",
+    "typescript": "^5.8.3"
+  }
+}

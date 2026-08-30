@@ -1,0 +1,18 @@
+@import 'fumadocs-ui/css/neutral.css';
+@import 'fumadocs-ui/css/preset.css';
+
+/* DeepDoc brand.
+   Fumadocs v15 tokens are `--color-fd-*` and hold complete colours — never
+   wrap one in hsl(). Its own tokens live inside @layer theme / @layer
+   utilities, so these unlayered rules win without !important. */
+:root {
+  --brand: #eb3e25;
+  --brand-light: #ef624e;
+  --brand-dark: #c1331f;
+  --color-fd-primary: var(--brand);
+  --color-fd-ring: var(--brand);
+}
+.dark {
+  --color-fd-primary: var(--brand-light);
+  --color-fd-ring: var(--brand-light);
+}

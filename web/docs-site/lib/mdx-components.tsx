@@ -1,0 +1,16 @@
+import defaultComponents from 'fumadocs-ui/mdx';
+import { Card, Cards } from 'fumadocs-ui/components/card';
+import { Step, Steps } from 'fumadocs-ui/components/steps';
+import { Tab, Tabs } from 'fumadocs-ui/components/tabs';
+import { Callout } from 'fumadocs-ui/components/callout';
+import { Accordion, Accordions } from 'fumadocs-ui/components/accordion';
+import type { MDXComponents } from 'mdx/types';
+
+/** Components available to every .mdx page without importing them. */
+export function getMDXComponents(components?: MDXComponents): MDXComponents {
+  return {
+    ...defaultComponents,
+    Card, Cards, Step, Steps, Tab, Tabs, Callout, Accordion, Accordions,
+    ...components,
+  };
+}

@@ -1,0 +1,56 @@
+---
+title: Quickstart
+description: From nothing to a running documentation site in four commands.
+---
+
+<Callout>Requires Python 3.10+ and Node.js 18+.</Callout>
+
+<Steps>
+  <Step>
+    ### Install
+
+    ```bash
+    pip install deepdoc
+    ```
+  </Step>
+  <Step>
+    ### Point it at your repository
+
+    ```bash
+    cd your-project
+    deepdoc init --provider anthropic
+    ```
+
+    Writes `.deepdoc.yaml`. Set your API key:
+
+    ```bash
+    export ANTHROPIC_API_KEY=sk-...
+    ```
+  </Step>
+  <Step>
+    ### Generate
+
+    ```bash
+    deepdoc generate
+    ```
+
+    Scans the repository, plans the structure, and writes Markdown into
+    `deepdoc-docs/`.
+  </Step>
+  <Step>
+    ### Preview
+
+    ```bash
+    deepdoc serve
+    ```
+
+    Opens `http://localhost:3000`.
+  </Step>
+</Steps>
+
+## Next
+
+<Cards>
+  <Card title="Make it yours" href="/docs/theming/colours" description="Brand colours, logo and fonts." />
+  <Card title="What it costs" href="/docs/costs" description="Which commands call an LLM, and which are free." />
+</Cards>

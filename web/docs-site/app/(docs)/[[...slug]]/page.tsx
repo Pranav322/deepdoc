@@ -26,6 +26,9 @@ export async function generateMetadata({
       title: page.data.title,
       description: page.data.description,
       url: `https://www.deepdoc.tech/docs${path}`,
+      // Overriding openGraph replaces the root object wholesale, so the
+      // inherited image has to be repeated or shared links get no preview.
+      images: ['/og.jpg'],
     },
   };
 }

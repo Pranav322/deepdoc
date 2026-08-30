@@ -379,6 +379,7 @@ Generated Markdown pages include provenance frontmatter such as `deepdoc_generat
 | `--since` | last synced commit | Git ref to diff against |
 | `--replan` | off | Force a full replan even if the change set looks incremental |
 | `--deploy` | off | Deploy after a fully successful update |
+| `--strict-quality` | off | Exit non-zero when any page fails validation — use this in CI |
 
 ### `deepdoc status`
 
@@ -443,6 +444,24 @@ deepdoc config set llm.api_key_env AZURE_API_KEY       # Change API key env var
 deepdoc config set compatibility.deprecated_version_warning.enabled false
 ```
 
+### `deepdoc clean`
+
+Reset the repository to a pre-DeepDoc state. Removes `.deepdoc.yaml`, the
+DeepDoc-owned docs and site output, and saved state under `.deepdoc/`.
+
+```bash
+deepdoc clean          # prompts before deleting
+deepdoc clean --yes    # no prompt, for scripts
+```
+
+Only files DeepDoc created are removed — deletion is tracked against its own
+manifest, so hand-written pages you added to the output directory survive.
+`chatbot_backend/` is preserved as well, since it may contain your changes.
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--yes` | off | Skip the confirmation prompt |
+
 ### `deepdoc benchmark`
 
 Run planner benchmark cases and optionally generate a combined docs+chatbot quality scorecard.
@@ -452,7 +471,7 @@ deepdoc benchmark --catalog benchmarks/catalog.json
 deepdoc benchmark --repo /path/to/repo --gold benchmarks/gold.json
 deepdoc benchmark --catalog benchmarks/catalog.json --chatbot-eval benchmarks/chatbot_eval.json
 deepdoc benchmark --catalog benchmarks/catalog.json --chatbot-eval benchmarks/chatbot_eval.json --scorecard-out .deepdoc/quality_scorecard.json --strict-scorecard
-deepdoc benchmark --generated-root /Users/apple/autodoc/docs --scorecard-out /Users/apple/autodoc/docs/_scorecards/latest.json
+deepdoc benchmark --generated-root ./deepdoc-docs --scorecard-out .deepdoc/scorecards/latest.json
 ```
 
 Use `--strict-scorecard` to fail the command when completeness gates are not met.

@@ -196,7 +196,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         },
         "theme": {
             # One of the built-in palettes, or "" for DeepDoc's own.
-            # neutral | black | vitepress | ocean | catppuccin | dusk | purple | solar | shadcn
+            # neutral | black | vitepress | ocean | catppuccin | dusk | purple
             "preset": "",
             # Raw Fumadocs design-token overrides — the final word, and the
             # escape hatch for anything the named keys above don't cover.

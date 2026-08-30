@@ -428,3 +428,34 @@ def test_generated_site_ships_mermaid_dark_mode_and_zoom(tmp_path: Path):
     css = (tmp_path / "site" / "app" / "globals.css").read_text()
     assert ".dd-mermaid-overlay" in css
     assert "cursor: zoom-in" in css
+
+
+# ── search (template contract) ────────────────────────────────────────────────
+
+
+def test_generated_site_ships_a_search_endpoint(tmp_path: Path):
+    """Search was silently dead: the route was lost in the MkDocs migration.
+
+    Fumadocs renders its search UI regardless, so the box opened and could
+    never return anything because /api/search did not exist.
+    """
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+    site = tmp_path / "site"
+
+    route = site / "app" / "api" / "search" / "route.ts"
+    assert route.exists(), "no /api/search route in the generated site"
+    body = route.read_text()
+    # static export has no server at runtime, so the index must be prebuilt
+    assert "staticGET" in body
+    assert "force-static" in body
+    assert "createSearchAPI" in body
+
+    # the client must be told to search the static index, not call a server
+    layout = (site / "app" / "layout.tsx").read_text()
+    assert "'static'" in layout
+
+    docs_lib = (site / "lib" / "docs.ts").read_text()
+    assert "getSearchIndexes" in docs_lib
+    # the whole index ships to the browser, so per-page prose is capped
+    assert "MAX_INDEXED_CHARS" in docs_lib

@@ -25,7 +25,14 @@ export default function RootLayout({ children }: { children: ReactNode }) {
         <script dangerouslySetInnerHTML={{ __html: `window.__DD_CONFIG__=${clientConfig};` }} />
       </head>
       <body>
-        <RootProvider>
+        <RootProvider
+          search={{
+            // The index is a static asset (see app/api/search/route.ts), so
+            // searching happens in the browser. Without this the client would
+            // call a dynamic endpoint that cannot exist in an exported site.
+            options: { type: 'static' },
+          }}
+        >
           <MermaidRunner />
           {children}
         </RootProvider>

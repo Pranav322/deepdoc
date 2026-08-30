@@ -9,6 +9,14 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **Search works again.** The generated site rendered Fumadocs' search UI but
+  had no `/api/search` endpoint, so the box opened and could never return a
+  result. The route was lost in the MkDocs migration — the old one used the
+  MDX-era source adapter this template no longer has. Rebuilt on
+  `createSearchAPI` reading the generated Markdown directly, exported as a
+  static index so it works in a fully static site with no server at runtime.
+  Indexed prose is capped per page, which keeps the browser download to
+  ~680 KB for a 48-page repo instead of ~3 MB.
 - **Mermaid diagrams follow the site theme and open full screen.** The
   renderer hardcoded mermaid's `neutral` theme, which is a *light* theme, so
   every diagram was unreadable in dark mode. The theme now tracks the live

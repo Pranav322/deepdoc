@@ -304,7 +304,10 @@ class PipelineV2:
             raise
 
     def _run_locked(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
-        assert_safe_for_generation(self.repo_root, self.cfg)
+        self.output_paths = assert_safe_for_generation(self.repo_root, self.cfg)
+        self.output_dir = self.output_paths.output_dir
+        self.site_dir = self.output_paths.site_dir
+        self.manifest = Manifest(self.output_dir)
         stats: dict[str, Any] = {}
         phase_timings: dict[str, float] = {}
         previous_ledger = load_generation_ledger(self.repo_root) if reconcile else {}

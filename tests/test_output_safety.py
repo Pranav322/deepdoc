@@ -139,6 +139,42 @@ def test_modified_owned_file_becomes_unmanaged_and_is_preserved(tmp_path: Path) 
     assert layout.read_text() == "custom layout"
 
 
+def test_modified_manifest_owned_markdown_is_preserved(tmp_path: Path) -> None:
+    paths = resolve_output_paths(tmp_path, _cfg())
+    paths.output_dir.mkdir()
+    page = paths.output_dir / "index.md"
+    page.write_text("---\ndeepdoc_generated_version: 1.0\n---\n# Generated\n")
+    record_output_ownership(
+        tmp_path,
+        paths,
+        output_files={page},
+        site_files=set(),
+    )
+
+    page.write_text("---\ndeepdoc_generated_version: 1.0\n---\n# Edited\n")
+    inspection = inspect_output_root(tmp_path, paths.output_dir, kind="output")
+    assert page in inspection.unmanaged_files
+    assert page not in inspection.owned_files
+
+    removed, preserved = clean_owned_outputs(tmp_path, _cfg())
+    assert page not in removed
+    assert page in preserved
+    assert page.read_text().endswith("# Edited\n")
+
+
+def test_unsafe_configured_default_root_refuses_instead_of_migrating_to_itself(
+    tmp_path: Path,
+) -> None:
+    authored = tmp_path / "deepdoc-docs" / "authored.md"
+    authored.parent.mkdir(parents=True)
+    authored.write_text("# Authored\n")
+
+    with pytest.raises(click.ClickException, match="Refusing to write"):
+        assert_safe_for_generation(tmp_path, _cfg())
+
+    assert authored.exists()
+
+
 def test_legacy_site_preserves_modified_template_file(tmp_path: Path) -> None:
     paths = resolve_output_paths(tmp_path, _cfg())
     layout = paths.site_dir / "app" / "layout.tsx"

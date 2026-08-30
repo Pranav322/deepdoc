@@ -925,3 +925,34 @@ def test_quality_stats_blockers_clean():
 
     assert _quality_stats_blockers({}) == []
     assert _quality_stats_blockers({"pages_failed": 0, "pages_invalid": 0}) == []
+
+
+def test_update_rebinds_to_auto_migrated_output_root(tmp_path, monkeypatch):
+    """A legacy docs/ collision must not remain bound during the update run."""
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "authored.md").write_text("# Authored\n")
+    cfg = {
+        "output_dir": "docs",
+        "site_dir": "deepdoc-site",
+        "llm": {
+            "provider": "anthropic",
+            "model": "test",
+            "context_window_tokens": 128000,
+            "output_reserve_tokens": 16000,
+        },
+    }
+    updater = SmartUpdater(tmp_path, cfg)
+    observed = {}
+
+    def fake_update_locked(*, since, force_replan):
+        observed["output_dir"] = updater.output_dir
+        observed["manifest_root"] = updater.manifest.output_dir
+        return {"status": "success", "changes": 0}
+
+    monkeypatch.setattr(updater, "_update_locked", fake_update_locked)
+    updater.update(since="HEAD")
+
+    assert observed["output_dir"] == tmp_path / "deepdoc-docs"
+    assert observed["manifest_root"] == tmp_path / "deepdoc-docs"
+    assert (docs / "authored.md").exists()

@@ -100,13 +100,21 @@ def inspect_output_root(
 
     for path in all_files:
         rel = _repo_relative(repo_root, path)
+        has_ownership_record = rel in owned_rel
         expected_hash = owned_hashes.get(rel)
-        owned = rel in owned_rel and (
+        owned = has_ownership_record and (
             not expected_hash or expected_hash == _file_hash(path)
         )
-        if path in legacy_owned:
+        # A recorded file whose hash changed was modified after generation.
+        # Do not let legacy provenance markers override that evidence.
+        if not has_ownership_record and path in legacy_owned:
             owned = True
-        if not owned and kind == "output" and _is_legacy_deepdoc_markdown(path):
+        if (
+            not has_ownership_record
+            and not owned
+            and kind == "output"
+            and _is_legacy_deepdoc_markdown(path)
+        ):
             owned = True
         if not owned and kind == "output" and path.name == ".deepdoc_manifest.json":
             owned = True
@@ -155,19 +163,34 @@ def assert_safe_for_generation(repo_root: Path, cfg: dict[str, Any]) -> OutputPa
 
     migrated = False
 
-    if output_state in ("tracked_authored", "unmanaged") and cfg.get("output_dir") in (None, "docs", "deepdoc-docs"):
+    if (
+        output_state in ("tracked_authored", "unmanaged")
+        and cfg.get("output_dir") in (None, "docs")
+    ):
         cfg["output_dir"] = "deepdoc-docs"
         migrated = True
 
-    if (site_state == "unmanaged" and _is_build_cache_only(inspections[1])) or (
-        site_state in ("tracked_authored", "unmanaged") and cfg.get("site_dir") in (None, "site", "deepdoc-site")
+    if (
+        site_state in ("tracked_authored", "unmanaged")
+        and cfg.get("site_dir") in (None, "site")
     ):
         cfg["site_dir"] = "deepdoc-site"
         migrated = True
 
     if migrated:
         _save_migrated_config(repo_root, cfg)
-        return resolve_output_paths(repo_root, cfg)
+        paths = resolve_output_paths(repo_root, cfg)
+        inspections = (
+            inspect_output_root(repo_root, paths.output_dir, kind="output"),
+            inspect_output_root(repo_root, paths.site_dir, kind="site"),
+        )
+        unsafe = [
+            inspection
+            for inspection in inspections
+            if not inspection.safe_for_generation
+        ]
+        if not unsafe:
+            return paths
 
     details: list[str] = []
     for inspection in unsafe:
@@ -461,7 +484,7 @@ def _save_migrated_config(repo_root: Path, cfg: dict[str, Any]) -> None:
 
 
 __all__ = [
-    "OutputInspection",
+    "RootInspection",
     "OutputPaths",
     "assert_safe_for_generation",
     "clean_owned_outputs",

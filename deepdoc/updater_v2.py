@@ -53,7 +53,9 @@ class UpdaterV2:
         Routes to bucket-aware update if the saved plan is v2_buckets,
         otherwise falls back to legacy page-level update.
         """
-        assert_safe_for_generation(self.repo_root, self.cfg)
+        paths = assert_safe_for_generation(self.repo_root, self.cfg)
+        self.output_dir = paths.output_dir
+        self.manifest = Manifest(self.output_dir)
         # Step 1: Load saved plan (determines which code path to take)
         plan = load_plan(self.repo_root)
 

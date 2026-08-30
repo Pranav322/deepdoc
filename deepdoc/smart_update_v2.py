@@ -183,7 +183,9 @@ class SmartUpdater:
     def update(
         self, since: str = "HEAD~1", force_replan: bool = False
     ) -> dict[str, Any]:
-        assert_safe_for_generation(self.repo_root, self.cfg)
+        paths = assert_safe_for_generation(self.repo_root, self.cfg)
+        self.output_dir = paths.output_dir
+        self.manifest = Manifest(self.output_dir)
         try:
             with deepdoc_state_lock(self.repo_root):
                 stats = self._update_locked(

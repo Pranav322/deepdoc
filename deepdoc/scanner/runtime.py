@@ -66,11 +66,11 @@ def discover_runtime_surfaces(
     classifier.
     """
     runtime = RuntimeScan()
-    eligible = _eligible_contents(
+    kinds = source_kind_by_file or {}
+    doc_roles = _runtime_doc_roles(
         file_contents, source_kind_by_file, doc_role_by_file
     )
-    kinds = source_kind_by_file or {}
-    doc_roles = doc_role_by_file or {}
+    eligible = _eligible_contents(file_contents, source_kind_by_file, doc_roles)
     runtime.scan_stats = {
         "input_files": len(file_contents),
         "eligible_files": len(eligible),
@@ -156,6 +156,31 @@ def _eligible_contents(
         if content
         and not is_low_trust_source_kind(kinds.get(path) or classify_source_kind(path))
         and doc_roles.get(path) not in RUNTIME_EXCLUDED_DOC_ROLES
+    }
+
+
+def _runtime_doc_roles(
+    file_contents: dict[str, str],
+    source_kind_by_file: dict[str, str] | None,
+    doc_role_by_file: dict[str, str] | None,
+) -> dict[str, str]:
+    """Use supplied scan roles or derive the same safe roles for public callers."""
+    if doc_role_by_file is not None:
+        return doc_role_by_file
+
+    from ..docs_system import classify_doc_role
+
+    kinds = source_kind_by_file or {}
+    return {
+        path: role
+        for path, content in file_contents.items()
+        if (
+            role := classify_doc_role(
+                path,
+                content=content,
+                source_kind=kinds.get(path) or classify_source_kind(path),
+            )
+        )
     }
 
 

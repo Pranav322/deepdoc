@@ -333,6 +333,12 @@ def _php_schedule_reassignment_positions(node) -> tuple[int, ...]:
                 closure = _php_unwrap_anonymous_function(candidate)
                 if closure is not None and _php_by_ref_schedule_closure_rebinds(closure):
                     positions.append(current.start_byte)
+                elif (
+                    candidate is not None
+                    and candidate.type == "variable_name"
+                    and candidate.text.lower() in closure_bindings
+                ):
+                    positions.append(current.start_byte)
         if current.type == "foreach_statement":
             body = current.child_by_field_name("body")
             bindings = [

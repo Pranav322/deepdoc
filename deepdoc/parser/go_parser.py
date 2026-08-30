@@ -187,9 +187,9 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
         module_role = binding_role(scopes, target_name(operand), position)
         constructor = text(field)
         if module_role == "module:robfig_cron" and constructor == "New":
-            return "receiver:robfig_cron"
+            return f"receiver:robfig_cron:{value.start_byte}"
         if module_role == "module:gocron" and constructor == "NewScheduler":
-            return "receiver:gocron"
+            return f"receiver:gocron:{value.start_byte}"
         return ""
 
     def value_role(
@@ -280,17 +280,17 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
             if (
                 method in {"Start", "StartAsync", "StartBlocking"}
                 and receiver_name
-                and receiver_role in {"receiver:robfig_cron", "receiver:gocron"}
+                and receiver_role.startswith(("receiver:robfig_cron:", "receiver:gocron:"))
             ):
-                started_receivers.add(receiver_name)
+                started_receivers.add(receiver_role)
             if (
                 method == "AddFunc"
-                and receiver_role == "receiver:robfig_cron"
+                and receiver_role.startswith("receiver:robfig_cron:")
                 and len(arguments) >= 2
             ):
                 schedule, target = literal(arguments[0]), target_name(arguments[1])
                 if schedule and target:
-                    registrations.append(("go_cron", target, schedule, receiver_name))
+                    registrations.append(("go_cron", target, schedule, receiver_role))
             elif method == "Do" and arguments:
                 outer_function = node.child_by_field_name("function")
                 outer_object = (
@@ -305,14 +305,14 @@ def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
                 if (
                     every == "Every"
                     and value_role(every_receiver, scopes, node.start_byte)
-                    == "receiver:gocron"
+                    .startswith("receiver:gocron:")
                     and every_args
                     and target
                 ):
                     cadence = text(every_args[0]).strip()
                     if cadence:
                         registrations.append(
-                            ("go_schedule", target, cadence, target_name(every_receiver))
+                            ("go_schedule", target, cadence, value_role(every_receiver, scopes, node.start_byte))
                         )
         for child in node.named_children:
             visit(child)

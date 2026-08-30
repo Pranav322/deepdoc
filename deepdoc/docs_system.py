@@ -81,7 +81,10 @@ def classify_doc_role(
 
     if (
         lowered.startswith("docs/")
-        and fname.endswith((".md", ".mdx", ".txt"))
+        and (
+            source_kind == "docs"
+            or fname.endswith((".md", ".mdx", ".txt"))
+        )
         and not _is_deepdoc_owned(content)
     ):
         return DocRole.AUTHORED

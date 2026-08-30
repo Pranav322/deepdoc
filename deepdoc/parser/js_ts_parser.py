@@ -759,11 +759,27 @@ class _Binder:
             target = self._declaration_for(callee)
             if target is not None and target in functions_by_scope.values():
                 callers.setdefault(target, set()).add(enclosing)
-        pending = list(mutates)
+        propagated_effects: dict[_Declaration, list] = {
+            declaration: list(effects)
+            for declaration, effects in pending_effects.items()
+        }
+        pending = list(propagated_effects)
         while pending:
             target = pending.pop()
             for caller in callers.get(target, ()):
-                if caller not in mutates:
+                target_effects = propagated_effects.get(target, ())
+                caller_effects = propagated_effects.setdefault(caller, [])
+                known = {
+                    (effect.type, effect.start_byte, effect.end_byte)
+                    for effect in caller_effects
+                }
+                additions = [
+                    effect
+                    for effect in target_effects
+                    if (effect.type, effect.start_byte, effect.end_byte) not in known
+                ]
+                if additions:
+                    caller_effects.extend(additions)
                     mutates.add(caller)
                     pending.append(caller)
         for call in nodes:
@@ -775,7 +791,7 @@ class _Binder:
             declaration = self._declaration_for(callee)
             if declaration is None or declaration not in mutates:
                 continue
-            for effect in pending_effects.get(declaration, ()):
+            for effect in propagated_effects.get(declaration, ()):
                 if effect.type == "call_expression":
                     self._record_reflective_mutation_at(effect, call.start_byte)
                 else:
@@ -1131,6 +1147,13 @@ def _is_proven_top_level_execution(node) -> bool:
     candidate = node
     current = node.parent
     while current is not None:
+        if current.type in _EXECUTION_SCOPE_TYPES - {"program"}:
+            invocation = _immediate_iife_invocation(current)
+            if invocation is not None:
+                candidate = invocation
+                current = invocation.parent
+                continue
+            return False
         if current.type in _UNPROVEN_CALL_ANCESTORS:
             return False
         if current.type == "binary_expression" and _is_lazy_binary_rhs(
@@ -1141,6 +1164,25 @@ def _is_proven_top_level_execution(node) -> bool:
             return True
         current = current.parent
     return False
+
+
+def _immediate_iife_invocation(function_node):
+    """The direct call that synchronously executes a function/arrow IIFE."""
+    current = function_node
+    while current.parent is not None and current.parent.type == "parenthesized_expression":
+        current = current.parent
+    parent = current.parent
+    if parent is None or parent.type != "call_expression":
+        return None
+    callee = _unwrap_value(parent.child_by_field_name("function"))
+    return (
+        parent
+        if callee is not None
+        and callee.type == function_node.type
+        and callee.start_byte == function_node.start_byte
+        and callee.end_byte == function_node.end_byte
+        else None
+    )
 
 
 def _execution_scope_is_program(node) -> bool:

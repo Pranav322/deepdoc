@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 
 from deepdoc.parser.base import ParsedFile
 from deepdoc.parser.registry import parse_file
@@ -156,6 +157,38 @@ def test_js_uninvoked_eval_does_not_taint_prior_dispatch() -> None:
     }
     runtime = _scan(sources, {path: "javascript" for path in sources})
     assert _queue_aliases(runtime) == [("producers/uninvoked-eval.js", ("orders",))]
+
+
+def test_js_transitive_invoked_mutation_revokes_queue_proof() -> None:
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('orders', handleOrders);\n"
+        ),
+        "producers/transitive.js": (
+            "const { Queue } = require('bullmq');\n"
+            "const queue = new Queue('orders');\n"
+            "function mutate() { Object.assign(queue, { add: fakeAdd }); }\n"
+            "function poison() { mutate(); }\n"
+            "poison();\n"
+            "queue.add('forged', {});\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "javascript" for path in sources})
+    assert _queue_aliases(runtime) == []
+
+
+def test_js_unconditional_iife_is_runtime_proof() -> None:
+    sources = {
+        "workers/orders.js": (
+            "const { Worker } = require('bullmq');\n"
+            "(() => { new Worker('orders', handleOrders); })();\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "javascript" for path in sources})
+    assert [(task.runtime_kind, task.queue) for task in runtime.tasks] == [
+        ("js_worker", "orders")
+    ]
 
 
 def test_js_deep_member_chain_does_not_abort_runtime_scan() -> None:
@@ -470,6 +503,22 @@ def test_php_assignment_rhs_schedule_call_is_kept() -> None:
     ] == [(["ok:run"], "daily")]
 
 
+def test_php_call_user_func_variable_closure_revokes_schedule() -> None:
+    sources = {
+        "app/Console/Kernel.php": _laravel_kernel(
+            "        $fn = function () use (&$schedule) { $schedule = new FakeScheduler(); };\n"
+            "        call_user_func($fn);\n"
+            "        $schedule->command('forged:call')->daily();\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "php" for path in sources})
+    assert [
+        scheduler
+        for scheduler in runtime.schedulers
+        if scheduler.scheduler_type == "laravel_schedule"
+    ] == []
+
+
 def test_php_static_event_dispatch_is_an_event_relation() -> None:
     sources = {
         "app/Events/OrderPlaced.php": (
@@ -581,6 +630,44 @@ def test_go_scheduler_alias_keeps_receiver_role() -> None:
     }
     runtime = _scan(sources, {path: "go" for path in sources})
     assert any(scheduler.scheduler_type == "go_cron" for scheduler in runtime.schedulers)
+
+
+def test_go_rebinding_does_not_pair_old_registration_with_new_start() -> None:
+    sources = {
+        "cmd/worker/main.go": (
+            "package main\n\n"
+            "import cron \"github.com/robfig/cron/v3\"\n\n"
+            "func work() {}\n"
+            "func main() {\n"
+            "    c := cron.New()\n"
+            "    c.AddFunc(\"@every 1m\", work)\n"
+            "    c = cron.New()\n"
+            "    c.Start()\n"
+            "}\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "go" for path in sources})
+    assert runtime.schedulers == []
+
+
+def test_go_alias_registration_pairs_with_original_start_identity() -> None:
+    sources = {
+        "cmd/worker/main.go": (
+            "package main\n\n"
+            "import cron \"github.com/robfig/cron/v3\"\n\n"
+            "func work() {}\n"
+            "func main() {\n"
+            "    c := cron.New()\n"
+            "    alias := c\n"
+            "    alias.AddFunc(\"@every 1m\", work)\n"
+            "    c.Start()\n"
+            "}\n"
+        ),
+    }
+    runtime = _scan(sources, {path: "go" for path in sources})
+    assert [(scheduler.scheduler_type, scheduler.invoked_targets) for scheduler in runtime.schedulers] == [
+        ("go_cron", ["work"])
+    ]
 
 
 def test_go_addfunc_without_start_is_not_scheduled_execution() -> None:
@@ -777,3 +864,50 @@ def test_every_document_role_is_excluded_from_runtime_eligibility() -> None:
     assert runtime.schedulers == []
     assert runtime.dispatch_evidence == []
     assert runtime.scan_stats["document_role_files_skipped"] == len(roles)
+
+
+def test_public_runtime_discovery_derives_document_roles_when_omitted() -> None:
+    sources = {
+        "docs/celery_tutorial.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def sync_orders():\n"
+            "    return 1\n"
+        ),
+    }
+    runtime = _scan(sources, {"docs/celery_tutorial.py": "python"})
+
+    assert runtime.tasks == []
+    assert runtime.schedulers == []
+    assert runtime.dispatch_evidence == []
+    assert runtime.scan_stats["document_role_files_skipped"] == 1
+
+
+def test_phase_two_runtime_discovery_receives_scan_document_roles(tmp_path) -> None:
+    from deepdoc.planner import scan_repo
+    from deepdoc.planner.engine import run_phase2_scans
+
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "bullmq-example.ts").write_text(
+        "import { Worker } from 'bullmq';\n"
+        "new Worker('orders', processOrders);\n"
+    )
+
+    scan = scan_repo(tmp_path, {})
+    assert scan.doc_role_by_file["docs/bullmq-example.ts"] == "authored_docs"
+
+    run_phase2_scans(
+        scan,
+        {
+            "giant_file_lines": 100_000,
+            "integration_detection": "off",
+            "include_endpoint_pages": False,
+        },
+        SimpleNamespace(telemetry=None),
+        tmp_path,
+    )
+
+    assert scan.runtime_scan.tasks == []
+    assert scan.runtime_scan.schedulers == []
+    assert scan.runtime_scan.dispatch_evidence == []

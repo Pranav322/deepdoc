@@ -299,6 +299,7 @@ python3 -m pytest -k "route or stale or chatbot" -q
 - Runtime/database/interface extraction: fixture-backed scan coverage + planner/generator regressions (new metadata must change page planning and evidence, not just raw scan output).
 - Freshness/update work: run stale and smart-update tests.
 - Chatbot/site work: run chatbot config/scaffold/relationship tests and `tests/test_next_builder.py` if scaffold output changed. When scaffold output changes, also run a real `npm install && next build` inside a generated `site/` to confirm the static site builds.
+- Output safety, authored-doc intake, navigation, or claim/citation work: run `tests/test_fastapi_product_gate.py`; use `python scripts/verify_fastapi_product_gate.py --clone /tmp/fastapi-smoke` for a no-LLM shallow real-FastAPI safety smoke check.
 - For non-trivial changes, prefer a focused test first, then `python3 -m pytest -q` if feasible.
 - If you could not run verification, say so clearly and name the next command to run.
 

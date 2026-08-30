@@ -6,6 +6,7 @@ import copy
 import dataclasses
 
 from ..v2_models import DocBucket, DocPlan, RepoScan, build_bucket_semantic_id
+from .nav_shaping import _flatten_nav_entries
 from .heuristics import _deduplicate_bucket_slugs
 
 # Global-only bucket types (injected once, post-merge, by
@@ -167,9 +168,20 @@ def merge_unit_plans(unit_plans: list[tuple[str, DocPlan]]) -> DocPlan:
             bucket.semantic_id = build_bucket_semantic_id(bucket)
             merged_buckets.append(bucket)
 
-        for section, slugs in plan.nav_structure.items():
-            mapped = [slug_map.get((unit_slug, s), s) for s in slugs]
-            merged_nav.setdefault(section, []).extend(mapped)
+        for section, entries in plan.nav_structure.items():
+            mapped_entries = []
+            for entry in entries:
+                if isinstance(entry, dict):
+                    flat = [entry["parent_slug"]] + entry.get("children", [])
+                    mapped_slugs = [slug_map.get((unit_slug, s), s) for s in flat]
+                    mapped_entries.append({
+                        "parent_slug": mapped_slugs[0],
+                        "display_title": entry.get("display_title", ""),
+                        "children": mapped_slugs[1:],
+                    })
+                else:
+                    mapped_entries.append(slug_map.get((unit_slug, entry), entry))
+            merged_nav.setdefault(section, []).extend(mapped_entries)
 
         merged_skipped.extend(plan.skipped_files)
         merged_orphaned.extend(plan.orphaned_files)

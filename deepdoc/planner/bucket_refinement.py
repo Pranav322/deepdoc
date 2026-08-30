@@ -502,11 +502,7 @@ def _apply_decompose_result(
         new_sub_buckets.append(sub_bucket)
         sub_slugs.append(sub_slug)
 
-    for section_name, slugs in list(new_nav.items()):
-        if bucket.slug in slugs:
-            slugs.remove(bucket.slug)
-            if not slugs:
-                del new_nav[section_name]
+    _remove_slug_from_nav(new_nav, bucket.slug)
     new_nav.setdefault(nav_section, []).extend(sub_slugs)
 
     return new_sub_buckets, sub_slugs
@@ -835,8 +831,18 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
     # Clean up nav_structure
     new_nav = {}
     remaining_slugs = {b.slug for b in new_buckets}
-    for section_name, slugs in plan.nav_structure.items():
-        cleaned = [s for s in slugs if s in remaining_slugs]
+    from .nav_shaping import _flatten_nav_entries
+    for section_name, entries in plan.nav_structure.items():
+        cleaned = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                if entry["parent_slug"] in remaining_slugs:
+                    children = [c for c in entry["children"] if c in remaining_slugs]
+                    if children:
+                        entry["children"] = children
+                        cleaned.append(entry)
+            elif entry in remaining_slugs:
+                cleaned.append(entry)
         if cleaned:
             new_nav[section_name] = cleaned
 

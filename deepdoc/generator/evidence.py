@@ -1904,15 +1904,15 @@ class EvidenceAssembler:
 
         if self.plan.nav_structure:
             lines.append("\n## Planned Documentation Map")
-            for section, slugs in self.plan.nav_structure.items():
+            from ..planner.nav_shaping import _iter_nav_slugs
+            for section, slug in _iter_nav_slugs(self.plan.nav_structure):
                 section_lines: list[str] = []
-                for slug in slugs[:8]:
-                    page = self._slug_to_bucket.get(slug)
-                    if not page:
-                        continue
-                    section_lines.append(
-                        f"- {page.title} (`/{page.slug}`): {page.description}"
-                    )
+                page = self._slug_to_bucket.get(slug)
+                if not page:
+                    continue
+                section_lines.append(
+                    f"- {page.title} (`/{page.slug}`): {page.description}"
+                )
                 if section_lines:
                     lines.append(f"\n### {section}")
                     lines.extend(section_lines)

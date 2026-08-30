@@ -540,15 +540,24 @@ class SmartUpdater:
                     f"  [dim]Removed {len(deleted_paths)} doc(s) for deleted bucket(s): "
                     f"{', '.join(removed_slugs)}[/dim]"
                 )
-            plan.nav_structure = {
-                section: [s for s in slugs if s not in removed_slugs]
-                for section, slugs in plan.nav_structure.items()
-            }
-            plan.nav_structure = {
-                section: slugs
-                for section, slugs in plan.nav_structure.items()
-                if slugs
-            }
+            from .planner.nav_shaping import _flatten_nav_entries
+
+            clean_nav = {}
+            for section, entries in plan.nav_structure.items():
+                clean_entries = []
+                for entry in entries:
+                    if isinstance(entry, dict):
+                        if entry["parent_slug"] in removed_slugs:
+                            continue
+                        children = [c for c in entry["children"] if c not in removed_slugs]
+                        if children:
+                            entry["children"] = children
+                            clean_entries.append(entry)
+                    elif entry not in removed_slugs:
+                        clean_entries.append(entry)
+                if clean_entries:
+                    clean_nav[section] = clean_entries
+            plan.nav_structure = clean_nav
 
         plan.buckets = updated_buckets
         return plan

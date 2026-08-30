@@ -146,6 +146,18 @@ def _flatten_nav_entries(entries: list) -> list[str]:
     return slugs
 
 
+def _iter_nav_slugs(nav_structure: dict):
+    """Yield (section, slug) pairs, flattening dict group entries transparently.
+
+    Use this anywhere you iterate ``nav_structure.items()`` and need plain
+    slug strings. Dict group entries are expanded into their parent slug
+    plus each child slug, each associated with the same section.
+    """
+    for section, entries in nav_structure.items():
+        for slug in _flatten_nav_entries(entries):
+            yield section, slug
+
+
 def _build_nav_items(
     slugs: list[str],
     slug_to_bucket: dict[str, DocBucket],

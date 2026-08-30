@@ -1,0 +1,133 @@
+---
+title: Colours and presets
+description: Set your brand colour, pick a palette, and override any individual design token.
+---
+
+Colour changes apply on the next `deepdoc serve`. No regeneration, no LLM
+calls — the site is rebuilt from your saved plan.
+
+![A generated site using the default palette](/img/site-default.png)
+
+## Your brand colour
+
+Three values, and each one does a specific job:
+
+```yaml title=".deepdoc.yaml"
+site:
+  colors:
+    primary: "#7c3aed"   # sidebar highlight, links, active states
+    light:   "#c4b5fd"   # the accent in dark mode
+    dark:    "#5b21b6"   # link hover in light mode
+```
+
+Then:
+
+```bash
+deepdoc serve
+```
+
+```
+Applied .deepdoc.yaml changes (no regeneration, no LLM calls): colors
+```
+
+That line only prints when something actually changed, so it doubles as
+confirmation your edit was picked up.
+
+<Callout title="Why three colours">
+  `light` is used as the dark-mode accent because a brand colour tuned for a
+  white page is usually too dark to read on a black one. `dark` drives link
+  hover in light mode. Set only `primary` and the other two fall back to the
+  built-in defaults.
+</Callout>
+
+Colours accept `#rgb` or `#rrggbb`. Anything else warns and falls back rather
+than failing your build:
+
+```
+site.colors.primary: 'purple' is not a hex colour (expected #rgb or #rrggbb) — using #eb3e25.
+```
+
+## Palettes
+
+A preset replaces the whole page palette — backgrounds, borders, muted text —
+not just the accent.
+
+```yaml title=".deepdoc.yaml"
+site:
+  theme:
+    preset: ocean
+```
+
+![The same site with preset: ocean](/img/site-ocean.png)
+
+Seven palettes ship:
+
+| Preset | Character |
+|---|---|
+| `neutral` | Greys. The default look. |
+| `black` | Higher contrast, near-black in dark mode. |
+| `vitepress` | Clean white with a blue primary. |
+| `ocean` | Deep navy in dark mode. |
+| `catppuccin` | Soft blue-grey with violet accents. |
+| `dusk` | Muted lavender, rose-pink primary. |
+| `purple` | Lilac page background. The loudest. |
+
+Leave `preset` empty for DeepDoc's own palette. An unknown name warns and falls
+back — it never breaks the build.
+
+<Callout type="warn" title="Presets and your brand colour work together">
+  A preset sets the palette; your `colors.primary` still overrides the accent on
+  top of it. If you want the preset's own primary instead, leave `colors` empty.
+</Callout>
+
+## Overriding individual tokens
+
+When a preset is close but not right, override single design tokens. This is
+the escape hatch — anything the named settings do not cover.
+
+```yaml title=".deepdoc.yaml"
+site:
+  theme:
+    preset: ocean
+    tokens:
+      light:
+        background: "#ffffff"
+        border: "#e5e7eb"
+      dark:
+        background: "#0b0b0d"
+```
+
+Twenty tokens are available, light and dark independently:
+
+<Accordions>
+  <Accordion title="All 20 design tokens">
+    `background` · `foreground` · `muted` · `muted-foreground` · `popover` ·
+    `popover-foreground` · `card` · `card-foreground` · `border` · `primary` ·
+    `primary-foreground` · `secondary` · `secondary-foreground` · `accent` ·
+    `accent-foreground` · `ring` · `error` · `warning` · `success` · `info`
+
+    Write them bare, as above. The `--color-fd-` prefix is accepted and
+    stripped, so `--color-fd-border` and `border` both work. An unknown name
+    warns and is ignored.
+  </Accordion>
+</Accordions>
+
+## Which wins
+
+Three layers, lowest to highest:
+
+<Steps>
+  <Step>**Preset** — sets the whole palette.</Step>
+  <Step>**Your brand colours** — override the accent on top of the preset.</Step>
+  <Step>**Token overrides** — the final word, always win.</Step>
+</Steps>
+
+So a preset plus a `tokens.light.background` gives you that palette with your
+own page background, and nothing else changes.
+
+## Next
+
+<Cards>
+  <Card title="Logo and fonts" href="/theming/logo-and-fonts" description="Your mark in the navbar, and a typeface that isn't the system default." />
+  <Card title="Layout" href="/theming/layout" description="Sidebar, table of contents, breadcrumbs and edit links." />
+</Cards>

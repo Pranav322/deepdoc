@@ -1,0 +1,127 @@
+---
+title: Navigation
+description: Reorder sections, rename pages, hide them, and add pages the planner never wrote.
+---
+
+DeepDoc decides your sidebar structure by analysing your code. It is usually
+close, and occasionally wrong — a section you want first ends up third, or a
+page has a name that made sense to the planner and not to your team.
+
+Every override here is read from the saved plan, so **none of it costs an LLM
+call or a repository scan.** Reordering your sidebar is free and instant.
+
+## Reorder sections
+
+```yaml title=".deepdoc.yaml"
+site:
+  nav:
+    sections:
+      - "Getting Started"
+      - "API Reference"
+      - "Architecture"
+```
+
+Sections you list appear first, in that order. Anything unlisted keeps its
+computed position after them — so you can pin the two that matter and ignore
+the rest.
+
+Match on the section title as it appears in the sidebar.
+
+## Hoist a page above the sections
+
+```yaml
+site:
+  nav:
+    pin:
+      - getting-started
+      - faq
+```
+
+Pinned pages move above every section, in the order listed. Use it for the one
+or two pages every reader needs first.
+
+## Rename
+
+```yaml
+site:
+  nav:
+    rename:
+      auth-service: "Authentication"
+      billing-webhooks-handler: "Billing Webhooks"
+      "API": "API Reference"
+```
+
+Keys match a page slug **or** a section title. Handy when the planner named a
+page after a module rather than after the thing it does.
+
+## Hide
+
+```yaml
+site:
+  nav:
+    hide:
+      - internal-notes
+      - scratch
+```
+
+<Callout type="warn" title="Hidden is not private">
+  `hide` removes a page from the sidebar. **The page is still built and still
+  reachable at its URL.** It is for tidying navigation, not for keeping anything
+  secret. If a page should not be published, keep it out of your docs directory.
+</Callout>
+
+## Add your own pages
+
+The gap this closes: drop a hand-written Markdown file into your docs directory
+and it renders and is reachable — but the sidebar comes from the plan, and the
+plan does not know it exists.
+
+```yaml
+site:
+  nav:
+    extra:
+      - { slug: runbook, title: "Deployment Runbook", section: "Guides" }
+      - { url: "https://github.com/acme/widgets/releases", title: "Releases" }
+```
+
+- **`slug`** — a Markdown file in your docs directory, without the extension.
+- **`url`** — an external link instead.
+- **`section`** — which section to file it under. Names a section that does not
+  exist and it is created. Omit it and the entry sits at the top level.
+
+DeepDoc tells you when pages are in this state:
+
+```
+2 page(s) are not in the sidebar: runbook, faq. Add them under site.nav.extra.
+```
+
+## Stale entries warn, never break
+
+Rename a page in your code and your override no longer matches. Rather than
+failing, DeepDoc reports it and carries on:
+
+```
+site.nav.hide: no page named 'internal-notes'
+site.nav.rename: no page or section named 'auth-service'
+site.nav.sections: no section named 'Getting Started'
+```
+
+Your site still builds. Nothing in this file can break a deploy.
+
+## Order of application
+
+<Steps>
+  <Step>**Rename** — titles are updated first, so later rules match new names.</Step>
+  <Step>**Hide** — pages are removed; a section left empty disappears with them.</Step>
+  <Step>**Extra** — your own pages and links are added.</Step>
+  <Step>**Pin, then section order** — the final arrangement.</Step>
+</Steps>
+
+This is why renaming a section and then ordering by its **new** name works.
+
+## Next
+
+<Cards>
+  <Card title="What it costs" href="/costs" description="Which commands call an LLM, and which are free." />
+  <Card title="Configuration reference" href="/reference/configuration" description="Every key in .deepdoc.yaml." />
+</Cards>

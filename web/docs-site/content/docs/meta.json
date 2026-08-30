@@ -1,4 +1,9 @@
 {
   "title": "Docs",
-  "pages": ["index", "quickstart", "your-first-site"]
+  "pages": [
+    "index",
+    "quickstart",
+    "your-first-site",
+    "theming"
+  ]
 }

@@ -1,0 +1,118 @@
+---
+title: Logo and fonts
+description: Put your mark in the navbar, set a favicon, and choose typefaces for prose and code.
+---
+
+![A site with a custom logo and brand colour](/img/site-branded.png)
+
+## Logo
+
+Point at an image in your repository. It replaces the project name in the
+navbar.
+
+```yaml title=".deepdoc.yaml"
+site:
+  logo: brand/logo.svg
+  logo_dark: brand/logo-dark.svg   # optional
+  favicon: brand/favicon.svg
+```
+
+Paths are relative to your repository root. DeepDoc copies each file into the
+site's `public/` directory at build time, so nothing needs to be hosted
+elsewhere.
+
+<Callout title="A wordmark beats an icon here">
+  The navbar slot is wide and short. An SVG wordmark reads better than a square
+  icon, which ends up rendering small.
+</Callout>
+
+`logo_dark` is optional. Give it one and the two are swapped in CSS rather than
+JavaScript, so the correct mark is right on first paint with no flash. Omit it
+and the same logo is used in both themes.
+
+Point at a file that does not exist and DeepDoc says so and carries on:
+
+```
+site.logo: 'brand/logo.svg' not found — skipping.
+```
+
+## Favicon
+
+Same idea — repo-relative, copied into `public/`, wired into the page metadata
+as the browser-tab icon.
+
+Browsers cache favicons aggressively. If you change yours and the tab looks
+unchanged, hard-reload (<kbd>⌘⇧R</kbd>) before assuming it did not work.
+
+## Fonts
+
+Fonts are **opt-in**. Leave them empty — the default — and your docs site makes
+no external font request at all, using the reader's system stack.
+
+```yaml title=".deepdoc.yaml"
+site:
+  theme:
+    fonts:
+      sans: "Inter"
+      mono: "JetBrains Mono"
+```
+
+Any [Google Fonts](https://fonts.google.com) family name works; it is passed
+straight through. Both stacks always keep a real system fallback, so text stays
+readable if the font fails to load.
+
+<Callout type="warn" title="This adds a network request">
+  Naming a font means every reader fetches it from Google. If your docs are
+  internal, airgapped, or you would rather not add a third-party request, leave
+  these empty.
+</Callout>
+
+Choices that read as clearly *not* the system default:
+
+| Family | Character |
+|---|---|
+| `Inter` | Neutral, workhorse UI sans |
+| `Space Grotesk` | Geometric, distinctive `a` and `g` |
+| `Outfit` | Rounded, friendly |
+| `IBM Plex Sans` | Slightly technical |
+| `Merriweather` | Serif — unmistakably different |
+
+## Code theme
+
+Syntax highlighting is separate from the page palette, so you can pair a light
+page with a dark code block or match them.
+
+```yaml title=".deepdoc.yaml"
+site:
+  theme:
+    code_theme:
+      light: github-light
+      dark: dracula
+```
+
+Any [Shiki](https://shiki.style/themes) theme name works. Defaults are
+`github-light` and `github-dark`.
+
+## Repository link
+
+```yaml title=".deepdoc.yaml"
+site:
+  repo_url: "https://github.com/acme/widgets"
+```
+
+This adds the repository icon to the navbar and is what the
+[edit-this-page link](/theming/layout#edit-this-page) is built from.
+
+<Callout title="Usually you can skip this">
+  Leave it empty and DeepDoc reads your git `origin` remote, normalising an SSH
+  remote like `git@github.com:acme/widgets.git` to an https URL. Set it
+  explicitly only when the remote is wrong or absent — an explicit value always
+  wins.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Layout" href="/theming/layout" description="Sidebar, table of contents, breadcrumbs and edit links." />
+  <Card title="Navigation" href="/theming/navigation" description="Reorder, rename or hide pages — and add your own." />
+</Cards>

@@ -1,0 +1,156 @@
+---
+title: Layout
+description: Sidebar, table of contents, breadcrumbs, edit links — every piece of chrome around your content.
+---
+
+Everything on this page lives under `site.chrome` and applies on the next
+`deepdoc serve`, with no regeneration.
+
+## The full set
+
+```yaml title=".deepdoc.yaml"
+site:
+  chrome:
+    sidebar: true
+    sidebar_default_open_level: 1
+    sidebar_collapsible: true
+    toc: true
+    toc_style: clerk        # clerk | normal
+    toc_depth: [2, 3]
+    breadcrumb: true
+    page_footer: true       # previous / next links
+    edit_link: false
+    last_update: true
+    theme_switch: true
+    search: true
+    generated_meta: true
+    links: []
+```
+
+Every key is optional. Set only what you want to change.
+
+## Sidebar
+
+```yaml
+site:
+  chrome:
+    sidebar_default_open_level: 2   # expand one level deeper
+    sidebar_collapsible: false      # readers cannot collapse it
+```
+
+`sidebar_default_open_level` controls how deep the tree starts expanded. On a
+large repository with many sections, `1` keeps the sidebar scannable; raise it
+when you have few sections and want everything visible.
+
+Setting `sidebar: false` removes it entirely — reasonable for a handful of
+pages, rarely otherwise.
+
+## Table of contents
+
+```yaml
+site:
+  chrome:
+    toc_style: normal      # or clerk
+    toc_depth: [2, 3, 4]   # include h4 headings
+```
+
+`toc_depth` is the lever that matters. The default `[2, 3]` lists `##` and
+`###` headings. Add `4` when your pages use `####` for meaningful subsections
+and readers need to jump to them — a reference page with one entry per
+configuration key, for instance.
+
+<Callout title="Deeper is not always better">
+  Including `h4` on pages with many small subsections produces a table of
+  contents longer than the page. Change it when a specific page needs it, not
+  as a default.
+</Callout>
+
+`toc_style` picks between `clerk` (a highlighted active section) and `normal`.
+
+## Edit this page
+
+```yaml
+site:
+  repo_url: "https://github.com/acme/widgets"
+  edit_branch: main
+  edit_path_prefix: ""
+  chrome:
+    edit_link: true
+```
+
+Adds a link from each page to its source in your repository.
+
+`edit_path_prefix` is for when your docs are not at the repository root — set
+it to the subdirectory, and it is prefixed to each page's path.
+
+<Callout type="warn" title="It needs a resolvable repository">
+  With `edit_link: true` but no usable `repo_url`, the link would be dead, so
+  DeepDoc disables it and tells you:
+
+  ```
+  site.chrome.edit_link is on but no repository URL was found
+  (set site.repo_url, or add a git `origin` remote) — disabling the edit link.
+  ```
+
+  Since `repo_url` falls back to your git `origin`, this usually just works.
+</Callout>
+
+## Navbar links
+
+```yaml
+site:
+  chrome:
+    links:
+      - { text: "API", url: "https://api.acme.com" }
+      - { text: "Status", url: "https://status.acme.com" }
+```
+
+Each entry needs both `text` and `url`. One missing a `url` is dropped with a
+warning rather than rendering a dead link.
+
+## The smaller switches
+
+<Accordions>
+  <Accordion title="breadcrumb">
+    The trail above each page title. Shows on nested pages; a top-level page has
+    nothing to show.
+  </Accordion>
+  <Accordion title="page_footer">
+    Previous / next links at the bottom. Useful when your docs read in order,
+    noise when they are reference material.
+  </Accordion>
+  <Accordion title="last_update">
+    The generation date on each page. Turn it off if a visible date invites
+    "is this current?" when your docs update on a schedule you are happy with.
+  </Accordion>
+  <Accordion title="theme_switch">
+    The light/dark toggle. Off pins readers to their system preference.
+  </Accordion>
+  <Accordion title="search">
+    The search box and its <kbd>⌘K</kbd> shortcut. The index is built at the
+    same time as the site and shipped as a static file, so search keeps working
+    on any static host with no server.
+  </Accordion>
+  <Accordion title="generated_meta">
+    The commit SHA and date strip in the sidebar footer. Handy internally —
+    it tells a reader exactly which commit the docs describe.
+  </Accordion>
+</Accordions>
+
+## Invalid values never break a build
+
+Every setting here is validated. A bad value warns and falls back:
+
+```
+site.chrome.toc_style: 'fancy' is not valid (clerk, normal) — using 'clerk'.
+site.chrome.toc_depth: ['x'] is not a list of heading levels 1-6 — using [2, 3].
+```
+
+Your site still builds, with the default in place.
+
+## Next
+
+<Cards>
+  <Card title="Navigation" href="/theming/navigation" description="Reorder, rename or hide pages — and add your own." />
+  <Card title="Configuration reference" href="/reference/configuration" description="Every key in .deepdoc.yaml." />
+</Cards>

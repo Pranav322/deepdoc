@@ -55,12 +55,30 @@ def _best_proposal_merge_target(
     return best_target if best_score >= 2 else None
 
 
-def _remove_slug_from_nav(nav_structure: dict[str, list[str]], slug: str) -> None:
-    for section_name, slugs in list(nav_structure.items()):
-        if slug in slugs:
-            nav_structure[section_name] = [s for s in slugs if s != slug]
-            if not nav_structure[section_name]:
-                del nav_structure[section_name]
+def _remove_slug_from_nav(nav_structure: dict[str, list], slug: str) -> None:
+    from .nav_shaping import _flatten_nav_entries
+
+    for section_name, entries in list(nav_structure.items()):
+        flat = _flatten_nav_entries(entries)
+        if slug not in flat:
+            continue
+        new_entries = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                if entry["parent_slug"] == slug:
+                    continue
+                children = [c for c in entry["children"] if c != slug]
+                if children:
+                    entry["children"] = children
+                    new_entries.append(entry)
+                else:
+                    new_entries.append(entry["parent_slug"])
+            elif entry != slug:
+                new_entries.append(entry)
+        if new_entries:
+            nav_structure[section_name] = new_entries
+        else:
+            del nav_structure[section_name]
 
 
 def _refine_proposal(
@@ -486,11 +504,7 @@ def _apply_decompose_result(
         new_sub_buckets.append(sub_bucket)
         sub_slugs.append(sub_slug)
 
-    for section_name, slugs in list(new_nav.items()):
-        if bucket.slug in slugs:
-            slugs.remove(bucket.slug)
-            if not slugs:
-                del new_nav[section_name]
+    _remove_slug_from_nav(new_nav, bucket.slug)
     new_nav.setdefault(nav_section, []).extend(sub_slugs)
 
     return new_sub_buckets, sub_slugs
@@ -819,8 +833,20 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
     # Clean up nav_structure
     new_nav = {}
     remaining_slugs = {b.slug for b in new_buckets}
-    for section_name, slugs in plan.nav_structure.items():
-        cleaned = [s for s in slugs if s in remaining_slugs]
+    from .nav_shaping import _flatten_nav_entries
+    for section_name, entries in plan.nav_structure.items():
+        cleaned = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                if entry["parent_slug"] in remaining_slugs:
+                    children = [c for c in entry["children"] if c in remaining_slugs]
+                    if children:
+                        entry["children"] = children
+                        cleaned.append(entry)
+                    else:
+                        cleaned.append(entry["parent_slug"])
+            elif entry in remaining_slugs:
+                cleaned.append(entry)
         if cleaned:
             new_nav[section_name] = cleaned
 

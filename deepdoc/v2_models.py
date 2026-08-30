@@ -168,6 +168,11 @@ class RepoScan:
     scan_scope: list[str] = field(default_factory=list)
     unsupported_extensions: dict[str, int] = field(default_factory=dict)
     skipped_source_files: dict[str, int] = field(default_factory=dict)
+    partial: bool = False
+    doc_role_by_file: dict[str, str] = field(default_factory=dict)
+    ai_derived_exports: list[str] = field(default_factory=list)
+    built_outputs: list[str] = field(default_factory=list)
+    docs_system: Any = None
 
     @property
     def published_api_endpoints(self) -> list[dict[str, Any]]:

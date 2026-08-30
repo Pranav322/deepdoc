@@ -7,6 +7,16 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Added
+- **Safe generated-output defaults and ownership-aware cleanup.** New projects write generated Markdown to `deepdoc-docs/` and the Next.js scaffold to `deepdoc-site/`. DeepDoc now classifies exact generated paths, refuses tracked or unmanaged output/site collisions before writing, and makes `--clean` remove only DeepDoc-owned artifacts rather than recursively deleting an entire configured directory.
+- **One-run output overrides.** `deepdoc generate --docs PATH --site PATH` selects safe repository-relative output roots for a single generation without mutating `.deepdoc.yaml`; explicit overrides still refuse authored or unmanaged collisions.
+- **Evidence-safe authored documentation intake.** Existing authored docs are classified before they enter evidence, while DeepDoc/DeepWiki exports, generated references, and built docs sites remain inventoried but cannot become factual generation context.
+
+### Fixed
+- **`generate --clean` could delete repository-owned documentation and site content.** Output and site roots are now validated before generation, cleaning, deployment, and site building; configured `site_dir` is honored across the builder, OpenAPI staging, serve, deploy, and update paths.
+- **Modified generated pages could still be removed by legacy frontmatter adoption.** A changed hash in the ownership manifest now preserves the file, even if it still has DeepDoc provenance fields.
+- **Output migration could leave a generate/update run bound to the old unsafe directory.** Generate and update now rebind their output paths and manifests after safety migration.
+
 ## [0.5.4] - 2026-08-25
 
 ### Added

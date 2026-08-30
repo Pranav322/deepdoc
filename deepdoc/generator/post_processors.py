@@ -909,3 +909,91 @@ def link_glossary_terms(content: str, terms: list[tuple[str, str]]) -> str:
             continue
         out.append(_rewrite_line(line))
     return "\n".join(out)
+
+
+def inject_source_citations(content: str, known_paths: set[str], git_remote: str = "", commit_sha: str = "") -> str:
+    """Convert bare `path:line` backtick references into linked source citations.
+
+    Only files that exist in the repository are cited. Hallucinated paths are
+    left unchanged. Links use commit-pinned GitHub blob URLs when remote and
+    commit are known and the commit is not ``"unknown"``.  Otherwise inline
+    plain ``path:line`` text is rendered.
+    """
+    from urllib.parse import quote
+
+    PAT = re.compile(r"`([^`]+):(\d+)`")
+    _valid_commit = bool(commit_sha and commit_sha not in ("unknown", ""))
+
+    def _github_url(remote: str, path: str, line: str) -> str | None:
+        if not _valid_commit:
+            return None
+        remote = remote.strip().rstrip("/")
+        if remote.startswith("git@github.com:"):
+            repo = remote.removeprefix("git@github.com:")
+        else:
+            match = re.match(r"(?:https?|ssh)://(?:git@)?github\.com/(.+)$", remote)
+            if not match:
+                return None
+            repo = match.group(1)
+        repo = repo.removesuffix(".git").strip("/")
+        if len(repo.split("/")) != 2:
+            return None
+        return f"https://github.com/{repo}/blob/{commit_sha}/{quote(path, safe='/')}#L{line}"
+
+    def _replace(m: re.Match) -> str:
+        path = m.group(1)
+        line = m.group(2)
+        if path not in known_paths:
+            return m.group(0)
+        before = m.string[:m.start()]
+        after = m.string[m.end():]
+        if before.endswith("[") and after.startswith("]("):
+            return m.group(0)
+        url = _github_url(git_remote, path, line)
+        if url:
+            return f"[`{path}:{line}`]({url})"
+        return m.group(0)
+
+    lines = content.splitlines(keepends=True)
+    rendered: list[str] = []
+    in_frontmatter = False
+    in_fence = False
+
+    for index, line in enumerate(lines):
+        stripped = line.strip()
+        if index == 0 and stripped == "---":
+            in_frontmatter = True
+            rendered.append(line)
+            continue
+        if in_frontmatter:
+            rendered.append(line)
+            if stripped == "---":
+                in_frontmatter = False
+            continue
+        if stripped.startswith("```") or stripped.startswith("~~~"):
+            in_fence = not in_fence
+            rendered.append(line)
+            continue
+        if in_fence:
+            rendered.append(line)
+            continue
+        rendered.append(PAT.sub(_replace, line))
+
+    return "".join(rendered)
+
+
+__all__ = [
+    "fix_mermaid_diagrams",
+    "fix_file_references",
+    "normalize_html_code_blocks",
+    "repair_unbalanced_code_fences",
+    "normalize_explanatory_lines_outside_fences",
+    "repair_dangling_plain_fences",
+    "fix_frontmatter_description",
+    "fix_bare_language_markers",
+    "fix_bare_mermaid_fences",
+    "repair_internal_doc_links",
+    "strip_leaked_provenance_fields",
+    "inject_source_files_disclosure",
+    "inject_source_citations",
+]

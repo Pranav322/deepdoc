@@ -59,11 +59,22 @@ def validate_plan_contract(plan: DocPlan) -> None:
     known_slugs = set(slug_owners)
     system_nav_slugs = {"whats-changed"}
     nav_locations: dict[str, list[str]] = defaultdict(list)
-    for section, slugs in sorted(plan.nav_structure.items()):
-        for slug in slugs:
-            nav_locations[slug].append(section)
-            if slug not in known_slugs and slug not in system_nav_slugs:
-                violations.append(f"unresolved nav slug: {section} -> {slug}")
+    for section, entries in sorted(plan.nav_structure.items()):
+        for entry in entries:
+            slugs_to_check: list[str] = []
+            if isinstance(entry, dict):
+                parent_slug = entry["parent_slug"]
+                nav_locations[parent_slug].append(section)
+                slugs_to_check.append(parent_slug)
+                for child in entry.get("children", []):
+                    nav_locations[child].append(section)
+                    slugs_to_check.append(child)
+            else:
+                nav_locations[entry].append(section)
+                slugs_to_check.append(entry)
+            for slug in slugs_to_check:
+                if slug not in known_slugs and slug not in system_nav_slugs:
+                    violations.append(f"unresolved nav slug: {section} -> {slug}")
 
     for slug, sections in sorted(nav_locations.items()):
         if len(sections) > 1:

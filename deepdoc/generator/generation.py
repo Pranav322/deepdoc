@@ -54,6 +54,7 @@ console = Console()
 
 from .evidence import AssembledEvidence, EvidenceAssembler
 from .validation import PageValidator, ValidationResult
+from .claims import ClaimExtractor, ClaimValidation, ClaimValidator
 from .post_processors import (
     build_internal_doc_link_maps,
     fix_bare_language_markers,
@@ -61,6 +62,7 @@ from .post_processors import (
     fix_file_references,
     fix_frontmatter_description,
     fix_mermaid_diagrams,
+    inject_source_citations,
     inject_source_files_disclosure,
     normalize_explanatory_lines_outside_fences,
     normalize_html_code_blocks,
@@ -435,9 +437,16 @@ class BucketGenerationEngine:
         self.plan = plan
         self.contract_plan = plan
         self.output_dir = output_dir
-        self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg)
+        self.assembler = EvidenceAssembler(repo_root, scan, plan, cfg, persistent_index=self._load_persistent_index(repo_root, cfg))
         self.generator = PageGenerator(llm, cfg, repo_root)
         self.validator = PageValidator(repo_root, scan)
+        self.claim_extractor = ClaimExtractor()
+        try:
+            from ..repo_model import build_repo_model_from_scan
+            self._repo_model = build_repo_model_from_scan(scan, str(repo_root))
+        except Exception:
+            self._repo_model = None
+        self.claim_validator = ClaimValidator(scan, self._repo_model) if self._repo_model else None
         self.max_workers = cfg.get("max_parallel_workers", MAX_PARALLEL_WORKERS)
         self.batch_size = cfg.get("batch_size", BATCH_SIZE)
         self.rate_limit_pause = cfg.get("rate_limit_pause", RATE_LIMIT_PAUSE)
@@ -717,7 +726,7 @@ class BucketGenerationEngine:
                 else nullcontext()
             )
             with validation_span:
-                validation = self.validator.validate(content, bucket, evidence)
+                validation, claim_validation = self._validate_page(content, bucket, evidence)
 
             # Step 6: Retry once on weak quality before degrading.
             if not validation.is_valid:
@@ -759,7 +768,7 @@ class BucketGenerationEngine:
                         else nullcontext()
                     )
                     with validation_span:
-                        validation = self.validator.validate(content, bucket, evidence)
+                        validation, claim_validation = self._validate_page(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -806,7 +815,7 @@ class BucketGenerationEngine:
                         else nullcontext()
                     )
                     with validation_span:
-                        validation = self.validator.validate(content, bucket, evidence)
+                        validation, claim_validation = self._validate_page(content, bucket, evidence)
                 except Exception:
                     pass
 
@@ -815,21 +824,29 @@ class BucketGenerationEngine:
                 degraded = True
                 content = self._apply_degradation_fixes(content, bucket, validation)
                 # Re-validate after fixes
-                validation = self.validator.validate(content, bucket, evidence)
+                validation, claim_validation = self._validate_page(content, bucket, evidence)
 
             elapsed = time.time() - start
 
             # Step 8: Write to disk
+            content = inject_source_citations(
+                content,
+                self._repo_file_paths,
+                git_remote=self._git_remote(),
+                commit_sha=self._git_commit_short(),
+            )
             content = strip_leaked_provenance_fields(content)
             if evidence is not None and evidence.evidence_file_paths:
                 content = inject_source_files_disclosure(
                     content, sorted(evidence.evidence_file_paths)
                 )
+            validation, claim_validation = self._validate_page(content, bucket, evidence)
             content = self._add_provenance_frontmatter(
                 content,
                 bucket,
                 validation,
                 evidence,
+                claim_validation=claim_validation,
             )
 
             doc_path = self.output_dir / bucket_output_path(bucket)
@@ -1187,6 +1204,28 @@ Re-run `deepdoc generate` to retry.
 {deps}
 """
 
+    def _validate_page(
+        self,
+        content: str,
+        bucket: DocBucket,
+        evidence: AssembledEvidence | None,
+    ) -> tuple[ValidationResult, ClaimValidation | None]:
+        """Validate page content and propagate claim integrity in memory."""
+        validation = self.validator.validate(content, bucket, evidence)
+        if self.claim_validator is None:
+            return validation, None
+
+        claim_validation = self.claim_validator.validate(
+            self.claim_extractor.extract(content)
+        )
+        if not claim_validation.is_valid:
+            validation.is_valid = False
+            for error in claim_validation.errors:
+                warning = f"[claims] {error}"
+                if warning not in validation.warnings:
+                    validation.warnings.append(warning)
+        return validation, claim_validation
+
     def _add_provenance_frontmatter(
         self,
         content: str,
@@ -1195,6 +1234,7 @@ Re-run `deepdoc generate` to retry.
         evidence: AssembledEvidence | None,
         *,
         status: str | None = None,
+        claim_validation: ClaimValidation | None = None,
     ) -> str:
         """Add or update DeepDoc provenance fields in MDX frontmatter."""
         status_value = status or (
@@ -1226,6 +1266,19 @@ Re-run `deepdoc generate` to retry.
                     "deepdoc_prompt_omitted_contexts": evidence.prompt_omitted_contexts,
                 }
             )
+        if claim_validation is not None:
+            fields["deepdoc_claims"] = {
+                "total": claim_validation.total_claims,
+                "grounded": claim_validation.grounded_claims,
+                "ungrounded_routes": claim_validation.ungrounded_route_claims,
+                "ungrounded_calls": claim_validation.ungrounded_call_claims,
+                "hallucinated_files": claim_validation.hallucinated_files[:10],
+                "is_valid": claim_validation.is_valid,
+            }
+            if claim_validation.errors:
+                fields["deepdoc_claim_errors"] = claim_validation.errors
+            if not claim_validation.is_valid:
+                fields["deepdoc_status"] = "invalid"
         return _merge_frontmatter_fields(content, fields)
 
     def _build_page_evidence_records(self, evidence_files: list[str]) -> list[dict[str, Any]]:
@@ -1252,6 +1305,17 @@ Re-run `deepdoc generate` to retry.
                 }
             )
         return records
+
+    def _git_remote(self) -> str:
+        try:
+            return subprocess.check_output(
+                ["git", "remote", "get-url", "origin"],
+                cwd=self.repo_root,
+                text=True,
+                stderr=subprocess.DEVNULL,
+            ).strip()
+        except Exception:
+            return ""
 
     def _git_commit_short(self) -> str:
         try:
@@ -1430,6 +1494,23 @@ Re-run `deepdoc generate` to retry.
 
         return result
 
+    def _load_persistent_index(self, repo_root: Path, cfg: dict[str, Any]) -> Any | None:
+        """Open a PersistentIndex if the config allows and the DB exists.
+
+        Returns None when the index isn't available — evidence assembly falls
+        back to RepoScan dicts transparently.
+        """
+        if not cfg.get("scan", {}).get("persistent_index", True):
+            return None
+        db_path = repo_root / ".deepdoc" / "index.db"
+        if not db_path.is_file():
+            return None
+        try:
+            from ..persistent_index import PersistentIndex
+            return PersistentIndex(repo_root)
+        except Exception:
+            return None
+
     def _planned_doc_pages(self) -> list[tuple[str, str]]:
         """Return planned titles mapped to their eventual site URLs."""
         pages: list[tuple[str, str]] = []
@@ -1467,20 +1548,27 @@ Re-run `deepdoc generate` to retry.
         lines: list[str] = []
         seen: set[str] = set()
 
-        for section, slugs in self.plan.nav_structure.items():
+        for section, entries in self.plan.nav_structure.items():
             section_lines: list[str] = []
-            for slug in slugs:
-                b = slug_to_bucket.get(slug)
-                if not b:
-                    continue
-                seen.add(slug)
-                page_path = self._bucket_url(b)
-                key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
-                if len(b.owned_files) > 4:
-                    key_files += f" +{len(b.owned_files) - 4} more"
-                section_lines.append(f"- [{b.title}]({page_path}) — {b.description}")
-                if key_files:
-                    section_lines.append(f"  *Covers: {key_files}*")
+            for entry in entries:
+                item_slugs: list[str] = []
+                if isinstance(entry, dict):
+                    item_slugs.append(entry["parent_slug"])
+                    item_slugs.extend(entry.get("children", []))
+                else:
+                    item_slugs.append(entry)
+                for slug in item_slugs:
+                    b = slug_to_bucket.get(slug)
+                    if not b:
+                        continue
+                    seen.add(slug)
+                    page_path = self._bucket_url(b)
+                    key_files = ", ".join(f"`{f}`" for f in b.owned_files[:4])
+                    if len(b.owned_files) > 4:
+                        key_files += f" +{len(b.owned_files) - 4} more"
+                    section_lines.append(f"- [{b.title}]({page_path}) — {b.description}")
+                    if key_files:
+                        section_lines.append(f"  *Covers: {key_files}*")
             if section_lines:
                 lines.append(f"**{section}**")
                 lines.extend(section_lines)

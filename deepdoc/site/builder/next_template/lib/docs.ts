@@ -11,8 +11,13 @@ import rehypeShiki from '@shikijs/rehype';
 import { visit } from 'unist-util-visit';
 import type { Root as HastRoot, Element } from 'hast';
 
-// docs/ lives one level above site/ (the Next.js project root)
-const DOCS_DIR = path.resolve(process.cwd(), '..', 'docs');
+// The builder writes DEEPDOC_DOCS_DIR into .env.local. Keep docs and site
+// roots independently configurable so DeepDoc never collides with authored
+// repository documentation.
+const DOCS_DIR = path.resolve(
+  process.cwd(),
+  process.env.DEEPDOC_DOCS_DIR || '../deepdoc-docs',
+);
 
 export interface TocItem {
   id: string;

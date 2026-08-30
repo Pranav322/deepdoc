@@ -30,6 +30,8 @@ dependencies = [
     "tree-sitter-typescript>=0.22",
     "tree-sitter-go>=0.22",
     "tree-sitter-php>=0.22",
+    "tree-sitter-java>=0.23",
+    "tree-sitter-rust>=0.24",
     "pyyaml>=6.0",
     "rich>=13.0",
     "jinja2>=3.1",
@@ -73,3 +75,6 @@ include = ["deepdoc*"]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
+markers = [
+    "slow: memory-intensive tests that should only run with --run-slow",
+]

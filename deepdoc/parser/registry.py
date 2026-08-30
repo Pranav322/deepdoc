@@ -6,9 +6,11 @@ from pathlib import Path
 
 from .base import ParsedFile
 from .go_parser import parse_go
+from .java_parser import parse_java
 from .js_ts_parser import parse_js_ts
 from .php_parser import parse_php
 from .python_parser import parse_python
+from .rust_parser import parse_rust
 from .vue_parser import parse_vue
 
 # extension → (language_name, parser_function)
@@ -23,6 +25,8 @@ _REGISTRY: dict[str, tuple[str, callable]] = {
     ".go": ("go", parse_go),
     ".php": ("php", parse_php),
     ".vue": ("vue", parse_vue),
+    ".java": ("java", parse_java),
+    ".rs": ("rust", parse_rust),
 }
 
 

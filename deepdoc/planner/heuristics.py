@@ -756,8 +756,20 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
     # Clean up nav_structure
     new_nav = {}
     remaining_slugs = {b.slug for b in new_buckets}
-    for section_name, slugs in plan.nav_structure.items():
-        cleaned = [s for s in slugs if s in remaining_slugs]
+    from .nav_shaping import _flatten_nav_entries
+    for section_name, entries in plan.nav_structure.items():
+        cleaned = []
+        for entry in entries:
+            if isinstance(entry, dict):
+                if entry["parent_slug"] in remaining_slugs:
+                    children = [c for c in entry["children"] if c in remaining_slugs]
+                    if children:
+                        entry["children"] = children
+                        cleaned.append(entry)
+                    else:
+                        cleaned.append(entry["parent_slug"])
+            elif entry in remaining_slugs:
+                cleaned.append(entry)
         if cleaned:
             new_nav[section_name] = cleaned
 

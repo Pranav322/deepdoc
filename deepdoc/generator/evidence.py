@@ -125,12 +125,14 @@ class EvidenceAssembler:
     COMPRESSED_CARD_TARGET = 60_000
 
     def __init__(
-        self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any]
+        self, repo_root: Path, scan: RepoScan, plan: DocPlan, cfg: dict[str, Any],
+        persistent_index: Any | None = None,
     ):
         self.repo_root = repo_root
         self.scan = scan
         self.plan = plan
         self.cfg = cfg
+        self._persistent_index = persistent_index
         llm_cfg = cfg.get("llm", {}) or {}
         def _token_value(value: Any, default: int) -> int:
             if value is None or (
@@ -337,6 +339,8 @@ class EvidenceAssembler:
         # Load file data, sort smallest first for maximum inclusion
         files_data: list[tuple[str, str, int, ParsedFile | None]] = []
         for src_file in tracked_bucket_files(bucket):
+            if not self._is_evidence_eligible_file(src_file):
+                continue
             src_path = self.repo_root / src_file
             if not src_path.exists():
                 continue
@@ -553,7 +557,7 @@ class EvidenceAssembler:
             file_path = context.get("file_path")
             summary = context.get("summary")
             title = context.get("title") or Path(file_path or "").stem
-            if not file_path or not summary:
+            if not file_path or not summary or not self._is_evidence_eligible_file(file_path):
                 continue
             doc_files.add(file_path)
             lines.append(f"- {title} (`{file_path}`): {summary}")
@@ -561,12 +565,24 @@ class EvidenceAssembler:
         if self.scan.doc_contexts:
             lines.append("\nAdditional repo documentation:")
             for file_path, summary in list(self.scan.doc_contexts.items())[:10]:
+                if not self._is_evidence_eligible_file(file_path):
+                    continue
                 doc_files.add(file_path)
                 lines.append(f"- `{file_path}`: {summary}")
 
         if len(lines) == 1:
             return "", set()
         return "## Internal Docs Context\n" + "\n".join(lines), doc_files
+
+    def _is_evidence_eligible_file(self, file_path: str) -> bool:
+        """Exclude AI-derived and generated document artifacts from evidence."""
+        role = getattr(self.scan, "doc_role_by_file", {}).get(file_path, "")
+        return role not in {
+            "ai_derived_export",
+            "generated_ref",
+            "built_docs_site",
+            "unknown_generated",
+        }
 
     def _extract_called_symbol_names(self, source_ctx: str) -> set[str]:
         call_pattern = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")
@@ -1902,15 +1918,15 @@ class EvidenceAssembler:
 
         if self.plan.nav_structure:
             lines.append("\n## Planned Documentation Map")
-            for section, slugs in self.plan.nav_structure.items():
+            from ..planner.nav_shaping import _iter_nav_slugs
+            for section, slug in _iter_nav_slugs(self.plan.nav_structure):
                 section_lines: list[str] = []
-                for slug in slugs[:8]:
-                    page = self._slug_to_bucket.get(slug)
-                    if not page:
-                        continue
-                    section_lines.append(
-                        f"- {page.title} (`/{page.slug}`): {page.description}"
-                    )
+                page = self._slug_to_bucket.get(slug)
+                if not page:
+                    continue
+                section_lines.append(
+                    f"- {page.title} (`/{page.slug}`): {page.description}"
+                )
                 if section_lines:
                     lines.append(f"\n### {section}")
                     lines.extend(section_lines)

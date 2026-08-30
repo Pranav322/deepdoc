@@ -44,10 +44,8 @@ FRAMEWORK_PRIORITIES = {
 # used to warn a user that a polyglot repo is partially invisible (Task 1
 # coverage report), never to gate or broaden scanning.
 KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS: dict[str, str] = {
-    ".java": "Java",
     ".kt": "Kotlin",
     ".kts": "Kotlin",
-    ".rs": "Rust",
     ".cs": "C#",
     ".rb": "Ruby",
     ".swift": "Swift",

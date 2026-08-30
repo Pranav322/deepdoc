@@ -87,7 +87,11 @@ def test_deploy_refuses_invalid_generated_docs(monkeypatch, tmp_path: Path) -> N
         '{"pages_failed": 0, "pages_invalid": 1}\n', encoding="utf-8"
     )
 
-    monkeypatch.setattr(cli, "_load_or_exit", lambda: {"output_dir": "docs", "chatbot": {"enabled": False}})
+    monkeypatch.setattr(
+        cli,
+        "_load_or_exit",
+        lambda: {"output_dir": "docs", "site_dir": "site", "chatbot": {"enabled": False}},
+    )
     monkeypatch.setattr(cli, "_find_repo_root", lambda: repo_root)
 
     def _fail(*args, **kwargs):

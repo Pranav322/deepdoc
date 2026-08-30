@@ -27,11 +27,11 @@ def test_empty_directory_raises_clear_error(tmp_path: Path) -> None:
 
 
 def test_unsupported_only_repo_raises_clear_error(tmp_path: Path) -> None:
-    (tmp_path / "Main.java").write_text("class Main {}", encoding="utf-8")
+    (tmp_path / "Main.rb").write_text("class Main\nend", encoding="utf-8")
     scan = scan_repo(tmp_path, {})
     pipeline = _pipeline(tmp_path)
 
-    with pytest.raises(click.ClickException, match="No supported source files"):
+    with pytest.raises(click.ClickException, match="No parseable source files"):
         pipeline._guard_supported_source_files(scan)
 
 

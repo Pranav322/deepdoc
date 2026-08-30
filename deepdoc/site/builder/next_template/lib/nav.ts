@@ -2,14 +2,18 @@ import type { PageTree } from 'fumadocs-core/server';
 import { getConfig } from './config';
 
 export interface NavSection {
+  type: 'section';
   title: string;
   items: NavItem[];
 }
 
-export interface NavItem {
+export interface NavPage {
+  type?: 'page';
   title: string;
   slug: string;
 }
+
+export type NavItem = NavPage | NavSection;
 
 // Build a Fumadocs PageTree from the nav array in deepdoc.config.json
 export function buildPageTree(): PageTree.Root {
@@ -18,29 +22,23 @@ export function buildPageTree(): PageTree.Root {
 
   const children: PageTree.Node[] = [];
 
-  for (const entry of nav) {
-    if (entry.type === 'page') {
-      children.push({
-        type: 'page',
-        name: entry.title,
-        url: entry.slug === '/' || entry.slug === 'index' ? '/' : `/${entry.slug}`,
-      });
-    } else if (entry.type === 'section') {
-      const sectionItems: PageTree.Node[] = (entry.items ?? []).map(
-        (item: { title: string; slug: string }) => ({
-          type: 'page' as const,
-          name: item.title,
-          url: `/${item.slug}`,
-        }),
-      );
-      children.push({
+  function buildNode(entry: NavItem): PageTree.Node {
+    if (entry.type === 'section') {
+      return {
         type: 'folder',
         name: entry.title,
-        children: sectionItems,
+        children: (entry.items ?? []).map(buildNode),
         defaultOpen: true,
-      });
+      };
     }
+    return {
+      type: 'page',
+      name: entry.title,
+      url: entry.slug === '/' || entry.slug === 'index' ? '/' : `/${entry.slug}`,
+    };
   }
+
+  for (const entry of nav as NavItem[]) children.push(buildNode(entry));
 
   return { name: cfg.project_name ?? 'Docs', children };
 }

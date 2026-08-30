@@ -128,9 +128,101 @@ def _shape_plan_nav(
     )
 
     plan.nav_structure = {
-        section: nav[section] for section in ordered_sections if nav.get(section)
+        section: _build_nav_items(nav[section], slug_to_bucket, section_depth, section_order)
+        for section in ordered_sections if nav.get(section)
     }
     return plan
+
+
+def _flatten_nav_entries(entries: list) -> list[str]:
+    """Extract all slugs from mixed nav entries (strings + dict groups)."""
+    slugs: list[str] = []
+    for entry in entries:
+        if isinstance(entry, dict):
+            slugs.append(entry["parent_slug"])
+            slugs.extend(entry.get("children", []))
+        else:
+            slugs.append(entry)
+    return slugs
+
+
+def _iter_nav_slugs(nav_structure: dict):
+    """Yield (section, slug) pairs, flattening dict group entries transparently.
+
+    Use this anywhere you iterate ``nav_structure.items()`` and need plain
+    slug strings. Dict group entries are expanded into their parent slug
+    plus each child slug, each associated with the same section.
+    """
+    for section, entries in nav_structure.items():
+        for slug in _flatten_nav_entries(entries):
+            yield section, slug
+
+
+def _build_nav_items(
+    slugs: list[str],
+    slug_to_bucket: dict[str, DocBucket],
+    section_depth: dict[str, int],
+    section_order: dict[str, int],
+) -> list:
+    """Build hierarchical nav items from a flat slug list.
+
+    Slugs with ``parent_slug`` set become children of their parent.
+    Parents become group entries with nested children.
+    Orphan slugs stay as flat string entries.
+    """
+    display_titles: dict[str, str] = {}
+    parent_of: dict[str, list[str]] = defaultdict(list)
+    is_child: set[str] = set()
+
+    for slug in slugs:
+        bucket = slug_to_bucket.get(slug)
+        if not bucket:
+            continue
+        display_titles[slug] = _short_display_title(slug, bucket)
+        parent = bucket.parent_slug
+        if parent and parent in slug_to_bucket and parent in slugs:
+            parent_of.setdefault(parent, []).append(slug)
+            is_child.add(slug)
+
+    items: list = []
+    seen: set[str] = set()
+
+    for slug in slugs:
+        if slug in seen or slug in is_child:
+            continue
+        children = parent_of.get(slug, [])
+        if children:
+            seen.add(slug)
+            seen.update(children)
+            items.append({
+                "parent_slug": slug,
+                "display_title": display_titles.get(slug, _slug_to_title(slug)),
+                "children": children,
+            })
+        else:
+            seen.add(slug)
+            items.append(slug)
+
+    if not any(isinstance(i, dict) for i in items):
+        return slugs
+    return items
+
+
+def _short_display_title(slug: str, bucket: DocBucket) -> str:
+    """Return a readable display title without altering the stable slug."""
+    title = bucket.title or _slug_to_title(slug)
+    tokens = title.split()
+    if len(tokens) <= 4:
+        return title
+    title = title.rstrip()
+    for suffix in (" Overview", " Automation", " Pipeline", " Operations"):
+        if title.endswith(suffix):
+            return title[: -len(suffix)].rstrip()
+    return title
+
+
+def _slug_to_title(slug: str) -> str:
+    return slug.replace("-", " ").title()
 
 
 def _merge_duplicate_setup_bucket(buckets: list[DocBucket]) -> list[DocBucket]:

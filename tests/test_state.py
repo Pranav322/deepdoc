@@ -158,6 +158,9 @@ def test_partial_generate_does_not_advance_baseline(tmp_repo):
         config_files=[],
         has_openapi=False,
         file_contents={"models.py": "", "auth.py": ""},
+        parsed_files={"models.py": MagicMock(), "auth.py": MagicMock()},
+        file_summaries={"models.py": "", "auth.py": ""},
+        unsupported_extensions={},
     )
     gen_results = [
         FakeResult(bucket=plan.buckets[0], content="# Auth\n", error=None),

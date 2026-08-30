@@ -7,8 +7,11 @@ from dataclasses import dataclass
 import click
 
 from ..llm import ModelCapabilityError, fit_prompt_sections
-from ..telemetry import RunTelemetry
 from ..manifest import file_hash
+from ..language_support import language_name_for_extension
+from ..source_metadata import KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS
+from ..telemetry import RunTelemetry
+from ..docs_system import classify_doc_role, DocRole
 from .common import *
 
 
@@ -22,6 +25,75 @@ def _record_scan_timing(
     timings[name] = timings.get(name, 0.0) + elapsed
     if telemetry is not None:
         telemetry.record_duration(f"scan.{name}", elapsed)
+
+
+def _build_repo_model_if_wanted(scan: RepoScan, repo_root: str, cfg: dict[str, Any]) -> None:
+    """Construct a RepositoryModel from the completed scan and attach it to the scan.
+
+    Controlled by ``scan.build_repo_model`` config key (default: True).
+    The model is additive — never alters the scan itself.
+    """
+    if not cfg.get("scan", {}).get("build_repo_model", True):
+        return
+    try:
+        from ..repo_model import build_repo_model_from_scan
+
+        model = build_repo_model_from_scan(scan, repo_root)
+        scan._repo_model = model  # type: ignore[attr-defined]
+    except Exception:
+        pass
+
+
+def _persist_scan_index(repo_root: Path, scan: RepoScan, cfg: dict[str, Any]) -> None:
+    """Write scan results to the persistent index and content store.
+
+    Controlled by ``scan.persistent_index`` config key (default: True).
+    RepoScan dicts remain fully populated — this is an additive write,
+    not a replacement.
+    """
+    if not cfg.get("scan", {}).get("persistent_index", True):
+        return
+    try:
+        from ..content_store import ContentStore
+        from ..persistent_index import PersistentIndex
+
+        content_store = ContentStore(repo_root)
+        with PersistentIndex(repo_root) as index:
+            for rel_path, content in getattr(scan, "file_contents", {}).items():
+                content_hash = content_store.put(content)
+
+                rel_path_str = str(rel_path)
+                source_kind = getattr(scan, "source_kind_by_file", {}).get(rel_path_str, "product")
+                parsed = getattr(scan, "parsed_files", {}).get(rel_path_str)
+                line_count = getattr(scan, "file_line_counts", {}).get(rel_path_str, 0)
+
+                if parsed is not None:
+                    parse_status = "full"
+                    language = parsed.language
+                    file_id = index.upsert_file(
+                        rel_path=rel_path_str,
+                        language=language,
+                        source_kind=source_kind,
+                        parse_status=parse_status,
+                        line_count=line_count,
+                        byte_count=len(content.encode("utf-8")),
+                        content_hash=content_hash,
+                    )
+                    index.upsert_symbols(file_id, parsed.symbols)
+                    index.upsert_imports(file_id, parsed.imports)
+                else:
+                    index.upsert_file(
+                        rel_path=rel_path_str,
+                        language="",
+                        source_kind=source_kind,
+                        parse_status="inventory_only",
+                        line_count=line_count,
+                        byte_count=len(content.encode("utf-8")),
+                        content_hash=content_hash,
+                    )
+    except Exception:
+        pass
+
 
 def plan_docs(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_root: Path = Path(".")) -> DocPlan:
     """Run the multi-step planner.
@@ -981,11 +1053,13 @@ def scan_repo(
 
     # Always exclude DeepDoc's own generated/state directories regardless of
     # user config — scanning these produces noise and giant-file false positives.
+    output_dir_str = str(cfg.get("output_dir") or "deepdoc-docs")
+    site_dir_str = str(cfg.get("site_dir") or "deepdoc-site")
     _DEEPDOC_GENERATED = {
         ".deepdoc",
-        "site",
+        site_dir_str,
         "chatbot_backend",
-        str(cfg.get("output_dir") or "docs"),  # configurable docs output dir
+        output_dir_str,
     }
     for _d in _DEEPDOC_GENERATED:
         if _d not in exclude:
@@ -1007,13 +1081,21 @@ def scan_repo(
     doc_contexts: dict[str, str] = {}
     research_contexts: list[dict[str, Any]] = []
     source_kind_by_file: dict[str, str] = {}
+    doc_role_by_file: dict[str, str] = {}
+    ai_derived_exports: list[str] = []
+    built_outputs: list[str] = []
     file_frameworks: dict[str, list[str]] = {}
     unsupported_extensions: dict[str, int] = {}
     skipped_source_files: dict[str, int] = {}
     scan_cfg = cfg.get("scan", {}) or {}
     max_source_bytes = int(scan_cfg.get("max_source_bytes", 1_000_000))
+    max_repo_files = int(scan_cfg.get("max_repo_files", 0))
+    timeout_seconds = float(scan_cfg.get("timeout_seconds", 0))
     scan_timings: dict[str, float] = {}
     step_start = time.perf_counter()
+    from ..scale_utils import TimeoutGuard
+    timeout_guard = TimeoutGuard(timeout_seconds) if timeout_seconds > 0 else None
+    scan_partial = False
     service_boundaries = _detect_service_boundaries(repo_root, cfg)
     _record_scan_timing(
         scan_timings,
@@ -1023,20 +1105,7 @@ def scan_repo(
     )
     file_services: dict[str, str] = {}
 
-    ext_to_lang = {
-        ".py": "python",
-        ".js": "javascript",
-        ".jsx": "javascript",
-        ".ts": "typescript",
-        ".tsx": "typescript",
-        ".go": "go",
-        ".php": "php",
-        ".mjs": "javascript",
-        ".cjs": "javascript",
-        ".vue": "vue",
-    }
-
-    # First pass: collect all files
+    # Phase 1: collect all files
     step_start = time.perf_counter()
     all_files_to_scan: list[Path] = []
     for root, dirs, files in os.walk(repo_root):
@@ -1084,7 +1153,20 @@ def scan_repo(
             "[dim]Scanning files...[/dim]", total=len(all_files_to_scan)
         )
 
+        if max_repo_files > 0 and len(all_files_to_scan) > max_repo_files:
+            console.print(
+                f"[yellow]⚠ {len(all_files_to_scan)} files discovered, "
+                f"exceeding scan.max_repo_files limit of {max_repo_files}. "
+                f"Scan will proceed but may use significant memory.[/yellow]"
+            )
+
         for fpath in all_files_to_scan:
+            if timeout_guard is not None and timeout_guard.check():
+                console.print(
+                    "[yellow]⚠ Scan timeout reached — returning partial results.[/yellow]"
+                )
+                scan_partial = True
+                break
             fname = fpath.name
             rel = fpath.relative_to(repo_root).as_posix()
             rel_dir = (
@@ -1095,6 +1177,14 @@ def scan_repo(
 
             progress.update(task, description=f"[dim]Scanning {rel}[/dim]")
             source_kind_by_file[rel] = classify_source_kind(rel)
+            doc_role = classify_doc_role(
+                rel,
+                source_kind=source_kind_by_file[rel],
+                output_dir=output_dir_str,
+                site_dir=site_dir_str,
+            )
+            if doc_role:
+                doc_role_by_file[rel] = doc_role
             service = _service_for_path(rel, service_boundaries)
             if service:
                 file_services[rel] = service
@@ -1116,8 +1206,10 @@ def scan_repo(
             ):
                 openapi_paths.append(rel)
 
-            # Only parse supported source files
-            if _is_doc_context_candidate(rel, fname):
+            # Read documentation candidates before accepting them as evidence.
+            # Content markers can identify DeepDoc/DeepWiki exports that path-only
+            # classification would otherwise mistake for authored documentation.
+            if _is_doc_context_candidate(rel, fname) or doc_role == DocRole.DOCS_CONFIG:
                 step_start = time.perf_counter()
                 try:
                     doc_content = fpath.read_text(encoding="utf-8", errors="replace")
@@ -1127,14 +1219,29 @@ def scan_repo(
                             "scan.doc_bytes_read",
                             len(doc_content.encode("utf-8")),
                         )
-                    if fname.lower().endswith(".ipynb"):
-                        summary, context = _summarize_notebook_context(rel, doc_content)
-                    else:
-                        summary, context = _summarize_doc_context(rel, doc_content)
-                    if summary:
-                        doc_contexts[rel] = summary
-                    if context:
-                        research_contexts.append(context)
+                    refined_role = classify_doc_role(
+                        rel,
+                        content=doc_content,
+                        source_kind=source_kind_by_file[rel],
+                        output_dir=output_dir_str,
+                        site_dir=site_dir_str,
+                    )
+                    if refined_role:
+                        doc_role_by_file[rel] = refined_role
+                    final_role = doc_role_by_file.get(rel, "")
+                    if final_role == DocRole.AI_DERIVED:
+                        ai_derived_exports.append(rel)
+                    elif final_role == DocRole.BUILT_SITE:
+                        built_outputs.append(rel)
+                    elif final_role in {DocRole.AUTHORED, DocRole.DOCS_CONFIG}:
+                        if fname.lower().endswith(".ipynb"):
+                            summary, context = _summarize_notebook_context(rel, doc_content)
+                        else:
+                            summary, context = _summarize_doc_context(rel, doc_content)
+                        if summary:
+                            doc_contexts[rel] = summary
+                        if context:
+                            research_contexts.append(context)
                 except Exception:
                     pass
                 finally:
@@ -1147,9 +1254,36 @@ def scan_repo(
 
             if fpath.suffix.lower() not in extensions:
                 file_tree[rel_dir].append(fname)
-                if fpath.suffix:
-                    ext = fpath.suffix.lower()
+                ext = fpath.suffix.lower() if fpath.suffix else ""
+                if ext:
                     unsupported_extensions[ext] = unsupported_extensions.get(ext, 0) + 1
+
+                skip_reason = _skip_reason_for_source_file(fpath, rel, max_source_bytes)
+                if skip_reason:
+                    skipped_source_files[f"unsupported_{skip_reason}"] = (
+                        skipped_source_files.get(f"unsupported_{skip_reason}", 0) + 1
+                    )
+                    progress.advance(task)
+                    continue
+
+                # Read unsupported file for inventory — no parsing
+                try:
+                    content = fpath.read_text(encoding="utf-8", errors="replace")
+                    file_contents[rel] = content
+                    file_line_counts[rel] = content.count("\n") + 1
+                    content_hash = file_hash(content)
+                    file_content_hashes[rel] = content_hash
+                    lang_name = KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS.get(ext, ext.lstrip(".")) if ext else "unknown"
+                    file_summaries[rel] = (
+                        f"Unsupported file ({lang_name}) — inventory only\n"
+                        f"Lines: {file_line_counts[rel]}\n"
+                        f"Size: {len(content)} bytes\n"
+                    )
+                    if telemetry is not None:
+                        telemetry.counter("scan.unsupported_files_read")
+                        telemetry.counter("scan.unsupported_bytes_read", len(content.encode("utf-8")))
+                except Exception:
+                    pass
                 progress.advance(task)
                 continue
 
@@ -1167,7 +1301,7 @@ def scan_repo(
                 progress.advance(task)
                 continue
 
-            lang = ext_to_lang.get(fpath.suffix.lower(), "")
+            lang = language_name_for_extension(fpath.suffix.lower())
             if lang:
                 lang_counts[lang] += 1
 
@@ -1307,7 +1441,24 @@ def scan_repo(
             if telemetry is not None:
                 telemetry.record_duration(f"scan.{phase_name}", 0.0)
 
-    return RepoScan(
+    # Post-scan refinement covers document-like files captured through the
+    # general inventory path. Never admit excluded roles as factual evidence.
+    for rel, content in file_contents.items():
+        doc_role = classify_doc_role(
+            rel,
+            content=content,
+            source_kind=source_kind_by_file.get(rel, "product"),
+            output_dir=output_dir_str,
+            site_dir=site_dir_str,
+        )
+        if doc_role:
+            doc_role_by_file[rel] = doc_role
+            if doc_role == DocRole.AI_DERIVED and rel not in ai_derived_exports:
+                ai_derived_exports.append(rel)
+            elif doc_role == DocRole.BUILT_SITE and rel not in built_outputs:
+                built_outputs.append(rel)
+
+    repo_scan = RepoScan(
         file_tree=dict(file_tree),
         file_summaries=file_summaries,
         api_endpoints=api_endpoints,
@@ -1332,7 +1483,17 @@ def scan_repo(
         scan_scope=sorted(normalized_scan_paths),
         unsupported_extensions=dict(unsupported_extensions),
         skipped_source_files=dict(skipped_source_files),
+        partial=scan_partial,
+        doc_role_by_file=doc_role_by_file,
+        ai_derived_exports=ai_derived_exports,
+        built_outputs=built_outputs,
     )
+
+    _build_repo_model_if_wanted(repo_scan, str(repo_root), cfg)
+
+    _persist_scan_index(repo_root, repo_scan, cfg)
+
+    return repo_scan
 
 
 def _detect_service_boundaries(repo_root: Path, cfg: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1631,6 +1792,22 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
             console.print(f"    • {sig.signal_type}: {sig.name}")
     else:
         console.print("  [dim]No debug signals detected[/dim]")
+
+    # 2.8 Documentation system detection
+    try:
+        from ..docs_system import detect_docs_system
+
+        scan.docs_system = detect_docs_system(
+            repo_root,
+            scan.file_tree,
+            scan.file_contents,
+            scan.source_kind_by_file,
+            getattr(scan, "doc_role_by_file", {}),
+            scan.config_files,
+            ci_artifacts=getattr(scan.artifact_scan, "ci_artifacts", []) if scan.artifact_scan else None,
+        )
+    except Exception:
+        scan.docs_system = None
 
     return scan
 

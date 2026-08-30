@@ -25,6 +25,12 @@ from rich.table import Table
 from . import __version__
 from .config import CONFIG_FILE, DEFAULT_CONFIG, find_config, load_config, save_config
 from .llm import ModelCapabilityError, resolve_completion_capabilities
+from .output_safety import (
+    assert_safe_for_generation,
+    clean_owned_outputs,
+    inspect_output_root,
+    resolve_output_paths,
+)
 
 console = Console()
 CONTEXT_SETTINGS = {
@@ -153,9 +159,15 @@ def _autoload_repo_env(start: Path) -> Path | None:
 )
 @click.option(
     "--output-dir",
-    default="docs",
+    default="deepdoc-docs",
     show_default=True,
     help="Directory where generated Markdown docs will be written.",
+)
+@click.option(
+    "--site-dir",
+    default="deepdoc-site",
+    show_default=True,
+    help="Directory where the generated Next.js site scaffold will be written.",
 )
 @click.option(
     "--with-chatbot",
@@ -172,6 +184,7 @@ def init(
     provider,
     model,
     output_dir,
+    site_dir,
     with_chatbot,
     llm_max_concurrency,
     llm_rpm,
@@ -275,6 +288,7 @@ def init(
     cfg["project_name"] = name or cwd.name
     cfg["description"] = description
     cfg["output_dir"] = output_dir
+    cfg["site_dir"] = site_dir
     cfg["llm"]["provider"] = provider
     cfg["llm"]["model"] = resolved_model
     cfg["llm"]["context_window_tokens"] = context_window_tokens
@@ -299,11 +313,12 @@ def init(
 
     save_config(cfg, cwd / CONFIG_FILE)
 
-    # Create .gitignore entries for the generated site build artifacts
+    # Create .gitignore entries for generated build artifacts only. Generated
+    # Markdown may be intentionally committed, so don't ignore output_dir.
     _add_gitignore_entries(
         cwd,
         [
-            "site/out/",
+            f"{site_dir.rstrip('/')}/out/",
             ".deepdoc/chatbot/",
             "chatbot_backend/.venv/",
             "chatbot_backend/__pycache__/",
@@ -353,7 +368,8 @@ def init(
         Panel.fit(
             f"[bold green]✓ DeepDoc initialized![/bold green]\n\n"
             f"Config saved to [cyan]{CONFIG_FILE}[/cyan]\n"
-            f"Docs will be generated to [cyan]{output_dir}/[/cyan]\n\n"
+            f"Docs will be generated to [cyan]{output_dir}/[/cyan]\n"
+            f"Site will be generated to [cyan]{site_dir}/[/cyan]\n\n"
             f"[dim]Next steps:[/dim]\n" + "\n".join(next_steps),
             title="DeepDoc",
             border_style="green",
@@ -375,7 +391,7 @@ def init(
 @click.option(
     "--clean",
     is_flag=True,
-    help="Delete generated docs and saved DeepDoc state, then rebuild from scratch.",
+    help="Delete exact DeepDoc-owned docs/site files and saved state, then rebuild.",
 )
 @click.option(
     "--yes",
@@ -426,6 +442,18 @@ def init(
     type=float,
     help="Seconds to pause between generation batches. 0 = no pause. Default: 0.5.",
 )
+@click.option(
+    "--docs",
+    "docs_path",
+    type=str,
+    help="Use this repository-relative docs output directory for this run only.",
+)
+@click.option(
+    "--site",
+    "site_path",
+    type=str,
+    help="Use this repository-relative site output directory for this run only.",
+)
 def generate(
     force,
     clean,
@@ -438,6 +466,8 @@ def generate(
     batch_size,
     max_parallel_workers,
     rate_limit_pause,
+    docs_path,
+    site_path,
 ):
     """Generate documentation for the entire codebase.
 
@@ -445,7 +475,7 @@ def generate(
     When to use which mode:
       deepdoc generate              First run in a repo
       deepdoc generate --force      Full refresh of existing DeepDoc docs
-      deepdoc generate --clean      Wipe docs + saved state, then rebuild
+      deepdoc generate --clean      Remove DeepDoc-owned output + saved state, then rebuild
 
     \b
     Pipeline overview:
@@ -455,16 +485,28 @@ def generate(
       4. API Ref     Stage OpenAPI assets for the API reference page
       5. Build      Write the Next.js + Fumadocs site scaffold
     """
-    cfg = _load_or_exit()
+    cfg = deepcopy(_load_or_exit())
     repo_root = _find_repo_root()
-    output_dir = repo_root / cfg.get("output_dir", "docs")
-    output_state = _inspect_output_state(repo_root, output_dir)
+    if docs_path is not None:
+        cfg["output_dir"] = docs_path
+    if site_path is not None:
+        cfg["site_dir"] = site_path
+    if docs_path is not None or site_path is not None:
+        cfg["_deepdoc_explicit_output_paths"] = True
+    if deploy and (docs_path is not None or site_path is not None):
+        raise click.ClickException(
+            "--deploy cannot be combined with one-run --docs/--site overrides. "
+            "Persist the paths with `deepdoc config set` before deploying."
+        )
     effective_force = force or clean
 
     if clean:
-        _confirm_clean(repo_root, output_dir, yes)
-        _wipe_deepdoc_output(repo_root, output_dir)
-        output_state = _inspect_output_state(repo_root, output_dir)
+        _confirm_clean(repo_root, cfg, yes)
+        _wipe_deepdoc_output(repo_root, cfg)
+
+    paths = assert_safe_for_generation(repo_root, cfg)
+    output_dir = paths.output_dir
+    output_state = _inspect_output_state(repo_root, output_dir)
 
     if output_state["deepdoc_managed"] and not effective_force:
         raise click.ClickException(
@@ -472,13 +514,6 @@ def generate(
             "Use `deepdoc update` for incremental refresh, "
             "`deepdoc generate --force` for a full refresh, "
             "or `deepdoc generate --clean --yes` to rebuild from scratch."
-        )
-
-    if output_state["has_files"] and not output_state["deepdoc_managed"] and not clean:
-        raise click.ClickException(
-            f"{output_dir} already exists and does not look DeepDoc-managed. "
-            "Use a different output directory or run `deepdoc generate --clean --yes` "
-            "to replace it explicitly."
         )
 
     if include:
@@ -535,8 +570,9 @@ def generate(
 def clean(yes):
     """Reset the current repository to a pre-DeepDoc state.
 
-    This removes `.deepdoc.yaml`, generated docs, the generated site scaffold,
-    chatbot backend scaffolding, and saved DeepDoc state files/directories.
+    This removes `.deepdoc.yaml`, exact DeepDoc-owned docs/site output, and
+    saved DeepDoc state files/directories. Chatbot backend scaffolding is
+    preserved because it may contain user changes.
 
     \b
     Examples:
@@ -546,17 +582,21 @@ def clean(yes):
     cfg_path = find_config()
     repo_root = cfg_path.parent if cfg_path else Path.cwd()
     cfg = load_config(cfg_path)
-    output_dir = repo_root / cfg.get("output_dir", "docs")
-    targets = _cleanup_targets(repo_root, output_dir, include_config=True)
+    paths = resolve_output_paths(repo_root, cfg)
+    targets = _cleanup_targets(repo_root, include_config=True)
+    owned_outputs = (
+        inspect_output_root(repo_root, paths.output_dir, kind="output").owned_files
+        | inspect_output_root(repo_root, paths.site_dir, kind="site").owned_files
+    )
 
-    if not targets:
+    if not targets and not owned_outputs:
         console.print(
             "[dim]No DeepDoc config, output, or saved state found to remove.[/dim]"
         )
         return
 
-    _confirm_clean(repo_root, output_dir, yes, include_config=True)
-    _wipe_deepdoc_output(repo_root, output_dir, include_config=True)
+    _confirm_clean(repo_root, cfg, yes, include_config=True)
+    _wipe_deepdoc_output(repo_root, cfg, include_config=True)
 
     console.print(
         "[green]✓ Removed DeepDoc config, generated output, and saved state.[/green]"
@@ -649,7 +689,7 @@ def update(since, deploy, replan, strict_quality):
                 "Run `deepdoc update` again after fixing the reported issue."
             )
         if cfg.get("quality", {}).get("strict"):
-            output_dir = repo_root / cfg.get("output_dir", "docs")
+            output_dir = resolve_output_paths(repo_root, cfg).output_dir
             blockers = _quality_stats_blockers(stats) + _deployment_quality_blockers(
                 repo_root, output_dir
             )
@@ -725,7 +765,7 @@ def status():
         )
     )
 
-    output_dir = repo_root / cfg.get("output_dir", "docs")
+    output_dir = resolve_output_paths(repo_root, cfg).output_dir
     stale = find_stale_buckets(plan, repo_root, output_dir=output_dir)
     if stale:
         console.print(f"\n[yellow]⚠ {len(stale)} stale bucket(s):[/yellow]")
@@ -1145,12 +1185,12 @@ def serve(port):
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
-    site_dir = repo_root / "site"
+    site_dir = resolve_output_paths(repo_root, cfg).site_dir
 
     pkg_json = site_dir / "package.json"
     if not pkg_json.exists():
         console.print(
-            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            f"[red]{site_dir.name}/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
 
@@ -1210,18 +1250,19 @@ def _deploy():
     \b
     Next.js builds a static HTML site:
       1. Run `deepdoc deploy`
-      2. Publish `site/out/` to any static host
+      2. Publish `<site_dir>/out/` to any static host
     Requires Node.js >=18: https://nodejs.org
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
-    site_dir = repo_root / "site"
-    output_dir = repo_root / str(cfg.get("output_dir", "docs") or "docs")
+    paths = resolve_output_paths(repo_root, cfg)
+    site_dir = paths.site_dir
+    output_dir = paths.output_dir
 
     pkg_json = site_dir / "package.json"
     if not pkg_json.exists():
         console.print(
-            "[red]site/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            f"[red]{site_dir.name}/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
 
@@ -1241,7 +1282,7 @@ def _deploy():
             "[bold]Next.js Deployment:[/bold]\n\n"
             "1. [bold cyan]Static build:[/bold cyan]\n"
             "   Run: [bold]deepdoc deploy[/bold]\n"
-            "   Publish [bold]site/out/[/bold] to any static host\n\n"
+            f"   Publish [bold]{site_dir.name}/out/[/bold] to any static host\n\n"
             "2. [bold cyan]Suggested hosts:[/bold cyan]\n"
             "   Vercel, Netlify, GitHub Pages, Cloudflare Pages, or any CDN/static server",
             title="Deploy",
@@ -1264,13 +1305,13 @@ def _deploy():
         )
         if build_result.returncode == 0:
             console.print(
-                "[bold green]✓ Build complete! Static files are in site/out/[/bold green]"
+                f"[bold green]✓ Build complete! Static files are in {site_dir.name}/out/[/bold green]"
             )
         else:
             # Must actually fail the process — a caller (CI, the hosted
             # runner) relies on the exit code to detect a broken build, and
             # silently returning 0 here hid the real `next build` error
-            # behind a much less useful "site/out/ was not produced" message.
+            # behind a much less useful "generated site output was not produced" message.
             raise click.ClickException(
                 "next build failed — see the output above for the real error."
             )
@@ -1414,7 +1455,7 @@ def _warn_if_deprecated_generated_version(cfg: dict, repo_root: Path) -> None:
         return
 
     generated_version = _detect_generated_deepdoc_version(
-        repo_root, repo_root / str(cfg.get("output_dir", "docs") or "docs")
+        repo_root, resolve_output_paths(repo_root, cfg).output_dir
     )
     if generated_version is None:
         return
@@ -1483,31 +1524,17 @@ def _find_repo_root() -> Path:
 
 
 def _inspect_output_state(repo_root: Path, output_dir: Path) -> dict[str, bool]:
-    has_files = output_dir.exists() and any(output_dir.iterdir())
-    markers = [
-        output_dir / ".deepdoc_manifest.json",
-        repo_root / ".deepdoc" / "plan.json",
-        repo_root / ".deepdoc" / "ledger.json",
-        repo_root / ".deepdoc_plan.json",
-        repo_root / ".deepdoc_file_map.json",
-    ]
+    inspection = inspect_output_root(repo_root, output_dir, kind="output")
     return {
-        "has_files": has_files,
-        "deepdoc_managed": any(marker.exists() for marker in markers),
+        "has_files": output_dir.exists() and any(output_dir.iterdir()),
+        "deepdoc_managed": inspection.state == "deepdoc_only",
     }
 
 
-def _cleanup_targets(
-    repo_root: Path, output_dir: Path, include_config: bool = False
-) -> list[Path]:
+def _cleanup_targets(repo_root: Path, include_config: bool = False) -> list[Path]:
     targets: list[Path] = []
-    if output_dir.exists():
-        targets.append(output_dir)
-
     for path in (
         repo_root / ".deepdoc",
-        repo_root / "site",
-        repo_root / "chatbot_backend",
         repo_root / ".deepdoc_plan.json",
         repo_root / ".deepdoc_file_map.json",
     ):
@@ -1524,22 +1551,35 @@ def _cleanup_targets(
 
 def _confirm_clean(
     repo_root: Path,
-    output_dir: Path,
+    cfg: dict[str, Any],
     yes: bool,
     include_config: bool = False,
 ) -> None:
     if yes:
         return
 
+    paths = resolve_output_paths(repo_root, cfg)
+    output_inspection = inspect_output_root(repo_root, paths.output_dir, kind="output")
+    site_inspection = inspect_output_root(repo_root, paths.site_dir, kind="site")
+    owned = output_inspection.owned_files | site_inspection.owned_files
+    preserved = (
+        output_inspection.unmanaged_files
+        | output_inspection.tracked_files
+        | site_inspection.unmanaged_files
+        | site_inspection.tracked_files
+    )
     targets = [
         str(path)
-        for path in _cleanup_targets(
-            repo_root, output_dir, include_config=include_config
-        )
+        for path in _cleanup_targets(repo_root, include_config=include_config)
     ]
-    target_text = ", ".join(targets) if targets else str(output_dir)
+    target_text = ", ".join(targets) if targets else "DeepDoc state"
+    summary = (
+        f"This will remove {len(owned)} DeepDoc-owned output file(s) and "
+        f"state in {target_text}. "
+        f"It will preserve {len(preserved)} unowned/tracked file(s)."
+    )
     if not click.confirm(
-        f"This will permanently delete DeepDoc output/state in {target_text}. Continue?",
+        summary + " Continue?",
         default=False,
     ):
         raise click.Abort()
@@ -1547,10 +1587,11 @@ def _confirm_clean(
 
 def _wipe_deepdoc_output(
     repo_root: Path,
-    output_dir: Path,
+    cfg: dict[str, Any],
     include_config: bool = False,
 ) -> None:
-    for path in _cleanup_targets(repo_root, output_dir, include_config=include_config):
+    clean_owned_outputs(repo_root, cfg)
+    for path in _cleanup_targets(repo_root, include_config=include_config):
         if path.is_dir():
             shutil.rmtree(path)
             continue

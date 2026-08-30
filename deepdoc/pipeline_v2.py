@@ -5,7 +5,7 @@ Flow:
     2. PLAN  — multi-step bucket planner (3 LLM calls) OR legacy single-call planner
     3. GENERATE — execute plan page-by-page, batched (N LLM calls)
     4. API REF — stage OpenAPI assets for the generated API reference page
-    5. BUILD — write the Next.js + Fumadocs site scaffold (site/ + deepdoc.config.json)
+    5. BUILD — write the Next.js + Fumadocs site scaffold (configured site_dir + deepdoc.config.json)
 
 The manifest tracks: source_file → content_hash → [page_slugs]
 So `deepdoc update` can diff changed files → find affected pages → regenerate only those.
@@ -34,6 +34,11 @@ from .generator import (
 )
 from .llm import LLMClient
 from .manifest import Manifest
+from .output_safety import (
+    assert_safe_for_generation,
+    record_output_ownership,
+    resolve_output_paths,
+)
 from .openapi import (
     extract_endpoints_from_spec,
     find_openapi_specs,
@@ -150,13 +155,17 @@ def stage_openapi_assets(
     openapi_paths: list[str] | None = None,
     plan: "DocPlan | None" = None,
     scanned_endpoints: list[dict] | None = None,
+    site_dir: Path | None = None,
 ) -> bool:
     """Stage all detected OpenAPI specs for the generated site."""
-    site_openapi_dir = repo_root / "site" / "openapi"
+    site_openapi_dir = (site_dir or (repo_root / "deepdoc-site")) / "openapi"
     site_openapi_dir.mkdir(parents=True, exist_ok=True)
 
     for existing in site_openapi_dir.iterdir():
-        if existing.is_file():
+        if existing.is_file() and (
+            existing.name.startswith("deepdoc-openapi-")
+            or existing.name == "manifest.json"
+        ):
             existing.unlink()
 
     detected_paths = openapi_paths
@@ -264,7 +273,9 @@ class PipelineV2:
     ) -> None:
         self.repo_root = repo_root
         self.cfg = cfg
-        self.output_dir = repo_root / cfg.get("output_dir", "docs")
+        self.output_paths = resolve_output_paths(repo_root, cfg)
+        self.output_dir = self.output_paths.output_dir
+        self.site_dir = self.output_paths.site_dir
         self.telemetry = telemetry or RunTelemetry(repo_root, "generate")
         self._owns_telemetry = telemetry is None
         self.llm = LLMClient(cfg, telemetry=self.telemetry)
@@ -293,6 +304,10 @@ class PipelineV2:
             raise
 
     def _run_locked(self, force: bool = False, reconcile: bool = False) -> dict[str, Any]:
+        self.output_paths = assert_safe_for_generation(self.repo_root, self.cfg)
+        self.output_dir = self.output_paths.output_dir
+        self.site_dir = self.output_paths.site_dir
+        self.manifest = Manifest(self.output_dir)
         stats: dict[str, Any] = {}
         phase_timings: dict[str, float] = {}
         previous_ledger = load_generation_ledger(self.repo_root) if reconcile else {}
@@ -624,26 +639,30 @@ class PipelineV2:
     _SUPPORTED_LANGUAGES = ("python", "javascript", "typescript", "go", "php", "vue")
 
     def _guard_supported_source_files(self, scan: RepoScan) -> None:
-        """Fail clearly if the scan found no documentable source file.
-
-        Without this, an empty or unsupported-only repo reaches planning with
-        an empty inventory and dies with an opaque PlanContractError instead
-        of a message that names what DeepDoc can actually parse.
-        """
-        if scan.file_contents:
+        """Fail clearly if the scan found no documentable source file."""
+        parsed = getattr(scan, "parsed_files", None)
+        if parsed is not None and parsed:
             return
+        contents = getattr(scan, "file_contents", None) or {}
         supported = ", ".join(self._SUPPORTED_LANGUAGES)
-        if scan.total_files == 0:
+        total = getattr(scan, "total_files", 0)
+        unsup = sorted(getattr(scan, "unsupported_extensions", {}) or {})
+        if total == 0:
             raise click.ClickException(
                 f"No source files found under {self.repo_root}. "
                 f"DeepDoc documents: {supported}."
             )
-        unsupported = sorted(scan.unsupported_extensions)
-        detail = f" (found: {', '.join(unsupported)})" if unsupported else ""
+        if contents:
+            detail = f" (found: {', '.join(unsup)})" if unsup else ""
+            raise click.ClickException(
+                f"No parseable source files found under {self.repo_root}{detail}. "
+                f"Unsupported files are inventoried but cannot generate documentation. "
+                f"DeepDoc parses: {supported}."
+            )
+        detail = f" (found: {', '.join(unsup)})" if unsup else ""
         raise click.ClickException(
-            f"No supported source files found under {self.repo_root}{detail}. "
-            f"DeepDoc documents: {supported}. See the scan summary above for "
-            f"which extensions were skipped."
+            f"No source files found under {self.repo_root}{detail}. "
+            f"DeepDoc documents: {supported}."
         )
 
     def _print_scan(self, scan: RepoScan) -> None:
@@ -670,11 +689,11 @@ class PipelineV2:
         if unsupported_langs:
             named = ", ".join(
                 f"{KNOWN_UNSUPPORTED_LANGUAGE_EXTENSIONS[ext]} ({ext}, {count} file"
-                f"{'s' if count != 1 else ''})"
+                f"{'s' if count != 1 else ''}, inventory only)"
                 for ext, count in sorted(unsupported_langs.items(), key=lambda x: -x[1])
             )
             console.print(
-                f"[yellow]⚠ Unsupported languages present, not parsed or documented: "
+                f"[yellow]⚠ Unsupported languages present — inventoried but not documented: "
                 f"{named}[/yellow]"
             )
 
@@ -688,6 +707,13 @@ class PipelineV2:
             console.print(
                 f"[dim]Skipped {sum(scan.skipped_source_files.values())} source "
                 f"file(s) without reading/parsing: {named_reasons}[/dim]"
+            )
+
+        if getattr(scan, "partial", False):
+            console.print(
+                "[yellow]⚠ Scan was interrupted (timeout/limit reached) — "
+                "results are partial. Re-run with increased "
+                "scan.timeout_seconds or scan.max_repo_files.[/yellow]"
             )
 
     def _print_coverage(self, scan: RepoScan, plan) -> None:
@@ -798,6 +824,7 @@ class PipelineV2:
             scan.openapi_paths,
             plan=plan,
             scanned_endpoints=scan.published_api_endpoints,
+            site_dir=self.site_dir,
         )
 
     # ──────────────────────────────────────────────────────────────────────
@@ -1020,8 +1047,35 @@ class PipelineV2:
         """Build the Next.js + Fumadocs site scaffold from the AI's nav plan."""
         from .site.builder import build_next_from_plan
 
-        build_next_from_plan(
+        site_files = build_next_from_plan(
             self.repo_root, self.output_dir, self.cfg, plan, has_openapi
+        ) or set()
+        site_files.update(
+            path
+            for path in (self.site_dir / "openapi").glob("*")
+            if path.is_file() and (
+                path.name.startswith("deepdoc-openapi-")
+                or path.name == "manifest.json"
+            )
+        )
+        output_files = {
+            path
+            for path in self.output_dir.rglob("*.md")
+            if "deepdoc_generated_version:" in path.read_text(
+                encoding="utf-8", errors="replace"
+            )[:20_000]
+        }
+        manifest_path = self.output_dir / ".deepdoc_manifest.json"
+        if manifest_path.exists():
+            output_files.add(manifest_path)
+        whats_changed = self.output_dir / "whats-changed.md"
+        if whats_changed.exists():
+            output_files.add(whats_changed)
+        record_output_ownership(
+            self.repo_root,
+            self.output_paths,
+            output_files=output_files,
+            site_files=site_files,
         )
         console.print("[green]✓[/green] Next.js site scaffold written")
 

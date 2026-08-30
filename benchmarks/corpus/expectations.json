@@ -1,0 +1,139 @@
+{
+  "_description": "Gold expectations for benchmark fixtures. Each key is a fixture name, value is the expected scan/model output.",
+  "test-file-trap": {
+    "description": "Test files in tests/ dir must be classified as test, produce no RouteRecords",
+    "source_kind": {
+      "tests/app/controllers.py": "test"
+    },
+    "min_parse_rate": 1.0,
+    "max_route_records": 0,
+    "parse_status": { "tests/app/controllers.py": "full" }
+  },
+  "fixture-trap": {
+    "description": "Fixture files in tests/fixtures/ must be classified as fixture, produce no RouteRecords",
+    "source_kind": {
+      "tests/fixtures/payment_api.py": "fixture"
+    },
+    "min_parse_rate": 1.0,
+    "max_route_records": 0,
+    "parse_status": { "tests/fixtures/payment_api.py": "full" }
+  },
+  "generated-trap": {
+    "description": "Generated files with @generated comment + .generated.ts suffix must be classified as generated",
+    "source_kind": {
+      "src/generated/models.generated.ts": "generated"
+    },
+    "min_parse_rate": 1.0,
+    "parse_status": { "src/generated/models.generated.ts": "full" }
+  },
+  "copy-paste-trap": {
+    "description": "Three files with identical function names must remain distinct in the symbol index",
+    "source_kind": {
+      "src/auth.py": "product",
+      "src/payment.py": "product",
+      "src/storage.py": "product"
+    },
+    "min_parse_rate": 1.0,
+    "min_files": 3,
+    "min_symbols": 6
+  },
+  "name-collision": {
+    "description": "Five files each with def create() must have distinct symbols, no conflation",
+    "source_kind": {
+      "src/user_service.py": "product",
+      "src/order_service.py": "product",
+      "src/product_service.py": "product",
+      "src/payment_service.py": "product",
+      "src/notification_service.py": "product"
+    },
+    "min_parse_rate": 1.0,
+    "min_files": 5,
+    "min_symbols": 5
+  },
+  "broken-imports": {
+    "description": "Imports from nonexistent modules must all be unresolved, no fabricated edges",
+    "source_kind": { "src/main.py": "product" },
+    "min_parse_rate": 1.0,
+    "min_imports": 3
+  },
+  "polyglot-small": {
+    "description": "Mix of supported (Python, TS) and unsupported (Ruby, .foo) must all be visible with correct parse_status",
+    "source_kind": {
+      "src/main.py": "product",
+      "src/server.ts": "product",
+      "src/legacy.rb": "product",
+      "src/config.foo": "product"
+    },
+    "parse_status": {
+      "src/main.py": "full",
+      "src/server.ts": "full",
+      "src/legacy.rb": "inventory_only",
+      "src/config.foo": "inventory_only"
+    },
+    "min_files": 4,
+    "min_parsed_files": 2,
+    "supported_languages": ["python", "typescript"],
+    "unsupported_languages": ["Ruby"]
+  },
+  "unknown-foo": {
+    "description": "Extensionless files must be visible with parse_status=unknown",
+    "min_files": 1,
+    "parse_status": { "src/README": "unknown" }
+  },
+  "django_app": {
+    "description": "Django fixture — route detection, URL patterns, class views",
+    "min_files": 2,
+    "min_route_records": 3,
+    "min_parsed_files": 1,
+    "frameworks": ["django"]
+  },
+  "express_app": {
+    "description": "Express fixture — mounted router prefixes, chained routes, middleware",
+    "min_files": 2,
+    "min_route_records": 2,
+    "min_parsed_files": 1,
+    "frameworks": ["express"]
+  },
+  "fastify_app": {
+    "description": "Fastify fixture — plugin prefixes, hooks, schema detection",
+    "min_files": 2,
+    "min_route_records": 2,
+    "min_parsed_files": 1,
+    "frameworks": ["fastify"]
+  },
+  "falcon_app": {
+    "description": "Falcon fixture — app middleware, inherited resources, add_route",
+    "min_files": 2,
+    "min_route_records": 1,
+    "min_parsed_files": 2,
+    "frameworks": ["falcon"]
+  },
+  "go_app": {
+    "description": "Go/Gin fixture — grouped routes, middleware accumulation",
+    "min_files": 2,
+    "min_route_records": 1,
+    "min_parsed_files": 1,
+    "frameworks": ["go"]
+  },
+  "vue_app": {
+    "description": "Vue 3 fixture — defineProps/Emits/Model, useRouter, storeToRefs",
+    "min_files": 2,
+    "min_parsed_files": 1,
+    "frameworks": ["vue"]
+  },
+  "java_app": {
+    "description": "Java/Spring Boot fixture — annotations, controller→service→repository layers, call edges",
+    "min_files": 4,
+    "min_parse_rate": 1.0,
+    "min_symbols": 10,
+    "min_call_edges": 5,
+    "frameworks": ["java"]
+  },
+  "rust_app": {
+    "description": "Rust/Actix-web fixture — attributes, handler functions, struct fields",
+    "min_files": 1,
+    "min_parse_rate": 1.0,
+    "min_symbols": 3,
+    "frameworks": ["rust"]
+  }
+}

@@ -23,6 +23,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "decompose_threshold": 7,  # buckets with 7+ files trigger decomposition consideration
     "planning_unit_max_files_seed": 0,  # 0 = no cap; else an advisory ceiling on the first split-seed size for an over-budget planning unit (bound_planning_unit's exact-token gate is what actually proves each part fits, this only shapes the initial guess)
     "consolidation_similarity_threshold": 0.55,  # Jaccard threshold for merging near-duplicate buckets
+    "max_files_per_bucket": 25,  # buckets above this are split by the decomposition pass
+    "max_flow_files": 45,  # cap on files pulled into a single flow's context
+    "max_flow_symbols": 80,  # cap on symbols pulled into a single flow's context
     "database_doc_mode": "overview_plus_groups",
     "database_group_model_cap": 12,
     "database_group_file_cap": 8,
@@ -39,6 +42,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "persistent_index": True,
     },
     # ── Concurrency ─────────────────────────────────────────────────────
+    "batch_size": 10,  # pages submitted per generation batch
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)
     "manifest_checkpoint_pages": 10,
@@ -46,6 +50,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # ── Integration detection ────────────────────────────────────────────
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────
+    "consistency_pass": True,  # post-generation LLM pass adding cross-page "See also" links
     "include_feature_pages": True,
     "include_endpoint_pages": True,
     "include_integration_pages": True,
@@ -54,6 +59,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "provider": "",  # must be set in .deepdoc.yaml — run: deepdoc init
         "model": "",
         "api_key_env": "",
+        "api_version": "",  # Azure deployments; written by `deepdoc init --provider azure`
         "base_url": None,
         "max_tokens": None,
         "temperature": 0.2,
@@ -72,6 +78,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # (python/javascript/typescript/go/php/vue) is fixed and independent of
     # this list. Adding a language here does not make DeepDoc parse it.
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
+    # Descriptive only, like `languages` above — names the frameworks in the
+    # generation prompt. Does not gate or broaden detection.
+    "frameworks": [],
     "include": [],  # glob patterns — empty = everything
     "services": [],  # optional monorepo service roots, e.g. ["services/auth", "apps/api"]
     # ── Endpoint grouping ────────────────────────────────────────────────

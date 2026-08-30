@@ -715,6 +715,13 @@ site:
 | **GitHub Pages** | | |
 | `github_pages.branch` | `gh-pages` | Branch for GitHub Pages deploy |
 | `github_pages.remote` | `origin` | Git remote for deploy |
+| `batch_size` | `10` | Pages submitted per generation batch |
+| `max_files_per_bucket` | `25` | Buckets above this are split by the decomposition pass |
+| `max_flow_files` | `45` | Cap on files pulled into a single flow's context |
+| `max_flow_symbols` | `80` | Cap on symbols pulled into a single flow's context |
+| `consistency_pass` | `true` | Post-generation LLM pass adding cross-page "See also" links |
+| `frameworks` | `[]` | Descriptive only — names frameworks in the generation prompt |
+| `llm.api_version` | `""` | Azure API version (e.g. `2024-02-01`) |
 | **Site** | | |
 | `site.repo_url` | `""` | Repo URL shown in the generated site navigation |
 | `site.favicon` | `""` | Path to favicon |

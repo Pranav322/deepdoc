@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import matter from 'gray-matter';
+import { getConfig } from './config';
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
 import remarkGfm from 'remark-gfm';
@@ -128,7 +129,11 @@ async function getProcessor() {
         .use(rehypeMermaid)
         .use(rehypeBasePath)
         .use(rehypeShiki, {
-          themes: { light: 'github-light', dark: 'github-dark' },
+          // Configurable via site.theme.code_theme in .deepdoc.yaml.
+          themes: {
+            light: getConfig().theme?.code_theme?.light || 'github-light',
+            dark: getConfig().theme?.code_theme?.dark || 'github-dark',
+          },
           fallbackLanguage: 'text',
         })
         .use(rehypeSlug)

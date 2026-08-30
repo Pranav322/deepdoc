@@ -25,6 +25,14 @@
   --color-fd-ring: var(--brand-light);
 }
 
+/* Fonts. --font-sans / --font-mono are emitted into <head> from
+   site.theme.fonts; both always carry a real fallback stack, so this holds
+   even when no webfont is configured (the default). */
+body { font-family: var(--font-sans, ui-sans-serif, system-ui, sans-serif); }
+code, pre, kbd, samp {
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace);
+}
+
 /* ── Callouts ─────────────────────────────────────────────────────────────── */
 .dd-callout {
   border-left: 3px solid;

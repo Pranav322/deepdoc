@@ -9,6 +9,20 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **Branding: palette presets, fonts, code theme, logo and favicon.**
+  `site.theme.preset` selects one of seven built-in palettes (neutral, black,
+  vitepress, ocean, catppuccin, dusk, purple); `site.theme.tokens` overrides any
+  individual Fumadocs design token in light or dark; `site.theme.code_theme`
+  picks the Shiki theme; and the long-dead `site.logo`, `site.logo_dark`,
+  `site.favicon` and `site.repo_url` keys now do something — assets are copied
+  into the site's `public/` and the repo URL drives the edit-this-page link.
+  - Fonts (`site.theme.fonts`) are opt-in: empty by default, so the site makes
+    no external request unless a family is named. Every stack keeps a real
+    system fallback.
+  - The theme is composed into CSS in Python and injected per request, so it
+    re-applies on `deepdoc serve` with no regeneration. Precedence is
+    preset → brand → explicit token overrides.
+
 - **A configurable site surface in `.deepdoc.yaml`.** New optional `site.theme`,
   `site.chrome`, `site.nav` and `site.labels` blocks cover palette preset, raw
   design-token overrides, fonts, code theme, TOC/sidebar/breadcrumb/footer

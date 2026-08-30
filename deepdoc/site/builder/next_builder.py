@@ -27,12 +27,9 @@ _DEFAULT_DARK = "#c1331f"
 
 _HEX_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\Z")
 
-# Built-in palettes. Vendored as plain CSS rather than imported from
-# fumadocs-ui/css/*.css: those are Tailwind `@theme` blocks and this template
-# ships no Tailwind (see postcss.config.mjs / commit eef8106), so importing one
-# would half-apply and break light mode.
-_PRESETS = ("neutral", "black", "vitepress", "ocean", "catppuccin", "dusk",
-            "purple", "solar", "shadcn")
+from .presets import PRESETS as _PRESET_TOKENS
+
+_PRESETS = tuple(_PRESET_TOKENS)
 
 _TOC_STYLES = ("clerk", "normal")
 
@@ -81,9 +78,47 @@ def build_next_from_plan(
     site_dir.mkdir(parents=True, exist_ok=True)
 
     written = _copy_template_files(site_dir)
-    written.add(_write_deepdoc_config(site_dir, cfg, plan, has_openapi))
+    written |= _copy_brand_assets(site_dir, repo_root, cfg)
+    written.add(_write_deepdoc_config(site_dir, cfg, plan, has_openapi, repo_root))
     written.add(_write_docs_env(site_dir, output_dir))
     return written
+
+
+def _copy_brand_assets(site_dir: Path, repo_root: Path, cfg: dict[str, Any]) -> set[Path]:
+    """Copy the configured logo/favicon into ``<site_dir>/public/``.
+
+    Paths are resolved against the repository root. Next serves ``public/`` at
+    the site root, so the page references them as ``/<filename>``.
+    """
+    site_cfg = cfg.get("site") or {}
+    written: set[Path] = set()
+    for key in ("logo", "logo_dark", "favicon"):
+        rel = str(site_cfg.get(key) or "").strip()
+        if not rel:
+            continue
+        src = (repo_root / rel).resolve()
+        if not src.is_file():
+            _warn(f"site.{key}: {rel!r} not found — skipping.")
+            continue
+        dst = site_dir / "public" / src.name
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        written.add(dst)
+    return written
+
+
+def brand_asset_urls(repo_root: Path, cfg: dict[str, Any]) -> dict[str, str]:
+    """Public URLs for the brand assets that actually exist on disk."""
+    site_cfg = cfg.get("site") or {}
+    urls: dict[str, str] = {}
+    for key in ("logo", "logo_dark", "favicon"):
+        rel = str(site_cfg.get(key) or "").strip()
+        if not rel:
+            continue
+        src = (repo_root / rel).resolve()
+        if src.is_file():
+            urls[key] = f"/{src.name}"
+    return urls
 
 
 def resolve_colors(cfg: dict[str, Any]) -> dict[str, str]:
@@ -162,6 +197,70 @@ def resolve_theme(cfg: dict[str, Any]) -> dict[str, Any]:
             "dark": str(code.get("dark") or "").strip() or "github-dark",
         },
     }
+
+
+def _font_stack(family: str, fallback: str) -> str:
+    return f"'{family}', {fallback}" if family else fallback
+
+
+_SANS_FALLBACK = "ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif"
+_MONO_FALLBACK = "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace"
+
+
+def theme_css(theme: dict[str, Any], colors: dict[str, str]) -> str:
+    """Compose the theme into one CSS block, injected into <head> at request time.
+
+    Emitted from config rather than baked into ``globals.css`` so that editing
+    ``.deepdoc.yaml`` and re-running ``deepdoc serve`` applies it with no
+    regeneration.
+
+    Precedence, lowest to highest: preset -> brand -> explicit token overrides.
+    Every rule is unlayered, and Fumadocs defines its own tokens inside
+    ``@layer theme`` / ``@layer utilities`` — unlayered CSS beats any layered
+    rule regardless of specificity or source order, so these always win.
+    """
+    preset = _PRESET_TOKENS.get(theme.get("preset") or "", {})
+    tokens = theme.get("tokens") or {}
+    fonts = theme.get("fonts") or {}
+
+    def block(selector: str, decls: list[str]) -> str:
+        return f"{selector}{{{''.join(decls)}}}" if decls else ""
+
+    light = [f"--color-fd-{k}:{v};" for k, v in (preset.get("light") or {}).items()]
+    dark = [f"--color-fd-{k}:{v};" for k, v in (preset.get("dark") or {}).items()]
+
+    light += [
+        f"--brand:{colors['primary']};",
+        f"--brand-light:{colors['light']};",
+        f"--brand-dark:{colors['dark']};",
+        "--color-fd-primary:var(--brand);",
+        "--color-fd-ring:var(--brand);",
+        f"--font-sans:{_font_stack(fonts.get('sans', ''), _SANS_FALLBACK)};",
+        f"--font-mono:{_font_stack(fonts.get('mono', ''), _MONO_FALLBACK)};",
+    ]
+    dark += [
+        "--color-fd-primary:var(--brand-light);",
+        "--color-fd-ring:var(--brand-light);",
+    ]
+
+    # Explicit overrides come last so they beat both preset and brand.
+    light += [f"--color-fd-{k}:{v};" for k, v in (tokens.get("light") or {}).items()]
+    dark += [f"--color-fd-{k}:{v};" for k, v in (tokens.get("dark") or {}).items()]
+
+    return block(":root", light) + block(".dark", dark)
+
+
+def google_fonts_href(theme: dict[str, Any]) -> str:
+    """Google Fonts URL for the configured families, or "" when none are set.
+
+    Opt-in by design: with no fonts configured the site makes no external
+    request at all.
+    """
+    families = [f for f in (theme.get("fonts") or {}).values() if f]
+    if not families:
+        return ""
+    parts = "&".join(f"family={f.replace(' ', '+')}:wght@400;500;600;700" for f in families)
+    return f"https://fonts.googleapis.com/css2?{parts}&display=swap"
 
 
 def resolve_chrome(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -339,8 +438,10 @@ def _write_deepdoc_config(
     cfg: dict[str, Any],
     plan: DocPlan,
     has_openapi: bool,
+    repo_root: Path | None = None,
 ) -> Path:
     colors = resolve_colors(cfg)
+    theme = resolve_theme(cfg)
     chatbot_cfg = cfg.get("chatbot", {})
     chatbot_enabled = bool(chatbot_cfg.get("enabled"))
     backend_url = ""
@@ -354,8 +455,15 @@ def _write_deepdoc_config(
         "project_name": cfg.get("project_name", "Docs"),
         "nav": _build_nav(plan, has_openapi),
         "colors": colors,
-        "theme": resolve_theme(cfg),
+        "theme": {
+            **theme,
+            # Precomposed so the page can inject it verbatim; see theme_css().
+            "css": theme_css(theme, colors),
+            "google_fonts": google_fonts_href(theme),
+        },
         "chrome": resolve_chrome(cfg),
+        "brand": brand_asset_urls(repo_root or site_dir.parent, cfg),
+        "repo": _repo_info(cfg),
         "labels": {
             str(k): str(v) for k, v in ((cfg.get("site") or {}).get("labels") or {}).items()
         },
@@ -369,6 +477,23 @@ def _write_deepdoc_config(
     path = site_dir / "deepdoc.config.json"
     _write_json(path, config)
     return path
+
+
+def _repo_info(cfg: dict[str, Any]) -> dict[str, str]:
+    """Split ``site.repo_url`` into the parts Fumadocs' edit-link needs."""
+    site_cfg = cfg.get("site") or {}
+    url = str(site_cfg.get("repo_url") or "").strip().rstrip("/")
+    owner = name = ""
+    match = re.search(r"github\.com[:/]+([^/]+)/([^/]+?)(?:\.git)?\Z", url)
+    if match:
+        owner, name = match.group(1), match.group(2)
+    return {
+        "url": url,
+        "owner": owner,
+        "name": name,
+        "branch": str(site_cfg.get("edit_branch") or "main").strip() or "main",
+        "path_prefix": str(site_cfg.get("edit_path_prefix") or "").strip(),
+    }
 
 
 def _head_commit_sha(repo_root: Path) -> str:

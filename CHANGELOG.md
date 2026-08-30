@@ -9,6 +9,19 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **Sidebar navigation is controllable via `site.nav`.** Pin or reorder
+  top-level sections (`sections`), hoist pages above them (`pin`), rename a
+  page or section (`rename`), remove one from the sidebar while leaving it
+  URL-reachable (`hide`), and add entries the planner never produced (`extra`)
+  — either a hand-written Markdown page or an external link.
+  - `extra` closes a real gap: a hand-written `.md` dropped into the output
+    directory already rendered and was reachable by URL, but had no way into
+    the sidebar. Generation now also reports pages in that state.
+  - Everything is derived from the saved plan, so reordering a sidebar costs no
+    LLM call and no repository scan — it applies on the next `deepdoc serve`.
+  - An override naming a page that does not exist warns and is skipped; a stale
+    entry can never break a build.
+
 - **Site chrome is configurable via `site.chrome`.** Sidebar (on/off, default
   open level, collapsible), table of contents (on/off, `clerk`/`normal` style,
   heading depth), breadcrumbs, previous/next page footer, edit-this-page,

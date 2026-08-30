@@ -513,3 +513,86 @@ def test_edit_link_needs_a_resolvable_repo(tmp_path: Path):
     page = (tmp_path / "site" / "app" / "(main)" / "[[...slug]]" / "page.tsx")
     build_next_from_plan(tmp_path, tmp_path / "docs", _chrome_cfg(edit_link=True), _make_plan())
     assert "repo?.owner && repo?.name" in page.read_text()
+
+
+# ── nav overrides (site.nav) ──────────────────────────────────────────────────
+
+
+def _nav_tree() -> list[dict]:
+    return [
+        {"type": "page", "title": "Overview", "slug": "/"},
+        {"type": "section", "title": "Guides", "items": [
+            {"title": "Auth", "slug": "auth-service"},
+            {"title": "Legacy", "slug": "legacy"},
+        ]},
+        {"type": "section", "title": "API", "items": [{"title": "Routes", "slug": "routes"}]},
+    ]
+
+
+_KNOWN = {"/", "auth-service", "legacy", "routes", "runbook"}
+
+
+def _apply(**nav_cfg):
+    from deepdoc.site.builder.next_builder import apply_nav_overrides
+
+    return apply_nav_overrides(_nav_tree(), nav_cfg, _KNOWN)
+
+
+def test_rename_by_slug_and_by_section_title():
+    nav, warnings = _apply(rename={"auth-service": "Authentication", "API": "API Reference"})
+    titles = [n["title"] for n in nav]
+    assert "API Reference" in titles
+    assert nav[1]["items"][0]["title"] == "Authentication"
+    assert warnings == [], "a successful rename must not warn"
+
+
+def test_hide_removes_a_page():
+    nav, _ = _apply(hide=["legacy"])
+    assert "legacy" not in [i["slug"] for n in nav if n.get("items") for i in n["items"]]
+
+
+def test_hiding_every_page_drops_the_empty_section():
+    nav, _ = _apply(hide=["routes"])
+    assert "API" not in [n["title"] for n in nav]
+
+
+def test_extra_page_joins_an_existing_section():
+    nav, _ = _apply(extra=[{"slug": "runbook", "title": "Runbook", "section": "Guides"}])
+    guides = next(n for n in nav if n["title"] == "Guides")
+    assert "Runbook" in [i["title"] for i in guides["items"]]
+
+
+def test_extra_page_creates_a_missing_section():
+    nav, _ = _apply(extra=[{"slug": "runbook", "title": "Runbook", "section": "Ops"}])
+    assert "Ops" in [n["title"] for n in nav]
+
+
+def test_extra_external_link_keeps_its_url():
+    nav, _ = _apply(extra=[{"url": "https://example.com", "title": "Site"}])
+    assert any(n.get("url") == "https://example.com" for n in nav)
+
+
+def test_sections_pin_the_order():
+    nav, _ = _apply(sections=["API", "Guides"])
+    assert [n["title"] for n in nav][:2] == ["API", "Guides"]
+
+
+def test_pin_hoists_a_page_above_sections():
+    nav, _ = _apply(pin=["/"])
+    assert nav[0]["slug"] == "/"
+
+
+def test_unknown_entries_warn_but_never_raise():
+    """A stale override must not break a build."""
+    nav, warnings = _apply(hide=["ghost"], pin=["nope"], rename={"absent": "X"},
+                           sections=["Missing"])
+    assert nav, "the tree must survive"
+    joined = " ".join(warnings)
+    for term in ("ghost", "nope", "absent", "Missing"):
+        assert term in joined
+
+
+def test_no_overrides_leaves_the_tree_untouched():
+    nav, warnings = _apply()
+    assert nav == _nav_tree()
+    assert warnings == []

@@ -79,7 +79,7 @@ def build_next_from_plan(
 
     written = _copy_template_files(site_dir)
     written |= _copy_brand_assets(site_dir, repo_root, cfg)
-    written.add(_write_deepdoc_config(site_dir, cfg, plan, has_openapi, repo_root))
+    written.add(_write_deepdoc_config(site_dir, cfg, plan, has_openapi, repo_root, output_dir))
     written.add(_write_docs_env(site_dir, output_dir))
     return written
 
@@ -421,6 +421,109 @@ def _find_overview_slug(plan: DocPlan) -> str | None:
     return None
 
 
+def _walk_nav(nav: list[dict]):
+    """Yield every node in the tree, sections included."""
+    for entry in nav:
+        yield entry
+        if entry.get("items"):
+            yield from _walk_nav(entry["items"])
+
+
+def apply_nav_overrides(
+    nav: list[dict],
+    nav_cfg: dict[str, Any],
+    known_slugs: set[str],
+) -> tuple[list[dict], list[str]]:
+    """Apply ``site.nav`` overrides to the built nav tree.
+
+    Four ordered passes: rename, hide, extra, then pin/order. Everything is
+    derived from the already-saved plan, so reordering a sidebar costs no LLM
+    call and no scan.
+
+    An override naming a slug that does not exist is reported as a warning and
+    skipped — a stale entry must never break a build.
+    """
+    warnings: list[str] = []
+    rename = {str(k): str(v) for k, v in (nav_cfg.get("rename") or {}).items()}
+    hide = {str(s) for s in (nav_cfg.get("hide") or [])}
+    pin = [str(s) for s in (nav_cfg.get("pin") or [])]
+    sections = [str(s) for s in (nav_cfg.get("sections") or [])]
+
+    for name, values in (("hide", hide), ("pin", set(pin))):
+        for slug in sorted(values - known_slugs):
+            warnings.append(f"site.nav.{name}: no page named {slug!r}")
+
+    # 1. rename — by slug, or by section title.
+    # Track what actually matched: checking afterwards would report a
+    # successful section rename as missing, since the old title is gone.
+    applied: set[str] = set()
+    for node in _walk_nav(nav):
+        slug = node.get("slug")
+        title = node.get("title")
+        if slug and slug in rename:
+            node["title"] = rename[slug]
+            applied.add(slug)
+        elif node.get("type") == "section" and title in rename:
+            node["title"] = rename[title]
+            applied.add(title)
+    for key in sorted(set(rename) - applied):
+        warnings.append(f"site.nav.rename: no page or section named {key!r}")
+
+    # 2. hide — drop pages, then any section left empty
+    def prune(entries: list[dict]) -> list[dict]:
+        kept = []
+        for entry in entries:
+            if entry.get("slug") in hide and entry.get("type") != "section":
+                continue
+            if entry.get("items") is not None:
+                entry["items"] = prune(entry["items"])
+                if not entry["items"]:
+                    continue
+            kept.append(entry)
+        return kept
+
+    nav = prune(nav)
+
+    # 3. extra — hand-written pages and external links
+    for item in nav_cfg.get("extra") or []:
+        if not isinstance(item, dict) or not item.get("title"):
+            warnings.append(f"site.nav.extra: {item!r} needs a 'title'")
+            continue
+        slug, url = str(item.get("slug") or ""), str(item.get("url") or "")
+        if not slug and not url:
+            warnings.append(f"site.nav.extra: {item['title']!r} needs a 'slug' or a 'url'")
+            continue
+        if slug and slug not in known_slugs:
+            warnings.append(f"site.nav.extra: no page named {slug!r}")
+            continue
+        node = {"type": "page", "title": str(item["title"])}
+        node["url" if url else "slug"] = url or slug
+
+        section_name = str(item.get("section") or "")
+        if not section_name:
+            nav.append(node)
+            continue
+        for entry in nav:
+            if entry.get("type") == "section" and entry.get("title") == section_name:
+                entry.setdefault("items", []).append(node)
+                break
+        else:
+            nav.append({"type": "section", "title": section_name, "items": [node]})
+
+    # 4. pin, then explicit section order; anything unlisted keeps its position
+    if pin:
+        pinned = [n for slug in pin for n in nav if n.get("slug") == slug]
+        nav = pinned + [n for n in nav if n not in pinned]
+    if sections:
+        order = {title: i for i, title in enumerate(sections)}
+        for title in sections:
+            if not any(n.get("title") == title for n in nav):
+                warnings.append(f"site.nav.sections: no section named {title!r}")
+        nav.sort(key=lambda n: order.get(n.get("title", ""), len(order)))
+
+    return nav, warnings
+
+
 def _slug_in_nav(nav: list[dict], slug: str) -> bool:
     def walk(entries: list[dict]) -> bool:
         for entry in entries:
@@ -439,9 +542,42 @@ def _write_deepdoc_config(
     plan: DocPlan,
     has_openapi: bool,
     repo_root: Path | None = None,
+    output_dir: Path | None = None,
 ) -> Path:
     colors = resolve_colors(cfg)
     theme = resolve_theme(cfg)
+
+    # Slugs the user may legitimately reference: planned pages plus any
+    # hand-written .md dropped into the output directory (those already render
+    # and are URL-reachable; site.nav.extra is how they reach the sidebar).
+    known_slugs = {
+        str(getattr(page, "slug", "")) for page in getattr(plan, "pages", []) or []
+    }
+    if output_dir is not None and output_dir.is_dir():
+        known_slugs |= {p.stem for p in output_dir.glob("*.md")}
+    known_slugs.discard("")
+
+    nav, nav_warnings = apply_nav_overrides(
+        _build_nav(plan, has_openapi),
+        (cfg.get("site") or {}).get("nav") or {},
+        known_slugs,
+    )
+    for warning in nav_warnings:
+        _warn(warning)
+
+    # Hand-written pages that render but are absent from the sidebar.
+    if output_dir is not None and output_dir.is_dir():
+        in_nav = {n.get("slug") for n in _walk_nav(nav)}
+        planned = {str(getattr(p, "slug", "")) for p in getattr(plan, "pages", []) or []}
+        orphans = sorted(
+            p.stem for p in output_dir.glob("*.md")
+            if p.stem not in in_nav and p.stem not in planned and p.stem != "index"
+        )
+        if orphans:
+            _warn(
+                f"{len(orphans)} page(s) are not in the sidebar: {', '.join(orphans[:5])}"
+                f"{' …' if len(orphans) > 5 else ''}. Add them under site.nav.extra."
+            )
     chatbot_cfg = cfg.get("chatbot", {})
     chatbot_enabled = bool(chatbot_cfg.get("enabled"))
     backend_url = ""
@@ -453,7 +589,7 @@ def _write_deepdoc_config(
 
     config = {
         "project_name": cfg.get("project_name", "Docs"),
-        "nav": _build_nav(plan, has_openapi),
+        "nav": nav,
         "colors": colors,
         "theme": {
             **theme,

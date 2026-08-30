@@ -10,7 +10,9 @@ export interface NavSection {
 export interface NavPage {
   type?: 'page';
   title: string;
-  slug: string;
+  /** Internal page slug; absent when `url` points somewhere external. */
+  slug?: string;
+  url?: string;
 }
 
 export type NavItem = NavPage | NavSection;
@@ -31,10 +33,17 @@ export function buildPageTree(): PageTree.Root {
         defaultOpen: true,
       };
     }
+    // site.nav.extra entries may carry an absolute `url` instead of a slug.
+    const external = (entry as { url?: string }).url;
     return {
       type: 'page',
       name: entry.title,
-      url: entry.slug === '/' || entry.slug === 'index' ? '/' : `/${entry.slug}`,
+      url: external
+        ? external
+        : entry.slug === '/' || entry.slug === 'index'
+          ? '/'
+          : `/${entry.slug}`,
+      ...(external ? { external: true } : {}),
     };
   }
 

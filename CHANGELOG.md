@@ -9,6 +9,10 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **`site.repo_url` is auto-detected from the git `origin` remote** when left
+  empty, the same way the commit SHA already was. SSH-style remotes are
+  normalised to https, and an explicit config value still wins.
+
 - **UI strings are overridable via `site.labels`.** Covers Fumadocs' own
   strings (`search`, `toc`, `lastUpdate`, `editOnGithub`, `nextPage`,
   `previousPage`, `chooseTheme`, …) and DeepDoc's callout headings (`note`,

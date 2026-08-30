@@ -312,3 +312,50 @@ def test_no_labels_by_default():
     from deepdoc.site.builder.next_builder import resolve_labels
 
     assert resolve_labels(deepcopy(DEFAULT_CONFIG)) == {"ui": {}, "callouts": {}}
+
+
+# ── repo_url auto-detection ───────────────────────────────────────────────────
+
+
+def _fake_git(monkeypatch, url: str | None):
+    """Stand in for gitpython so tests never touch a real repo."""
+    import deepdoc.site.builder.next_builder as nb
+
+    class _Repo:
+        def __init__(self, *a, **k):
+            if url is None:
+                raise RuntimeError("not a repo")
+            self.remotes = type("R", (), {"origin": type("O", (), {"url": url})()})()
+
+    monkeypatch.setitem(__import__("sys").modules, "git", type("M", (), {"Repo": _Repo}))
+    return nb
+
+
+@pytest.mark.parametrize("remote,expected", [
+    ("https://github.com/acme/widgets.git", "https://github.com/acme/widgets"),
+    ("git@github.com:acme/widgets.git", "https://github.com/acme/widgets"),
+    ("ssh://git@gitlab.com:acme/widgets.git", "https://gitlab.com/acme/widgets"),
+    ("https://github.com/acme/widgets", "https://github.com/acme/widgets"),
+])
+def test_repo_url_is_detected_from_the_git_remote(remote, expected, monkeypatch, tmp_path):
+    """Saves stating what the repository already knows, like the commit SHA."""
+    nb = _fake_git(monkeypatch, remote)
+    assert nb._detect_repo_url(tmp_path) == expected
+
+
+def test_detection_is_silent_outside_a_git_repo(monkeypatch, tmp_path):
+    nb = _fake_git(monkeypatch, None)
+    assert nb._detect_repo_url(tmp_path) == ""
+
+
+def test_configured_repo_url_beats_detection(monkeypatch, tmp_path):
+    nb = _fake_git(monkeypatch, "git@github.com:acme/widgets.git")
+    info = nb._repo_info(_cfg(repo_url="https://gitlab.com/me/thing"), tmp_path)
+    assert info["url"] == "https://gitlab.com/me/thing"
+
+
+def test_edit_link_survives_when_the_url_was_detected(capsys):
+    """The guard must judge the resolved URL, not just the configured one."""
+    cfg = _cfg(repo_url="", chrome={"edit_link": True})
+    assert resolve_chrome(cfg, "https://github.com/acme/widgets")["edit_link"] is True
+    assert capsys.readouterr().out == ""

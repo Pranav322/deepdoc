@@ -297,8 +297,12 @@ def resolve_labels(cfg: dict[str, Any]) -> dict[str, dict[str, str]]:
     return {"ui": ui, "callouts": callouts}
 
 
-def resolve_chrome(cfg: dict[str, Any]) -> dict[str, Any]:
-    """Validate and normalise ``site.chrome`` (layout toggles)."""
+def resolve_chrome(cfg: dict[str, Any], repo_url: str | None = None) -> dict[str, Any]:
+    """Validate and normalise ``site.chrome`` (layout toggles).
+
+    ``repo_url`` is the *resolved* repository URL, which may have been
+    auto-detected from git rather than configured.
+    """
     from ...config import DEFAULT_CONFIG
 
     defaults = DEFAULT_CONFIG["site"]["chrome"]
@@ -326,8 +330,14 @@ def resolve_chrome(cfg: dict[str, Any]) -> dict[str, Any]:
     resolved["toc_depth"] = levels
 
     # An edit link without a repository URL would render a dead anchor.
-    if resolved.get("edit_link") and not str((cfg.get("site") or {}).get("repo_url") or "").strip():
-        _warn("site.chrome.edit_link is on but site.repo_url is empty — disabling the edit link.")
+    effective_url = repo_url if repo_url is not None else str(
+        (cfg.get("site") or {}).get("repo_url") or ""
+    )
+    if resolved.get("edit_link") and not effective_url.strip():
+        _warn(
+            "site.chrome.edit_link is on but no repository URL was found "
+            "(set site.repo_url, or add a git `origin` remote) — disabling the edit link."
+        )
         resolved["edit_link"] = False
 
     links = []
@@ -580,6 +590,7 @@ def _write_deepdoc_config(
 ) -> Path:
     colors = resolve_colors(cfg)
     theme = resolve_theme(cfg)
+    repo = _repo_info(cfg, repo_root)
 
     # Slugs the user may legitimately reference: planned pages plus any
     # hand-written .md dropped into the output directory (those already render
@@ -631,9 +642,9 @@ def _write_deepdoc_config(
             "css": theme_css(theme, colors),
             "google_fonts": google_fonts_href(theme),
         },
-        "chrome": resolve_chrome(cfg),
+        "chrome": resolve_chrome(cfg, repo["url"]),
         "brand": brand_asset_urls(repo_root or site_dir.parent, cfg),
-        "repo": _repo_info(cfg),
+        "repo": repo,
         "labels": resolve_labels(cfg),
         "chatbot": {
             "enabled": chatbot_enabled,
@@ -647,10 +658,37 @@ def _write_deepdoc_config(
     return path
 
 
-def _repo_info(cfg: dict[str, Any]) -> dict[str, str]:
-    """Split ``site.repo_url`` into the parts Fumadocs' edit-link needs."""
+def _detect_repo_url(repo_root: Path | None) -> str:
+    """Best-effort ``origin`` URL from git, normalised to https.
+
+    Saves the common case from having to state something the repository
+    already knows, the same way the commit SHA is picked up.
+    """
+    if repo_root is None:
+        return ""
+    try:
+        import git as _git
+
+        repo = _git.Repo(repo_root, search_parent_directories=True)
+        url = str(repo.remotes.origin.url).strip()
+    except Exception:
+        return ""
+    # scp-style (git@host:owner/repo.git) -> https://host/owner/repo
+    match = re.match(r"(?:ssh://)?git@([^:/]+)[:/](.+?)(?:\.git)?/?\Z", url)
+    if match:
+        return f"https://{match.group(1)}/{match.group(2)}"
+    return re.sub(r"\.git/?\Z", "", url)
+
+
+def _repo_info(cfg: dict[str, Any], repo_root: Path | None = None) -> dict[str, str]:
+    """Split the repository URL into the parts Fumadocs' edit-link needs.
+
+    Falls back to the git ``origin`` remote when ``site.repo_url`` is unset.
+    """
     site_cfg = cfg.get("site") or {}
     url = str(site_cfg.get("repo_url") or "").strip().rstrip("/")
+    if not url:
+        url = _detect_repo_url(repo_root)
     owner = name = ""
     match = re.search(r"github\.com[:/]+([^/]+)/([^/]+?)(?:\.git)?\Z", url)
     if match:

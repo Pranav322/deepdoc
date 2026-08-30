@@ -129,3 +129,52 @@ def test_report_silent_on_first_write(capsys):
     """Nothing to diff against when the site had no previous config."""
     cli._report_site_config_changes({}, {"colors": {"primary": "#fff"}})
     assert capsys.readouterr().out.strip() == ""
+
+
+# ── the product requirement, end to end ───────────────────────────────────────
+
+
+def test_every_ui_setting_applies_on_serve_with_no_llm(repo: Path, monkeypatch):
+    """Edit .deepdoc.yaml -> `deepdoc serve` -> new UI. No regeneration.
+
+    Covers all six live-appliable families at once and trips hard if anything
+    on this path constructs an LLM client.
+    """
+    import deepdoc.llm.client as llm_client
+    from copy import deepcopy
+    from deepdoc.config import DEFAULT_CONFIG
+
+    def _boom(*_a, **_kw):  # pragma: no cover - must never run
+        raise AssertionError("an LLM client was constructed during serve resync")
+
+    monkeypatch.setattr(llm_client, "LLMClient", _boom)
+    monkeypatch.setattr("deepdoc.persistence_v2.load_plan", lambda _r: _plan())
+
+    site, docs = repo / "site", repo / "docs"
+    cfg = deepcopy(DEFAULT_CONFIG)
+    cfg.update({"project_name": "E2E", "site_dir": str(site)})
+    cfg["chatbot"] = {"enabled": False}
+
+    cli._resync_site_from_config(repo, docs, site, cfg)
+    before = _site_config(site)
+
+    # The user edits their config.
+    s = cfg["site"]
+    s["colors"]["primary"] = "#7c3aed"
+    s["theme"]["preset"] = "vitepress"
+    s["theme"]["fonts"]["sans"] = "Inter"
+    s["chrome"]["toc_style"] = "normal"
+    s["labels"] = {"toc": "On this page"}
+    s["nav"] = {"rename": {"guide": "Handbook"}}
+
+    cli._resync_site_from_config(repo, docs, site, cfg)
+    after = _site_config(site)
+
+    assert after["colors"]["primary"] == "#7c3aed"
+    assert after["theme"]["preset"] == "vitepress"
+    assert "--color-fd-card" in after["theme"]["css"], "preset tokens not emitted"
+    assert "family=Inter" in after["theme"]["google_fonts"]
+    assert after["chrome"]["toc_style"] == "normal"
+    assert after["labels"]["ui"]["toc"] == "On this page"
+    assert "Handbook" in json.dumps(after["nav"])
+    assert after != before

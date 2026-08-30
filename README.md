@@ -668,10 +668,57 @@ github_pages:
   remote: origin
 
 site:
-  repo_url: ""                      # e.g., https://github.com/you/your-repo
-  favicon: ""
+  repo_url: ""                      # auto-detected from git `origin` if left empty
+  edit_branch: main                 # branch the "edit this page" link points at
+  favicon: ""                       # repo-relative image, copied into the site
   logo: ""
+  logo_dark: ""                     # optional separate dark-mode logo
+  colors:
+    primary: ""                     # brand hue; "" uses the DeepDoc default
+    light: ""                       # lighter shade — the dark-mode accent
+    dark: ""                        # darker shade — link hover
+  theme:
+    preset: ""                      # neutral|black|vitepress|ocean|catppuccin|dusk|purple
+    tokens:                         # raw overrides for any Fumadocs design token
+      light: {}                     #   e.g. {background: "#ffffff"}
+      dark: {}
+    fonts:                          # Google Font names; empty = no external request
+      sans: ""
+      mono: ""
+    code_theme:
+      light: github-light           # any Shiki theme
+      dark: github-dark
+  chrome:
+    sidebar: true
+    sidebar_default_open_level: 1
+    sidebar_collapsible: true
+    toc: true
+    toc_style: clerk                # clerk | normal
+    toc_depth: [2, 3]               # heading levels in the table of contents
+    breadcrumb: true
+    page_footer: true               # previous / next links
+    edit_link: false                # needs repo_url
+    last_update: true
+    theme_switch: true
+    search: true
+    generated_meta: true            # commit/date strip in the sidebar footer
+    links: []                       # navbar links: [{text, url}]
+  nav:
+    sections: []                    # explicit top-level section order, by title
+    pin: []                         # page slugs hoisted above all sections
+    hide: []                        # removed from the sidebar (still URL-reachable)
+    rename: {}                      # {slug-or-section-title: "New Title"}
+    extra: []                       # your own pages / external links:
+                                    #   - {slug: runbook, title: Runbook, section: Guides}
+                                    #   - {url: "https://...", title: Releases}
+  labels: {}                        # override UI strings, e.g. {toc: "On this page"}
 ```
+
+> **Everything under `site:` applies without regenerating.** Edit it, run
+> `deepdoc serve`, and the change is live — no LLM calls and no repository
+> scan, because the sidebar is rebuilt from the saved plan. Settings that
+> change *what gets documented* (`exclude`, scan limits, model choice) are
+> architectural and need `deepdoc generate` / `deepdoc update`.
 
 ### Configuration Reference
 
@@ -716,9 +763,39 @@ site:
 | `github_pages.branch` | `gh-pages` | Branch for GitHub Pages deploy |
 | `github_pages.remote` | `origin` | Git remote for deploy |
 | **Site** | | |
-| `site.repo_url` | `""` | Repo URL shown in the generated site navigation |
-| `site.favicon` | `""` | Path to favicon |
-| `site.logo` | `""` | Path to logo |
+| `site.repo_url` | `""` | Repo URL — adds a repo link and drives "edit this page". Auto-detected from the git `origin` remote when left empty. |
+| `site.edit_branch` | `main` | Branch used by the edit-this-page link |
+| `site.edit_path_prefix` | `""` | Path inside the repo the docs live under |
+| `site.favicon` | `""` | Repo-relative image, copied into the site's `public/` |
+| `site.logo` | `""` | Navbar logo, replaces the project name |
+| `site.logo_dark` | `""` | Optional separate dark-mode logo |
+| `site.colors.primary` | `""` | Brand colour (`#rgb`/`#rrggbb`); empty uses the default |
+| `site.colors.light` | `""` | Lighter shade — used as the dark-mode accent |
+| `site.colors.dark` | `""` | Darker shade — used for link hover |
+| `site.theme.preset` | `""` | `neutral`, `black`, `vitepress`, `ocean`, `catppuccin`, `dusk`, `purple` |
+| `site.theme.tokens.{light,dark}` | `{}` | Raw Fumadocs design-token overrides |
+| `site.theme.fonts.{sans,mono}` | `""` | Google Font family; empty means no external request |
+| `site.theme.code_theme.{light,dark}` | `github-light` / `github-dark` | Shiki syntax theme |
+| `site.chrome.sidebar` | `true` | Show the sidebar |
+| `site.chrome.sidebar_default_open_level` | `1` | How deep the sidebar starts expanded |
+| `site.chrome.sidebar_collapsible` | `true` | Allow collapsing the sidebar |
+| `site.chrome.toc` | `true` | Show the table of contents |
+| `site.chrome.toc_style` | `clerk` | `clerk` or `normal` |
+| `site.chrome.toc_depth` | `[2, 3]` | Heading levels listed in the TOC |
+| `site.chrome.breadcrumb` | `true` | Show breadcrumbs |
+| `site.chrome.page_footer` | `true` | Previous / next page links |
+| `site.chrome.edit_link` | `false` | "Edit this page" link (requires `repo_url`) |
+| `site.chrome.last_update` | `true` | Show the generation date on each page |
+| `site.chrome.theme_switch` | `true` | Show the light/dark toggle |
+| `site.chrome.search` | `true` | Show the search box |
+| `site.chrome.generated_meta` | `true` | Commit/date strip in the sidebar footer |
+| `site.chrome.links` | `[]` | Extra navbar links: `[{text, url}]` |
+| `site.nav.sections` | `[]` | Explicit top-level section order, by title |
+| `site.nav.pin` | `[]` | Page slugs hoisted above all sections |
+| `site.nav.hide` | `[]` | Slugs removed from the sidebar (still URL-reachable) |
+| `site.nav.rename` | `{}` | `{slug-or-section-title: "New Title"}` |
+| `site.nav.extra` | `[]` | Hand-written pages or external links to add |
+| `site.labels` | `{}` | Override UI strings and callout headings |
 | **Compatibility** | | |
 | `compatibility.deprecated_version_warning.enabled` | `true` | Warn when existing generated docs were produced by a different major version of DeepDoc (e.g. docs from v1.x with CLI v2.x). Suppressed for minor/patch version gaps. |
 

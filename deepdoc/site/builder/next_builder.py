@@ -27,6 +27,36 @@ _DEFAULT_DARK = "#c1331f"
 
 _HEX_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\Z")
 
+# Built-in palettes. Vendored as plain CSS rather than imported from
+# fumadocs-ui/css/*.css: those are Tailwind `@theme` blocks and this template
+# ships no Tailwind (see postcss.config.mjs / commit eef8106), so importing one
+# would half-apply and break light mode.
+_PRESETS = ("neutral", "black", "vitepress", "ocean", "catppuccin", "dusk",
+            "purple", "solar", "shadcn")
+
+_TOC_STYLES = ("clerk", "normal")
+
+# The Fumadocs design tokens that may be overridden via site.theme.tokens.
+_FD_TOKENS = (
+    "background", "foreground", "muted", "muted-foreground", "popover",
+    "popover-foreground", "card", "card-foreground", "border", "primary",
+    "primary-foreground", "secondary", "secondary-foreground", "accent",
+    "accent-foreground", "ring", "error", "warning", "success", "info",
+)
+
+
+def _warn(message: str) -> None:
+    """Report a bad config value without failing the build.
+
+    A typo in a colour must never stop a site from being generated; it falls
+    back to the default and says so.
+    """
+    print(f"[deepdoc] {message}")
+
+
+def _valid_hex(value: str) -> bool:
+    return bool(_HEX_RE.match(value))
+
 
 # ── public API ────────────────────────────────────────────────────────────────
 
@@ -75,14 +105,105 @@ def resolve_colors(cfg: dict[str, Any]) -> dict[str, str]:
         if not value:
             resolved[key] = default
             continue
-        if not _HEX_RE.match(value):
-            print(
-                f"[deepdoc] site.colors.{key}: {value!r} is not a hex colour "
+        if not _valid_hex(value):
+            _warn(
+                f"site.colors.{key}: {value!r} is not a hex colour "
                 f"(expected #rgb or #rrggbb) — using {default}."
             )
             resolved[key] = default
             continue
         resolved[key] = value
+    return resolved
+
+
+def resolve_theme(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalise ``site.theme``.
+
+    Invalid values warn and fall back; nothing here can fail a build.
+    """
+    theme = (cfg.get("site") or {}).get("theme") or {}
+
+    preset = str(theme.get("preset") or "").strip().lower()
+    if preset and preset not in _PRESETS:
+        _warn(
+            f"site.theme.preset: {preset!r} is not a known preset "
+            f"({', '.join(_PRESETS)}) — using the default palette."
+        )
+        preset = ""
+
+    tokens: dict[str, dict[str, str]] = {"light": {}, "dark": {}}
+    raw_tokens = theme.get("tokens") or {}
+    for mode in ("light", "dark"):
+        for name, value in (raw_tokens.get(mode) or {}).items():
+            key = str(name).strip().lstrip("-").removeprefix("color-fd-")
+            text = str(value or "").strip()
+            if key not in _FD_TOKENS:
+                _warn(f"site.theme.tokens.{mode}.{name}: unknown design token — ignored.")
+                continue
+            if not _valid_hex(text):
+                _warn(
+                    f"site.theme.tokens.{mode}.{name}: {text!r} is not a hex colour — ignored."
+                )
+                continue
+            tokens[mode][key] = text
+
+    fonts = theme.get("fonts") or {}
+    code = theme.get("code_theme") or {}
+    return {
+        "preset": preset,
+        "tokens": tokens,
+        # Empty means no webfont is loaded and no external request is made.
+        "fonts": {
+            "sans": str(fonts.get("sans") or "").strip(),
+            "mono": str(fonts.get("mono") or "").strip(),
+        },
+        "code_theme": {
+            "light": str(code.get("light") or "").strip() or "github-light",
+            "dark": str(code.get("dark") or "").strip() or "github-dark",
+        },
+    }
+
+
+def resolve_chrome(cfg: dict[str, Any]) -> dict[str, Any]:
+    """Validate and normalise ``site.chrome`` (layout toggles)."""
+    from ...config import DEFAULT_CONFIG
+
+    defaults = DEFAULT_CONFIG["site"]["chrome"]
+    chrome = (cfg.get("site") or {}).get("chrome") or {}
+    resolved = {key: chrome.get(key, default) for key, default in defaults.items()}
+
+    style = str(resolved.get("toc_style") or "").strip().lower()
+    if style not in _TOC_STYLES:
+        if style:
+            _warn(
+                f"site.chrome.toc_style: {style!r} is not valid "
+                f"({', '.join(_TOC_STYLES)}) — using 'clerk'."
+            )
+        style = "clerk"
+    resolved["toc_style"] = style
+
+    depth = resolved.get("toc_depth") or [2, 3]
+    try:
+        levels = sorted({int(d) for d in depth if 1 <= int(d) <= 6})
+    except (TypeError, ValueError):
+        levels = []
+    if not levels:
+        _warn(f"site.chrome.toc_depth: {depth!r} is not a list of heading levels 1-6 — using [2, 3].")
+        levels = [2, 3]
+    resolved["toc_depth"] = levels
+
+    # An edit link without a repository URL would render a dead anchor.
+    if resolved.get("edit_link") and not str((cfg.get("site") or {}).get("repo_url") or "").strip():
+        _warn("site.chrome.edit_link is on but site.repo_url is empty — disabling the edit link.")
+        resolved["edit_link"] = False
+
+    links = []
+    for item in resolved.get("links") or []:
+        if isinstance(item, dict) and item.get("text") and item.get("url"):
+            links.append({"text": str(item["text"]), "url": str(item["url"])})
+        else:
+            _warn(f"site.chrome.links: {item!r} needs both 'text' and 'url' — ignored.")
+    resolved["links"] = links
     return resolved
 
 
@@ -233,6 +354,11 @@ def _write_deepdoc_config(
         "project_name": cfg.get("project_name", "Docs"),
         "nav": _build_nav(plan, has_openapi),
         "colors": colors,
+        "theme": resolve_theme(cfg),
+        "chrome": resolve_chrome(cfg),
+        "labels": {
+            str(k): str(v) for k, v in ((cfg.get("site") or {}).get("labels") or {}).items()
+        },
         "chatbot": {
             "enabled": chatbot_enabled,
             "backend_url": backend_url,

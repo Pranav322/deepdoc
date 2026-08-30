@@ -9,6 +9,21 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **A configurable site surface in `.deepdoc.yaml`.** New optional `site.theme`,
+  `site.chrome`, `site.nav` and `site.labels` blocks cover palette preset, raw
+  design-token overrides, fonts, code theme, TOC/sidebar/breadcrumb/footer
+  toggles, navbar links, nav ordering and UI labels. Every key is optional and
+  empty means "built-in default", so an existing config renders exactly as
+  before. `site.colors` is unchanged and stays where it is.
+  - Invalid values never fail a build: an unknown preset, a malformed hex, a bad
+    TOC style or depth, a navbar link missing a URL, or an edit link with no
+    `repo_url` each warn and fall back.
+  - Fonts are opt-in — empty by default, so no external font request is made.
+- **`deepdoc config set` now rejects unknown keys** instead of silently creating
+  and persisting them, with a "did you mean" suggestion. User-defined maps
+  (`site.labels`, `site.nav.rename`, `site.theme.tokens.*`, `endpoint_groups`)
+  still accept any key.
+
 - **Search works again.** The generated site rendered Fumadocs' search UI but
   had no `/api/search` endpoint, so the box opened and could never return a
   result. The route was lost in the MkDocs migration — the old one used the

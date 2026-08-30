@@ -1900,7 +1900,59 @@ def _lookup_default(keys: list[str]) -> Any:
     return node
 
 
+# Config subtrees whose keys are user-defined, so an unknown key there is
+# legitimate rather than a typo.
+_OPEN_CONFIG_MAPS: tuple[tuple[str, ...], ...] = (
+    ("endpoint_groups",),
+    ("site", "theme", "tokens", "light"),
+    ("site", "theme", "tokens", "dark"),
+    ("site", "nav", "rename"),
+    ("site", "labels"),
+)
+
+
+def _known_config_key(keys: list[str]) -> bool:
+    """True when a dotted config path exists in DEFAULT_CONFIG.
+
+    Guards `config set`, which writes to disk: without this, a misspelled key is
+    silently created and persisted, and the user is left wondering why the
+    setting does nothing.
+    """
+    if any(part.startswith("_") for part in keys):
+        return True  # internal runtime flags
+    if any(tuple(keys[: len(prefix)]) == prefix for prefix in _OPEN_CONFIG_MAPS):
+        return True
+    node: Any = DEFAULT_CONFIG
+    for key in keys:
+        if not isinstance(node, dict) or key not in node:
+            return False
+        node = node[key]
+    return True
+
+
+def _flat_config_keys(node: Any = None, prefix: str = "") -> list[str]:
+    """Every dotted leaf path in DEFAULT_CONFIG, for suggestions."""
+    node = DEFAULT_CONFIG if node is None else node
+    paths: list[str] = []
+    for key, value in node.items():
+        path = f"{prefix}{key}"
+        paths.append(path)
+        if isinstance(value, dict) and value:
+            paths.extend(_flat_config_keys(value, f"{path}."))
+    return paths
+
+
 def _set_nested(d: dict, keys: list[str], value: str) -> None:
+    if not _known_config_key(keys):
+        import difflib
+
+        dotted = ".".join(keys)
+        close = difflib.get_close_matches(dotted, _flat_config_keys(), n=3, cutoff=0.5)
+        hint = f"\n\nDid you mean:\n  " + "\n  ".join(close) if close else ""
+        raise click.ClickException(
+            f"Unknown config key: {dotted}{hint}\n\n"
+            "Run `deepdoc config show` to see every available key."
+        )
     for key in keys[:-1]:
         d = d.setdefault(key, {})
     last = keys[-1]

@@ -45,9 +45,9 @@ export default function DocsRootLayout({ children }: { children: ReactNode }) {
               padding: 0.4rem 1rem;
               font-size: 0.65rem;
               font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-              color: hsl(var(--fd-muted-foreground));
-              background: hsl(var(--fd-sidebar-background, var(--fd-background)));
-              border-top: 1px solid hsl(var(--fd-border));
+              color: var(--color-fd-muted-foreground);
+              background: var(--color-fd-card, var(--color-fd-background));
+              border-top: 1px solid var(--color-fd-border);
               z-index: 10; pointer-events: none;
             }
             .dd-gen-commit { display: flex; align-items: center; gap: 0.3rem; }

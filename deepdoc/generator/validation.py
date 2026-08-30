@@ -51,6 +51,22 @@ from .evidence import AssembledEvidence
 # ═════════════════════════════════════════════════════════════════════════════
 
 
+# Scripts that do not separate words with whitespace: hiragana, katakana, and
+# CJK ideographs (incl. extension A). Korean is excluded — Hangul is spaced.
+_CJK_RE = re.compile(r"[぀-ヿ㐀-䶿一-鿿]")
+
+
+def _count_words(content: str) -> int:
+    """Count words, treating each CJK/kana character as one word.
+
+    ``str.split()`` alone undercounts non-spaced scripts by roughly 5-10x, which
+    would drive every page below the minimum-word-count validity gate and burn a
+    quality retry plus a full rewrite on each one. Purely additive for content
+    without CJK, so English counts are unchanged.
+    """
+    return len(content.split()) + len(_CJK_RE.findall(content))
+
+
 @dataclass
 class ValidationResult:
     """Result of validating a generated page against bucket requirements."""
@@ -96,7 +112,7 @@ class PageValidator:
     ) -> ValidationResult:
         """Run all validation checks on generated content."""
         result = ValidationResult(is_valid=True)
-        result.word_count = len(content.split())
+        result.word_count = _count_words(content)
 
         # 1. Check required sections appear as headings
         self._check_sections(content, bucket, result)

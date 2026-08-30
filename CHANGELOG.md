@@ -7,6 +7,51 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Fixed
+
+- **Brand colours now actually apply to the generated site.** The template
+  targeted Fumadocs v14 CSS variables (`--fd-*`) while shipping v15, which
+  renamed every colour token to `--color-fd-*` and changed their values to
+  complete colours. 28 references were therefore dead in both directions:
+  `--fd-primary: var(--brand)` set a variable nothing reads, so the configured
+  colour never reached the sidebar, TOC, search or buttons; and 27
+  `hsl(var(--fd-*))` reads were invalid at computed-value time, so table and
+  `<hr>` borders vanished, inline code lost its background, and muted text was
+  not muted. Renamed the tokens and stripped the now-wrong `hsl()` wrapper.
+- **`site.colors.light` and `site.colors.dark` do something.** Both were
+  written into CSS variables that nothing consumed. `light` now drives the
+  dark-mode primary (better contrast on a dark background) and `dark` drives
+  the light-mode link hover.
+- **Empty brand colours no longer emit invalid CSS.** `DEFAULT_CONFIG` ships
+  `site.colors.*` as `""`, so the key exists and `.get(key, default)` returned
+  `""` rather than the default — emitting the invalid declaration
+  `--brand: ;`. Colour resolution is now a single validated owner
+  (`resolve_colors`) that also rejects malformed hex with a warning.
+- **Template fixes now reach already-generated sites.** The builder skipped any
+  template file that already existed, so only `deepdoc.config.json` and
+  `app/globals.css` were ever refreshed — changes to the layouts, `lib/*.ts` or
+  the chatbot never arrived on upgrade. The builder now owns every file in
+  `next_template/`; user-added files, `node_modules/`, `.next/`, `openapi/` and
+  `public/` are untouched.
+- **Non-English pages no longer fail the length gate.** Page word count used
+  `str.split()`, which undercounts Chinese and Japanese by 5-10x and drove
+  every such page below the `< 100 words` validity check — burning a quality
+  retry and a full rewrite each. CJK and kana characters are now counted
+  individually. English counts are unchanged.
+- Aligned two stale in-code config fallbacks with their shipped defaults:
+  `decompose_threshold` (5 → 7) and `consolidation_similarity_threshold`
+  (0.70 → 0.55). Unreachable in production since `load_config` always merges
+  over `DEFAULT_CONFIG`; the defaults themselves are unchanged.
+
+### Changed
+
+- Brand colours are written only to `deepdoc.config.json` and injected into
+  `<head>` at request time; they are no longer baked into `app/globals.css`.
+  This removes a duplicate source of truth and means a colour change applies on
+  `deepdoc serve` without regenerating any Markdown.
+- `_ensure_node_modules` reinstalls when `package.json` content changes, tracked
+  via a `node_modules/.deepdoc-pkg-sha` stamp rather than mtime.
+
 ## [0.5.5] - 2026-08-30
 
 ### Added

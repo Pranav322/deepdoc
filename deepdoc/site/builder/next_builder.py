@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 from datetime import datetime, timezone
 from pathlib import Path
@@ -24,13 +25,7 @@ _DEFAULT_PRIMARY = "#eb3e25"
 _DEFAULT_LIGHT = "#ef624e"
 _DEFAULT_DARK = "#c1331f"
 
-# Files that are rewritten by the builder on every generate run.
-# All other template files are only copied if they don't already exist
-# (so users can customise them without losing changes).
-_ALWAYS_OVERWRITE = {
-    "deepdoc.config.json",
-    "app/globals.css",
-}
+_HEX_RE = re.compile(r"#(?:[0-9a-fA-F]{3}|[0-9a-fA-F]{6})\Z")
 
 
 # ── public API ────────────────────────────────────────────────────────────────
@@ -57,25 +52,59 @@ def build_next_from_plan(
 
     written = _copy_template_files(site_dir)
     written.add(_write_deepdoc_config(site_dir, cfg, plan, has_openapi))
-    written.add(_write_globals_css(site_dir, cfg))
     written.add(_write_docs_env(site_dir, output_dir))
     return written
+
+
+def resolve_colors(cfg: dict[str, Any]) -> dict[str, str]:
+    """Resolve the brand colours from config, falling back per key.
+
+    Sole owner of colour resolution. ``DEFAULT_CONFIG`` ships ``site.colors.*``
+    as empty strings, so the key *exists* and a plain ``.get(key, default)``
+    returns ``""`` rather than the default — which previously emitted the
+    invalid declaration ``--brand: ;``. Treat empty/invalid as unset.
+    """
+    colors = (cfg.get("site") or {}).get("colors") or {}
+    resolved: dict[str, str] = {}
+    for key, default in (
+        ("primary", _DEFAULT_PRIMARY),
+        ("light", _DEFAULT_LIGHT),
+        ("dark", _DEFAULT_DARK),
+    ):
+        value = str(colors.get(key) or "").strip()
+        if not value:
+            resolved[key] = default
+            continue
+        if not _HEX_RE.match(value):
+            print(
+                f"[deepdoc] site.colors.{key}: {value!r} is not a hex colour "
+                f"(expected #rgb or #rrggbb) — using {default}."
+            )
+            resolved[key] = default
+            continue
+        resolved[key] = value
+    return resolved
 
 
 # ── template scaffolding ──────────────────────────────────────────────────────
 
 
 def _copy_template_files(site_dir: Path) -> set[Path]:
-    """Copy next_template/ → configured site_dir, skipping files that already exist unless
-    they are in _ALWAYS_OVERWRITE (those are managed by the builder)."""
+    """Copy next_template/ → configured site_dir, overwriting every template file.
+
+    The builder owns 100% of ``next_template/``. Previously files were skipped
+    when they already existed, which meant template fixes never reached an
+    already-generated site — only ``deepdoc.config.json`` and ``globals.css``
+    were refreshed, so changes to the layouts, ``lib/*.ts`` or the chatbot never
+    arrived on upgrade. Anything a user adds is by definition not part of the
+    template and is left alone, as are ``node_modules/``, ``.next/``,
+    ``openapi/`` and ``public/``, which live outside it.
+    """
     written: set[Path] = set()
     for src in _TEMPLATE_DIR.rglob("*"):
         if src.is_dir():
             continue
-        rel = src.relative_to(_TEMPLATE_DIR)
-        dst = site_dir / rel
-        if dst.exists() and str(rel) not in _ALWAYS_OVERWRITE:
-            continue
+        dst = site_dir / src.relative_to(_TEMPLATE_DIR)
         dst.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(src, dst)
         written.add(dst)
@@ -190,7 +219,7 @@ def _write_deepdoc_config(
     plan: DocPlan,
     has_openapi: bool,
 ) -> Path:
-    colors = cfg.get("site", {}).get("colors", {})
+    colors = resolve_colors(cfg)
     chatbot_cfg = cfg.get("chatbot", {})
     chatbot_enabled = bool(chatbot_cfg.get("enabled"))
     backend_url = ""
@@ -203,11 +232,7 @@ def _write_deepdoc_config(
     config = {
         "project_name": cfg.get("project_name", "Docs"),
         "nav": _build_nav(plan, has_openapi),
-        "colors": {
-            "primary": colors.get("primary", _DEFAULT_PRIMARY),
-            "light": colors.get("light", _DEFAULT_LIGHT),
-            "dark": colors.get("dark", _DEFAULT_DARK),
-        },
+        "colors": colors,
         "chatbot": {
             "enabled": chatbot_enabled,
             "backend_url": backend_url,
@@ -228,46 +253,6 @@ def _head_commit_sha(repo_root: Path) -> str:
         return repo.head.commit.hexsha[:7]
     except Exception:
         return ""
-
-
-# ── globals.css ───────────────────────────────────────────────────────────────
-
-
-def _write_globals_css(site_dir: Path, cfg: dict[str, Any]) -> Path:
-    """Write app/globals.css with the project's brand color variables."""
-    colors = cfg.get("site", {}).get("colors", {})
-    primary = colors.get("primary", _DEFAULT_PRIMARY)
-    light = colors.get("light", _DEFAULT_LIGHT)
-    dark = colors.get("dark", _DEFAULT_DARK)
-
-    # Read the template globals.css and patch the brand vars block
-    template_css = (_TEMPLATE_DIR / "app" / "globals.css").read_text()
-    patched = _patch_brand_vars(template_css, primary, light, dark)
-    css_path = site_dir / "app" / "globals.css"
-    css_path.parent.mkdir(parents=True, exist_ok=True)
-    css_path.write_text(patched)
-    return css_path
-
-
-def _patch_brand_vars(css: str, primary: str, light: str, dark: str) -> str:
-    """Replace the brand color block in globals.css with new values."""
-    replacement = (
-        f"/* Brand colors — overwritten by `deepdoc generate` with project values */\n"
-        f":root {{\n"
-        f"  --brand: {primary};\n"
-        f"  --brand-light: {light};\n"
-        f"  --brand-dark: {dark};\n"
-        f"  --fd-primary: var(--brand);\n"
-        f"}}"
-    )
-    import re
-    patched = re.sub(
-        r"/\* Brand colors.*?:root \{[^}]*\}",
-        replacement,
-        css,
-        flags=re.DOTALL,
-    )
-    return patched if patched != css else css
 
 
 def _write_docs_env(site_dir: Path, output_dir: Path) -> Path:

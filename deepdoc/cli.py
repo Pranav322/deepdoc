@@ -1342,14 +1342,37 @@ def _ensure_node_installed() -> None:
 
 
 def _ensure_node_modules(site_dir) -> None:
-    """Run npm install in site_dir if node_modules is missing."""
+    """Run npm install when node_modules is missing or package.json changed.
+
+    The builder rewrites every template file (package.json included) on each
+    run, so a dependency bump must trigger a reinstall. ``shutil.copy2``
+    preserves the source mtime, which makes timestamp comparison unreliable —
+    compare a content hash instead.
+    """
+    import hashlib
     from pathlib import Path
-    nm = Path(site_dir) / "node_modules"
-    if not nm.exists():
-        console.print("[dim]Installing npm dependencies (first run only)…[/dim]")
-        result = subprocess.run(["npm", "install"], cwd=str(site_dir))
-        if result.returncode != 0:
-            raise click.ClickException("npm install failed. Check your Node.js installation.")
+
+    site_dir = Path(site_dir)
+    pkg = site_dir / "package.json"
+    stamp = site_dir / "node_modules" / ".deepdoc-pkg-sha"
+    want = hashlib.sha256(pkg.read_bytes()).hexdigest() if pkg.exists() else ""
+
+    try:
+        if stamp.exists() and stamp.read_text().strip() == want:
+            return
+    except OSError:
+        pass
+
+    console.print("[dim]Installing npm dependencies…[/dim]")
+    result = subprocess.run(["npm", "install"], cwd=str(site_dir))
+    if result.returncode != 0:
+        raise click.ClickException("npm install failed. Check your Node.js installation.")
+    try:
+        stamp.parent.mkdir(parents=True, exist_ok=True)
+        stamp.write_text(want)
+    except OSError:
+        # A missing stamp only costs a redundant reinstall next run.
+        pass
 
 
 # ─────────────────────────────────────────────────────────────────────────────

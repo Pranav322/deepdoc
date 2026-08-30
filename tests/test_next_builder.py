@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -10,11 +11,14 @@ from typing import Any
 import pytest
 
 from deepdoc.site.builder.next_builder import (
+    _DEFAULT_DARK,
+    _DEFAULT_LIGHT,
+    _DEFAULT_PRIMARY,
     _build_nav,
-    _patch_brand_vars,
     _slug_in_nav,
     _slug_to_title,
     build_next_from_plan,
+    resolve_colors,
 )
 
 
@@ -189,35 +193,54 @@ def test_nav_template_recursively_builds_nested_sections():
     assert ".map(buildNode)" in template
 
 
-# ── _patch_brand_vars ─────────────────────────────────────────────────────────
+# ── resolve_colors ────────────────────────────────────────────────────────────
 
 
-_SAMPLE_CSS = """\
-@import "fumadocs-ui/style.css";
-
-/* Brand colors — overwritten by `deepdoc generate` with project values */
-:root {
-  --brand: #eb3e25;
-  --brand-light: #ef624e;
-  --brand-dark: #c1331f;
-}
-
-.dd-prose { color: var(--brand); }
-"""
+def test_resolve_colors_uses_configured_values():
+    cfg = {"site": {"colors": {"primary": "#123456", "light": "#abcdef", "dark": "#000000"}}}
+    assert resolve_colors(cfg) == {
+        "primary": "#123456",
+        "light": "#abcdef",
+        "dark": "#000000",
+    }
 
 
-def test_patch_brand_vars_replaces_colors():
-    patched = _patch_brand_vars(_SAMPLE_CSS, "#123456", "#abcdef", "#000000")
-    assert "--brand: #123456;" in patched
-    assert "--brand-light: #abcdef;" in patched
-    assert "--brand-dark: #000000;" in patched
-    # prose style should be preserved
-    assert ".dd-prose" in patched
+def test_resolve_colors_empty_strings_fall_back_to_defaults():
+    """Regression: DEFAULT_CONFIG ships site.colors.* as "".
+
+    The key exists, so a plain ``.get(key, default)`` returns "" instead of the
+    default and the builder emitted the invalid declaration ``--brand: ;``.
+    """
+    cfg = {"site": {"colors": {"primary": "", "light": "", "dark": ""}}}
+    assert resolve_colors(cfg) == {
+        "primary": _DEFAULT_PRIMARY,
+        "light": _DEFAULT_LIGHT,
+        "dark": _DEFAULT_DARK,
+    }
 
 
-def test_patch_brand_vars_unchanged_when_no_block():
-    css = ".foo { color: red; }"
-    assert _patch_brand_vars(css, "#000", "#111", "#222") == css
+def test_resolve_colors_defaults_from_real_default_config():
+    """The shipped defaults must resolve to real hex, never "" ."""
+    from deepdoc.config import DEFAULT_CONFIG
+
+    for value in resolve_colors(deepcopy(DEFAULT_CONFIG)).values():
+        assert value.startswith("#") and len(value) in (4, 7)
+
+
+def test_resolve_colors_missing_blocks():
+    assert resolve_colors({})["primary"] == _DEFAULT_PRIMARY
+    assert resolve_colors({"site": {}})["primary"] == _DEFAULT_PRIMARY
+    assert resolve_colors({"site": {"colors": None}})["primary"] == _DEFAULT_PRIMARY
+
+
+@pytest.mark.parametrize("bad", ["red", "#ff00", "ff0000", "#gggggg", "rgb(1,2,3)"])
+def test_resolve_colors_rejects_malformed_hex(bad):
+    resolved = resolve_colors({"site": {"colors": {"primary": bad}}})
+    assert resolved["primary"] == _DEFAULT_PRIMARY
+
+
+def test_resolve_colors_accepts_shorthand_hex():
+    assert resolve_colors({"site": {"colors": {"primary": "#f00"}}})["primary"] == "#f00"
 
 
 # ── build_next_from_plan (integration) ───────────────────────────────────────
@@ -279,11 +302,34 @@ def test_build_next_from_plan_copies_package_json(tmp_path: Path):
     assert "fumadocs-ui" in data.get("dependencies", {})
 
 
-def test_build_next_from_plan_writes_globals_css(tmp_path: Path):
+def test_build_next_from_plan_writes_colors_to_config(tmp_path: Path):
+    """Colours live only in deepdoc.config.json now.
+
+    They are injected into <head> from there at request time, so a colour change
+    applies on `deepdoc serve` without regenerating any Markdown.
+    """
     plan = _make_plan()
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg("#aabbcc"), plan)
-    css = (tmp_path / "site" / "app" / "globals.css").read_text()
-    assert "--brand: #aabbcc;" in css
+    cfg = json.loads((tmp_path / "site" / "deepdoc.config.json").read_text())
+    assert cfg["colors"]["primary"] == "#aabbcc"
+
+
+def test_generated_css_has_no_dead_fumadocs_v14_vars(tmp_path: Path):
+    """Guard against the v14 pattern returning.
+
+    Fumadocs v15 renamed colour tokens to --color-fd-* and their values are
+    complete colours, so both `--fd-<colour>` and any `hsl(var(...))` wrapper
+    are dead. Size vars (--fd-sidebar-width etc.) are still valid.
+    """
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+    site = tmp_path / "site"
+    for rel in ("app/globals.css", "app/(main)/layout.tsx", "components/chatbot.tsx"):
+        text = (site / rel).read_text()
+        assert "hsl(var(" not in text, f"{rel} still wraps a token in hsl()"
+        for dead in ("--fd-primary", "--fd-foreground", "--fd-background",
+                     "--fd-border", "--fd-muted", "--fd-sidebar-background"):
+            assert dead not in text, f"{rel} still references {dead}"
 
 
 def test_build_next_from_plan_preserves_mkdocs_yml(tmp_path: Path):
@@ -295,16 +341,40 @@ def test_build_next_from_plan_preserves_mkdocs_yml(tmp_path: Path):
     assert (site_dir / "mkdocs.yml").exists()
 
 
-def test_build_next_from_plan_does_not_overwrite_custom_files(tmp_path: Path):
+def test_build_next_from_plan_refreshes_template_files(tmp_path: Path):
+    """The builder owns every file in next_template/.
+
+    Previously template files were skipped when they already existed, so a fix
+    to a layout, lib/*.ts or the chatbot never reached an already-generated
+    site — only deepdoc.config.json and globals.css were refreshed.
+    """
     plan = _make_plan()
-    # First run — copies template
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
-    # User edits a non-overwrite file
-    custom_layout = tmp_path / "site" / "app" / "layout.tsx"
-    custom_layout.write_text("// custom layout\n")
-    # Second run — should NOT overwrite the custom layout
+
+    layout = tmp_path / "site" / "app" / "layout.tsx"
+    layout.write_text("// stale\n")
     build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
-    assert custom_layout.read_text() == "// custom layout\n"
+
+    assert layout.read_text() != "// stale\n"
+    assert "RootProvider" in layout.read_text()
+
+
+def test_build_next_from_plan_preserves_user_added_files(tmp_path: Path):
+    """Files the template does not contain are the user's and must survive."""
+    plan = _make_plan()
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+
+    site = tmp_path / "site"
+    mine = site / "app" / "my-page" / "page.tsx"
+    mine.parent.mkdir(parents=True, exist_ok=True)
+    mine.write_text("// mine\n")
+    (site / "public").mkdir(exist_ok=True)
+    (site / "public" / "logo.svg").write_text("<svg/>")
+
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), plan)
+
+    assert mine.read_text() == "// mine\n"
+    assert (site / "public" / "logo.svg").read_text() == "<svg/>"
 
 
 def test_build_next_from_plan_always_overwrites_config(tmp_path: Path):

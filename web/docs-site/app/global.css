@@ -1,10 +1,16 @@
+@import 'tailwindcss';
 @import 'fumadocs-ui/css/neutral.css';
 @import 'fumadocs-ui/css/preset.css';
 
+/* Tell Tailwind where to scan, since content lives outside the default roots. */
+@source '../app/**/*.{ts,tsx}';
+@source '../content/**/*.mdx';
+@source '../node_modules/fumadocs-ui/dist/**/*.js';
+
 /* DeepDoc brand.
    Fumadocs v15 tokens are `--color-fd-*` and hold complete colours — never
-   wrap one in hsl(). Its own tokens live inside @layer theme / @layer
-   utilities, so these unlayered rules win without !important. */
+   wrap one in hsl(). Its tokens sit inside @layer theme / @layer utilities,
+   so these unlayered rules win without !important. */
 :root {
   --brand: #eb3e25;
   --brand-light: #ef624e;

@@ -11,4 +11,7 @@ export default withMDX({
   basePath: '/docs',
   images: { unoptimized: true },
   trailingSlash: true,
+  // This app has its own lockfile inside a larger repo; without this Next
+  // walks up and picks the wrong workspace root.
+  outputFileTracingRoot: import.meta.dirname,
 });

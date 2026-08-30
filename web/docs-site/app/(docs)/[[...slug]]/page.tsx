@@ -5,7 +5,10 @@ import { source } from '@/lib/source';
 import { getMDXComponents } from '@/lib/mdx-components';
 
 export function generateStaticParams() {
-  return source.generateParams();
+  // `output: export` requires the index route to be listed explicitly for an
+  // optional catch-all; generateParams() only yields the child pages.
+  const params = source.generateParams();
+  return params.some(p => !p.slug?.length) ? params : [{ slug: [] }, ...params];
 }
 
 export async function generateMetadata({

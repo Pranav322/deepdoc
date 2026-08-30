@@ -1,3 +1,3 @@
 """DeepDoc — Auto-generate beautiful docs from any codebase."""
 
-__version__ = "0.5.5"
+__version__ = "0.6.0"

@@ -7,6 +7,8 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.6.0] - 2026-08-30
+
 ### Added
 
 - **`site.repo_url` is auto-detected from the git `origin` remote** when left
@@ -140,6 +142,26 @@ The automated release workflow reads the section that matches the version in
   `decompose_threshold` (5 → 7) and `consolidation_similarity_threshold`
   (0.70 → 0.55). Unreachable in production since `load_config` always merges
   over `DEFAULT_CONFIG`; the defaults themselves are unchanged.
+
+### Removed
+
+- **Config keys that were never implemented.** Each had zero readers, so
+  setting one did nothing:
+  - `github_pages.*` — deploy is a static export to `<site_dir>/out/`; there is
+    no gh-pages path
+  - `chatbot.answer.rate_limits.*` and `chatbot.embeddings.rate_limits.*` —
+    rate limiting is real but wired only for `llm.rate_limits`, so these never
+    affected chatbot requests. `llm.rate_limits` is unchanged.
+  - `chatbot.vector_store.kind` — FAISS is hardcoded
+  - `chatbot.retrieval.deep_research_chunk_chars` / `_top_k` — orphans from an
+    earlier retrieval shape
+  - `include_feature_pages` — its two siblings are live; this one never was
+  - `compatibility.deprecated_version_warning.minimum_version` /
+    `.upgrade_command` — the check compares major versions in code and
+    hardcodes its own remedy text
+
+  Existing `.deepdoc.yaml` files are unaffected: the keys are ignored rather
+  than rejected, and nothing reads them. They can be deleted by hand.
 
 ### Changed
 

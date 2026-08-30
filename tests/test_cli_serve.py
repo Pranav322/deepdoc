@@ -278,6 +278,17 @@ def test_serve_reapplies_config_before_starting_next(tmp_path: Path, monkeypatch
     monkeypatch.setattr(cli, "_ensure_node_installed", lambda: calls.append("node"))
     monkeypatch.setattr(cli, "_ensure_node_modules", lambda _d: calls.append("npm"))
     monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: calls.append("next-dev"))
+    # serve opens the preview in a real browser from a daemon thread that
+    # sleeps first. Patching webbrowser.open is not enough: monkeypatch is
+    # undone at teardown, so the thread would fire afterwards against the real
+    # function and pop a tab on the developer's machine. Stop the thread from
+    # starting at all.
+    import threading
+
+    monkeypatch.setattr(
+        threading, "Thread",
+        lambda *a, **k: type("NoThread", (), {"start": lambda self: calls.append("browser-thread")})(),
+    )
 
     CliRunner().invoke(cli.main, ["serve", "--port", "3999"])
 

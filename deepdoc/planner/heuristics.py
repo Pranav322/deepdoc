@@ -640,7 +640,7 @@ def _consolidate_similar_buckets(plan: DocPlan, cfg: dict[str, Any]) -> DocPlan:
     Runs after decompose to catch cases where decomposition or the proposal step
     created overlapping pages (e.g. "Vinculum Overview" + "Vinculum Workflow").
     """
-    threshold = cfg.get("consolidation_similarity_threshold", 0.70)
+    threshold = cfg.get("consolidation_similarity_threshold", 0.55)
     buckets = list(plan.buckets)
     merged_slugs: set[str] = set()
 

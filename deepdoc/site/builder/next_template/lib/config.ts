@@ -17,11 +17,11 @@ type NavEntry =
   | { type: 'page'; title: string; slug: string }
   | { type: 'section'; title: string; items: { title: string; slug: string }[] };
 
-let _cache: DeepDocConfig | null = null;
-
 export function getConfig(): DeepDocConfig {
-  if (_cache) return _cache;
+  // Read on every call rather than caching at module scope. The file is not an
+  // import, so nothing invalidates a module-level cache — under `next dev` the
+  // first read would be pinned for the life of the server process and config
+  // changes would never appear without a full restart.
   const cfgPath = path.join(process.cwd(), 'deepdoc.config.json');
-  _cache = JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as DeepDocConfig;
-  return _cache;
+  return JSON.parse(fs.readFileSync(cfgPath, 'utf-8')) as DeepDocConfig;
 }

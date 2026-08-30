@@ -247,3 +247,40 @@ def test_deprecated_generated_version_warning_is_configurable(
     )
 
     assert capsys.readouterr().out == ""
+
+
+def test_serve_reapplies_config_before_starting_next(tmp_path: Path, monkeypatch) -> None:
+    """`deepdoc serve` must re-apply .deepdoc.yaml before launching the dev server.
+
+    Guards the ordering too: the resync rewrites package.json, so it has to run
+    before _ensure_node_modules decides whether to reinstall.
+    """
+    import json
+    from types import SimpleNamespace
+
+    calls: list[str] = []
+
+    site = tmp_path / "deepdoc-site"
+    site.mkdir()
+    (site / "package.json").write_text('{"name":"x"}')
+
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: {"site_dir": "deepdoc-site"})
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        cli, "resolve_output_paths",
+        lambda root, cfg: SimpleNamespace(site_dir=site, output_dir=tmp_path / "deepdoc-docs"),
+    )
+
+    def _resync(*_a, **_kw):
+        calls.append("resync")
+
+    monkeypatch.setattr(cli, "_resync_site_from_config", _resync)
+    monkeypatch.setattr(cli, "_ensure_node_installed", lambda: calls.append("node"))
+    monkeypatch.setattr(cli, "_ensure_node_modules", lambda _d: calls.append("npm"))
+    monkeypatch.setattr(cli.subprocess, "run", lambda *a, **k: calls.append("next-dev"))
+
+    CliRunner().invoke(cli.main, ["serve", "--port", "3999"])
+
+    assert "resync" in calls, "serve did not re-apply .deepdoc.yaml"
+    assert calls.index("resync") < calls.index("npm"), "resync must precede npm install"
+    assert calls.index("resync") < calls.index("next-dev"), "resync must precede next dev"

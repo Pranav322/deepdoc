@@ -1185,7 +1185,8 @@ def serve(port):
     """
     cfg = _load_or_exit()
     repo_root = _find_repo_root()
-    site_dir = resolve_output_paths(repo_root, cfg).site_dir
+    paths = resolve_output_paths(repo_root, cfg)
+    site_dir = paths.site_dir
 
     pkg_json = site_dir / "package.json"
     if not pkg_json.exists():
@@ -1193,6 +1194,12 @@ def serve(port):
             f"[red]{site_dir.name}/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
+
+    # Re-apply .deepdoc.yaml before starting Next, so config edits show up on
+    # the next `serve` without regenerating any docs. Must run before
+    # _ensure_node_modules, which decides whether to reinstall from the
+    # package.json this rewrites.
+    _resync_site_from_config(repo_root, paths.output_dir, site_dir, cfg)
 
     _ensure_node_installed()
     _ensure_node_modules(site_dir)
@@ -1274,6 +1281,10 @@ def _deploy():
             + "\nRun `deepdoc generate` again after fixing the generation issues."
         )
 
+    # Apply .deepdoc.yaml before building, so a deploy never ships a UI that is
+    # stale relative to the config. Must precede _ensure_node_modules.
+    _resync_site_from_config(repo_root, output_dir, site_dir, cfg)
+
     _ensure_node_installed()
     _ensure_node_modules(site_dir)
 
@@ -1339,6 +1350,81 @@ def _ensure_node_installed() -> None:
         raise click.ClickException(
             "Node.js not found. Install Node.js >=18 from https://nodejs.org"
         )
+
+
+# Written fresh on every build; comparing them would report a change every run.
+_VOLATILE_SITE_CONFIG_KEYS = frozenset({"generated_at", "commit_sha"})
+
+
+def _read_site_config(site_dir) -> dict:
+    from pathlib import Path
+
+    path = Path(site_dir) / "deepdoc.config.json"
+    try:
+        return json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}
+
+
+def _resync_site_from_config(repo_root, output_dir, site_dir, cfg) -> None:
+    """Rebuild the site's config and scaffold from .deepdoc.yaml + the saved plan.
+
+    Reads ``.deepdoc/plan.json`` rather than re-planning, so this makes no LLM
+    calls and performs no repository scan. That is what lets a user edit
+    ``.deepdoc.yaml`` and see the change on the next ``deepdoc serve`` without
+    regenerating any Markdown.
+    """
+    from .persistence_v2 import load_plan
+    from .site.builder import build_next_from_plan
+
+    plan = load_plan(repo_root)
+    if plan is None:
+        console.print(
+            "[yellow]No saved plan in .deepdoc/ — serving the site as it was generated. "
+            "Run [bold]deepdoc generate[/bold] to enable config-only updates.[/yellow]"
+        )
+        return
+    if not hasattr(plan, "nav_structure"):
+        # A v1 LegacyDocPlan carries no nav structure, so the site builder
+        # cannot rebuild from it. Serve what is on disk rather than fail.
+        console.print(
+            "[yellow]Saved plan predates the current format — serving the site as generated. "
+            "Run [bold]deepdoc generate[/bold] to enable config-only updates.[/yellow]"
+        )
+        return
+
+    before = _read_site_config(site_dir)
+    try:
+        build_next_from_plan(
+            repo_root,
+            output_dir,
+            cfg,
+            plan,
+            has_openapi=(output_dir / "api.md").exists(),
+        )
+    except Exception as exc:
+        # Never block a preview because the config could not be re-applied.
+        console.print(f"[yellow]Could not re-apply .deepdoc.yaml ({exc}). Serving the existing site.[/yellow]")
+        return
+
+    _report_site_config_changes(before, _read_site_config(site_dir))
+
+
+def _report_site_config_changes(before: dict, after: dict) -> None:
+    """Print the settings that changed since the site was last written."""
+    if not before:
+        return
+    changed = [
+        key
+        for key in sorted(set(before) | set(after))
+        if key not in _VOLATILE_SITE_CONFIG_KEYS and before.get(key) != after.get(key)
+    ]
+    if not changed:
+        return
+    console.print(
+        "[green]Applied .deepdoc.yaml changes[/green] "
+        "[dim](no regeneration, no LLM calls):[/dim] " + ", ".join(changed)
+    )
 
 
 def _ensure_node_modules(site_dir) -> None:

@@ -7,6 +7,19 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Added
+
+- **`deepdoc serve` now re-applies `.deepdoc.yaml` before starting the dev
+  server.** Edit your config, run `deepdoc serve`, and the change is live — no
+  regeneration, no LLM calls, no repository scan. The site config and scaffold
+  are rebuilt from the saved `.deepdoc/plan.json`, and changed settings are
+  reported on startup. `deepdoc deploy` does the same, so a deploy can no
+  longer ship a UI that is stale relative to the config.
+  - A missing or pre-v2 saved plan warns and serves the existing site rather
+    than failing.
+  - The resync runs before the npm check, so a dependency change in the
+    refreshed `package.json` triggers a reinstall.
+
 ### Fixed
 
 - **Brand colours now actually apply to the generated site.** The template

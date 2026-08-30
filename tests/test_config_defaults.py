@@ -86,3 +86,65 @@ def test_empty_api_version_sends_no_kwarg():
     """
     source = (_ROOT / "llm" / "client.py").read_text()
     assert source.count("if self.api_version:") == 2
+
+
+# ── the duplicated chatbot schema must not rot apart again ────────────────────
+
+
+def _flat(d: dict, prefix: str = "") -> set[str]:
+    keys = set()
+    for key, value in d.items():
+        keys.add(prefix + key)
+        if isinstance(value, dict):
+            keys |= _flat(value, f"{prefix}{key}.")
+    return keys
+
+
+def test_the_two_chatbot_schemas_declare_the_same_keys():
+    """`chatbot` is declared in config.py AND chatbot/settings.py.
+
+    Their only divergence was eight `rate_limits` keys that existed solely in
+    config.py and were never read — the tell that they were never implemented.
+    Pin the two together so the next divergence is caught immediately.
+    """
+    from deepdoc.chatbot.settings import DEFAULT_CHATBOT_CONFIG
+
+    assert _flat(DEFAULT_CONFIG["chatbot"]) == _flat(DEFAULT_CHATBOT_CONFIG)
+
+
+@pytest.mark.parametrize("path", [
+    ("include_feature_pages",),
+    ("github_pages",),
+    ("chatbot", "vector_store"),
+    ("chatbot", "answer", "rate_limits"),
+    ("chatbot", "embeddings", "rate_limits"),
+    ("compatibility", "deprecated_version_warning", "minimum_version"),
+    ("compatibility", "deprecated_version_warning", "upgrade_command"),
+])
+def test_removed_keys_stay_removed(path):
+    """Guards against a dead key being reintroduced by a merge."""
+    node = DEFAULT_CONFIG
+    for part in path[:-1]:
+        node = node.get(part, {})
+    assert path[-1] not in node, f"{'.'.join(path)} is dead — it should not be back"
+
+
+def test_the_live_rate_limits_block_survives():
+    """Only `llm.rate_limits` was ever wired (llm/client.py) — keep it."""
+    assert set(DEFAULT_CONFIG["llm"]["rate_limits"]) == {
+        "max_concurrency", "requests_per_minute", "tokens_per_minute", "adaptive_backoff",
+    }
+
+
+def test_an_old_config_containing_removed_keys_still_loads():
+    """Existing .deepdoc.yaml files contain these; they must be inert, not fatal."""
+    from deepdoc.config import _deep_merge
+
+    stale = {
+        "github_pages": {"enabled": True, "branch": "gh-pages"},
+        "include_feature_pages": False,
+        "chatbot": {"vector_store": {"kind": "faiss"}},
+    }
+    merged = _deep_merge(dict(DEFAULT_CONFIG), stale)
+    assert merged["output_dir"] == DEFAULT_CONFIG["output_dir"]
+    assert merged["github_pages"]["enabled"] is True  # carried, simply unread

@@ -51,7 +51,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────
     "consistency_pass": True,  # post-generation LLM pass adding cross-page "See also" links
-    "include_feature_pages": True,
     "include_endpoint_pages": True,
     "include_integration_pages": True,
     # ── LLM ──────────────────────────────────────────────────────────────
@@ -178,11 +177,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # ── Project-specific ───────────────────────────────────────────────
         # Add project-specific excludes here in .deepdoc.yaml under the "exclude:" key.
     ],
-    "github_pages": {
-        "enabled": False,
-        "branch": "gh-pages",
-        "remote": "origin",
-    },
     "site": {
         "repo_url": "",  # shown in top-bar of documentation site
         "favicon": "",
@@ -196,8 +190,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "compatibility": {
         "deprecated_version_warning": {
             "enabled": True,
-            "minimum_version": "1.0.0",
-            "upgrade_command": "python3 -m pip install --upgrade deepdoc",
         },
     },
     "chatbot": {
@@ -223,12 +215,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "output_reserve_tokens": None,
             "continuation_retries": 2,
             "continuation_context_chars": 12000,
-            "rate_limits": {
-                "max_concurrency": 4,
-                "requests_per_minute": 60,
-                "tokens_per_minute": 100000,
-                "adaptive_backoff": True,
-            },
         },
         "embeddings": {
             "backend": "fastembed",
@@ -244,15 +230,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "base_url": "",
             "api_version": "",
             "batch_size": 24,
-            "rate_limits": {
-                "mode": "auto",
-                "hosted_max_concurrency": 2,
-                "hosted_requests_per_minute": 60,
-                "hosted_tokens_per_minute": 1000000,
-            },
-        },
-        "vector_store": {
-            "kind": "faiss",
         },
         "indexing": {
             "include_repo_docs": True,
@@ -306,8 +283,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "live_fallback_max_files": 6,
             "live_fallback_max_per_file": 2,
             "live_fallback_context_lines": 12,
-            "deep_research_chunk_chars": 3200,
-            "deep_research_top_k": 10,
         },
         "chunking": {
             "code_chunk_lines": 120,

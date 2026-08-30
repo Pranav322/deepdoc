@@ -9,6 +9,13 @@ The automated release workflow reads the section that matches the version in
 
 ### Added
 
+- **UI strings are overridable via `site.labels`.** Covers Fumadocs' own
+  strings (`search`, `toc`, `lastUpdate`, `editOnGithub`, `nextPage`,
+  `previousPage`, `chooseTheme`, …) and DeepDoc's callout headings (`note`,
+  `tip`, `warning`, `danger`, `info`). An unrecognised label warns rather than
+  being silently dropped. No language switcher is added — this is relabelling,
+  not internationalisation.
+
 - **Sidebar navigation is controllable via `site.nav`.** Pin or reorder
   top-level sections (`sections`), hoist pages above them (`pin`), rename a
   page or section (`rename`), remove one from the sidebar while leaving it

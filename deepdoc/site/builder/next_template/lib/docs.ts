@@ -40,8 +40,10 @@ export interface DocPage {
 // Transform "> [!NOTE]" / "> [!WARNING]" etc. blockquotes into callout divs.
 function rehypeGitHubAlerts() {
   const ALERT_RE = /^\[!(NOTE|TIP|WARNING|DANGER|INFO)\]\n?/;
+  // Overridable via site.labels.{note,tip,warning,danger,info}
   const LABEL: Record<string, string> = {
     NOTE: 'Note', TIP: 'Tip', WARNING: 'Warning', DANGER: 'Danger', INFO: 'Info',
+    ...(getConfig().labels?.callouts ?? {}),
   };
   return (tree: HastRoot) => {
     visit(tree, 'element', (node: Element) => {

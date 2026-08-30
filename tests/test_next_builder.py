@@ -596,3 +596,18 @@ def test_no_overrides_leaves_the_tree_untouched():
     nav, warnings = _apply()
     assert nav == _nav_tree()
     assert warnings == []
+
+
+def test_template_applies_labels(tmp_path: Path):
+    """Both label families must reach the components that render them."""
+    build_next_from_plan(tmp_path, tmp_path / "docs", _minimal_cfg(), _make_plan())
+    site = tmp_path / "site"
+
+    # Fumadocs UI strings go through the i18n provider, without `locales` —
+    # supplying that would render a language switcher.
+    layout = (site / "app" / "layout.tsx").read_text()
+    assert "translations: cfg.labels.ui" in layout
+    assert "locales:" not in layout, "passing `locales` would add a language switcher"
+
+    # Callout headings override the built-in map.
+    assert "labels?.callouts" in (site / "lib" / "docs.ts").read_text()

@@ -263,6 +263,40 @@ def google_fonts_href(theme: dict[str, Any]) -> str:
     return f"https://fonts.googleapis.com/css2?{parts}&display=swap"
 
 
+# Fumadocs' own UI strings (its `Translations` interface).
+_UI_LABELS = (
+    "search", "searchNoResult", "toc", "tocNoHeadings", "lastUpdate",
+    "chooseLanguage", "nextPage", "previousPage", "chooseTheme", "editOnGithub",
+)
+# DeepDoc's GitHub-style callout headings.
+_CALLOUT_LABELS = ("note", "tip", "warning", "danger", "info")
+
+
+def resolve_labels(cfg: dict[str, Any]) -> dict[str, dict[str, str]]:
+    """Split ``site.labels`` into Fumadocs UI strings and callout headings.
+
+    Only keys the template actually renders are accepted; anything else warns,
+    since a silently-ignored label looks like a bug to whoever set it.
+    """
+    raw = (cfg.get("site") or {}).get("labels") or {}
+    ui: dict[str, str] = {}
+    callouts: dict[str, str] = {}
+    for key, value in raw.items():
+        name, text = str(key).strip(), str(value or "").strip()
+        if not text:
+            continue
+        if name in _UI_LABELS:
+            ui[name] = text
+        elif name.lower() in _CALLOUT_LABELS:
+            callouts[name.upper()] = text
+        else:
+            _warn(
+                f"site.labels.{name}: not a known label "
+                f"({', '.join(_UI_LABELS + _CALLOUT_LABELS)}) — ignored."
+            )
+    return {"ui": ui, "callouts": callouts}
+
+
 def resolve_chrome(cfg: dict[str, Any]) -> dict[str, Any]:
     """Validate and normalise ``site.chrome`` (layout toggles)."""
     from ...config import DEFAULT_CONFIG
@@ -600,9 +634,7 @@ def _write_deepdoc_config(
         "chrome": resolve_chrome(cfg),
         "brand": brand_asset_urls(repo_root or site_dir.parent, cfg),
         "repo": _repo_info(cfg),
-        "labels": {
-            str(k): str(v) for k, v in ((cfg.get("site") or {}).get("labels") or {}).items()
-        },
+        "labels": resolve_labels(cfg),
         "chatbot": {
             "enabled": chatbot_enabled,
             "backend_url": backend_url,

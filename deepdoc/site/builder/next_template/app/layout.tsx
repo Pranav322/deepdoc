@@ -39,6 +39,11 @@ export default function RootLayout({ children }: { children: ReactNode }) {
       </head>
       <body>
         <RootProvider
+          {...(Object.keys(cfg.labels?.ui ?? {}).length
+            // `locales` is deliberately omitted: supplying it would render a
+            // language switcher, and this is relabelling, not i18n.
+            ? { i18n: { locale: 'en', translations: cfg.labels.ui } }
+            : {})}
           search={{
             // The index is a static asset (see app/api/search/route.ts), so
             // searching happens in the browser. Without this the client would

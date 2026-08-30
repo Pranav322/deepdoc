@@ -275,3 +275,40 @@ def test_existing_brand_asset_becomes_a_public_url(tmp_path):
 
     (tmp_path / "logo.svg").write_text("<svg/>")
     assert brand_asset_urls(tmp_path, _cfg(logo="logo.svg")) == {"logo": "/logo.svg"}
+
+
+# ── labels ────────────────────────────────────────────────────────────────────
+
+
+def _labels(**mapping):
+    from deepdoc.site.builder.next_builder import resolve_labels
+
+    return resolve_labels(_cfg(labels=mapping))
+
+
+def test_ui_and_callout_labels_are_separated():
+    """Fumadocs owns its own strings; callout headings are DeepDoc's."""
+    out = _labels(toc="On this page", note="Heads up")
+    assert out["ui"] == {"toc": "On this page"}
+    assert out["callouts"] == {"NOTE": "Heads up"}
+
+
+def test_callout_label_keys_are_case_insensitive():
+    assert _labels(WARNING="Careful")["callouts"] == {"WARNING": "Careful"}
+
+
+def test_unknown_label_warns_and_is_ignored(capsys):
+    """A silently-dropped label looks like a bug to whoever set it."""
+    out = _labels(bogus="nope")
+    assert out == {"ui": {}, "callouts": {}}
+    assert "bogus" in capsys.readouterr().out
+
+
+def test_empty_label_is_skipped():
+    assert _labels(toc="")["ui"] == {}
+
+
+def test_no_labels_by_default():
+    from deepdoc.site.builder.next_builder import resolve_labels
+
+    assert resolve_labels(deepcopy(DEFAULT_CONFIG)) == {"ui": {}, "callouts": {}}

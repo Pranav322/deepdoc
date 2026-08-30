@@ -34,7 +34,7 @@ export interface DeepDocConfig {
   };
   brand: { logo?: string; logo_dark?: string; favicon?: string };
   repo: { url: string; owner: string; name: string; branch: string; path_prefix: string };
-  labels: Record<string, string>;
+  labels: { ui: Record<string, string>; callouts: Record<string, string> };
   chatbot: { enabled: boolean; backend_url: string };
   generated_at: string;
   commit_sha: string;

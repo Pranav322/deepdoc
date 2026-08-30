@@ -133,6 +133,42 @@ class TestMkDocsDetection:
         assert system.kind == "mkdocs_zensical"
         assert "docs/en/mkdocs.yml" in system.config_files
 
+    def test_root_mkdocs_records_docs_source_root(self):
+        file_contents = {
+            "mkdocs.yml": "site_name: Test\n",
+            "docs/index.md": "# Authored docs\n",
+        }
+        system = detect_docs_system(
+            Path("."),
+            {".": ["mkdocs.yml"], "docs": ["index.md"]},
+            file_contents,
+            {"mkdocs.yml": "config", "docs/index.md": "docs"},
+            {"mkdocs.yml": DocRole.DOCS_CONFIG, "docs/index.md": DocRole.AUTHORED},
+            config_files=["mkdocs.yml"],
+        )
+        assert system.detected
+        assert system.source_roots == ["docs"]
+
+
+class TestDocumentEvidenceIntake:
+    def test_ai_derived_doc_is_inventoried_but_not_evidence(self, tmp_path: Path):
+        from deepdoc.planner import scan_repo
+
+        docs = tmp_path / "docs"
+        docs.mkdir()
+        (docs / "authored.md").write_text("# Authored\nUseful team context.\n")
+        (docs / "deepwiki-export.md").write_text(
+            "---\ndeepdoc_generated_version: 1\n---\n# Stale export\n"
+        )
+
+        scan = scan_repo(tmp_path, {})
+
+        assert scan.doc_role_by_file["docs/authored.md"] == DocRole.AUTHORED
+        assert scan.doc_role_by_file["docs/deepwiki-export.md"] == DocRole.AI_DERIVED
+        assert "docs/authored.md" in scan.doc_contexts
+        assert "docs/deepwiki-export.md" not in scan.doc_contexts
+        assert "docs/deepwiki-export.md" in scan.ai_derived_exports
+
     def test_no_mkdocs_when_no_config(self):
         file_tree = {"src": ["app.py"]}
         file_contents = {"src/app.py": "def f(): pass\n"}

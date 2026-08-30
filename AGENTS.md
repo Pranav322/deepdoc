@@ -3,6 +3,7 @@ Guidance for coding agents working in this repository.
 
 ## Scope
 - Applies to the repository root.
+- Generated output defaults to `deepdoc-docs/` and `deepdoc-site/`. `deepdoc generate --docs PATH --site PATH` is a non-persistent, safety-checked override; it must never authorize writes into authored or unmanaged content.
 - If you change core CLI behavior, persistence/state formats, routing semantics, or generated-site behavior, update this file in the same task. Also keep `README.md` in sync with actual codebase behavior.
 - **IMPORTANT**: Whenever you need more knowledge about the exact execution flows, functions, classes, invariants, and cross-file relationships, take reference from [`deepdoc/CONCEPTS.md`](deepdoc/CONCEPTS.md). It is the exhaustive semantic and architectural map of the codebase.
 

@@ -275,3 +275,78 @@ def test_generate_api_flag_can_reenable_endpoint_pages(monkeypatch, tmp_path: Pa
 
     assert result.exit_code == 0, result.output
     assert captured["cfg"]["include_endpoint_pages"] is True
+
+
+def test_generate_docs_and_site_overrides_are_run_scoped(monkeypatch, tmp_path: Path) -> None:
+    captured: dict[str, object] = {}
+    cfg = {
+        "project_name": "Demo",
+        "output_dir": "deepdoc-docs",
+        "site_dir": "deepdoc-site",
+        "llm": {"provider": "anthropic", "model": "claude-test"},
+    }
+
+    class FakePipeline:
+        def __init__(self, repo_root: Path, pipeline_cfg: dict):
+            captured["cfg"] = pipeline_cfg
+
+        def run(self, force: bool, reconcile: bool) -> None:
+            return {}
+
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: cfg)
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: tmp_path)
+    monkeypatch.setattr(
+        cli,
+        "_inspect_output_state",
+        lambda repo_root, output_dir: {"deepdoc_managed": False, "has_files": False},
+    )
+    import deepdoc.pipeline_v2 as pipeline_v2
+
+    monkeypatch.setattr(pipeline_v2, "PipelineV2", FakePipeline)
+
+    result = CliRunner().invoke(
+        cli.main,
+        ["generate", "--docs", "docs/deepdoc", "--site", "preview-site"],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert captured["cfg"]["output_dir"] == "docs/deepdoc"
+    assert captured["cfg"]["site_dir"] == "preview-site"
+    assert cfg["output_dir"] == "deepdoc-docs"
+    assert cfg["site_dir"] == "deepdoc-site"
+
+
+def test_generate_rejects_deploy_with_run_scoped_paths(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        cli,
+        "_load_or_exit",
+        lambda: {"llm": {"provider": "anthropic", "model": "claude-test"}},
+    )
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: tmp_path)
+
+    result = CliRunner().invoke(
+        cli.main,
+        ["generate", "--docs", "temporary-docs", "--deploy"],
+    )
+
+    assert result.exit_code != 0
+    assert "cannot be combined" in result.output
+
+
+def test_generate_explicit_docs_path_never_auto_migrates(monkeypatch, tmp_path: Path) -> None:
+    docs = tmp_path / "docs"
+    docs.mkdir()
+    (docs / "authored.md").write_text("# Authored\n")
+    cfg = {
+        "output_dir": "deepdoc-docs",
+        "site_dir": "deepdoc-site",
+        "llm": {"provider": "anthropic", "model": "claude-test"},
+    }
+    monkeypatch.setattr(cli, "_load_or_exit", lambda: cfg)
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: tmp_path)
+
+    result = CliRunner().invoke(cli.main, ["generate", "--docs", "docs"])
+
+    assert result.exit_code != 0
+    assert "Refusing to write" in result.output
+    assert (docs / "authored.md").exists()

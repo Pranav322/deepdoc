@@ -391,7 +391,7 @@ def init(
 @click.option(
     "--clean",
     is_flag=True,
-    help="Delete generated docs and saved DeepDoc state, then rebuild from scratch.",
+    help="Delete exact DeepDoc-owned docs/site files and saved state, then rebuild.",
 )
 @click.option(
     "--yes",
@@ -442,6 +442,18 @@ def init(
     type=float,
     help="Seconds to pause between generation batches. 0 = no pause. Default: 0.5.",
 )
+@click.option(
+    "--docs",
+    "docs_path",
+    type=str,
+    help="Use this repository-relative docs output directory for this run only.",
+)
+@click.option(
+    "--site",
+    "site_path",
+    type=str,
+    help="Use this repository-relative site output directory for this run only.",
+)
 def generate(
     force,
     clean,
@@ -454,6 +466,8 @@ def generate(
     batch_size,
     max_parallel_workers,
     rate_limit_pause,
+    docs_path,
+    site_path,
 ):
     """Generate documentation for the entire codebase.
 
@@ -461,7 +475,7 @@ def generate(
     When to use which mode:
       deepdoc generate              First run in a repo
       deepdoc generate --force      Full refresh of existing DeepDoc docs
-      deepdoc generate --clean      Wipe docs + saved state, then rebuild
+      deepdoc generate --clean      Remove DeepDoc-owned output + saved state, then rebuild
 
     \b
     Pipeline overview:
@@ -471,17 +485,27 @@ def generate(
       4. API Ref     Stage OpenAPI assets for the API reference page
       5. Build      Write the Next.js + Fumadocs site scaffold
     """
-    cfg = _load_or_exit()
+    cfg = deepcopy(_load_or_exit())
     repo_root = _find_repo_root()
-    paths = resolve_output_paths(repo_root, cfg)
-    output_dir = paths.output_dir
+    if docs_path is not None:
+        cfg["output_dir"] = docs_path
+    if site_path is not None:
+        cfg["site_dir"] = site_path
+    if docs_path is not None or site_path is not None:
+        cfg["_deepdoc_explicit_output_paths"] = True
+    if deploy and (docs_path is not None or site_path is not None):
+        raise click.ClickException(
+            "--deploy cannot be combined with one-run --docs/--site overrides. "
+            "Persist the paths with `deepdoc config set` before deploying."
+        )
     effective_force = force or clean
 
     if clean:
         _confirm_clean(repo_root, cfg, yes)
         _wipe_deepdoc_output(repo_root, cfg)
 
-    assert_safe_for_generation(repo_root, cfg)
+    paths = assert_safe_for_generation(repo_root, cfg)
+    output_dir = paths.output_dir
     output_state = _inspect_output_state(repo_root, output_dir)
 
     if output_state["deepdoc_managed"] and not effective_force:
@@ -546,8 +570,9 @@ def generate(
 def clean(yes):
     """Reset the current repository to a pre-DeepDoc state.
 
-    This removes `.deepdoc.yaml`, generated docs, the generated site scaffold,
-    chatbot backend scaffolding, and saved DeepDoc state files/directories.
+    This removes `.deepdoc.yaml`, exact DeepDoc-owned docs/site output, and
+    saved DeepDoc state files/directories. Chatbot backend scaffolding is
+    preserved because it may contain user changes.
 
     \b
     Examples:

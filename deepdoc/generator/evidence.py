@@ -339,6 +339,8 @@ class EvidenceAssembler:
         # Load file data, sort smallest first for maximum inclusion
         files_data: list[tuple[str, str, int, ParsedFile | None]] = []
         for src_file in tracked_bucket_files(bucket):
+            if not self._is_evidence_eligible_file(src_file):
+                continue
             src_path = self.repo_root / src_file
             if not src_path.exists():
                 continue
@@ -555,7 +557,7 @@ class EvidenceAssembler:
             file_path = context.get("file_path")
             summary = context.get("summary")
             title = context.get("title") or Path(file_path or "").stem
-            if not file_path or not summary:
+            if not file_path or not summary or not self._is_evidence_eligible_file(file_path):
                 continue
             doc_files.add(file_path)
             lines.append(f"- {title} (`{file_path}`): {summary}")
@@ -563,12 +565,24 @@ class EvidenceAssembler:
         if self.scan.doc_contexts:
             lines.append("\nAdditional repo documentation:")
             for file_path, summary in list(self.scan.doc_contexts.items())[:10]:
+                if not self._is_evidence_eligible_file(file_path):
+                    continue
                 doc_files.add(file_path)
                 lines.append(f"- `{file_path}`: {summary}")
 
         if len(lines) == 1:
             return "", set()
         return "## Internal Docs Context\n" + "\n".join(lines), doc_files
+
+    def _is_evidence_eligible_file(self, file_path: str) -> bool:
+        """Exclude AI-derived and generated document artifacts from evidence."""
+        role = getattr(self.scan, "doc_role_by_file", {}).get(file_path, "")
+        return role not in {
+            "ai_derived_export",
+            "generated_ref",
+            "built_docs_site",
+            "unknown_generated",
+        }
 
     def _extract_called_symbol_names(self, source_ctx: str) -> set[str]:
         call_pattern = re.compile(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(")

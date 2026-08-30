@@ -245,15 +245,15 @@ def _detect_mkdocs(
     system.config_files = mkdocs_configs
 
     for rel in mkdocs_configs:
-        parent = str(Path(rel).parent)
-        if "/" + parent + "/" not in str(mkdocs_configs):
-            candidate = parent + "/docs"
-            if any(
-                d == candidate or d.startswith(candidate + "/")
-                for d in file_contents
-                if doc_role_by_file.get(d) == DocRole.AUTHORED
-            ):
-                system.source_roots.append(candidate)
+        parent_path = Path(rel).parent
+        parent = "" if parent_path == Path(".") else parent_path.as_posix()
+        candidate = "docs" if not parent else f"{parent}/docs"
+        if any(
+            d == candidate or d.startswith(candidate + "/")
+            for d in file_contents
+            if doc_role_by_file.get(d) == DocRole.AUTHORED
+        ):
+            system.source_roots.append(candidate)
 
     translation_dirs: set[str] = set()
     for d in file_tree:

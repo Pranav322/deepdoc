@@ -162,8 +162,11 @@ def assert_safe_for_generation(repo_root: Path, cfg: dict[str, Any]) -> OutputPa
     site_state = output_dir_collision_reason(inspections[1])
 
     migrated = False
+    allow_auto_migrate = not cfg.get("_deepdoc_explicit_output_paths", False)
 
     if (
+        allow_auto_migrate
+        and
         output_state in ("tracked_authored", "unmanaged")
         and cfg.get("output_dir") in (None, "docs")
     ):
@@ -171,6 +174,8 @@ def assert_safe_for_generation(repo_root: Path, cfg: dict[str, Any]) -> OutputPa
         migrated = True
 
     if (
+        allow_auto_migrate
+        and
         site_state in ("tracked_authored", "unmanaged")
         and cfg.get("site_dir") in (None, "site")
     ):

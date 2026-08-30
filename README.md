@@ -295,6 +295,7 @@ deepdoc generate --deploy          # Generate + export the static site
 deepdoc generate --batch-size 3    # Smaller batches for rate-limited APIs
 deepdoc generate --include "src/**" --include "lib/**"
 deepdoc generate --exclude "tests/**"
+deepdoc generate --docs docs/deepdoc --site preview-site  # One-run safe output override
 ```
 
 **Current behavior:**
@@ -331,6 +332,8 @@ deepdoc generate --exclude "tests/**"
 | `--include` | all files | Glob patterns to include (can be repeated) |
 | `--exclude` | see config | Additional glob patterns to exclude |
 | `--deploy` | off | Build and export the static site after generation |
+| `--docs PATH` | config value | Use a repository-relative docs output directory for this run only; does not bypass output safety or persist configuration |
+| `--site PATH` | config value | Use a repository-relative site output directory for this run only; does not bypass output safety or persist configuration |
 | `--batch-size` | 10 | Pages per batch before pausing (helps with rate limits) |
 
 ### `deepdoc update`

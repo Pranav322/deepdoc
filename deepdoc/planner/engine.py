@@ -1185,13 +1185,6 @@ def scan_repo(
             )
             if doc_role:
                 doc_role_by_file[rel] = doc_role
-                if doc_role == "ai_derived_export":
-                    ai_derived_exports.append(rel)
-                elif doc_role == "built_docs_site":
-                    built_outputs.append(rel)
-            # For files that might be AI-derived but need content inspection,
-            # defer to the post-read phase (see below). The path-based
-            # classification above catches the unambiguous cases.
             service = _service_for_path(rel, service_boundaries)
             if service:
                 file_services[rel] = service
@@ -1213,8 +1206,10 @@ def scan_repo(
             ):
                 openapi_paths.append(rel)
 
-            # Only parse supported source files
-            if _is_doc_context_candidate(rel, fname):
+            # Read documentation candidates before accepting them as evidence.
+            # Content markers can identify DeepDoc/DeepWiki exports that path-only
+            # classification would otherwise mistake for authored documentation.
+            if _is_doc_context_candidate(rel, fname) or doc_role == DocRole.DOCS_CONFIG:
                 step_start = time.perf_counter()
                 try:
                     doc_content = fpath.read_text(encoding="utf-8", errors="replace")
@@ -1224,14 +1219,29 @@ def scan_repo(
                             "scan.doc_bytes_read",
                             len(doc_content.encode("utf-8")),
                         )
-                    if fname.lower().endswith(".ipynb"):
-                        summary, context = _summarize_notebook_context(rel, doc_content)
-                    else:
-                        summary, context = _summarize_doc_context(rel, doc_content)
-                    if summary:
-                        doc_contexts[rel] = summary
-                    if context:
-                        research_contexts.append(context)
+                    refined_role = classify_doc_role(
+                        rel,
+                        content=doc_content,
+                        source_kind=source_kind_by_file[rel],
+                        output_dir=output_dir_str,
+                        site_dir=site_dir_str,
+                    )
+                    if refined_role:
+                        doc_role_by_file[rel] = refined_role
+                    final_role = doc_role_by_file.get(rel, "")
+                    if final_role == DocRole.AI_DERIVED:
+                        ai_derived_exports.append(rel)
+                    elif final_role == DocRole.BUILT_SITE:
+                        built_outputs.append(rel)
+                    elif final_role in {DocRole.AUTHORED, DocRole.DOCS_CONFIG}:
+                        if fname.lower().endswith(".ipynb"):
+                            summary, context = _summarize_notebook_context(rel, doc_content)
+                        else:
+                            summary, context = _summarize_doc_context(rel, doc_content)
+                        if summary:
+                            doc_contexts[rel] = summary
+                        if context:
+                            research_contexts.append(context)
                 except Exception:
                     pass
                 finally:
@@ -1431,23 +1441,22 @@ def scan_repo(
             if telemetry is not None:
                 telemetry.record_duration(f"scan.{phase_name}", 0.0)
 
-    # Post-scan doc role refinement: check file contents for AI-derived
-    # markers that were not detectable from path alone.
+    # Post-scan refinement covers document-like files captured through the
+    # general inventory path. Never admit excluded roles as factual evidence.
     for rel, content in file_contents.items():
-        if rel not in doc_role_by_file or doc_role_by_file[rel] == DocRole.UNKNOWN:
-            doc_role = classify_doc_role(
-                rel,
-                content=content,
-                source_kind=source_kind_by_file.get(rel, "product"),
-                output_dir=output_dir_str,
-                site_dir=site_dir_str,
-            )
-            if doc_role:
-                doc_role_by_file[rel] = doc_role
-                if doc_role == "ai_derived_export":
-                    ai_derived_exports.append(rel)
-                elif doc_role == "built_docs_site":
-                    built_outputs.append(rel)
+        doc_role = classify_doc_role(
+            rel,
+            content=content,
+            source_kind=source_kind_by_file.get(rel, "product"),
+            output_dir=output_dir_str,
+            site_dir=site_dir_str,
+        )
+        if doc_role:
+            doc_role_by_file[rel] = doc_role
+            if doc_role == DocRole.AI_DERIVED and rel not in ai_derived_exports:
+                ai_derived_exports.append(rel)
+            elif doc_role == DocRole.BUILT_SITE and rel not in built_outputs:
+                built_outputs.append(rel)
 
     repo_scan = RepoScan(
         file_tree=dict(file_tree),

@@ -1188,18 +1188,22 @@ def serve(port):
     paths = resolve_output_paths(repo_root, cfg)
     site_dir = paths.site_dir
 
+    # Re-apply .deepdoc.yaml before starting Next, so config edits show up on
+    # the next `serve` without regenerating any docs. This also rebuilds the
+    # scaffold from the saved plan when site_dir is missing entirely — site
+    # directories are usually gitignored, so a fresh clone has the docs and the
+    # plan but no site, and that is recoverable without any LLM call. Must run
+    # before _ensure_node_modules, which decides whether to reinstall from the
+    # package.json this rewrites.
+    _resync_site_from_config(repo_root, paths.output_dir, site_dir, cfg)
+
     pkg_json = site_dir / "package.json"
     if not pkg_json.exists():
         console.print(
-            f"[red]{site_dir.name}/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            f"[red]{site_dir.name}/package.json not found and no saved plan to rebuild it from. "
+            f"Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
-
-    # Re-apply .deepdoc.yaml before starting Next, so config edits show up on
-    # the next `serve` without regenerating any docs. Must run before
-    # _ensure_node_modules, which decides whether to reinstall from the
-    # package.json this rewrites.
-    _resync_site_from_config(repo_root, paths.output_dir, site_dir, cfg)
 
     _ensure_node_installed()
     _ensure_node_modules(site_dir)
@@ -1266,10 +1270,15 @@ def _deploy():
     site_dir = paths.site_dir
     output_dir = paths.output_dir
 
+    # Rebuild the scaffold from the saved plan first, so a missing site_dir
+    # (they are usually gitignored) does not force a full regeneration.
+    _resync_site_from_config(repo_root, output_dir, site_dir, cfg)
+
     pkg_json = site_dir / "package.json"
     if not pkg_json.exists():
         console.print(
-            f"[red]{site_dir.name}/package.json not found. Run [bold]deepdoc generate[/bold] first.[/red]"
+            f"[red]{site_dir.name}/package.json not found and no saved plan to rebuild it from. "
+            f"Run [bold]deepdoc generate[/bold] first.[/red]"
         )
         sys.exit(1)
 
@@ -1280,10 +1289,6 @@ def _deploy():
             + "\n- ".join(blockers)
             + "\nRun `deepdoc generate` again after fixing the generation issues."
         )
-
-    # Apply .deepdoc.yaml before building, so a deploy never ships a UI that is
-    # stale relative to the config. Must precede _ensure_node_modules.
-    _resync_site_from_config(repo_root, output_dir, site_dir, cfg)
 
     _ensure_node_installed()
     _ensure_node_modules(site_dir)

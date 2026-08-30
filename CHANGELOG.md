@@ -98,6 +98,15 @@ The automated release workflow reads the section that matches the version in
 
 ### Fixed
 
+- **`deepdoc serve` and `deepdoc deploy` no longer refuse when the site
+  directory is missing.** Both checked for `<site_dir>/package.json` *before*
+  re-applying the config, so a fresh clone — where site directories are
+  normally gitignored, leaving docs and a saved plan but no site — was told to
+  run `deepdoc generate` and pay for a full regeneration to rebuild something
+  the saved plan already describes. The resync now runs first and rebuilds the
+  scaffold with no LLM call; the guard only fires when there is genuinely no
+  plan to rebuild from.
+
 - **Brand colours now actually apply to the generated site.** The template
   targeted Fumadocs v14 CSS variables (`--fd-*`) while shipping v15, which
   renamed every colour token to `--color-fd-*` and changed their values to

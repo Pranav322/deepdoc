@@ -178,3 +178,54 @@ def test_every_ui_setting_applies_on_serve_with_no_llm(repo: Path, monkeypatch):
     assert after["labels"]["ui"]["toc"] == "On this page"
     assert "Handbook" in json.dumps(after["nav"])
     assert after != before
+
+
+# ── a missing site directory is recoverable without regenerating ──────────────
+
+
+def test_resync_rebuilds_a_site_that_does_not_exist(repo: Path, monkeypatch):
+    """site_dir is normally gitignored, so a fresh clone has docs and a saved
+    plan but no site. That is rebuildable with no LLM call, so `serve` and
+    `deploy` must not refuse before trying."""
+    import deepdoc.llm.client as llm_client
+
+    def _boom(*_a, **_kw):  # pragma: no cover - must never run
+        raise AssertionError("rebuilding a missing site should not need an LLM")
+
+    monkeypatch.setattr(llm_client, "LLMClient", _boom)
+    monkeypatch.setattr("deepdoc.persistence_v2.load_plan", lambda _r: _plan())
+
+    site = repo / "site"
+    assert not site.exists()
+
+    cli._resync_site_from_config(repo, repo / "docs", site, _cfg(site))
+
+    assert (site / "package.json").exists(), "scaffold not rebuilt"
+    assert (site / "deepdoc.config.json").exists()
+
+
+def test_serve_resyncs_before_checking_for_package_json(tmp_path: Path, monkeypatch):
+    """Ordering guard: the guard used to run first, so a missing site sent the
+    user to `deepdoc generate` — and its LLM bill — for something free."""
+    import inspect
+
+    source = inspect.getsource(cli.serve.callback)
+    resync_at = source.index("_resync_site_from_config")
+    guard_at = source.index('"package.json"')
+    assert resync_at < guard_at, "package.json guard must not precede the resync"
+
+
+def test_deploy_resyncs_before_checking_for_package_json():
+    import inspect
+
+    source = inspect.getsource(cli._deploy.callback)
+    resync_at = source.index("_resync_site_from_config")
+    guard_at = source.index('"package.json"')
+    assert resync_at < guard_at, "package.json guard must not precede the resync"
+
+
+def test_deploy_resyncs_exactly_once():
+    """An earlier revision left a second, redundant resync in deploy."""
+    import inspect
+
+    assert inspect.getsource(cli._deploy.callback).count("_resync_site_from_config") == 1

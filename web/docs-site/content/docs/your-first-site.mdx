@@ -1,0 +1,92 @@
+---
+title: Your first site
+description: What DeepDoc just created, how to read it, and which parts are yours to edit.
+---
+
+`deepdoc generate` writes three things into your repository. Knowing which is
+which tells you what is safe to edit and what gets overwritten.
+
+<Files>
+  <File name=".deepdoc.yaml" description="Your config. Yours to edit." />
+  <Folder name="deepdoc-docs" description="Generated Markdown — one file per page" defaultOpen>
+    <File name="index.md" />
+    <File name="getting-started.md" />
+    <File name="whats-changed.md" description="Auto-written changelog" />
+  </Folder>
+  <Folder name="deepdoc-site" description="The Next.js site. Built output — do not edit.">
+    <File name="deepdoc.config.json" description="Rewritten on every serve" />
+  </Folder>
+  <Folder name=".deepdoc" description="Saved state — commit this">
+    <File name="plan.json" description="The page plan. Makes re-theming free." />
+    <File name="ledger.json" description="Which pages DeepDoc owns" />
+    <File name="generation_quality.json" />
+  </Folder>
+</Files>
+
+## What each one is for
+
+**`deepdoc-docs/`** is plain Markdown, one file per page. Readable, diffable,
+and reviewable in a pull request like any other file.
+
+**`deepdoc-site/`** is the site that renders it. Treat it as build output —
+DeepDoc owns every file in there and rewrites them on each run.
+
+**`.deepdoc/`** is the saved state, and it is the reason theming is free.
+`plan.json` holds the page structure, so changing colours or reordering the
+sidebar rebuilds the site from that file instead of re-reading your code.
+
+<Callout title="Commit .deepdoc/">
+  Without `plan.json`, DeepDoc cannot rebuild the site from your config and has
+  to regenerate — which costs LLM calls. Commit it alongside your docs.
+</Callout>
+
+## Adding your own pages
+
+Drop a Markdown file into `deepdoc-docs/` and it is published. DeepDoc only
+deletes files it created — it tracks its own output in `ledger.json` — so
+hand-written pages survive every regeneration.
+
+```bash
+echo "# Runbook" > deepdoc-docs/runbook.md
+```
+
+That page is now live at `/runbook`, but it will not appear in the sidebar.
+The sidebar comes from the plan, and the plan does not know about it. Add it:
+
+```yaml title=".deepdoc.yaml"
+site:
+  nav:
+    extra:
+      - { slug: runbook, title: "Runbook", section: "Guides" }
+```
+
+DeepDoc tells you when this applies to you:
+
+```
+2 page(s) are not in the sidebar: runbook, faq. Add them under site.nav.extra.
+```
+
+## What gets overwritten
+
+<Accordions>
+  <Accordion title="Safe to edit">
+    `.deepdoc.yaml`, and any Markdown file you added to `deepdoc-docs/`
+    yourself. Neither is ever overwritten.
+  </Accordion>
+  <Accordion title="Overwritten every run">
+    Everything in `deepdoc-site/`, and any page DeepDoc generated. Editing a
+    generated page by hand is lost on the next run — change the config or the
+    source code instead.
+  </Accordion>
+  <Accordion title="Removed by deepdoc clean">
+    Only files DeepDoc created, tracked against its own manifest. Your
+    hand-written pages and `chatbot_backend/` are preserved.
+  </Accordion>
+</Accordions>
+
+## Next
+
+<Cards>
+  <Card title="Make it yours" href="/theming/colours" description="Brand colours, logo and fonts — applied without regenerating." />
+  <Card title="What it costs" href="/costs" description="Which commands call an LLM, and which are free." />
+</Cards>

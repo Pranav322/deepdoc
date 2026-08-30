@@ -6,11 +6,14 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
-const out = resolve(here, '..', 'out');
+// With a custom distDir, `output: export` writes the exported site into the
+// dist directory itself rather than into out/. The build passes EXPORT_DIR so
+// this does not have to guess.
+const out = resolve(here, '..', process.env.EXPORT_DIR || 'out');
 const dest = resolve(here, '..', '..', 'public', 'docs');
 
 try { await access(out); } catch {
-  console.error('[docs] no out/ — run `next build` first');
+  console.error(`[docs] no ${out} — run \`npm run build\` first`);
   process.exit(1);
 }
 await rm(dest, { recursive: true, force: true });

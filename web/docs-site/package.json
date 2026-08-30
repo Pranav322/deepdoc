@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3100",
-    "build": "next build && node scripts/copy-to-web-public.mjs"
+    "build": "NEXT_DIST_DIR=.next-build next build && EXPORT_DIR=.next-build node scripts/copy-to-web-public.mjs"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3",

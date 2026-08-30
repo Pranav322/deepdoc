@@ -1,0 +1,217 @@
+---
+title: Commands
+description: Every DeepDoc command, what it does, and whether it costs you anything.
+---
+
+Ten commands. Only two of them call an LLM.
+
+| Command | What it does | Calls an LLM |
+|---|---|---|
+| [`init`](#init) | Write `.deepdoc.yaml` | No |
+| [`generate`](#generate) | Scan, plan and write the docs | **Yes** |
+| [`update`](#update) | Refresh docs after code changes | **Yes**, for changed pages |
+| [`serve`](#serve) | Preview locally | No |
+| [`deploy`](#deploy) | Build a static site | No |
+| [`status`](#status) | Show what exists and what is stale | No |
+| [`config`](#config) | Read or write config values | No |
+| [`performance`](#performance) | Timing and token metrics | No |
+| [`clean`](#clean) | Remove everything DeepDoc created | No |
+| [`benchmark`](#benchmark) | Score planner quality | Depends |
+
+---
+
+## `init`
+
+Creates `.deepdoc.yaml` in the current repository.
+
+```bash
+deepdoc init --provider anthropic
+```
+
+`--provider` is required. Everything else has a sensible default.
+
+| Flag | Description |
+|---|---|
+| `--provider` | `anthropic`, `openai`, `azure`, `ollama`, or any LiteLLM alias |
+| `--model` | Defaults to a sensible model for the provider |
+| `--name` / `--description` | Project name and description; default to the directory name |
+| `--output-dir` / `--site-dir` | Default `deepdoc-docs` and `deepdoc-site` |
+| `--with-chatbot` | Also scaffold the optional Q&A backend |
+| `--llm-max-concurrency` / `--llm-rpm` / `--llm-tpm` | Rate limits |
+| `--context-window-tokens` | Override the detected context window |
+
+<Callout>
+  For Google Gemini, run `init` with any provider and then set the model with
+  `deepdoc config set`. See [Providers](/providers).
+</Callout>
+
+---
+
+## `generate`
+
+Scans your code, plans the structure, and writes Markdown. **This is the step
+that costs LLM calls.**
+
+```bash
+deepdoc generate
+```
+
+Refuses to overwrite existing DeepDoc-managed docs unless you say so:
+
+```bash
+deepdoc generate --force   # refresh existing pages
+deepdoc generate --clean   # delete owned files and saved state, then rebuild
+```
+
+| Flag | Description |
+|---|---|
+| `--force` | Fully refresh existing DeepDoc-managed docs instead of refusing |
+| `--clean` | Delete DeepDoc-owned files and saved state, then rebuild |
+| `--yes` | Skip confirmation prompts |
+| `--include` / `--exclude` | Extra glob patterns for this run |
+| `--docs` / `--site` | Use different output directories, this run only |
+| `--batch-size` | Pages submitted per batch |
+| `--max-parallel-workers` | Concurrent LLM calls |
+| `--rate-limit-pause` | Seconds between batches |
+| `--strict-quality` | Fail if any page is invalid, degraded, fallback or a stub |
+| `--deploy` | Build the static site afterwards |
+
+---
+
+## `update`
+
+The normal command after your first `generate`. Diffs against the last synced
+commit and regenerates **only the affected pages**.
+
+```bash
+deepdoc update
+```
+
+| Flag | Default | Description |
+|---|---|---|
+| `--since` | last synced commit | Git ref to diff against |
+| `--replan` | off | Force a full replan even if the change set looks incremental |
+| `--strict-quality` | off | Exit non-zero when any page fails validation — use in CI |
+| `--deploy` | off | Deploy after a fully successful update |
+
+See [Keeping docs fresh](/keeping-docs-fresh) for how it decides what to redo.
+
+---
+
+## `serve`
+
+Previews the docs locally with live reload.
+
+```bash
+deepdoc serve
+deepdoc serve --port 4000
+```
+
+Before starting, it re-applies `.deepdoc.yaml` from your saved plan — so config
+changes show up here with no regeneration and no LLM calls:
+
+```
+Applied .deepdoc.yaml changes (no regeneration, no LLM calls): colors, nav
+```
+
+Needs Node.js 18+. The first run installs npm dependencies automatically.
+
+---
+
+## `deploy`
+
+Builds a static site into `<site_dir>/out/`, publishable to any static host.
+
+```bash
+deepdoc deploy
+```
+
+Refuses to ship broken docs:
+
+```
+Refusing to deploy docs with unresolved quality issues:
+- invalid docs present: cli-commands
+- stub docs present: page-generation-validation
+```
+
+Fix those by regenerating. See [Deploying](/deploying).
+
+---
+
+## `status`
+
+Shows what has been generated and what is now stale. No flags, no cost.
+
+```bash
+deepdoc status
+```
+
+---
+
+## `config`
+
+```bash
+deepdoc config show
+deepdoc config set site.theme.preset ocean
+deepdoc config set site.colors.primary "#7c3aed"
+```
+
+`config set` rejects keys that do not exist, rather than silently writing a
+setting that does nothing:
+
+```
+Error: Unknown config key: site.theme.presset
+
+Did you mean:
+  site.theme.preset
+```
+
+---
+
+## `performance`
+
+Timing, token usage, retries and I/O for recent runs, from
+`.deepdoc/performance/runs.jsonl`.
+
+```bash
+deepdoc performance
+```
+
+This is where to look if you want to know what a run actually cost.
+
+---
+
+## `clean`
+
+Resets the repository to a pre-DeepDoc state.
+
+```bash
+deepdoc clean          # prompts first
+deepdoc clean --yes    # no prompt
+```
+
+Removes only files DeepDoc created — tracked against its own manifest — so
+hand-written pages in your docs directory and `chatbot_backend/` survive.
+
+---
+
+## `benchmark`
+
+Scores planner quality against a gold manifest. Mainly of interest if you are
+working on DeepDoc itself.
+
+```bash
+deepdoc benchmark --catalog benchmarks/catalog.json
+deepdoc benchmark --generated-root ./deepdoc-docs --scorecard-out .deepdoc/scorecards/latest.json
+```
+
+Use `--strict-scorecard` to fail when completeness gates are not met. Without a
+hand-written catalog, artifact mode (`--generated-root`) computes a provisional
+scorecard from persisted `.deepdoc/` output.
+
+## Next
+
+<Cards>
+  <Card title="Keeping docs fresh" href="/keeping-docs-fresh" description="How update decides what to regenerate." />
+  <Card title="What it costs" href="/costs" description="Which commands spend money, and how much." />
+</Cards>

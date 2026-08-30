@@ -1,0 +1,113 @@
+---
+title: Keeping docs fresh
+description: How update decides what to regenerate, and how to keep docs current in CI.
+---
+
+After your first `generate`, `update` is the command you run. It diffs against
+the last commit DeepDoc synced and regenerates **only the pages your change
+affected**.
+
+```bash
+deepdoc update
+```
+
+## What it does
+
+<Steps>
+  <Step>
+    **Diff.** Compares your working tree against the last synced commit, read
+    from saved state in `.deepdoc/`.
+  </Step>
+  <Step>
+    **Pick a strategy.** Either an incremental pass over the affected pages, a
+    full replan, or nothing at all if the diff touched no documented code.
+  </Step>
+  <Step>
+    **Regenerate.** Only the pages in scope. This is where the cost is.
+  </Step>
+  <Step>
+    **Record.** Appends to the changelog, refreshes the sidebar, and saves the
+    new sync point.
+  </Step>
+</Steps>
+
+If nothing relevant changed, `update` does nothing and costs nothing.
+
+## When it replans everything
+
+Usually `update` stays incremental. It escalates to a full replan when:
+
+- you pass `--replan`
+- **DeepDoc's own engine version changed** — a new release can plan
+  differently, so the previous plan is no longer comparable
+- the change is structural enough that the existing plan cannot describe it
+
+<Callout>
+  A full replan costs about what `generate` costs. Upgrading DeepDoc and then
+  running `update` may therefore be a full-price run — worth knowing before you
+  do it in CI on a schedule.
+</Callout>
+
+## Checking before you run
+
+```bash
+deepdoc status
+```
+
+Shows what has been generated and which pages are now stale. Free, and a good
+habit before an update in a repository you have not touched for a while.
+
+## Diffing against something else
+
+```bash
+deepdoc update --since v1.4.0
+deepdoc update --since HEAD~10
+```
+
+Any git ref works. Useful after a long-lived branch merge, when the last synced
+commit is not the comparison you want.
+
+## In CI
+
+```yaml title=".github/workflows/docs.yml"
+- name: Update documentation
+  run: deepdoc update --strict-quality
+  env:
+    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+```
+
+`--strict-quality` exits non-zero when any page comes out invalid, degraded or
+a stub — so a bad run fails the job instead of quietly publishing broken pages.
+
+<Callout type="warn" title="Give CI a real history">
+  `update` diffs against a git ref. With a shallow clone there may be no
+  history to diff against, and it falls back to doing more work than needed.
+  Use `fetch-depth: 0` on the checkout step.
+</Callout>
+
+## When quality gates block you
+
+`deploy` refuses to publish docs with unresolved problems:
+
+```
+Refusing to deploy docs with unresolved quality issues:
+- invalid docs present: cli-commands
+- stub docs present: page-generation-validation
+```
+
+That is the gate doing its job. The pages genuinely did not generate cleanly.
+Inspect them:
+
+```bash
+cat .deepdoc/generation_quality.json
+```
+
+Then re-run `update` for those pages, or `generate --force` if the whole set
+needs redoing.
+
+## Next
+
+<Cards>
+  <Card title="What it costs" href="/costs" description="Which commands spend money, and how to measure yours." />
+  <Card title="Deploying" href="/deploying" description="Static output, hosts and CI." />
+</Cards>

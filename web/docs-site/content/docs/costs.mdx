@@ -1,0 +1,110 @@
+---
+title: What it costs
+description: Which commands call an LLM, which are free, and how to measure your own spend.
+---
+
+Most tools in this space are vague about cost. Here is the whole picture.
+
+## Free forever
+
+These commands never call an LLM. Run them as often as you like.
+
+| Command | |
+|---|---|
+| `deepdoc serve` | Rebuilds the site from your saved plan |
+| `deepdoc deploy` | Builds static output |
+| `deepdoc status` | Reads local state |
+| `deepdoc config` | Reads and writes YAML |
+| `deepdoc performance` | Reads a local log |
+| `deepdoc clean` | Deletes files |
+| `deepdoc init` | Writes a config file |
+
+**Every theming change is in this list.** Colours, presets, fonts, logo,
+sidebar order, renaming pages, hiding pages, adding your own — all rebuilt from
+`.deepdoc/plan.json`, none of it re-reads your code.
+
+<Callout title="This is the point of the saved plan">
+  The plan records your documentation structure. Because it persists, changing
+  how the docs *look* never re-derives what they *say*. Iterate on the design as
+  much as you want.
+</Callout>
+
+## What costs money
+
+Two commands.
+
+### `deepdoc generate`
+
+The full run. Roughly:
+
+<Steps>
+  <Step>**Scan** — no LLM. Parses your code locally.</Step>
+  <Step>**Plan** — a small number of calls to name and group the clusters found in your call graph.</Step>
+  <Step>**Generate** — approximately **one call per page**, in batches of 10 with up to 6 in flight.</Step>
+  <Step>**Consistency pass** — one further pass adding cross-page links. Disable with `consistency_pass: false`.</Step>
+</Steps>
+
+So the dominant term is **pages**, not repository size directly. A repo that
+plans to 40 pages costs roughly 40 generation calls plus planning overhead.
+
+A page that fails validation is retried, up to `MAX_RETRIES` of 3. Most pages
+never retry; a page that does costs 2–3× that page.
+
+### `deepdoc update`
+
+The same machinery, but **only for pages affected by your diff**. Change one
+module and you pay for the handful of pages that describe it, not all 40.
+
+This is why `update` is the normal command after your first `generate`.
+
+## Measuring your own
+
+Do not trust an estimate — including one from these docs. Measure it:
+
+```bash
+deepdoc performance
+```
+
+That reads `.deepdoc/performance/runs.jsonl`, which records per-run timings,
+token counts and retries. The token counts there are the real numbers for your
+repository and your model, which is the only figure that matters.
+
+<Callout type="warn" title="Why there are no dollar figures here">
+  Cost depends on your model, your repository size, and how many pages your code
+  plans into. Any number quoted here would be wrong for most readers. The
+  measurement above takes seconds and is accurate for you.
+</Callout>
+
+## Spending less
+
+<Accordions>
+  <Accordion title="Use `update`, not `generate`">
+    After the first run, `update` regenerates only what your diff touched. This
+    is the single biggest lever.
+  </Accordion>
+  <Accordion title="Use a cheaper model">
+    Set `llm.model` to a smaller model. Documentation is mostly summarisation,
+    which smaller models handle well. See [Providers](/providers).
+  </Accordion>
+  <Accordion title="Run a local model">
+    Ollama costs nothing per token. Slower, and quality varies by model, but the
+    marginal cost is zero.
+  </Accordion>
+  <Accordion title="Narrow the scope">
+    `exclude` in `.deepdoc.yaml` keeps generated tests, vendored code and build
+    output out of the plan. Fewer files means fewer pages means fewer calls.
+    Unlike theming, this changes *what gets documented*, so set it before
+    generating.
+  </Accordion>
+  <Accordion title="Turn off the consistency pass">
+    `consistency_pass: false` skips the cross-linking pass. You lose the
+    "See also" links between related pages.
+  </Accordion>
+</Accordions>
+
+## Next
+
+<Cards>
+  <Card title="Keeping docs fresh" href="/keeping-docs-fresh" description="How update decides what to regenerate." />
+  <Card title="Providers" href="/providers" description="Pick a model — including local ones that cost nothing." />
+</Cards>

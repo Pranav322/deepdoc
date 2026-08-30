@@ -1,0 +1,86 @@
+---
+title: VS Code extension
+description: Explain selected code inline, and insert generated comments above it.
+---
+
+A separate extension from the CLI, for the other half of the job: explaining
+code while you are reading it, rather than documenting a whole repository.
+
+Select some code, ask for an explanation, and optionally have the comment
+inserted above the selection.
+
+## Install
+
+The extension lives in `vscode-extension/` in the repository and ships on its
+own release track, independent of the Python package.
+
+```bash
+cd vscode-extension
+npm install && npm run package
+code --install-extension deepdoc-*.vsix
+```
+
+## Using it
+
+Select code, then either hover for the `DeepDoc · Fast | Deep` actions or use a
+shortcut:
+
+| Mode | macOS | Windows / Linux |
+|---|---|---|
+| Fast | <kbd>Cmd+Alt+E</kbd> | <kbd>Ctrl+Alt+E</kbd> |
+| Deep | <kbd>Cmd+Alt+D</kbd> | <kbd>Ctrl+Alt+D</kbd> |
+
+Fast is a quick single-pass explanation. Deep spends longer and reasons further
+for code that needs it.
+
+## Commands
+
+From the command palette:
+
+| Command | |
+|---|---|
+| `DeepDoc: Fast` | Explain the selection quickly |
+| `DeepDoc: Deep` | Explain it thoroughly |
+| `DeepDoc: Test Connection` | Check your provider and key work |
+| `DeepDoc: Set API Key` | Store a key securely |
+| `DeepDoc: Clear API Key` | Remove it |
+
+<Callout>
+  Run **Test Connection** first. It surfaces a bad key or endpoint immediately,
+  instead of letting your first real explanation fail confusingly.
+</Callout>
+
+## Settings
+
+<Accordions>
+  <Accordion title="Provider">
+    `deepdoc.provider` · `deepdoc.baseUrl` · `deepdoc.fastModel` ·
+    `deepdoc.deepModel`, plus `deepdoc.azureApiVersion` and
+    `deepdoc.azureDeploymentName` for Azure.
+  </Accordion>
+  <Accordion title="What gets sent">
+    `deepdoc.maxSelectedLines` caps the selection size;
+    `deepdoc.includeContextLines` adds surrounding lines for context.
+    Both control how much of your code leaves the editor.
+  </Accordion>
+  <Accordion title="What gets inserted">
+    `deepdoc.includeMetadataHeader`, `deepdoc.includeMarkers` and
+    `deepdoc.replaceExistingBlock` control the shape of the inserted comment
+    and whether re-running replaces a previous block rather than stacking.
+  </Accordion>
+  <Accordion title="Limits">
+    `deepdoc.timeoutMs`, `deepdoc.fastMaxTokens`, `deepdoc.deepMaxTokens`.
+  </Accordion>
+</Accordions>
+
+<Callout type="warn" title="Separate from your .deepdoc.yaml">
+  The extension has its own settings and its own key. It does not read the
+  CLI's config, so configure it independently.
+</Callout>
+
+## Next
+
+<Cards>
+  <Card title="Commands" href="/commands" description="The CLI, for documenting a whole repository." />
+  <Card title="Providers" href="/providers" description="Model options." />
+</Cards>

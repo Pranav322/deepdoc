@@ -1,0 +1,174 @@
+---
+title: Troubleshooting
+description: Common failures and what they actually mean.
+---
+
+## Install and setup
+
+<Accordions>
+  <Accordion title="tree-sitter takes forever to install">
+    It compiles from source. Install the pure-Python dependencies first, then
+    DeepDoc without re-resolving them:
+
+    ```bash
+    pip install click litellm gitpython rich pyyaml jinja2
+    pip install deepdoc --no-deps
+    ```
+  </Accordion>
+  <Accordion title="npx not found / serve or deploy fails immediately">
+    Both shell out to Node. Install Node.js 18 or newer from
+    [nodejs.org](https://nodejs.org). The Python side works without it; only
+    previewing and building the site need it.
+  </Accordion>
+  <Accordion title="Azure: I do not know what to put in base_url or model">
+    In the Azure Portal, open your OpenAI resource:
+
+    - **`base_url`** — *Keys and Endpoint* → Endpoint
+    - **`model`** — *Model deployments* → your **deployment name**, prefixed
+      `azure/`. Your chosen name, not the underlying model.
+    - **`api_version`** — the version your deployment targets, e.g. `2024-02-01`
+
+    DeepDoc names whichever of these is missing rather than failing vaguely.
+  </Accordion>
+  <Accordion title="Gemini requests fail or authenticate oddly">
+    Keep the `gemini/` prefix on the model name. Without it LiteLLM may route to
+    Vertex AI, which authenticates differently.
+  </Accordion>
+</Accordions>
+
+## Generating
+
+<Accordions>
+  <Accordion title="generate refuses to run because docs already exist">
+    A guard against overwriting work. Choose one:
+
+    ```bash
+    deepdoc update           # regenerate only what changed — usually right
+    deepdoc generate --force # refresh existing DeepDoc-managed pages
+    deepdoc generate --clean # delete owned files and state, then rebuild
+    ```
+  </Accordion>
+  <Accordion title="A page came out wrong or thin">
+    Check the record:
+
+    ```bash
+    cat .deepdoc/generation_quality.json
+    ```
+
+    Pages marked invalid or stub failed validation. Re-run `update`, or
+    `generate --force` if several pages are affected. If it persists, the page
+    is probably starved of evidence — a larger `source_context_budget` or a
+    more capable model usually helps.
+  </Accordion>
+  <Accordion title="Rate limits / 429s">
+    Lower the concurrency:
+
+    ```bash
+    deepdoc config set llm.rate_limits.max_concurrency 2
+    deepdoc config set llm.rate_limits.requests_per_minute 30
+    ```
+
+    These apply to documentation generation. The chatbot's answer model is a
+    separate surface and does not read them.
+  </Accordion>
+  <Accordion title="Not in a git repository">
+    DeepDoc uses git to detect changes. Outside a repository it falls back to
+    content hashing — which works, but `update --since` has nothing to diff
+    against.
+  </Accordion>
+</Accordions>
+
+## The site
+
+<Accordions>
+  <Accordion title="My config change did nothing">
+    Check which kind it is. Everything under `site.*` applies on the next
+    `deepdoc serve`. Everything else — `exclude`, scan limits, the model —
+    changes what gets documented and needs `generate` or `update`.
+
+    On a successful re-apply, `serve` says so:
+
+    ```
+    Applied .deepdoc.yaml changes (no regeneration, no LLM calls): colors
+    ```
+
+    No line means nothing changed. If you expected one, check for a typo —
+    `config set` catches those, hand-editing does not.
+  </Accordion>
+  <Accordion title="deploy refuses to publish">
+    ```
+    Refusing to deploy docs with unresolved quality issues:
+    - invalid docs present: cli-commands
+    ```
+
+    Working as intended — those pages did not generate cleanly. Fix them by
+    regenerating, rather than working around the gate.
+  </Accordion>
+  <Accordion title="Pages are missing from the sidebar">
+    ```
+    2 page(s) are not in the sidebar: runbook, faq. Add them under site.nav.extra.
+    ```
+
+    Hand-written Markdown renders and is reachable by URL, but the sidebar comes
+    from the plan. Add them with
+    [`site.nav.extra`](/theming/navigation#add-your-own-pages).
+  </Accordion>
+  <Accordion title="My theme preset was ignored">
+    Seven presets exist: `neutral`, `black`, `vitepress`, `ocean`,
+    `catppuccin`, `dusk`, `purple`. An unknown name warns and falls back:
+
+    ```
+    site.theme.preset: 'solar' is not a known preset — using the default palette.
+    ```
+  </Accordion>
+  <Accordion title="The favicon did not change">
+    Browsers cache favicons hard. Hard-reload (⌘⇧R) before concluding it failed.
+  </Accordion>
+  <Accordion title="Links break when served under a subpath">
+    Set the base path at build time:
+
+    ```bash
+    NEXT_PUBLIC_BASE_PATH=/docs deepdoc deploy
+    ```
+  </Accordion>
+</Accordions>
+
+## Chatbot
+
+<Accordions>
+  <Accordion title="Answers look wrong">
+    Inspect what was retrieved, without paying for an answer:
+
+    ```bash
+    curl -X POST localhost:8100/query-context -d '{"query":"how does auth work"}'
+    ```
+
+    If retrieval missed the relevant files, the answer never had a chance.
+  </Accordion>
+  <Accordion title="First run downloads hundreds of megabytes">
+    Expected. Embeddings default to local `fastembed`, which fetches its model
+    once (~300 MB). No key and no external calls afterwards.
+  </Accordion>
+  <Accordion title="The chatbot cannot reach its backend in production">
+    Set `chatbot.backend.base_url` to the deployed service and add your docs
+    domain to `chatbot.backend.allowed_origins`, then rebuild.
+  </Accordion>
+</Accordions>
+
+## CI
+
+<Accordions>
+  <Accordion title="update does more work than expected in CI">
+    A shallow clone has no history to diff against. Use `fetch-depth: 0` on the
+    checkout step.
+  </Accordion>
+  <Accordion title="A bad run published anyway">
+    Add `--strict-quality`, which exits non-zero when any page fails validation
+    instead of publishing it.
+  </Accordion>
+</Accordions>
+
+## Still stuck
+
+`deepdoc status` shows what exists and what is stale. `deepdoc performance`
+shows what recent runs actually did. Both are free and local.

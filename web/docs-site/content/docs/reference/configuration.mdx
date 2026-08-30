@@ -1,0 +1,159 @@
+---
+title: Configuration
+description: Every key in .deepdoc.yaml, with its default.
+---
+
+`deepdoc init` writes a complete `.deepdoc.yaml`. Every key is optional — an
+empty value means "use the built-in default".
+
+<Callout title="Two kinds of setting">
+  Everything under **`site.*`** applies on the next `deepdoc serve`, free.
+  Everything else changes *what gets documented* and takes effect on your next
+  `generate` or `update`. See [What it costs](/costs).
+</Callout>
+
+## Project
+
+<TypeTable type={{
+  project_name: { type: 'string', default: '""', description: 'Shown in the site header. Defaults to the directory name.' },
+  description: { type: 'string', default: '""', description: 'Short description used in prompts and metadata.' },
+  output_dir: { type: 'string', default: 'deepdoc-docs', description: 'Where generated Markdown is written.' },
+  site_dir: { type: 'string', default: 'deepdoc-site', description: 'Where the site scaffold is written.' },
+  max_pages: { type: 'number', default: '0', description: '0 means no cap — let the planner decide.' },
+}} />
+
+## LLM
+
+<TypeTable type={{
+  'llm.provider': { type: 'string', default: '""', description: 'anthropic, openai, azure, ollama, or any LiteLLM alias.' },
+  'llm.model': { type: 'string', default: '""', description: 'Model name, prefixed where LiteLLM requires it.' },
+  'llm.api_key_env': { type: 'string', default: '""', description: 'Environment variable holding the key.' },
+  'llm.api_version': { type: 'string', default: '""', description: 'Azure API version, e.g. 2024-02-01.' },
+  'llm.base_url': { type: 'string | null', default: 'null', description: 'Custom endpoint. Required for Azure.' },
+  'llm.temperature': { type: 'number', default: '0.2', description: 'Low keeps documentation consistent.' },
+  'llm.max_tokens': { type: 'number | null', default: 'null', description: 'null lets the provider decide.' },
+  'llm.context_window_tokens': { type: 'number | null', default: 'null', description: 'Override the detected context window.' },
+  'llm.rate_limits.max_concurrency': { type: 'number', default: '6', description: 'Concurrent requests.' },
+  'llm.rate_limits.requests_per_minute': { type: 'number', default: '60', description: '' },
+  'llm.rate_limits.tokens_per_minute': { type: 'number', default: '250000', description: '' },
+  'llm.rate_limits.adaptive_backoff': { type: 'boolean', default: 'true', description: 'Back off automatically on 429s.' },
+}} />
+
+## Scope
+
+<TypeTable type={{
+  include: { type: 'string[]', default: '[]', description: 'Glob patterns. Empty means everything not excluded.' },
+  exclude: { type: 'string[]', default: '(a long default list)', description: 'Ships with sensible defaults for build output, dependencies and secrets.' },
+  services: { type: 'string[]', default: '[]', description: 'Monorepo service roots, e.g. services/auth.' },
+  languages: { type: 'string[]', default: 'python, javascript, typescript, go, php, vue', description: 'Descriptive only — names the languages in prompts. Does not widen parsing.' },
+  frameworks: { type: 'string[]', default: '[]', description: 'Descriptive only, like languages.' },
+}} />
+
+<Callout type="warn">
+  `languages` does not control which files are parsed. The supported set is
+  fixed; adding an entry here does not make DeepDoc understand a new language.
+</Callout>
+
+## Generation
+
+<TypeTable type={{
+  batch_size: { type: 'number', default: '10', description: 'Pages submitted per batch.' },
+  max_parallel_workers: { type: 'number', default: '6', description: 'Concurrent LLM calls.' },
+  rate_limit_pause: { type: 'number', default: '0.5', description: 'Seconds between batches.' },
+  consistency_pass: { type: 'boolean', default: 'true', description: 'Post-generation pass adding cross-page links. Costs one extra pass.' },
+  'quality.strict': { type: 'boolean', default: 'false', description: 'Fail the run when pages do not validate.' },
+  include_endpoint_pages: { type: 'boolean', default: 'true', description: 'Generate API endpoint pages.' },
+  include_integration_pages: { type: 'boolean', default: 'true', description: 'Generate third-party integration pages.' },
+}} />
+
+## Planner
+
+Rarely worth changing.
+
+<TypeTable type={{
+  max_files_per_bucket: { type: 'number', default: '25', description: 'Pages above this are split.' },
+  decompose_threshold: { type: 'number', default: '7', description: 'Files before a page is considered for splitting.' },
+  consolidation_similarity_threshold: { type: 'number', default: '0.55', description: 'Jaccard threshold for merging near-duplicate pages.' },
+  large_file_lines: { type: 'number', default: '500', description: 'Above this, files get tiered summarisation.' },
+  giant_file_lines: { type: 'number', default: '2000', description: 'Above this, files get clustered by feature first.' },
+  source_context_budget: { type: 'number', default: '200000', description: 'Character budget before compressed evidence is used.' },
+}} />
+
+## Scanning
+
+<TypeTable type={{
+  'scan.max_workers': { type: 'number', default: '8', description: 'Parallel file parsers.' },
+  'scan.max_source_bytes': { type: 'number', default: '1000000', description: 'Skip files larger than this.' },
+  'scan.max_repo_files': { type: 'number', default: '0', description: '0 means unlimited.' },
+  'scan.timeout_seconds': { type: 'number', default: '0', description: '0 means unlimited. Otherwise abort with partial results.' },
+  'scan.persistent_index': { type: 'boolean', default: 'true', description: 'Cache the parse index between runs.' },
+}} />
+
+## Site
+
+Everything below applies on the next `deepdoc serve` with no regeneration.
+Each has its own guide — [colours](/theming/colours),
+[logo and fonts](/theming/logo-and-fonts), [layout](/theming/layout),
+[navigation](/theming/navigation).
+
+<TypeTable type={{
+  'site.repo_url': { type: 'string', default: '""', description: 'Repo link and edit-page base. Falls back to your git origin remote.' },
+  'site.edit_branch': { type: 'string', default: 'main', description: 'Branch for edit links.' },
+  'site.edit_path_prefix': { type: 'string', default: '""', description: 'Path inside the repo the docs live under.' },
+  'site.logo': { type: 'string', default: '""', description: 'Repo-relative image; replaces the project name in the navbar.' },
+  'site.logo_dark': { type: 'string', default: '""', description: 'Optional separate dark-mode logo.' },
+  'site.favicon': { type: 'string', default: '""', description: 'Repo-relative image; the browser-tab icon.' },
+  'site.colors.primary': { type: 'string', default: '""', description: 'Brand colour. #rgb or #rrggbb.' },
+  'site.colors.light': { type: 'string', default: '""', description: 'Lighter shade — the dark-mode accent.' },
+  'site.colors.dark': { type: 'string', default: '""', description: 'Darker shade — light-mode link hover.' },
+  'site.theme.preset': { type: 'string', default: '""', description: 'neutral, black, vitepress, ocean, catppuccin, dusk, purple.' },
+  'site.theme.tokens': { type: 'object', default: '{}', description: 'Raw design-token overrides, light and dark.' },
+  'site.theme.fonts.sans': { type: 'string', default: '""', description: 'Google Font family. Empty means no external request.' },
+  'site.theme.fonts.mono': { type: 'string', default: '""', description: 'Google Font family for code.' },
+  'site.theme.code_theme.light': { type: 'string', default: 'github-light', description: 'Any Shiki theme.' },
+  'site.theme.code_theme.dark': { type: 'string', default: 'github-dark', description: '' },
+  'site.chrome.toc_style': { type: 'string', default: 'clerk', description: 'clerk or normal.' },
+  'site.chrome.toc_depth': { type: 'number[]', default: '[2, 3]', description: 'Heading levels in the table of contents.' },
+  'site.chrome.edit_link': { type: 'boolean', default: 'false', description: 'Requires a resolvable repo_url.' },
+  'site.chrome.links': { type: 'object[]', default: '[]', description: 'Extra navbar links: {text, url}.' },
+  'site.nav.sections': { type: 'string[]', default: '[]', description: 'Explicit top-level section order.' },
+  'site.nav.pin': { type: 'string[]', default: '[]', description: 'Page slugs hoisted above sections.' },
+  'site.nav.hide': { type: 'string[]', default: '[]', description: 'Removed from the sidebar; still reachable by URL.' },
+  'site.nav.rename': { type: 'object', default: '{}', description: '{slug: "New Title"}. Also matches section titles.' },
+  'site.nav.extra': { type: 'object[]', default: '[]', description: 'Your own pages or external links.' },
+  'site.labels': { type: 'object', default: '{}', description: 'Override built-in UI strings and callout headings.' },
+}} />
+
+The remaining `site.chrome` switches — `sidebar`, `sidebar_default_open_level`,
+`sidebar_collapsible`, `toc`, `breadcrumb`, `page_footer`, `last_update`,
+`theme_switch`, `search`, `generated_meta` — are all booleans defaulting to
+`true`, except `edit_link`. See [Layout](/theming/layout).
+
+## Chatbot
+
+Off by default. See [Chatbot](/chatbot).
+
+<TypeTable type={{
+  'chatbot.enabled': { type: 'boolean', default: 'false', description: 'Scaffold and serve the Q&A backend.' },
+  'chatbot.answer.*': { type: 'object', default: 'inherits llm.*', description: 'A separate model for answering.' },
+  'chatbot.embeddings.backend': { type: 'string', default: 'fastembed', description: 'Local by default — no key, no external call.' },
+  'chatbot.backend.base_url': { type: 'string', default: '""', description: 'Where the deployed backend lives.' },
+  'chatbot.backend.allowed_origins': { type: 'string[]', default: 'localhost', description: 'CORS origins for your docs domain.' },
+}} />
+
+## Reading and writing
+
+```bash
+deepdoc config show
+deepdoc config set site.theme.preset ocean
+```
+
+`config set` rejects keys that do not exist rather than silently writing a
+setting that does nothing:
+
+```
+Error: Unknown config key: site.theme.presset
+
+Did you mean:
+  site.theme.preset
+```

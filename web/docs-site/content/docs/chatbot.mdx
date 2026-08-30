@@ -1,0 +1,140 @@
+---
+title: Chatbot
+description: An optional Q&A layer over your docs and source, answering with citations.
+---
+
+The chatbot is **off by default**. Turned on, it adds an `/ask` page to your
+docs site backed by a small Python service that answers questions about your
+codebase — with file-and-line citations rather than assertions.
+
+## Enable it
+
+<Tabs items={['New project', 'Existing project']}>
+  <Tab value="New project">
+```bash
+deepdoc init --provider anthropic --with-chatbot
+export ANTHROPIC_API_KEY=sk-ant-...
+deepdoc generate
+deepdoc serve
+```
+  </Tab>
+  <Tab value="Existing project">
+```bash
+deepdoc config set chatbot.enabled true
+deepdoc generate
+deepdoc serve
+```
+  </Tab>
+</Tabs>
+
+`serve` starts the backend alongside the site. Nothing else to run.
+
+<Callout title="One key is usually enough">
+  The answer model inherits your `llm.*` settings, and embeddings default to
+  local `fastembed` — no key, no external call. The first run downloads the
+  embedding model (~300 MB), once.
+</Callout>
+
+## Three surfaces, three models
+
+Independent on purpose, so you can pair an expensive writer with a cheap
+responder:
+
+| Surface | Config | Used for |
+|---|---|---|
+| Documentation | `llm.*` | Writing your docs |
+| Answers | `chatbot.answer.*` | Replying in the chatbot |
+| Embeddings | `chatbot.embeddings.*` | Indexing and retrieval |
+
+Leave `chatbot.answer.*` empty and it inherits `llm.*`.
+
+```yaml title="A cheaper model for answers"
+chatbot:
+  enabled: true
+  answer:
+    provider: openai
+    model: gpt-4o-mini
+    api_key_env: OPENAI_API_KEY
+```
+
+## Query modes
+
+<Tabs items={['Fast', 'Deep']}>
+  <Tab value="Fast">
+    Single-pass retrieval, then one answer. Good for "where is X handled?" —
+    the common case, and the cheaper one.
+  </Tab>
+  <Tab value="Deep">
+    An agentic loop that searches, reads files and greps until it can answer.
+    Slower and costs more, for questions spanning several parts of the codebase.
+  </Tab>
+</Tabs>
+
+Readers pick per question in the UI.
+
+## Evidence, not assertions
+
+Answers cite the source they came from — file path and line range — so a claim
+can be checked rather than trusted. Where the chatbot cannot find support, it
+says so instead of filling the gap.
+
+## The API
+
+The backend is a small FastAPI service with six endpoints:
+
+| Endpoint | |
+|---|---|
+| `GET /health` | Liveness |
+| `POST /query` | Fast answer |
+| `POST /deep` | Agentic answer |
+| `POST /query/stream` | Fast, streamed |
+| `POST /deep/stream` | Agentic, streamed |
+| `POST /query-context` | Retrieval only, no answer — useful for debugging what it found |
+
+<Callout>
+  `/query-context` is the one to reach for when an answer looks wrong. It shows
+  what was retrieved without spending a call on generating prose.
+</Callout>
+
+## Deploying it
+
+The docs site is static and can go anywhere. The chatbot is a Python service
+and needs somewhere to run.
+
+<Steps>
+  <Step>Deploy `chatbot_backend/` to an internal Python host.</Step>
+  <Step>Point `chatbot.backend.base_url` at it.</Step>
+  <Step>Add your docs domain to `chatbot.backend.allowed_origins`.</Step>
+  <Step>Rebuild and publish the site.</Step>
+</Steps>
+
+```yaml title=".deepdoc.yaml"
+chatbot:
+  backend:
+    base_url: "https://docs-chat.internal.acme.com"
+    allowed_origins:
+      - "https://docs.acme.com"
+```
+
+<Callout type="warn" title="It reads your source">
+  The chatbot indexes and quotes your code. Put the backend somewhere with the
+  same access controls as the repository — not on a public host.
+</Callout>
+
+## Turning it off
+
+```bash
+deepdoc config set chatbot.enabled false
+deepdoc generate
+```
+
+The `/ask` route and chatbot components are not scaffolded at all when it is
+disabled. `deepdoc clean` preserves `chatbot_backend/`, since it may contain
+your changes — delete it by hand if you want it gone.
+
+## Next
+
+<Cards>
+  <Card title="Providers" href="/providers" description="Pick the model that answers." />
+  <Card title="Deploying" href="/deploying" description="Ship the docs site." />
+</Cards>

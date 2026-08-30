@@ -1,0 +1,120 @@
+---
+title: How it works
+description: The pipeline behind deepdoc generate — useful when output surprises you.
+---
+
+You do not need this page to use DeepDoc. It is here for when the output
+surprises you and you want to know why.
+
+## Five phases
+
+<Steps>
+  <Step>
+    ### Scan — no LLM
+
+    Parses your repository locally: a call graph, the topology of which modules
+    call which, API routes, config artifacts, database models and third-party
+    integrations. Entirely local and deterministic.
+  </Step>
+  <Step>
+    ### Plan — a few LLM calls
+
+    Clusters the call graph into cohesive domains, then asks a model to *name*
+    those clusters and group them into sections. The clustering is deterministic;
+    the model supplies the naming and judgement.
+
+    The result is saved as `.deepdoc/plan.json` — the file that makes re-theming
+    free.
+  </Step>
+  <Step>
+    ### Generate — roughly one LLM call per page
+
+    Assembles an evidence pack per page — the relevant source, symbols, routes
+    and diagrams — and writes the Markdown. Pages are generated in batches, and
+    a page that fails validation is retried.
+  </Step>
+  <Step>
+    ### API reference
+
+    If an OpenAPI spec is found, it is staged and rendered as an interactive
+    reference page.
+  </Step>
+  <Step>
+    ### Build — no LLM
+
+    Writes the site scaffold, navigation and theme from your config and the
+    saved plan. This phase is what `deepdoc serve` re-runs on its own, which is
+    why theming costs nothing.
+  </Step>
+</Steps>
+
+## Why pages come out the way they do
+
+Structure is derived from your **call graph**, not your directory layout. Files
+that call each other tend to land on the same page, even in different folders —
+because that reflects how the code behaves rather than how it is filed.
+
+Consequences worth knowing:
+
+- A well-factored module usually becomes one clean page.
+- Code touched by everything — utilities, config — often spreads across pages
+  or collects into a shared one.
+- Renaming a directory does not necessarily reshape the docs. Changing what
+  calls what does.
+
+If the grouping is wrong for your project, you can reshape the **sidebar**
+without regenerating — see [Navigation](/theming/navigation). Changing the
+underlying grouping needs a `--replan`.
+
+## Evidence
+
+Pages are written from an evidence pack rather than from whole files. DeepDoc
+selects what is relevant — the symbols a page owns, the routes it serves, the
+models it touches — and trims to a budget when it must, in a fixed order so
+runs stay reproducible.
+
+This is why a page can describe a large module accurately without the whole
+module fitting in a context window.
+
+## Validation
+
+Every generated page is checked before it counts: required sections present,
+file paths real, routes real, no invented symbols. Most checks warn. A few —
+a page that is too short, contains placeholder sections, or cites paths that do
+not exist — mark it invalid and trigger a retry.
+
+`deepdoc deploy` refuses to publish while invalid or stub pages remain, which is
+why a failing deploy is usually telling you something true.
+
+## State
+
+| File | Holds |
+|---|---|
+| `.deepdoc/plan.json` | The page plan. Rebuilds the site with no LLM call. |
+| `.deepdoc/ledger.json` | Which pages DeepDoc owns — so `clean` spares yours. |
+| `.deepdoc/generation_quality.json` | Per-page validation results. |
+| `.deepdoc/performance/runs.jsonl` | Timings, tokens and retries per run. |
+
+Commit `.deepdoc/`. Without it, DeepDoc cannot rebuild from config and has to
+regenerate.
+
+## Incremental updates
+
+`deepdoc update` diffs against the last synced commit and regenerates only the
+pages your change affected. It escalates to a full replan when you pass
+`--replan`, or when DeepDoc's own engine version has changed — a new release
+can plan differently, so the old plan is no longer comparable.
+
+## Language support
+
+Python, JavaScript, TypeScript, Go, PHP and Vue are parsed for call graphs and
+routes. Other languages are still read and documented, but without the same
+structural understanding — the planner has less to work with, so grouping leans
+more on file layout.
+
+## Next
+
+<Cards>
+  <Card title="Configuration" href="/reference/configuration" description="Every key in .deepdoc.yaml." />
+  <Card title="Troubleshooting" href="/troubleshooting" description="When something goes wrong." />
+</Cards>

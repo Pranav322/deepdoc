@@ -7,6 +7,12 @@
     "theming",
     "commands",
     "keeping-docs-fresh",
-    "costs"
+    "costs",
+    "providers",
+    "chatbot",
+    "deploying",
+    "vscode",
+    "reference",
+    "troubleshooting"
   ]
 }

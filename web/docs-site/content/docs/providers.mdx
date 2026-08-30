@@ -1,0 +1,157 @@
+---
+title: Providers
+description: Point DeepDoc at Anthropic, OpenAI, Gemini, Azure, or a local model.
+---
+
+DeepDoc talks to models through [LiteLLM](https://docs.litellm.ai/docs/providers),
+so anything LiteLLM supports works. `deepdoc init --provider` picks sensible
+defaults for the common ones.
+
+<Tabs items={['Anthropic', 'OpenAI', 'Gemini', 'Azure', 'Ollama']}>
+  <Tab value="Anthropic">
+```bash
+deepdoc init --provider anthropic
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+```yaml title=".deepdoc.yaml"
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  api_key_env: ANTHROPIC_API_KEY
+```
+
+<Callout>
+  Anthropic has no embedding models. If you enable the chatbot, embeddings come
+  from the local `fastembed` default or another provider.
+</Callout>
+  </Tab>
+
+  <Tab value="OpenAI">
+```bash
+deepdoc init --provider openai
+export OPENAI_API_KEY=sk-...
+```
+
+```yaml title=".deepdoc.yaml"
+llm:
+  provider: openai
+  model: gpt-4o
+  api_key_env: OPENAI_API_KEY
+```
+  </Tab>
+
+  <Tab value="Gemini">
+```bash
+deepdoc init --provider gemini
+export GEMINI_API_KEY=...
+```
+
+```yaml title=".deepdoc.yaml"
+llm:
+  provider: gemini
+  model: gemini/gemini-2.0-flash
+  api_key_env: GEMINI_API_KEY
+```
+
+<Callout type="warn" title="Keep the gemini/ prefix">
+  LiteLLM uses it to route to the Gemini API. Without it you may be routed to
+  Vertex AI, which authenticates differently.
+</Callout>
+  </Tab>
+
+  <Tab value="Azure">
+```bash
+deepdoc init --provider azure
+export AZURE_API_KEY=...
+```
+
+```yaml title=".deepdoc.yaml"
+llm:
+  provider: azure
+  model: azure/your-deployment-name
+  api_key_env: AZURE_API_KEY
+  base_url: "https://your-resource.openai.azure.com"
+  api_version: "2024-02-01"
+```
+
+Azure needs `base_url` and `api_version` as well as the key. DeepDoc says so
+if either is missing.
+
+<Accordions>
+  <Accordion title="Where to find these values">
+    In the Azure Portal, open your OpenAI resource:
+
+    - **`base_url`** — *Keys and Endpoint* → Endpoint
+    - **`api_key_env`** — *Keys and Endpoint* → KEY 1
+    - **`model`** — *Model deployments* → your **deployment name**, prefixed
+      with `azure/`. This is the name you chose, not the underlying model name.
+    - **`api_version`** — the API version your deployment targets, e.g.
+      `2024-02-01`
+  </Accordion>
+</Accordions>
+  </Tab>
+
+  <Tab value="Ollama">
+```bash
+deepdoc init --provider ollama
+ollama pull llama3.2
+```
+
+```yaml title=".deepdoc.yaml"
+llm:
+  provider: ollama
+  model: ollama/llama3.2
+```
+
+No API key, no per-token cost, and nothing leaves your machine. Slower than a
+hosted model, and quality varies — but for a private repository it is often the
+right trade.
+  </Tab>
+</Tabs>
+
+## Any other provider
+
+`--provider` is not restricted to the list above. Any LiteLLM alias works:
+
+```bash
+deepdoc init --provider groq
+deepdoc config set llm.model "groq/llama-3.3-70b-versatile"
+deepdoc config set llm.api_key_env GROQ_API_KEY
+```
+
+## Rate limits
+
+If you hit 429s, lower the concurrency:
+
+```yaml title=".deepdoc.yaml"
+llm:
+  rate_limits:
+    max_concurrency: 2
+    requests_per_minute: 30
+    tokens_per_minute: 100000
+    adaptive_backoff: true
+```
+
+<Callout type="warn">
+  These apply to **documentation generation**. The chatbot's answer model is a
+  separate surface and does not read them.
+</Callout>
+
+## Switching later
+
+```bash
+deepdoc config set llm.provider openai
+deepdoc config set llm.model gpt-4o
+deepdoc config set llm.api_key_env OPENAI_API_KEY
+```
+
+Changing the model changes what gets *written*, so it takes effect on your next
+`generate` or `update` — not on `serve`.
+
+## Next
+
+<Cards>
+  <Card title="What it costs" href="/costs" description="How model choice affects your bill." />
+  <Card title="Chatbot" href="/chatbot" description="Optional Q&A over your docs." />
+</Cards>

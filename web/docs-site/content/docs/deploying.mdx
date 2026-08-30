@@ -1,0 +1,114 @@
+---
+title: Deploying
+description: Build a static site and publish it anywhere — plus keeping it current in CI.
+---
+
+`deepdoc deploy` produces a plain static site. No server, no runtime, no
+special host.
+
+```bash
+deepdoc deploy
+```
+
+```
+✓ Build complete! Static files are in deepdoc-site/out/
+```
+
+Publish `deepdoc-site/out/` to Vercel, Netlify, Cloudflare Pages, S3, nginx, or
+anything that serves files.
+
+<Callout>
+  Search works on a static host. The index is built at the same time as the
+  site and shipped as a static asset, so the browser searches it directly —
+  nothing to run.
+</Callout>
+
+## The quality gate
+
+`deploy` refuses to publish docs with unresolved problems:
+
+```
+Refusing to deploy docs with unresolved quality issues:
+- invalid docs present: cli-commands
+- stub docs present: page-generation-validation
+```
+
+Those pages genuinely did not generate cleanly. Inspect
+`.deepdoc/generation_quality.json`, then re-run `update` — or
+`generate --force` if the whole set needs redoing.
+
+## Serving under a subpath
+
+Publishing to `example.com/docs` rather than a domain root:
+
+```bash
+NEXT_PUBLIC_BASE_PATH=/docs deepdoc deploy
+```
+
+Links inside generated Markdown are rewritten at render time to match, so
+internal navigation keeps working.
+
+## In CI
+
+```yaml title=".github/workflows/docs.yml"
+name: Documentation
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # update needs history to diff against
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - run: pip install deepdoc
+
+      - name: Update documentation
+        run: deepdoc update --strict-quality --deploy
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: docs
+          path: deepdoc-site/out/
+```
+
+<Callout type="warn" title="fetch-depth: 0 matters">
+  `update` diffs against a git ref. A shallow clone has no history to diff, so
+  it falls back to doing more work — and costs more — than it needs to.
+</Callout>
+
+`--strict-quality` fails the job rather than publishing broken pages.
+
+## What to commit
+
+<Accordions>
+  <Accordion title="Commit these">
+    `.deepdoc.yaml` and `.deepdoc/`. The saved plan is what makes theming and
+    incremental updates free — without it, DeepDoc has to regenerate.
+  </Accordion>
+  <Accordion title="Ignore these">
+    `deepdoc-site/` is build output and is rewritten on every run.
+    `deepdoc-docs/` is your call: commit it to review documentation changes in
+    pull requests, or ignore it and generate in CI.
+  </Accordion>
+</Accordions>
+
+## Next
+
+<Cards>
+  <Card title="Keeping docs fresh" href="/keeping-docs-fresh" description="How update decides what to regenerate." />
+  <Card title="Troubleshooting" href="/troubleshooting" description="When something goes wrong." />
+</Cards>

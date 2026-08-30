@@ -9,6 +9,8 @@ Covers Gin, Echo, Fiber, Chi, net/http patterns via the API detector.
 
 from __future__ import annotations
 
+from bisect import bisect_right
+from dataclasses import dataclass
 from pathlib import Path
 import re
 
@@ -21,14 +23,314 @@ try:
     GO_LANGUAGE = Language(tsgo.language())
     _TS_AVAILABLE = True
 except Exception:
+    Parser = None  # type: ignore[assignment]
     _TS_AVAILABLE = False
+
+
+@dataclass(frozen=True)
+class GoRuntimeFact:
+    """One syntax-proven Go runtime surface with no raw-source provenance."""
+
+    kind: str
+    target: str
+    schedule: str = ""
+
+
+_GO_ROBFIG_CRON_MODULES = frozenset(
+    {"github.com/robfig/cron", "github.com/robfig/cron/v3"}
+)
+_GO_GOCRON_MODULES = frozenset({"github.com/go-co-op/gocron"})
+_GO_MODULE_DEFAULT_ALIASES = {
+    "github.com/robfig/cron": "cron",
+    "github.com/robfig/cron/v3": "cron",
+    "github.com/go-co-op/gocron": "gocron",
+}
+_GO_SCOPE_NODE_TYPES = frozenset(
+    {
+        "source_file",
+        "block",
+        "function_declaration",
+        "method_declaration",
+        "func_literal",
+        "if_statement",
+        "for_statement",
+        "expression_switch_statement",
+        "type_switch_statement",
+        "select_statement",
+        "expression_case",
+        "type_case",
+        "communication_case",
+    }
+)
+
+
+def go_runtime_facts(content: str) -> tuple[GoRuntimeFact, ...]:
+    """Return strict runtime facts from a complete Go syntax tree.
+
+    The supported shapes are real ``go fn()`` statements, ``robfig/cron``
+    ``AddFunc`` registrations, and ``go-co-op/gocron`` ``Every(...).Do(fn)``
+    chains. Scheduler receivers require a current parser-proven import and
+    constructor binding. Comments, strings, error-recovery nodes, and generic
+    local methods never participate; absent parser support fails closed.
+    """
+    if not _TS_AVAILABLE or Parser is None:
+        return ()
+    root = Parser(GO_LANGUAGE).parse(content.encode("utf8")).root_node
+    if root.has_error:
+        return ()
+    facts: list[GoRuntimeFact] = []
+    registrations: list[tuple[str, str, str, str]] = []
+    started_receivers: set[str] = set()
+    program_scope = (root.type, root.start_byte, root.end_byte)
+    bindings: dict[tuple[tuple[str, int, int], str], list[tuple[int, str]]] = {}
+
+    def text(node) -> str:
+        return node.text.decode("utf8", "replace") if node is not None else ""
+
+    def target_name(node) -> str:
+        return text(node) if node is not None and node.type == "identifier" else ""
+
+    def literal(node) -> str:
+        if node is None or node.type not in {
+            "interpreted_string_literal",
+            "raw_string_literal",
+        }:
+            return ""
+        value = text(node)
+        return value[1:-1] if len(value) >= 2 else ""
+
+    def scope_chain_for(node) -> tuple[tuple[str, int, int], ...]:
+        scopes: list[tuple[str, int, int]] = []
+        current = node
+        while current is not None:
+            if current.type in _GO_SCOPE_NODE_TYPES or current is root:
+                scopes.append((current.type, current.start_byte, current.end_byte))
+            current = current.parent
+        return tuple(scopes) or (program_scope,)
+
+    def add_binding(
+        scope: tuple[str, int, int], name: str, position: int, role: str
+    ) -> None:
+        if name and name != "_":
+            bindings.setdefault((scope, name), []).append((position, role))
+
+    def binding_role(
+        scopes: tuple[tuple[str, int, int], ...], name: str, position: int
+    ) -> str:
+        for scope in scopes:
+            events = bindings.get((scope, name), ())
+            index = bisect_right(events, (position, "\uffff")) - 1
+            if index >= 0:
+                return events[index][1]
+        return ""
+
+    def binding_scope_for_assignment(
+        scopes: tuple[tuple[str, int, int], ...], name: str, position: int
+    ) -> tuple[str, int, int]:
+        """Return the lexical binding an ordinary assignment mutates.
+
+        A Go ``=`` assignment never introduces a new local name.  Recording it
+        in the innermost block would let a stale outer scheduler receiver
+        survive after an inner block or closure reassigns that receiver.
+        Unknown targets remain in the innermost scope so they cannot fall back
+        to a trusted outer/import binding.
+        """
+        for scope in scopes:
+            events = bindings.get((scope, name), ())
+            if bisect_right(events, (position, "\uffff")):
+                return scope
+        return scopes[0]
+
+    def all_nodes(node):
+        yield node
+        for child in node.named_children:
+            yield from all_nodes(child)
+
+    def expression_values(node) -> tuple:
+        return tuple(node.named_children) if node is not None and node.type == "expression_list" else ()
+
+    def write_pairs(node) -> tuple[tuple[str, object], ...]:
+        if node.type == "parameter_declaration":
+            type_node = node.child_by_field_name("type")
+            return tuple(
+                (text(child), None)
+                for child in node.named_children
+                if child != type_node and child.type == "identifier"
+            )
+        if node.type == "var_spec":
+            values = next(
+                (child for child in node.named_children if child.type == "expression_list"),
+                None,
+            )
+            names = tuple(
+                child for child in node.named_children if child.type == "identifier"
+            )
+        else:
+            names = expression_values(node.child_by_field_name("left"))
+            values = node.child_by_field_name("right")
+        value_nodes = expression_values(values)
+        return tuple(
+            (text(name), value_nodes[index] if index < len(value_nodes) else None)
+            for index, name in enumerate(names)
+        )
+
+    def constructor_role(
+        value, scopes: tuple[tuple[str, int, int], ...], position: int
+    ) -> str:
+        if value is None or value.type != "call_expression":
+            return ""
+        function = value.child_by_field_name("function")
+        if function is None or function.type != "selector_expression":
+            return ""
+        operand = function.child_by_field_name("operand")
+        field = function.child_by_field_name("field")
+        module_role = binding_role(scopes, target_name(operand), position)
+        constructor = text(field)
+        if module_role == "module:robfig_cron" and constructor == "New":
+            return f"receiver:robfig_cron:{value.start_byte}"
+        if module_role == "module:gocron" and constructor == "NewScheduler":
+            return f"receiver:gocron:{value.start_byte}"
+        return ""
+
+    def value_role(
+        value, scopes: tuple[tuple[str, int, int], ...], position: int
+    ) -> str:
+        name = target_name(value)
+        if name:
+            return binding_role(scopes, name, position)
+        return constructor_role(value, scopes, position)
+
+    def range_uses_assignment(node) -> bool:
+        """Whether a range clause uses ``=`` rather than ``:=``."""
+        return any(child.type == "=" for child in node.children)
+
+    for node in all_nodes(root):
+        if node.type != "import_spec":
+            continue
+        module = literal(node.child_by_field_name("path"))
+        alias = node.child_by_field_name("name")
+        name = text(alias) if alias is not None else _GO_MODULE_DEFAULT_ALIASES.get(module, "")
+        if module in _GO_ROBFIG_CRON_MODULES:
+            add_binding(program_scope, name, 0, "module:robfig_cron")
+        elif module in _GO_GOCRON_MODULES:
+            add_binding(program_scope, name, 0, "module:gocron")
+
+    writes = sorted(
+        (
+            node
+            for node in all_nodes(root)
+            if node.type
+            in {
+                "parameter_declaration",
+                "var_spec",
+                "short_var_declaration",
+                "assignment_statement",
+                "range_clause",
+            }
+        ),
+        key=lambda node: node.start_byte,
+    )
+    for node in writes:
+        scopes = scope_chain_for(node)
+        for name, value in write_pairs(node):
+            scope = (
+                binding_scope_for_assignment(scopes, name, node.start_byte)
+                if node.type == "assignment_statement"
+                or node.type == "range_clause" and range_uses_assignment(node)
+                else scopes[0]
+            )
+            add_binding(
+                scope,
+                name,
+                node.start_byte,
+                value_role(value, scopes, node.start_byte),
+            )
+
+    def call_parts(node) -> tuple[str, object, tuple]:
+        if node is None or node.type != "call_expression":
+            return "", None, ()
+        function = node.child_by_field_name("function")
+        arguments = node.child_by_field_name("arguments")
+        return (
+            text(function.child_by_field_name("field"))
+            if function is not None and function.type == "selector_expression"
+            else "",
+            function.named_children[0]
+            if function is not None
+            and function.type == "selector_expression"
+            and function.named_children
+            else None,
+            tuple(arguments.named_children) if arguments is not None else (),
+        )
+
+    def visit(node) -> None:
+        if node.type == "go_statement":
+            call = next(
+                (child for child in node.named_children if child.type == "call_expression"),
+                None,
+            )
+            target = target_name(call.child_by_field_name("function") if call else None)
+            if target:
+                facts.append(GoRuntimeFact("goroutine", target))
+        elif node.type == "call_expression":
+            method, receiver, arguments = call_parts(node)
+            scopes = scope_chain_for(node)
+            receiver_name = target_name(receiver)
+            receiver_role = value_role(receiver, scopes, node.start_byte)
+            if (
+                method in {"Start", "StartAsync", "StartBlocking"}
+                and receiver_name
+                and receiver_role.startswith(("receiver:robfig_cron:", "receiver:gocron:"))
+            ):
+                started_receivers.add(receiver_role)
+            if (
+                method == "AddFunc"
+                and receiver_role.startswith("receiver:robfig_cron:")
+                and len(arguments) >= 2
+            ):
+                schedule, target = literal(arguments[0]), target_name(arguments[1])
+                if schedule and target:
+                    registrations.append(("go_cron", target, schedule, receiver_role))
+            elif method == "Do" and arguments:
+                outer_function = node.child_by_field_name("function")
+                outer_object = (
+                    outer_function.named_children[0]
+                    if outer_function is not None
+                    and outer_function.type == "selector_expression"
+                    and outer_function.named_children
+                    else None
+                )
+                every, every_receiver, every_args = call_parts(outer_object)
+                target = target_name(arguments[0])
+                if (
+                    every == "Every"
+                    and value_role(every_receiver, scopes, node.start_byte)
+                    .startswith("receiver:gocron:")
+                    and every_args
+                    and target
+                ):
+                    cadence = text(every_args[0]).strip()
+                    if cadence:
+                        registrations.append(
+                            ("go_schedule", target, cadence, value_role(every_receiver, scopes, node.start_byte))
+                        )
+        for child in node.named_children:
+            visit(child)
+
+    visit(root)
+    facts.extend(
+        GoRuntimeFact(kind, target, schedule)
+        for kind, target, schedule, receiver_name in registrations
+        if receiver_name and receiver_name in started_receivers
+    )
+    return tuple(facts)
 
 
 def parse_go(path: Path, content: str, language: str) -> ParsedFile:
     symbols: list[Symbol] = []
     imports: list[str] = []
 
-    if _TS_AVAILABLE:
+    if _TS_AVAILABLE and Parser is not None:
         parser = Parser(GO_LANGUAGE)
         tree = parser.parse(bytes(content, "utf8"))
         lines = content.splitlines()

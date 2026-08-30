@@ -1,14 +1,15 @@
 from __future__ import annotations
-from collections import defaultdict
+from collections import defaultdict  # noqa: F401 - legacy scanner star re-export
 from dataclasses import dataclass, field
-import json
-from pathlib import Path
+import json  # noqa: F401 - legacy scanner star re-export
+from pathlib import Path  # noqa: F401 - legacy scanner star re-export
 import re
-from typing import Any
+from typing import Any  # noqa: F401 - legacy scanner star re-export
+
 from rich.console import Console
-from ..llm import LLMClient
-from ..parser.base import ParsedFile, Symbol
-from ..source_metadata import classify_integration_party
+from ..llm import LLMClient  # noqa: F401 - legacy scanner star re-export
+from ..parser.base import ParsedFile, Symbol  # noqa: F401 - legacy scanner star re-export
+from ..source_metadata import classify_integration_party  # noqa: F401 - legacy scanner star re-export
 
 console = Console()
 
@@ -24,7 +25,7 @@ GO_IMPORT_RE = re.compile(r'"([^"]+)"')
 
 PHP_USE_RE = re.compile(r"use\s+([\w\\]+)")
 
-FILE_EXT_RE = re.compile(r"\.(py|ts|js|tsx|jsx|go|php|mjs|cjs)$")
+FILE_EXT_RE = re.compile(r"\.(py|ts|js|tsx|jsx|go|php|mjs|cjs|vue)$")
 
 WORD_TOKEN_RE = re.compile(r"[\w]+")
 
@@ -152,6 +153,25 @@ class RuntimeTask:
     triggers: list[str] = field(default_factory=list)
     producer_files: list[str] = field(default_factory=list)
     linked_endpoints: list[str] = field(default_factory=list)
+    # Parser-proven, canonical runtime identities (currently PHP FQCNs). These
+    # are intentionally distinct from the display `name`, which may collide.
+    target_identities: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class DispatchEvidence:
+    """One syntax/role-proven runtime dispatch site.
+
+    ``relation`` defines how the target may resolve: ``direct`` is a
+    one-to-one invocation and therefore fails closed when its aliases are
+    ambiguous; later extractor slices add explicit broadcast/queue relations.
+    """
+
+    file_path: str
+    language: str
+    relation: str
+    target_aliases: tuple[str, ...]
+
 
 @dataclass
 class RuntimeScheduler:
@@ -163,6 +183,8 @@ class RuntimeScheduler:
     cron: str = ""
     invoked_targets: list[str] = field(default_factory=list)
     linked_endpoints: list[str] = field(default_factory=list)
+    # Stable per-file declaration identity for source-owner endpoint evidence.
+    owner_key: str = ""
 
 @dataclass
 class RealtimeConsumer:
@@ -182,6 +204,9 @@ class RuntimeScan:
     tasks: list[RuntimeTask] = field(default_factory=list)
     schedulers: list[RuntimeScheduler] = field(default_factory=list)
     realtime_consumers: list[RealtimeConsumer] = field(default_factory=list)
+    dispatch_evidence: list[DispatchEvidence] = field(default_factory=list)
+    # Observable work counters for the scan (see `discover_runtime_surfaces`).
+    scan_stats: dict[str, int] = field(default_factory=dict)
 
 @dataclass
 class ConfigImpact:

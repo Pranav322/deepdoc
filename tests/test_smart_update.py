@@ -517,6 +517,11 @@ def test_engine_fingerprint_records_semantic_boundary_refinement():
     assert "semantic_boundaries" in ENGINE_FINGERPRINT
 
 
+def test_engine_fingerprint_records_runtime_evidence_contract():
+    """Runtime-evidence semantic changes invalidate persisted scan state."""
+    assert ENGINE_FINGERPRINT.endswith("runtime_evidence_v10")
+
+
 def test_engine_fingerprint_mismatch_forces_full_replan(tmp_repo_with_plan):
     """Outdated sync state should trigger a one-time full replan."""
     root, plan = tmp_repo_with_plan
@@ -847,7 +852,6 @@ def test_handle_deleted_files_noop_when_nothing_deleted(tmp_repo_with_plan):
 
 def test_merge_targeted_plan_mutates_existing_by_slug(tmp_repo_with_plan):
     """Replanned bucket matching existing slug is mutated in-place, not duplicated."""
-    from deepdoc.smart_update_v2 import SmartUpdater
     from deepdoc.v2_models import RepoScan
     from .conftest import make_bucket, make_plan
 

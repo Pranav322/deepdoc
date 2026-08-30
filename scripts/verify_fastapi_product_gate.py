@@ -38,7 +38,7 @@ def main() -> int:
             ["git", "clone", "--depth", "1", "https://github.com/fastapi/fastapi.git", str(args.clone)],
             check=True,
         )
-        repo = args.clone
+        repo = args.clone.resolve()
     else:
         repo = args.repo.resolve()
 
@@ -56,9 +56,11 @@ def main() -> int:
     ).stdout
 
     assert paths.output_dir == repo / "deepdoc-docs"
-    assert paths.site_dir == repo / "deepdoc-site"
+    # The real FastAPI checkout has no legacy site/ collision. A missing site
+    # root is already safe, so safety migration need not change it.
+    assert paths.site_dir == repo / "site"
     assert before == after
-    print("PASS: FastAPI authored docs preserved; DeepDoc selected dedicated output roots.")
+    print("PASS: FastAPI authored docs preserved; DeepDoc selected a dedicated docs root.")
     return 0
 
 

@@ -93,6 +93,7 @@ Guidance for coding agents working in this repository.
 - `deepdoc/prompts/selectors.py` — `get_prompt_for_bucket`, `get_prompt_for_page_type`
 - `deepdoc/parser/routes/` — per-framework route detection and repo-aware resolution (`repo_resolver.py`)
 - `deepdoc/scanner/` — runtime, integration, artifact, database extraction
+- `deepdoc/scanner/runtime.py` — runtime evidence is fail-closed: Python imports retain exact defining-file identities, PHP schedule rebinding is source ordered (including closure callbacks), Go registrations require a proven `Start` call on the same receiver provenance, and JS/Vue evidence must come from executable syntax (including unconditional IIFEs, never lazy/nested execution). Files carrying any document role (`authored_docs`, `docs_config`, generated references, AI exports, built sites, or unknown generated docs) are excluded before runtime parsing and linking. `dispatch_evidence` is file-scoped and must be filtered in planning sub-scans. The regex-only `_discover_nestjs_runtime()` remains intentionally unwired; see GitHub issue #18 for a syntax-backed implementation.
 - `tests/` — pytest suite; shared fixtures in `tests/conftest.py`
 
 ### Release and infrastructure
@@ -212,7 +213,7 @@ DeepDoc can parse a number of source formats, but parsing is not the same as ful
 - Fix generated output by changing generators/builders, not by hand-editing configured DeepDoc output/site roots or `.deepdoc/` state.
 - If a change touches persisted state or freshness semantics, audit plan, ledger, sync state, manifest, and stale detection together.
 - Freshness treats a missing tracked path as a deletion only when that path had a recorded generation hash. Never-existing LLM artifact hints are not allowed to make a freshly generated bucket immediately stale.
-- If route behavior changes materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
+- If route behavior or runtime-evidence semantics change materially, update the engine fingerprint in `deepdoc/persistence_v2.py`.
 - CLI-facing failures should raise `click.ClickException` or print a clear Rich message.
 - If CLI behavior changes, update `README.md` and root `CHANGELOG.md` in the same task.
 - The version compatibility warning compares major versions only (`generated_major < cli_major`); message says "run `deepdoc generate`", not "upgrade the CLI".

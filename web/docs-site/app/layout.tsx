@@ -13,7 +13,16 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <body>
-        <RootProvider>{children}</RootProvider>
+        <RootProvider
+          search={{
+            // The index is a static asset (see app/api/search/route.ts), so
+            // searching happens in the browser. Without this the client calls
+            // a dynamic endpoint that cannot exist in an exported site.
+            options: { type: 'static' },
+          }}
+        >
+          {children}
+        </RootProvider>
       </body>
     </html>
   );

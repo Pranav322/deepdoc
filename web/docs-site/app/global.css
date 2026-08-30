@@ -27,23 +27,25 @@
    viewport and the prose column stretches with it. Constrain the whole thing
    and keep the reading column narrow — long measures are the single biggest
    reason docs feel "wide and weird". */
-:root {
-  /* The real fix for "too wide": Fumadocs ships 100vw, so the whole shell
-     spans the viewport. --fd-layout-offset centres it and clamps to 0 on
-     narrow screens, so this is safe on mobile.
+/* Layout note: do NOT set --fd-layout-width. Content is padded by
+   calc(--fd-layout-offset + --fd-sidebar-width), and --fd-layout-offset is
+   max(50vw - layout-width/2, 0). Constraining the width therefore creates a
+   left gutter that the sidebar background fills, which reads as a ~500px
+   sidebar. Leave the shell full-width so the offset is 0 and the sidebar sits
+   flush left; the reading column is capped on the article instead. */
 
-     Sidebar and TOC widths are deliberately NOT overridden here. Fumadocs
-     sets them with element-level utilities inside media queries
-     (md:[--fd-sidebar-width:286px]); an unguarded :root value loses to those
-     on desktop while overriding the 0px mobile base that collapses the
-     sidebar off-canvas — breaking small screens for no desktop gain. */
-  --fd-layout-width: 1400px;
-}
-
-/* Reading column: ~72 characters. */
+/* Reading column: ~72 characters, sitting next to the sidebar rather than
+   floating in the middle of the remaining space. Fumadocs centres the article,
+   which on a wide screen leaves a large dead gap after the sidebar. */
 #nd-page article,
 article.prose {
   max-width: 46rem;
+  margin-inline-start: 0;
+  margin-inline-end: auto;
+}
+/* Pull the whole content area closer to the sidebar. */
+#nd-page {
+  padding-inline-start: 2.5rem;
 }
 
 /* ── Typography ─────────────────────────────────────────────────────────── */
@@ -66,7 +68,14 @@ article.prose {
 /* ── Sidebar: quieter and tighter, closer to a real docs shell ─────────── */
 #nd-sidebar {
   font-size: 0.875rem;
-  border-right: 1px solid var(--color-fd-border);
+  /* Borderless: the sidebar should sit on the page, not in a panel. */
+  border-right: none;
+  background: transparent;
+}
+/* The search field reads as a heavy input by default; soften it. */
+#nd-sidebar button[data-search-full] {
+  background: var(--color-fd-muted);
+  border-color: transparent;
 }
 #nd-sidebar a {
   padding-top: 0.3rem;

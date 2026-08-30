@@ -1,6 +1,6 @@
-# DeepDoc Universal Architecture — Roadmap 🏁 COMPLETE
+# DeepDoc Universal Architecture — Foundation Complete
 
-## Status: All 9 slices delivered. 16/16 benchmark cases pass (100%).
+## Status: The original universal architecture and product-hardening slices are complete. See [`plans/DEEPDOC_PRODUCT_COMPLETION_PLAN.md`](plans/DEEPDOC_PRODUCT_COMPLETION_PLAN.md) for the active product roadmap from v0.5.5 onward.
 
 ## Goal
 

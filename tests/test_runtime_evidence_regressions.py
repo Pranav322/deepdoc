@@ -14,9 +14,18 @@ def _parsed(path: str, language: str) -> ParsedFile:
     return ParsedFile(path=Path(path), language=language, imports=[], symbols=[])
 
 
-def _scan(sources: dict[str, str], languages: dict[str, str]) -> RuntimeScan:
+def _scan(
+    sources: dict[str, str],
+    languages: dict[str, str],
+    *,
+    doc_roles: dict[str, str] | None = None,
+) -> RuntimeScan:
     parsed = {path: _parsed(path, languages[path]) for path in sources}
-    return discover_runtime_surfaces(parsed, sources)
+    return discover_runtime_surfaces(
+        parsed,
+        sources,
+        doc_role_by_file=doc_roles,
+    )
 
 
 def _queue_aliases(runtime: RuntimeScan) -> list[tuple[str, tuple[str, ...]]]:
@@ -695,3 +704,76 @@ def test_empty_product_files_are_not_counted_as_low_trust() -> None:
 
 def test_file_ext_re_includes_vue() -> None:
     assert FILE_EXT_RE.search("components/Queue.vue")
+
+
+def test_document_roles_never_create_runtime_facts() -> None:
+    sources = {
+        "docs/bullmq-example.ts": (
+            "import { Worker } from 'bullmq';\n"
+            "new Worker('orders', processOrders);\n"
+        ),
+        "docs/celery-guide.py": (
+            "from celery import shared_task\n"
+            "@shared_task\n"
+            "def sync_orders():\n"
+            "    return 1\n"
+        ),
+        "docs_src/queue-worker.ts": (
+            "import { Worker } from 'bullmq';\n"
+            "new Worker('payments', processPayments);\n"
+        ),
+        "site/generated-runtime.js": (
+            "const { Worker } = require('bullmq');\n"
+            "new Worker('generated', processGenerated);\n"
+        ),
+        "docs/deepwiki-export.md": "Source: https://deepwiki.com/acme/repo\n",
+    }
+    languages = {
+        "docs/bullmq-example.ts": "typescript",
+        "docs/celery-guide.py": "python",
+        "docs_src/queue-worker.ts": "typescript",
+        "site/generated-runtime.js": "javascript",
+        "docs/deepwiki-export.md": "",
+    }
+    roles = {
+        "docs/bullmq-example.ts": "authored_docs",
+        "docs/celery-guide.py": "authored_docs",
+        "docs_src/queue-worker.ts": "authored_docs",
+        "site/generated-runtime.js": "built_docs_site",
+        "docs/deepwiki-export.md": "ai_derived_export",
+    }
+
+    runtime = _scan(sources, languages, doc_roles=roles)
+
+    assert runtime.tasks == []
+    assert runtime.schedulers == []
+    assert runtime.dispatch_evidence == []
+    assert runtime.scan_stats["document_role_files_skipped"] == len(sources)
+
+
+def test_every_document_role_is_excluded_from_runtime_eligibility() -> None:
+    roles = (
+        "authored_docs",
+        "docs_config",
+        "generated_ref",
+        "ai_derived_export",
+        "built_docs_site",
+        "unknown_generated",
+    )
+    sources = {
+        f"examples/{role}.js": (
+            "const { Worker } = require('bullmq');\n"
+            f"new Worker('{index}', processJob);\n"
+        )
+        for index, role in enumerate(roles)
+    }
+    runtime = _scan(
+        sources,
+        {path: "javascript" for path in sources},
+        doc_roles={path: role for path, role in zip(sources, roles)},
+    )
+
+    assert runtime.tasks == []
+    assert runtime.schedulers == []
+    assert runtime.dispatch_evidence == []
+    assert runtime.scan_stats["document_role_files_skipped"] == len(roles)

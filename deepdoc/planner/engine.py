@@ -1696,6 +1696,7 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
         scan.file_contents,
         scan.published_api_endpoints,
         source_kind_by_file=scan.source_kind_by_file,
+        doc_role_by_file=scan.doc_role_by_file,
     )
     runtime_seconds = _record_scan_timing(
         scan.scan_timings,
@@ -1707,6 +1708,7 @@ def run_phase2_scans(scan: RepoScan, cfg: dict[str, Any], llm: LLMClient, repo_r
     console.print(
         f"    [dim]{runtime_stats.get('eligible_files', 0)} product file(s), "
         f"{runtime_stats.get('low_trust_files_skipped', 0)} low-trust skipped, "
+        f"{runtime_stats.get('document_role_files_skipped', 0)} document-role skipped, "
         f"{runtime_stats.get('link_candidate_files', 0)} dispatch candidate(s) "
         f"in {runtime_seconds:.2f}s[/dim]"
     )

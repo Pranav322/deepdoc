@@ -34,6 +34,16 @@ PYTHON_LANGUAGES = frozenset({"python"})
 JS_LANGUAGES = frozenset({"javascript", "typescript", "vue"})
 PHP_LANGUAGES = frozenset({"php"})
 GO_LANGUAGES = frozenset({"go"})
+RUNTIME_EXCLUDED_DOC_ROLES = frozenset(
+    {
+        "authored_docs",
+        "docs_config",
+        "generated_ref",
+        "ai_derived_export",
+        "built_docs_site",
+        "unknown_generated",
+    }
+)
 
 
 def discover_runtime_surfaces(
@@ -41,19 +51,26 @@ def discover_runtime_surfaces(
     file_contents: dict[str, str],
     api_endpoints: list[dict[str, Any]] | None = None,
     source_kind_by_file: dict[str, str] | None = None,
+    doc_role_by_file: dict[str, str] | None = None,
 ) -> RuntimeScan:
     """Detect first-class background job, scheduler, and realtime surfaces.
 
     Only product-trust source participates: low-trust kinds (test/fixture/
     example/generated) describe how a runtime *could* look, not what this
-    product actually runs. `source_kind_by_file` is the scan-wide classification
+    product actually runs. Documentation roles are also excluded: authored
+    tutorials, docs configuration, generated references, AI exports, and built
+    sites can provide secondary prose context but never establish runtime facts.
+    `source_kind_by_file` is the scan-wide classification
     (`RepoScan.source_kind_by_file`); when absent each path is classified with
     the same shared `classify_source_kind()` so there is no second path
     classifier.
     """
     runtime = RuntimeScan()
-    eligible = _eligible_contents(file_contents, source_kind_by_file)
+    eligible = _eligible_contents(
+        file_contents, source_kind_by_file, doc_role_by_file
+    )
     kinds = source_kind_by_file or {}
+    doc_roles = doc_role_by_file or {}
     runtime.scan_stats = {
         "input_files": len(file_contents),
         "eligible_files": len(eligible),
@@ -63,6 +80,10 @@ def discover_runtime_surfaces(
             for path, content in file_contents.items()
         ),
         "empty_files_skipped": sum(not content for content in file_contents.values()),
+        "document_role_files_skipped": sum(
+            bool(content) and doc_roles.get(path) in RUNTIME_EXCLUDED_DOC_ROLES
+            for path, content in file_contents.items()
+        ),
     }
     languages = _language_index(eligible, parsed_files)
     python_files = _by_language(eligible, languages, PYTHON_LANGUAGES)
@@ -124,14 +145,17 @@ def discover_runtime_surfaces(
 def _eligible_contents(
     file_contents: dict[str, str],
     source_kind_by_file: dict[str, str] | None,
+    doc_role_by_file: dict[str, str] | None = None,
 ) -> dict[str, str]:
     """Drop empty and low-trust files, preserving the caller's key order."""
     kinds = source_kind_by_file or {}
+    doc_roles = doc_role_by_file or {}
     return {
         path: content
         for path, content in file_contents.items()
         if content
         and not is_low_trust_source_kind(kinds.get(path) or classify_source_kind(path))
+        and doc_roles.get(path) not in RUNTIME_EXCLUDED_DOC_ROLES
     }
 
 

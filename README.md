@@ -1305,7 +1305,7 @@ DeepDoc as the source of truth for that stack.
 | Go | Syntax-proven goroutine workers, `AddFunc` cron registrations, scheduler `.Every(...).Do(...)` patterns |
 | Generic cron | Python `crontab(...)` style schedule declarations |
 
-Runtime facts are **fail-closed evidence**, not text-marker matches: DeepDoc requires a syntax-valid language node plus a framework/API role proof and bounded identity resolution. Comments, strings, invalid syntax, dynamic scope/reflection, and unprovable nested JS execution do not create runtime links. Laravel schedules require a typed Console Kernel method; JS/TS runtime roles are limited to unconditional module-top-level execution.
+Runtime facts are **fail-closed evidence**, not text-marker matches: DeepDoc requires a syntax-valid language node plus a framework/API role proof and bounded identity resolution. Comments, strings, invalid syntax, dynamic scope/reflection, documentation examples, generated references, AI-derived exports, built documentation sites, and unprovable nested JS execution do not create runtime links. Laravel schedules require a typed Console Kernel method; JS/TS runtime roles are limited to unconditional module-top-level execution.
 
 ---
 

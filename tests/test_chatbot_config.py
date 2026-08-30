@@ -17,7 +17,6 @@ def test_chatbot_defaults_are_present() -> None:
     chatbot = DEFAULT_CONFIG["chatbot"]
 
     assert chatbot["enabled"] is False
-    assert chatbot["vector_store"]["kind"] == "faiss"
     assert chatbot["retrieval"]["top_k_code"] == 15
     assert chatbot["retrieval"]["deep_top_k_code"] == 16
     assert chatbot["answer"]["api_key_env"] == "DEEPDOC_CHAT_API_KEY"
@@ -40,8 +39,6 @@ def test_chatbot_defaults_match_runtime_settings_defaults() -> None:
         "max_prompt_relationship_chunks",
         "rerank_candidate_limit",
         "rerank_candidate_limit_per_kind",
-        "deep_research_chunk_chars",
-        "deep_research_top_k",
         "deep_mode_max_prompt_chars",
         "deep_top_k_code",
         "deep_top_k_relationship",

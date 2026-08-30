@@ -662,11 +662,6 @@ include_integration_pages: true     # Generate integration documentation
 max_parallel_workers: 6             # Concurrent LLM calls (increase for Azure PTU)
 batch_size: 10                      # Pages per batch before rate-limit pause
 
-github_pages:
-  enabled: false
-  branch: gh-pages
-  remote: origin
-
 site:
   repo_url: ""                      # e.g., https://github.com/you/your-repo
   favicon: ""
@@ -712,9 +707,13 @@ site:
 | `languages` | `[python, javascript, typescript, go, php, vue]` | Descriptive only — fills a sentence in generation prompts. Does not gate or broaden scanning; the scanner's supported languages are fixed |
 | `include` | `[]` | Glob patterns to include (empty = everything) |
 | `exclude` | *(see config)* | Glob patterns to exclude (node_modules, .git, dist, etc.) |
-| **GitHub Pages** | | |
-| `github_pages.branch` | `gh-pages` | Branch for GitHub Pages deploy |
-| `github_pages.remote` | `origin` | Git remote for deploy |
+| `batch_size` | `10` | Pages submitted per generation batch |
+| `max_files_per_bucket` | `25` | Buckets above this are split by the decomposition pass |
+| `max_flow_files` | `45` | Cap on files pulled into a single flow's context |
+| `max_flow_symbols` | `80` | Cap on symbols pulled into a single flow's context |
+| `consistency_pass` | `true` | Post-generation LLM pass adding cross-page "See also" links |
+| `frameworks` | `[]` | Descriptive only — names frameworks in the generation prompt |
+| `llm.api_version` | `""` | Azure API version (e.g. `2024-02-01`) |
 | **Site** | | |
 | `site.repo_url` | `""` | Repo URL shown in the generated site navigation |
 | `site.favicon` | `""` | Path to favicon |
@@ -892,9 +891,6 @@ chatbot:
     api_version: ""
     batch_size: 24
 
-  vector_store:
-    kind: "faiss"
-
   indexing:
     include_repo_docs: true
     include_tests: false
@@ -948,8 +944,6 @@ chatbot:
     live_fallback_max_files: 6
     live_fallback_max_per_file: 2
     live_fallback_context_lines: 12
-    deep_research_chunk_chars: 3200
-    deep_research_top_k: 10
 
   chunking:
     code_chunk_lines: 120
@@ -1047,8 +1041,6 @@ The defaults work for almost every project. Expand below only when you need to t
 | `chatbot.retrieval.live_fallback_max_files` | `6` | Max repo files inspected during a deep-research live fallback |
 | `chatbot.retrieval.live_fallback_max_per_file` | `2` | Max fallback snippets returned per inspected file |
 | `chatbot.retrieval.live_fallback_context_lines` | `12` | Lines per fallback snippet around each exact match |
-| `chatbot.retrieval.deep_research_chunk_chars` | `3200` | Max chars per evidence chunk passed into deep-research step answers |
-| `chatbot.retrieval.deep_research_top_k` | `10` | Retrieved chunks per deep-research sub-question |
 | **Chunking** | | |
 | `chatbot.chunking.code_chunk_lines` | `120` | Lines per code chunk |
 | `chatbot.chunking.code_chunk_overlap` | `20` | Overlap lines between code chunks |

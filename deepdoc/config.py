@@ -23,6 +23,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "decompose_threshold": 7,  # buckets with 7+ files trigger decomposition consideration
     "planning_unit_max_files_seed": 0,  # 0 = no cap; else an advisory ceiling on the first split-seed size for an over-budget planning unit (bound_planning_unit's exact-token gate is what actually proves each part fits, this only shapes the initial guess)
     "consolidation_similarity_threshold": 0.55,  # Jaccard threshold for merging near-duplicate buckets
+    "max_files_per_bucket": 25,  # buckets above this are split by the decomposition pass
+    "max_flow_files": 45,  # cap on files pulled into a single flow's context
+    "max_flow_symbols": 80,  # cap on symbols pulled into a single flow's context
     "database_doc_mode": "overview_plus_groups",
     "database_group_model_cap": 12,
     "database_group_file_cap": 8,
@@ -39,6 +42,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "persistent_index": True,
     },
     # ── Concurrency ─────────────────────────────────────────────────────
+    "batch_size": 10,  # pages submitted per generation batch
     "max_parallel_workers": 6,  # concurrent LLM calls for generation, clustering, and decompose
     "rate_limit_pause": 0.5,  # seconds to pause between generation batches (0 = no pause)
     "manifest_checkpoint_pages": 10,
@@ -46,7 +50,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # ── Integration detection ────────────────────────────────────────────
     "integration_detection": "auto",  # "auto" | "off"
     # ── Page type toggles ────────────────────────────────────────────────
-    "include_feature_pages": True,
+    "consistency_pass": True,  # post-generation LLM pass adding cross-page "See also" links
     "include_endpoint_pages": True,
     "include_integration_pages": True,
     # ── LLM ──────────────────────────────────────────────────────────────
@@ -54,6 +58,7 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "provider": "",  # must be set in .deepdoc.yaml — run: deepdoc init
         "model": "",
         "api_key_env": "",
+        "api_version": "",  # Azure deployments; written by `deepdoc init --provider azure`
         "base_url": None,
         "max_tokens": None,
         "temperature": 0.2,
@@ -72,6 +77,9 @@ DEFAULT_CONFIG: dict[str, Any] = {
     # (python/javascript/typescript/go/php/vue) is fixed and independent of
     # this list. Adding a language here does not make DeepDoc parse it.
     "languages": ["python", "javascript", "typescript", "go", "php", "vue"],
+    # Descriptive only, like `languages` above — names the frameworks in the
+    # generation prompt. Does not gate or broaden detection.
+    "frameworks": [],
     "include": [],  # glob patterns — empty = everything
     "services": [],  # optional monorepo service roots, e.g. ["services/auth", "apps/api"]
     # ── Endpoint grouping ────────────────────────────────────────────────
@@ -169,11 +177,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # ── Project-specific ───────────────────────────────────────────────
         # Add project-specific excludes here in .deepdoc.yaml under the "exclude:" key.
     ],
-    "github_pages": {
-        "enabled": False,
-        "branch": "gh-pages",
-        "remote": "origin",
-    },
     "site": {
         "repo_url": "",  # shown in top-bar of documentation site
         "favicon": "",
@@ -187,8 +190,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "compatibility": {
         "deprecated_version_warning": {
             "enabled": True,
-            "minimum_version": "1.0.0",
-            "upgrade_command": "python3 -m pip install --upgrade deepdoc",
         },
     },
     "chatbot": {
@@ -214,12 +215,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "output_reserve_tokens": None,
             "continuation_retries": 2,
             "continuation_context_chars": 12000,
-            "rate_limits": {
-                "max_concurrency": 4,
-                "requests_per_minute": 60,
-                "tokens_per_minute": 100000,
-                "adaptive_backoff": True,
-            },
         },
         "embeddings": {
             "backend": "fastembed",
@@ -235,15 +230,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "base_url": "",
             "api_version": "",
             "batch_size": 24,
-            "rate_limits": {
-                "mode": "auto",
-                "hosted_max_concurrency": 2,
-                "hosted_requests_per_minute": 60,
-                "hosted_tokens_per_minute": 1000000,
-            },
-        },
-        "vector_store": {
-            "kind": "faiss",
         },
         "indexing": {
             "include_repo_docs": True,
@@ -297,8 +283,6 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "live_fallback_max_files": 6,
             "live_fallback_max_per_file": 2,
             "live_fallback_context_lines": 12,
-            "deep_research_chunk_chars": 3200,
-            "deep_research_top_k": 10,
         },
         "chunking": {
             "code_chunk_lines": 120,

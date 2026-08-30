@@ -49,9 +49,6 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "api_version": "",
         "batch_size": 24,
     },
-    "vector_store": {
-        "kind": "faiss",
-    },
     "indexing": {
         "include_repo_docs": True,
         "include_tests": False,
@@ -104,8 +101,6 @@ DEFAULT_CHATBOT_CONFIG: dict[str, Any] = {
         "live_fallback_max_files": 6,
         "live_fallback_max_per_file": 2,
         "live_fallback_context_lines": 12,
-        "deep_research_chunk_chars": 3200,
-        "deep_research_top_k": 10,
     },
     "chunking": {
         "code_chunk_lines": 120,

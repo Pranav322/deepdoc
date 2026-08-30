@@ -16,5 +16,10 @@ rsync -a --exclude node_modules --exclude .next --exclude .next-build \
         --exclude .source --exclude out "$SRC/" "$TMP/"
 ln -s "$SRC/node_modules" "$TMP/node_modules"
 
+# components/site-header.tsx imports ../../shared/site-nav.json, which lives
+# outside this project, so the copy needs it too.
+mkdir -p "$(dirname "$TMP")/shared"
+rsync -a "$SRC/../shared/" "$TMP/../shared/" 2>/dev/null || true
+
 ( cd "$TMP" && EXPORT_DIR=.next-build NEXT_DIST_DIR=.next-build npx next build >/dev/null 2>&1 )
 echo "$TMP/.next-build"

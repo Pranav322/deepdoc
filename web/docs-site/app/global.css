@@ -7,26 +7,71 @@
 @source '../node_modules/fumadocs-ui/dist/**/*.js';
 
 /* ── Brand ──────────────────────────────────────────────────────────────────
+   Ported from web/src/styles — the same palette the marketing site uses, so
+   /docs is visibly the same product. The accent is DeepDoc lime, NOT the
+   #eb3e25 that generated sites default to.
+
    Fumadocs v15 tokens are `--color-fd-*` and hold complete colours — never
    wrap one in hsl(). Its tokens sit inside @layer theme / @layer utilities,
    so these unlayered rules win without !important. */
 :root {
-  --brand: #eb3e25;
-  --brand-light: #ef624e;
-  --brand-dark: #c1331f;
-  --color-fd-primary: var(--brand);
-  --color-fd-ring: var(--brand);
+  --color-accent: #4C8B00;
+  --color-ink: #111110;
+  --color-ink-muted: #6B6B63;
+  --color-surface: #F5F4F0;
+  --color-surface-raised: #ECEAE4;
+  --color-line: rgba(0, 0, 0, 0.07);
+
+  --color-fd-primary: var(--color-accent);
+  --color-fd-ring: var(--color-accent);
+  --color-fd-background: var(--color-surface);
+  --color-fd-foreground: var(--color-ink);
+  --color-fd-muted-foreground: var(--color-ink-muted);
+  --color-fd-card: var(--color-surface-raised);
+  --color-fd-muted: var(--color-surface-raised);
+  --color-fd-border: var(--color-line);
 }
 .dark {
-  --color-fd-primary: var(--brand-light);
-  --color-fd-ring: var(--brand-light);
+  --color-accent: #C2FF4D;
+  --color-ink: #F0EFEA;
+  --color-ink-muted: #9E9D96;
+  --color-surface: #09090D;
+  --color-surface-raised: #10101A;
+  --color-line: rgba(255, 255, 255, 0.06);
+
+  --color-fd-primary: var(--color-accent);
+  --color-fd-ring: var(--color-accent);
+  --color-fd-background: var(--color-surface);
+  --color-fd-foreground: var(--color-ink);
+  --color-fd-muted-foreground: var(--color-ink-muted);
+  --color-fd-card: var(--color-surface-raised);
+  --color-fd-muted: var(--color-surface-raised);
+  --color-fd-border: var(--color-line);
 }
 
-/* ── Layout ─────────────────────────────────────────────────────────────────
-   Fumadocs defaults to --fd-layout-width: 100vw, so the shell spans the whole
-   viewport and the prose column stretches with it. Constrain the whole thing
-   and keep the reading column narrow — long measures are the single biggest
-   reason docs feel "wide and weird". */
+/* ── Brand logo (ported from Logo.astro) ─────────────────────────────────── */
+.dd-logo { display: inline-flex; align-items: center; line-height: 1; font-size: 1.15rem; }
+.dd-mark {
+  display: block;
+  flex-shrink: 0;
+  width: 1.16em;
+  height: 1.16em;
+  margin-left: -0.33em;
+  margin-right: 0.04em;
+  transform: translateY(-0.05em);
+}
+.dd-front { fill: var(--color-accent); }
+.dd-echo { fill: none; stroke: var(--color-accent); stroke-width: 2; stroke-linecap: round; }
+.dd-echo-1 { opacity: 0.4; }
+.dd-echo-2 { opacity: 0.18; }
+.dd-word {
+  font-weight: 600;
+  font-size: 1em;
+  letter-spacing: -0.015em;
+  line-height: 1;
+  color: var(--color-ink);
+}
+
 /* Layout note: do NOT set --fd-layout-width. Content is padded by
    calc(--fd-layout-offset + --fd-sidebar-width), and --fd-layout-offset is
    max(50vw - layout-width/2, 0). Constraining the width therefore creates a
@@ -114,3 +159,39 @@
 /* ── Table of contents ──────────────────────────────────────────────────── */
 #nd-toc { font-size: 0.8125rem; }
 #nd-toc a { padding-top: 0.2rem; padding-bottom: 0.2rem; }
+
+/* ── Site header (ported from Header.astro) ──────────────────────────────── */
+.dd-header {
+  position: sticky;
+  top: 0;
+  z-index: 40;
+  height: 52px;
+  border-bottom: 1px solid var(--color-line);
+  background: color-mix(in oklab, var(--color-surface) 86%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+.dd-header-inner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  height: 100%;
+  padding: 0 1.5rem;
+}
+.dd-header-brand { display: inline-flex; align-items: center; text-decoration: none; transition: opacity 0.12s; }
+.dd-header-brand:hover { opacity: 0.8; }
+.dd-header-nav { display: flex; align-items: center; gap: 0.125rem; }
+.dd-header-link {
+  padding: 0.375rem 0.75rem;
+  border-radius: 0.375rem;
+  font-size: 14px;
+  font-weight: 500;
+  text-decoration: none;
+  color: color-mix(in srgb, var(--color-ink) 72%, var(--color-ink-muted));
+  transition: color 0.12s;
+}
+.dd-header-link:hover { color: var(--color-ink); }
+.dd-header-link.is-current { color: var(--color-ink); }
+@media (max-width: 640px) {
+  .dd-header-nav a:not(.is-current) { display: none; }
+}

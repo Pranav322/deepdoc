@@ -1,12 +1,9 @@
 ---
 import Logo from "./Logo.astro";
+import siteNav from "../../shared/site-nav.json";
 const pathname = Astro.url.pathname;
-const nav = [
-  { label: "Docs", href: "/docs" },
-  { label: "Changelog", href: "/changelog" },
-  { label: "GitHub", href: "https://github.com/tss-pranavkumar/deepdoc", external: true },
-  { label: "PyPI", href: "https://pypi.org/project/deepdoc/", external: true },
-];
+// Shared with the docs site — see web/shared/site-nav.json
+const nav = siteNav.items;
 ---
 
 <header

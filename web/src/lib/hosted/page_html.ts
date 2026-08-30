@@ -1050,7 +1050,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
             <nav class="cloud-footer-links">
               <a href="https://deepdoc.tech">Home</a>
               <a href="https://deepdoc.tech/docs">Docs</a>
-              <a href="https://github.com/tss-pranavkumar/deepdoc" target="_blank" rel="noreferrer">GitHub</a>
+              <a href="https://github.com/Pranav322/deepdoc" target="_blank" rel="noreferrer">GitHub</a>
               <a href="https://pypi.org/project/deepdoc/" target="_blank" rel="noreferrer">PyPI</a>
             </nav>
           </footer>

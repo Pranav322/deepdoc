@@ -17,7 +17,17 @@ export async function generateMetadata({
   const { slug } = await params;
   const page = source.getPage(slug);
   if (!page) return {};
-  return { title: page.data.title, description: page.data.description };
+  const path = slug?.length ? `/${slug.join('/')}` : '';
+  return {
+    title: page.data.title,
+    description: page.data.description,
+    alternates: { canonical: `https://www.deepdoc.tech/docs${path}` },
+    openGraph: {
+      title: page.data.title,
+      description: page.data.description,
+      url: `https://www.deepdoc.tech/docs${path}`,
+    },
+  };
 }
 
 export default async function Page({

@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <rect width="48" height="48" rx="11" fill="#0E0E13"/>
+  <g transform="translate(-4 -2)">
+    <path d="M14 9 H24 A15 15 0 0 1 24 39 H14" transform="translate(6 6)" fill="none" stroke="#C2FF4D" stroke-width="2.5" opacity="0.18"/>
+    <path d="M14 9 H24 A15 15 0 0 1 24 39 H14" transform="translate(3 3)" fill="none" stroke="#C2FF4D" stroke-width="2.5" opacity="0.4"/>
+    <path fill-rule="evenodd" fill="#C2FF4D" d="M14 9 H24 A15 15 0 0 1 24 39 H14 Z M20 15 H24 A9 9 0 0 1 24 33 H20 Z"/>
+  </g>
+</svg>

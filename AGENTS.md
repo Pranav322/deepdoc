@@ -65,6 +65,24 @@ Guidance for coding agents working in this repository.
 - `deepdoc/chatbot/scaffold.py` — chatbot `chatbot_backend/` scaffolding generator
 
 ### Site builder (Next.js + Fumadocs)
+- `web/docs-site/` — **the hand-written documentation site** served at
+  `deepdoc.tech/docs`. Next + Fumadocs + MDX, built with `basePath=/docs`,
+  static-exported and copied into `web/public/docs/`, which Astro serves
+  verbatim. It is NOT a DeepDoc-generated site: the generator documents a
+  codebase, product docs teach a person to use the product.
+  - `npm run build` in `web/` runs the docs build first, then `astro build`.
+    Never run `astro build` alone for a deploy — Cloudflare would ship a stale
+    or missing `/docs`, since `web/public/docs/` is gitignored.
+  - The header nav is shared: `web/shared/site-nav.json` is imported by both
+    `web/src/components/Header.astro` and
+    `web/docs-site/components/site-header.tsx`. Edit it once.
+  - `web/docs-site/scripts/copy-to-web-public.mjs` flattens Next's bracketed
+    route-chunk directories (`(docs)/[[...slug]]`). Without it the Astro
+    Cloudflare adapter reads those brackets as a dynamic-route parameter and
+    fails the **entire** build with "Parameter name must match".
+  - Use `scripts/verify-build.sh` to check a build while `next dev` is running.
+    A normal build regenerates `.source`, which the dev server hot-reloads and
+    then dies on with "TypeError: a[d] is not a function".
 - `deepdoc/site/builder/next_builder.py` — **canonical site builder**: `build_next_from_plan()` copies the Next.js + Fumadocs shell template from `next_template/` into configured `site_dir` (`deepdoc-site/` by default), writes `deepdoc.config.json` and `.env.local` pointing at configured `output_dir`. `mkdocs_builder.py` was deleted in `b75b4eb`; this is the only site builder.
   - **The builder owns 100% of `next_template/`** — every template file is overwritten on each run. Do not reintroduce a skip-if-exists check: it meant template fixes never reached an already-generated site (only `deepdoc.config.json` and `globals.css` were refreshed, so layout, `lib/*.ts` and chatbot changes never arrived on upgrade). Files the user adds are not part of the template and survive; `node_modules/`, `.next/`, `openapi/` and `public/` sit outside it.
   - Because `package.json` is rewritten every run, `_ensure_node_modules` compares a `node_modules/.deepdoc-pkg-sha` content hash rather than mtime (`shutil.copy2` preserves the source mtime).

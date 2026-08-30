@@ -7,12 +7,14 @@
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "astro build",
+    "build": "npm run build:docs && astro build",
     "images": "node scripts/build-images.mjs",
     "test:hosted": "node scripts/test-hosted-client.mjs",
     "test:tokens": "node scripts/test-hosted-tokens.mjs",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "build:docs": "cd docs-site && npm install --silent && npm run build",
+    "build:site-only": "astro build"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",

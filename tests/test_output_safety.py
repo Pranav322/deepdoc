@@ -45,25 +45,29 @@ def test_paths_are_repository_relative_and_non_overlapping(tmp_path: Path) -> No
         resolve_output_paths(tmp_path, _cfg("deepdoc-docs", "deepdoc-docs/site"))
 
 
-def test_tracked_authored_docs_block_generation(tmp_path: Path) -> None:
+def test_tracked_authored_docs_auto_migrates(tmp_path: Path) -> None:
     authored = tmp_path / "docs" / "en" / "docs" / "index.md"
     authored.parent.mkdir(parents=True)
     authored.write_text("# Authored docs\n")
     _init_git(tmp_path)
 
-    with pytest.raises(click.ClickException, match="Refusing to write"):
-        assert_safe_for_generation(tmp_path, _cfg("docs", "deepdoc-site"))
+    cfg = {"output_dir": "docs", "site_dir": "deepdoc-site"}
+    paths = assert_safe_for_generation(tmp_path, cfg)
+    assert paths.output_dir.name == "deepdoc-docs"
+    assert cfg["output_dir"] == "deepdoc-docs"
     assert authored.exists()
 
 
-def test_tracked_site_blocks_generation(tmp_path: Path) -> None:
+def test_tracked_site_auto_migrates(tmp_path: Path) -> None:
     authored = tmp_path / "site" / "index.html"
     authored.parent.mkdir(parents=True)
     authored.write_text("authored build output")
     _init_git(tmp_path)
 
-    with pytest.raises(click.ClickException, match="Refusing to write"):
-        assert_safe_for_generation(tmp_path, _cfg("deepdoc-docs", "site"))
+    cfg = {"output_dir": "deepdoc-docs", "site_dir": "site"}
+    paths = assert_safe_for_generation(tmp_path, cfg)
+    assert paths.site_dir.name == "deepdoc-site"
+    assert cfg["site_dir"] == "deepdoc-site"
     assert authored.exists()
 
 

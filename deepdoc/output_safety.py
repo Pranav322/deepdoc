@@ -119,6 +119,15 @@ def inspect_output_root(
         else:
             inspection.unmanaged_files.add(path)
 
+    _BUILD_ARTIFACT_DIRS = {".next", "node_modules", "out", ".turbo", ".cache", "__pycache__"}
+    inspection.unmanaged_files = {
+        p for p in inspection.unmanaged_files
+        if not any(
+            d in _BUILD_ARTIFACT_DIRS
+            for d in (p.relative_to(root).parts if root in p.parents else p.parts)
+        )
+    }
+
     tracked = _git_tracked_paths(repo_root, root)
     inspection.tracked_files = {
         path for path in tracked if path not in inspection.owned_files
@@ -127,7 +136,11 @@ def inspect_output_root(
 
 
 def assert_safe_for_generation(repo_root: Path, cfg: dict[str, Any]) -> OutputPaths:
-    """Refuse to write into roots containing unowned or tracked content."""
+    """Refuse to write into roots containing unowned or tracked content.
+
+    Auto-migrates config to safe defaults when the collision is recoverable
+    (e.g. tracked docs, build-cache pollution).
+    """
     paths = resolve_output_paths(repo_root, cfg)
     inspections = (
         inspect_output_root(repo_root, paths.output_dir, kind="output"),
@@ -136,6 +149,25 @@ def assert_safe_for_generation(repo_root: Path, cfg: dict[str, Any]) -> OutputPa
     unsafe = [inspection for inspection in inspections if not inspection.safe_for_generation]
     if not unsafe:
         return paths
+
+    output_state = output_dir_collision_reason(inspections[0])
+    site_state = output_dir_collision_reason(inspections[1])
+
+    migrated = False
+
+    if output_state in ("tracked_authored", "unmanaged") and cfg.get("output_dir") in (None, "docs", "deepdoc-docs"):
+        cfg["output_dir"] = "deepdoc-docs"
+        migrated = True
+
+    if (site_state == "unmanaged" and _is_build_cache_only(inspections[1])) or (
+        site_state in ("tracked_authored", "unmanaged") and cfg.get("site_dir") in (None, "site", "deepdoc-site")
+    ):
+        cfg["site_dir"] = "deepdoc-site"
+        migrated = True
+
+    if migrated:
+        _save_migrated_config(repo_root, cfg)
+        return resolve_output_paths(repo_root, cfg)
 
     details: list[str] = []
     for inspection in unsafe:
@@ -154,6 +186,21 @@ def assert_safe_for_generation(repo_root: Path, cfg: dict[str, Any]) -> OutputPa
         + "  deepdoc config set output_dir deepdoc-docs\n"
         + "  deepdoc config set site_dir deepdoc-site"
     )
+
+
+def output_dir_collision_reason(inspection: RootInspection) -> str:
+    """Return the collision reason for an output root inspection."""
+    return inspection.state
+
+
+def _is_build_cache_only(inspection: RootInspection) -> bool:
+    """Return True if unmanaged files are only transient build artifacts."""
+    BUILD_ARTIFACT_DIRS = {".next", "node_modules", "out", ".turbo", ".cache"}
+    for path in inspection.unmanaged_files:
+        parts = path.relative_to(inspection.root).parts if inspection.root in path.parents else path.parts
+        if not any(p in BUILD_ARTIFACT_DIRS for p in parts):
+            return False
+    return bool(inspection.unmanaged_files)
 
 
 def clean_owned_outputs(
@@ -394,6 +441,23 @@ def _remove_empty_directories(root: Path) -> None:
 
 def _file_hash(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _save_migrated_config(repo_root: Path, cfg: dict[str, Any]) -> None:
+    """Persist auto-migrated output_dir/site_dir to .deepdoc.yaml."""
+    try:
+        from .config import find_config as _find, load_config as _load, save_config as _save
+    except ImportError:
+        return
+    config_path = _find(repo_root)
+    if config_path is None or not config_path.exists():
+        return
+    saved = _load(config_path)
+    if saved.get("output_dir") != cfg.get("output_dir"):
+        saved["output_dir"] = cfg["output_dir"]
+    if saved.get("site_dir") != cfg.get("site_dir"):
+        saved["site_dir"] = cfg["site_dir"]
+    _save(saved, config_path)
 
 
 __all__ = [

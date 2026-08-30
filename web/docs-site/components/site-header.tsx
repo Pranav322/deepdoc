@@ -1,5 +1,6 @@
 import { Logo } from '@/components/logo';
 import siteNav from '../../shared/site-nav.json';
+import { ThemeToggle } from '@/components/theme-toggle';
 
 /**
  * The site header. The nav itself comes from web/shared/site-nav.json, the
@@ -41,6 +42,7 @@ export function SiteHeader() {
               </a>
             );
           })}
+          <ThemeToggle />
         </nav>
       </div>
     </header>

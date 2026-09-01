@@ -7,6 +7,18 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.6.1] - 2026-09-01
+
+### Fixed
+
+- **Misleading "litellm not installed" error.** `deepdoc/llm/client.py` caught
+  any `ImportError` raised while preparing litellm and always reported it as
+  a missing package, even when litellm was installed but its own import chain
+  failed for another reason (a broken sub-dependency, a mismatched venv). The
+  error now includes the real underlying message instead of a generic one, so
+  reinstalling litellm isn't the only diagnostic step offered when it isn't
+  the actual cause.
+
 ## [0.6.0] - 2026-08-30
 
 ### Added

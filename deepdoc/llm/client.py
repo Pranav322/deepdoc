@@ -202,11 +202,13 @@ class LLMClient:
             self._raise_if_truncated(response)
             return response.choices[0].message.content or ""
 
-        except ImportError:
+        except ImportError as e:
             error_type = "ImportError"
             raise RuntimeError(
-                "litellm not installed. Run: pip install litellm"
-            )
+                f"litellm import failed ({e}). If `pip show litellm` finds it, "
+                "this is a broken dependency in litellm's import chain, not a "
+                "missing package — reinstalling litellm alone won't fix it."
+            ) from e
         except LLMOutputTruncatedError:
             error_type = "LLMOutputTruncatedError"
             raise
@@ -261,9 +263,13 @@ class LLMClient:
                         yield delta.content
             self._raise_if_truncated(final_chunk)
 
-        except ImportError:
+        except ImportError as e:
             error_type = "ImportError"
-            raise RuntimeError("litellm not installed. Run: pip install litellm")
+            raise RuntimeError(
+                f"litellm import failed ({e}). If `pip show litellm` finds it, "
+                "this is a broken dependency in litellm's import chain, not a "
+                "missing package — reinstalling litellm alone won't fix it."
+            ) from e
         except LLMOutputTruncatedError:
             error_type = "LLMOutputTruncatedError"
             raise

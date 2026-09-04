@@ -21,11 +21,11 @@ export async function generateMetadata({
   return {
     title: page.data.title,
     description: page.data.description,
-    alternates: { canonical: `https://www.deepdoc.tech/docs${path}` },
+    alternates: { canonical: `https://deepdoc.tech/docs${path}` },
     openGraph: {
       title: page.data.title,
       description: page.data.description,
-      url: `https://www.deepdoc.tech/docs${path}`,
+      url: `https://deepdoc.tech/docs${path}`,
       // Overriding openGraph replaces the root object wholesale, so the
       // inherited image has to be repeated or shared links get no preview.
       images: ['/og.jpg'],

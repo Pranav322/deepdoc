@@ -3,7 +3,7 @@ import type { Metadata } from 'next';
 import { RootProvider } from 'fumadocs-ui/provider';
 import './global.css';
 
-const SITE = 'https://www.deepdoc.tech';
+const SITE = 'https://deepdoc.tech';
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE),

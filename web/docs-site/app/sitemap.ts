@@ -5,7 +5,7 @@ import { source } from '@/lib/source';
 export const dynamic = 'force-static';
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const site = 'https://www.deepdoc.tech';
+  const site = 'https://deepdoc.tech';
   return source.getPages().map(page => ({
     url: `${site}/docs${page.url === '/' ? '' : page.url}`,
     lastModified: new Date(),

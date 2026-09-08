@@ -144,6 +144,7 @@ chatbot_backend/
 .hermes/
 plans/DEEPDOC_PRODUCT_COMPLETION_PLAN.md
 HANDOFF.md
+ROADMAP.md
 deepdoc/COVERAGE_AUDIT.md
 deepdoc/COVERAGE_FIX_BRIEF.md
 deepdoc/MCP_DESIGN_BRIEF.md

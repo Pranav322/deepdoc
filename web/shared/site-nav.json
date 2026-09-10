@@ -1,0 +1,24 @@
+{
+  "_comment": "Single source of truth for the site header nav. Imported by both web/src/components/Header.astro (marketing, Astro) and web/docs-site/components/site-header.tsx (docs, Next). Change it here and both update.",
+  "home": "https://deepdoc.tech",
+  "items": [
+    {
+      "label": "Docs",
+      "href": "/docs"
+    },
+    {
+      "label": "Changelog",
+      "href": "/changelog"
+    },
+    {
+      "label": "GitHub",
+      "href": "https://github.com/Pranav322/deepdoc",
+      "external": true
+    },
+    {
+      "label": "PyPI",
+      "href": "https://pypi.org/project/deepdoc/",
+      "external": true
+    }
+  ]
+}

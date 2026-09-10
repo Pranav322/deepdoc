@@ -60,6 +60,13 @@ web/*
 !web/*.tsx
 !web/*.toml
 !web/bun.lock
+!web/*.sql
+# shared/site-nav.json is imported by BOTH web/src/components/Header.astro
+# and web/docs-site/components/site-header.tsx. `web/*` above was hiding it,
+# so a fresh clone failed the Astro build outright with "Could not resolve
+# ../../shared/site-nav.json".
+!web/shared/
+!web/shared/**
 !web/content/
 !web/server/
 !web/server/**

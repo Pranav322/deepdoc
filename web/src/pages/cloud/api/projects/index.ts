@@ -21,8 +21,18 @@ export const GET: APIRoute = async ({ locals, cookies }) => {
   const user = await requireSession(env, cookies);
   if (!user) return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
 
+  // owner_repo_jobs.visibility is canonical (it's what the public gallery and
+  // the page-serving gate actually check); projects.visibility is a copy that
+  // can drift out of sync if it's ever written without the paired update
+  // (e.g. a direct DB edit). Read the canonical value here so "your projects"
+  // never shows a visibility that doesn't match what's actually being served.
   const { results } = await env.DB.prepare(
-    "SELECT owner, repo, job_id, status, created_at, description, language, avatar_url, visibility, stars FROM projects WHERE user_login = ? ORDER BY created_at DESC",
+    `SELECT p.owner, p.repo, p.job_id, p.status, p.created_at, p.description, p.language,
+            p.avatar_url, COALESCE(o.visibility, p.visibility) AS visibility, p.stars
+     FROM projects p
+     LEFT JOIN owner_repo_jobs o
+       ON LOWER(o.owner) = LOWER(p.owner) AND LOWER(o.repo) = LOWER(p.repo) AND o.owner_login = p.user_login
+     WHERE p.user_login = ? ORDER BY p.created_at DESC`,
   )
     .bind(user.login)
     .all<{

@@ -16,11 +16,11 @@
   --color-ink: #F0EFEA;
   --color-ink-muted: #9E9D96;
   --color-ink-faint: #5E5D56;
-  --color-surface: #09090D;
-  --color-surface-raised: #10101A;
-  --color-surface-high: #181820;
-  --color-line: rgba(255, 255, 255, 0.06);
-  --color-line-strong: rgba(255, 255, 255, 0.11);
+  --color-surface: #0A0A09;
+  --color-surface-raised: #141412;
+  --color-surface-high: #1E1E1B;
+  --color-line: rgba(255, 255, 255, 0.085);
+  --color-line-strong: rgba(255, 255, 255, 0.15);
   --color-accent: #C2FF4D;
   --color-accent-dim: rgba(194, 255, 77, 0.09);
   --color-accent-glow: rgba(194, 255, 77, 0.18);
@@ -187,7 +187,7 @@ body {
 .hero-path:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--color-accent) 65%, var(--color-line-strong)); }
 .hero-path:focus-visible { outline: 2px solid var(--color-accent); outline-offset: 4px; }
 .hero-path-hosted { border-color: color-mix(in srgb, var(--color-accent) 78%, transparent); background: var(--color-accent); box-shadow: 0 8px 20px rgba(194, 255, 77, 0.18); }
-.hero-path-hosted > span { color: #111119; }.hero-path-hosted small { color: rgba(17, 17, 25, 0.7); }.hero-path-hosted:hover { box-shadow: 0 16px 42px rgba(194, 255, 77, 0.3); }
+.hero-path-hosted > span { color: #11110D; }.hero-path-hosted small { color: rgba(17, 17, 13, 0.7); }.hero-path-hosted:hover { box-shadow: 0 16px 42px rgba(194, 255, 77, 0.3); }
 .hero-path-local { background: color-mix(in oklab, var(--color-surface-high) 82%, var(--color-surface)); box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04); }
 .hero-stage {
   position: relative;

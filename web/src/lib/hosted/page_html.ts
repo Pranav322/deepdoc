@@ -26,11 +26,11 @@ export type Theme = "dark" | "light";
  */
 const MINI_PAGE_CSS = `
   :root {
-    --surface: #09090D; --surface-raised: #10101A;
+    --surface: #0A0A09; --surface-raised: #141412;
     --ink: #F0EFEA; --ink-muted: #9E9D96;
-    --line-strong: rgba(255,255,255,0.11); --accent: #C2FF4D; --accent-ink: #09090D;
+    --line-strong: rgba(255,255,255,0.15); --accent: #C2FF4D; --accent-ink: #0A0A09;
     --shadow: 0 24px 60px -20px rgba(0,0,0,0.6);
-    --solid: #F0EFEA; --solid-ink: #09090D;
+    --solid: #F0EFEA; --solid-ink: #0A0A09;
     --font-sans: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
   }
   html[data-theme="light"] {
@@ -97,19 +97,19 @@ export function tryPageHtml(theme: Theme = "dark"): string {
      buttons are ink-filled (near-white on dark, near-black on light) — a
      lime slab under every action was the loudest thing on these screens. */
   :root {
-    --surface: #09090D; --surface-raised: #10101A; --surface-high: #181820;
+    --surface: #0A0A09; --surface-raised: #141412; --surface-high: #1E1E1B;
     --ink: #F0EFEA; --ink-muted: #9E9D96; --ink-faint: #5E5D56;
-    --line: rgba(255,255,255,0.06); --line-strong: rgba(255,255,255,0.11);
-    --accent: #C2FF4D; --accent-ink: #09090D; --accent-dim: rgba(194,255,77,0.09); --accent-line: rgba(194,255,77,0.3);
+    --line: rgba(255,255,255,0.085); --line-strong: rgba(255,255,255,0.15);
+    --accent: #C2FF4D; --accent-ink: #0A0A09; --accent-dim: rgba(194,255,77,0.09); --accent-line: rgba(194,255,77,0.3);
     --danger: #ff6b6b; --danger-dim: rgba(255,107,107,0.08);
     --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
     --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
     --shadow-lift: 0 24px 60px -20px rgba(0,0,0,0.6);
-    --solid: #F0EFEA; --solid-ink: #09090D;
+    --solid: #F0EFEA; --solid-ink: #0A0A09;
     --hover: rgba(255,255,255,0.045); --press: rgba(255,255,255,0.075);
     --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
     --shadow-pop: 0 18px 44px -14px rgba(0,0,0,0.72);
-    --seg-track: #101019; --seg-thumb: #24242F;
+    --seg-track: #131311; --seg-thumb: #2A2A26;
     --r-xs: 6px; --r-sm: 8px; --r-md: 11px; --r-lg: 14px; --r-xl: 18px;
     --ease: cubic-bezier(0.22, 1, 0.36, 1);
   }
@@ -534,7 +534,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     text-decoration: none; color: inherit; cursor: pointer;
     padding: 17px 18px 15px;
     transition: border-color 0.16s var(--ease), transform 0.16s var(--ease), box-shadow 0.16s var(--ease); }
-  .card:hover { border-color: var(--line-strong); transform: translateY(-2px); box-shadow: var(--shadow-sm); }
+  .card:hover { border-color: var(--line-strong); background: var(--surface-high); transform: translateY(-2px); box-shadow: var(--shadow-pop); }
   .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; }
   /* The grid filter toggles the hidden property, and the author-level display
      above outranks the UA's [hidden] rule. */

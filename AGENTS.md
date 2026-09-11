@@ -413,6 +413,15 @@ Marketing copy is **outcome-led, not implementation-led** — say "your docs sta
 
 ### Design tokens are shared with the marketing site
 
+**The dark neutral scale is warm, not blue.** Surfaces are `#0A0A09` / `#141412` /
+`#1E1E1B` (hue ~60, same family as the warm ink scale `#F0EFEA` / `#9E9D96` /
+`#5E5D56`). They used to be blue-violet (`#09090D` / `#10101A` / `#181820`), which put
+cream text on navy cards and read muddy — the cards on `/generate` were the worst of
+it. Do not reintroduce a cool tint on one side of the warm/cool line; light mode was
+always warm (`#F5F4F0`), so dark was the outlier. `--seg-track`/`--seg-thumb` in
+`page_html.ts` are hosted-only but follow the same scale.
+
+
 `page_html.ts` can't import `src/styles/global.css` — it's an HTML string built in a
 Worker, not an Astro page — so its `:root` is a hand-copy of the marketing palette.
 **`npm run test:tokens` fails if the two drift**, for both themes and for the

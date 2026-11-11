@@ -7,6 +7,8 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.6.2] - 2026-11-12
+
 ### Fixed
 
 - **`generate` crashed on an OpenAPI spec with empty values.** A spec containing

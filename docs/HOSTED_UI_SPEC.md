@@ -285,6 +285,30 @@ Removed in this pass: the `.page-ruled` dashed vertical rules, the
 `.card-new` lime gradient (accent is a state colour, not a fill), and the
 generation-date metric on gallery cards.
 
+**Premium pass (2026-11-12).** Every rule above still holds (ink buttons, accent
+as state, mono for code, one card grid). What changed:
+
+1. **Depth.** Raised panels sit on an app-only `--card` surface with a 1px lit top
+   edge and a soft shadow; in light mode cards are lighter than the page, not
+   darker. A static lime/teal ambient glow and a fading dot grid sit at the top of
+   every screen, echoing deepdoc.tech's hero at a fraction of its strength.
+2. **Gallery.** An eyebrow chip with the public-site count, a larger headline with a
+   one-line lede, a 56px search field with a `/` shortcut, a "Recently generated"
+   label, and cards that carry the generated site's screenshot again (owner avatar,
+   GitHub language colour, stars). Screenshots fade in over a docs-page wireframe.
+3. **Projects.** Status chip and Public/Private on every card, plus a saved-sites
+   meter beside the title.
+4. **Detail.** Owner avatar beside the title; the preview sits in a browser-window
+   frame with the site's address; visibility and delete share one settings bar.
+5. **Generate.** Search and repo list are one picker panel; rows show language
+   colour and a lock for private repos; the confirm panel says how long it takes.
+6. **Generating.** Avatar plus `owner/repo` header, a top sweep line (motion, not
+   progress, stopped on every terminal state), and a one-line caption under the
+   active stage.
+7. **Standalone pages** (private, 404, no docs, stale, failed) share one shell with
+   the brand bar, the ambient glow and a per-page icon.
+8. **The app bar actually sticks** now (the slot is the sticky element).
+
 ---
 
 ## 6. Known interaction/edge-case gaps (still open, not regressions from this revamp)

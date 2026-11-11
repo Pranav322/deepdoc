@@ -18,7 +18,8 @@ description: Common failures and what they actually mean.
   <Accordion title='pip install "deepdoc[chatbot]" fails with ResolutionImpossible'>
     You are probably on Python 3.15. The chatbot's local embedding model
     (`fastembed`) needs `onnxruntime`, which only publishes wheels up to Python
-    3.14. Create the virtual environment with Python 3.10–3.14 instead:
+    3.14, and on Intel Macs only up to 3.13. Create the virtual environment with
+    Python 3.10–3.14 (3.10–3.13 on an Intel Mac) instead:
 
     ```bash
     python3.14 -m venv .venv && source .venv/bin/activate
@@ -32,11 +33,17 @@ description: Common failures and what they actually mean.
     `deepdoc generate --force`. Setting `HF_TOKEN` to a free Hugging Face token
     avoids the limit.
   </Accordion>
-  <Accordion title="deploy refuses: unresolved quality issues / update says no sync baseline">
-    A run that ended `partial` (an invalid page or a failed chatbot sync) blocks
-    `deepdoc deploy` and records no baseline for `deepdoc update`. Plain
-    `deepdoc generate` refuses because docs already exist, so use
-    `deepdoc generate --force`. `deepdoc status` shows which page is affected.
+  <Accordion title="deploy refuses: unresolved quality issues">
+    `deepdoc deploy` refuses while any page is `failed` or `invalid`; the error
+    lists those pages. Plain `deepdoc generate` refuses because docs already
+    exist, so regenerate with `deepdoc generate --force`. A failed chatbot sync
+    alone does not block deploy.
+  </Accordion>
+  <Accordion title="update says there is no sync baseline">
+    `deepdoc update` diffs from the last commit that was fully synced. If the
+    first `deepdoc generate` had a failed page or a failed chatbot sync, no such
+    commit exists yet. Run `deepdoc generate --force` once; later runs keep the
+    last good baseline even if they end `partial`.
   </Accordion>
   <Accordion title="npx not found / serve or deploy fails immediately">
     Both shell out to Node. Install Node.js 18 or newer from

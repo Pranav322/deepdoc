@@ -122,3 +122,10 @@ def test_deepdoc_legacy_state_files_are_not_scanned(tmp_path: Path) -> None:
 
     scanned = set(scan.file_summaries) | set(scan.file_contents)
     assert not {".deepdoc_plan.json", ".deepdoc_file_map.json"} & scanned
+
+
+def test_ambiguous_ancestor_match_stays_unresolved() -> None:
+    """With src/api.py and src/app/api.py both present, `import api` from
+    src/app/main.py depends on which directory is on sys.path; don't guess."""
+    known = {"src/app/main.py", "src/api.py", "src/app/api.py"}
+    assert _resolve_python_module_path("src/app/main.py", "api", known, None) == ""

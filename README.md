@@ -79,8 +79,9 @@ The base install does not include chatbot dependencies.
 
 > **Python 3.15:** the base package installs, but the `chatbot` extra does not yet:
 > its local embedding model (`fastembed`) needs `onnxruntime`, which publishes wheels
-> only up to Python 3.14. Use Python 3.10–3.14 for the chatbot, for example
-> `python3.14 -m venv .venv`.
+> only up to Python 3.14 (up to 3.13 on Intel Macs, where current releases ship no
+> wheels). Use Python 3.10–3.14 for the chatbot (3.10–3.13 on an Intel Mac), for
+> example `python3.13 -m venv .venv`.
 
 ### From source (recommended during development)
 
@@ -1668,7 +1669,7 @@ deepdoc generate --force           # Full regen with new model
 
 ## Requirements
 
-- Python 3.10+ (the `chatbot` extra needs 3.10–3.14 until `onnxruntime` ships 3.15 wheels)
+- Python 3.10+ (the `chatbot` extra needs 3.10–3.14, or 3.10–3.13 on Intel Macs, because of `onnxruntime` wheel availability)
 - **Node.js ≥18** — used by `deepdoc serve` (`next dev`) and `deepdoc deploy` (`next build`) for the generated site. Install from [nodejs.org](https://nodejs.org). `npm install` runs automatically inside `site/` when needed.
 - Git (for `deepdoc update` and `deepdoc deploy`)
 - An LLM API key (or Ollama running locally)

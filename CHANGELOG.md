@@ -22,7 +22,8 @@ not be deployed.
   and `/{id}`. The docs then cited the real `/notes/...` routes, the claim validator
   marked them ungrounded, and the page went `invalid`, which blocks `deepdoc deploy`.
   The resolver now also tries the importing file's ancestor directories (repo root
-  still wins). The engine fingerprint changed, so existing projects replan once.
+  still wins; if two ancestors match, the import stays unresolved instead of
+  guessed). The engine fingerprint changed, so existing projects replan once.
 - **Source files with doc-like words in their names were treated as docs.** Any
   name containing `notes`, `history`, `readme`, `changelog` or `glossary` (for
   example `notes.py`, `order_history.py`) was classified `docs` and lost code
@@ -39,8 +40,9 @@ not be deployed.
 
 ### Docs
 
-- README: the `chatbot` extra needs Python 3.10–3.14 (`onnxruntime` has no 3.15
-  wheels); corrected the clone URL and the Azure example's `output_dir`.
+- README: the `chatbot` extra needs Python 3.10–3.14, or 3.10–3.13 on Intel Macs
+  (`onnxruntime` wheel availability); corrected the clone URL and the Azure
+  example's `output_dir`.
 - Troubleshooting: Python 3.15 install failure, Hugging Face 429 on the first
   embedding-model download, and recovering from a `partial` run.
 

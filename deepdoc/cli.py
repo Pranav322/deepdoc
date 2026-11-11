@@ -1299,8 +1299,7 @@ def _deploy():
             "Refusing to deploy docs with unresolved quality issues:\n- "
             + "\n- ".join(blockers)
             + "\nRegenerate with `deepdoc generate --force` (docs already exist, so plain "
-            "`deepdoc generate` refuses), then deploy again. `deepdoc status` lists "
-            "each page's state."
+            "`deepdoc generate` refuses), then deploy again."
         )
 
     _ensure_node_installed()

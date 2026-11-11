@@ -97,7 +97,7 @@ deepdoc/
 
 tests/                       # pytest suite
 vscode-extension/            # VS Code extension (separate release track)
-web/                         # Marketing site (Vite + React)
+web/                         # deepdoc.tech, product docs and the hosted app (Astro)
 ```
 
 The `CLAUDE.md` file in the root contains deeper architecture notes including the data model, key invariants, and rules about which files are canonical for specific responsibilities.

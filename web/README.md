@@ -1,65 +1,43 @@
-# DeepDoc — Web
+# DeepDoc web
 
-Public-facing website for DeepDoc at `https://deepdoc.tech`. Built with **Astro 5** and **Tailwind 4**. Ships zero client-side JS by default — static HTML and CSS only, with minimal hydration where needed.
+One Astro 5 project, three surfaces:
 
-## Stack
-
-| Tool | Version | Role |
+| Surface | Where | Code |
 |---|---|---|
-| Astro | 5.x | Static site generator and component framework |
-| Tailwind CSS | 4.x | Utility-first styling via the Vite plugin |
-| TypeScript | 5.x | Type checking for `.astro` and `.ts` files |
-| Bun | — | Package manager |
+| Marketing | `deepdoc.tech` | `src/pages/index.astro`, `src/pages/changelog.astro` |
+| Product docs | `deepdoc.tech/docs` | `src/content/docs/**/*.mdx`, `src/pages/docs/` |
+| Hosted app | `cloud.deepdoc.tech` | `src/pages/cloud/`, `src/lib/hosted/` |
 
-## Local development
+`src/middleware.ts` rewrites `cloud.deepdoc.tech` requests into `src/pages/cloud/`, so the hosted app keeps clean URLs (`/generate`, `/projects`, `/owner/repo/`).
+
+## Develop
 
 ```bash
-bun install
-bun run dev        # dev server at http://localhost:4321 with hot reload
-bun run build      # production build → ./dist/
-bun run preview    # serve the built dist/ locally before deploying
+npm install
+npm run dev          # http://localhost:4321
+npm run build        # production build into dist/
 ```
 
-## Structure
+The hosted app branches on hostname, so browse it at `http://cloud.localhost:4321` (Chrome resolves `*.localhost` to loopback). For real D1 and R2 bindings run `npm run build && npx wrangler pages dev dist`.
 
-```
-web/
-├── astro.config.mjs          # Astro config — site URL, Tailwind Vite plugin
-├── tsconfig.json             # TypeScript config
-├── public/                   # Static assets served as-is (favicon, og images, …)
-└── src/
-    ├── layouts/
-    │   └── Layout.astro      # Base HTML shell — <head>, global styles, slot
-    ├── components/
-    │   ├── Header.astro      # Top navigation bar
-    │   └── Footer.astro      # Footer links and legal
-    └── pages/
-        ├── index.astro       # Landing page — hero, features, install snippet
-        ├── docs.astro        # Docs landing (placeholder — links to generated site)
-        └── changelog.astro   # Changelog page (placeholder)
+## Checks
+
+```bash
+npm run test:tokens    # one palette across all three surfaces
+npm run test:hosted    # parses the hosted app's client JS against a running server
 ```
 
-## Adding a new page
+## Editing the docs
 
-1. Create `src/pages/your-page.astro`.
-2. Wrap content in `<Layout title="...">`.
-3. Link from `Header.astro` if it should appear in the nav.
-
-No routing config needed — Astro maps the file path directly to the URL.
-
-## Styling
-
-Tailwind 4 is wired in as a Vite plugin (`@tailwindcss/vite`). Use utility classes directly in `.astro` files. No `tailwind.config.js` is required for basic usage — Tailwind scans all files automatically.
+Add or edit an `.mdx` file under `src/content/docs/`, then list it in `docsSections` in `src/lib/nav.ts`. The build fails if a page is unlisted or a listed page is missing.
 
 ## Deploy
 
-The `dist/` output is plain static HTML/CSS/JS. It deploys to any static host:
+Cloudflare Pages, direct upload. From this directory:
 
-| Platform | How |
-|---|---|
-| Vercel | Connect the repo, set root to `web/`, build command `bun run build`, output `dist` |
-| Netlify | Same — build command `bun run build`, publish directory `dist` |
-| Cloudflare Pages | Build command `bun run build`, output `dist` |
-| GitHub Pages | Upload `dist/` via `actions/upload-pages-artifact` |
+```bash
+npm run build
+npx wrangler pages deploy dist --project-name=deepdoc
+```
 
-The site URL is set to `https://deepdoc.dev` in `astro.config.mjs` — update this if deploying to a different domain.
+Design rules, hosted-app constraints and infrastructure notes live in the repository's [`AGENTS.md`](../AGENTS.md) and [`docs/PRODUCTION_INFRA.md`](../docs/PRODUCTION_INFRA.md).

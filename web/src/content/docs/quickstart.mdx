@@ -1,0 +1,56 @@
+---
+title: Quickstart
+description: From nothing to a running documentation site in four commands.
+---
+
+You need Python 3.10 or newer and Node.js 18 or newer. The chatbot extra additionally needs Python 3.10 to 3.14 (3.10 to 3.13 on an Intel Mac) for now.
+
+<Steps>
+  <Step>
+    ### Install
+
+    ```bash
+    pip install deepdoc
+    ```
+  </Step>
+  <Step>
+    ### Point it at your repository
+
+    ```bash
+    cd your-project
+    deepdoc init --provider anthropic
+    ```
+
+    This writes `.deepdoc.yaml`. Set the API key for your provider:
+
+    ```bash
+    export ANTHROPIC_API_KEY=sk-ant-...
+    ```
+
+    No key handy? Use [DeepDoc Cloud](/docs/cloud), or run a local model with `--provider ollama`.
+  </Step>
+  <Step>
+    ### Generate
+
+    ```bash
+    deepdoc generate
+    ```
+
+    Scans the repository, plans the structure and writes Markdown into `deepdoc-docs/`.
+  </Step>
+  <Step>
+    ### Preview
+
+    ```bash
+    deepdoc serve
+    ```
+
+    Opens `http://localhost:3000`. The first run installs the site's npm dependencies.
+  </Step>
+</Steps>
+
+## After your first run
+
+- Commit `.deepdoc.yaml` and `.deepdoc/`. The saved plan is what makes theming and updates cheap.
+- Run `deepdoc update` after commits instead of `generate`. See [Keeping docs fresh](/docs/keeping-docs-fresh).
+- Run `deepdoc deploy` when you are ready to publish. See [Deploying](/docs/deploying).

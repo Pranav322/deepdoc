@@ -1,0 +1,41 @@
+---
+title: Introduction
+description: Point DeepDoc at a repository and get a documentation site you can brand, theme and ship.
+---
+
+DeepDoc reads a codebase and writes the documentation site you would have written yourself. It groups pages by domain, ships a search box and an optional chatbot that cites real files, and then keeps the whole thing current as your code changes.
+
+<Cards>
+  <Card title="Quickstart" href="/docs/quickstart" description="Install, generate and preview in four commands." />
+  <Card title="DeepDoc Cloud" href="/docs/cloud" description="No install. Sign in with GitHub and generate in the browser." />
+  <Card title="Make it yours" href="/docs/theming/colours" description="Colours, logo, fonts and navigation, applied without regenerating." />
+  <Card title="Configuration" href="/docs/reference/configuration" description="Every key in .deepdoc.yaml, with its default." />
+</Cards>
+
+## The shape of it
+
+<Steps>
+  <Step>
+    **Point it at your repo.** `deepdoc init` writes a `.deepdoc.yaml`.
+  </Step>
+  <Step>
+    **Generate.** DeepDoc scans the code, plans a structure and writes Markdown. This is the only step that spends LLM tokens, apart from `update`.
+  </Step>
+  <Step>
+    **Make it yours.** Set colours, logo and navigation. They apply on the next `deepdoc serve`, with no regeneration and no further LLM calls.
+  </Step>
+  <Step>
+    **Ship it.** `deepdoc deploy` produces a static site for any host.
+  </Step>
+  <Step>
+    **Keep it current.** `deepdoc update` diffs against your last synced commit and regenerates only the pages that changed.
+  </Step>
+</Steps>
+
+<Callout title="Changing how it looks is free">
+  Generation is the only step that costs LLM calls. Themes, fonts, navigation order and labels are re-applied from your saved plan, so you can iterate on the look as much as you like without paying for it again.
+</Callout>
+
+## What it supports
+
+Endpoint, runtime and call-graph analysis cover Python (Django, Django REST Framework, FastAPI, Falcon), JavaScript and TypeScript (Express, Fastify, NestJS), PHP (Laravel) and Go. Vue components are parsed for symbols. Other languages may parse but are not fully supported, and DeepDoc prints a warning when it finds source it cannot analyse.

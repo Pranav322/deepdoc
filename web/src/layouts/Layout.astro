@@ -1,19 +1,18 @@
 ---
-import "../styles/global.css";
+import "../styles/site.css";
 
 export interface Props {
   title?: string;
   description?: string;
   /** Path or URL to the social card image (defaults to the site OG image). */
   image?: string;
-  /** Set true on thin or in-progress pages to keep them out of search results. */
   noindex?: boolean;
 }
 
 const {
-  title = "DeepDoc — Engineering docs your team will actually read",
-  // Kept under ~160 chars so it survives SERP truncation.
-  description = "DeepDoc generates evidence-grounded engineering docs from your codebase: architecture, endpoints, integrations, plus a chatbot that answers from source.",
+  title = "DeepDoc: documentation that keeps pace with your codebase",
+  // Kept under ~160 characters so it survives SERP truncation.
+  description = "DeepDoc reads your repository and writes a docs site with a chatbot that cites real files, then regenerates only the pages your commits touch.",
   image = "/og.jpg",
   noindex = false,
 } = Astro.props;
@@ -36,12 +35,12 @@ const jsonLd = {
 ---
 
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="dark light" />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#0D0D0C" />
     <meta name="generator" content={Astro.generator} />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="canonical" href={canonical} />
@@ -69,37 +68,35 @@ const jsonLd = {
 
     <script type="application/ld+json" set:html={JSON.stringify(jsonLd)} is:inline />
 
-    <!-- Fonts: DM Serif Display + DM Sans + JetBrains Mono -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Dancing+Script:wght@600&family=DM+Serif+Display:ital@0;1&family=DM+Sans:opsz,wght@9..40,400..800&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400..700&family=Instrument+Serif:ital@1&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
 
-    <!-- No-flash theme init: runs before first paint -->
+    <!-- No-flash theme init. The dd_theme cookie is the cross-subdomain
+         channel (localStorage is per hostname, so a choice made on
+         cloud.deepdoc.tech could never reach here); localStorage is the
+         same-origin fallback. -->
     <script is:inline>
       (function () {
-        // Cookie first: it is the cross-subdomain channel, so a preference set
-        // on cloud.deepdoc.tech is honoured here too. localStorage stays as the
-        // same-origin fallback for anyone who set a theme before the cookie
-        // existed. These pages are prerendered, so this can't be read
-        // server-side — hence the inline script.
-        var m = document.cookie.match(/(?:^|;\s*)dd_theme=(dark|light)/);
-        var stored = (m && m[1]) || localStorage.getItem("theme");
-        var prefer = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
-        var theme = stored || prefer;
+        var theme = "dark";
+        try {
+          var m = document.cookie.match(/(?:^|;\s*)dd_theme=(dark|light)/);
+          var stored = (m && m[1]) || localStorage.getItem("theme");
+          theme =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: light)").matches
+                ? "light"
+                : "dark";
+        } catch (e) {}
         document.documentElement.setAttribute("data-theme", theme);
       })();
     </script>
   </head>
   <body>
-    <!-- Top accent glow (hidden in light mode via opacity) -->
-    <div
-      id="accent-glow"
-      aria-hidden="true"
-      style="position:fixed;top:-120px;left:50%;transform:translateX(-50%);width:600px;height:320px;background:radial-gradient(ellipse at 50% 0%, rgba(194,255,77,0.07) 0%, transparent 70%);pointer-events:none;z-index:0;transition:opacity 0.3s;"
-    ></div>
     <slot />
   </body>
 </html>

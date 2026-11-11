@@ -1,0 +1,24 @@
+---
+interface Props { items: string[] }
+const { items } = Astro.props;
+---
+<div class="tabs" data-tabs>
+  <div class="tab-list" role="tablist">
+    {items.map((name, i) => (
+      <button type="button" role="tab" class="tab-btn" data-tab={name} aria-selected={i === 0 ? "true" : "false"}>{name}</button>
+    ))}
+  </div>
+  <div class="tab-panels"><slot /></div>
+</div>
+<script>
+  document.querySelectorAll<HTMLElement>("[data-tabs]").forEach((root) => {
+    const buttons = root.querySelectorAll<HTMLButtonElement>(".tab-btn");
+    const panels = root.querySelectorAll<HTMLElement>(":scope > .tab-panels > [data-panel]");
+    const show = (name: string) => {
+      buttons.forEach((b) => b.setAttribute("aria-selected", String(b.dataset.tab === name)));
+      panels.forEach((p) => (p.hidden = p.dataset.panel !== name));
+    };
+    buttons.forEach((b) => b.addEventListener("click", () => show(b.dataset.tab!)));
+    show(buttons[0]?.dataset.tab ?? "");
+  });
+</script>

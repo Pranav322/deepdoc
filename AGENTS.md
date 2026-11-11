@@ -65,24 +65,10 @@ Guidance for coding agents working in this repository.
 - `deepdoc/chatbot/scaffold.py` — chatbot `chatbot_backend/` scaffolding generator
 
 ### Site builder (Next.js + Fumadocs)
-- `web/docs-site/` — **the hand-written documentation site** served at
-  `deepdoc.tech/docs`. Next + Fumadocs + MDX, built with `basePath=/docs`,
-  static-exported and copied into `web/public/docs/`, which Astro serves
-  verbatim. It is NOT a DeepDoc-generated site: the generator documents a
-  codebase, product docs teach a person to use the product.
-  - `npm run build` in `web/` runs the docs build first, then `astro build`.
-    Never run `astro build` alone for a deploy — Cloudflare would ship a stale
-    or missing `/docs`, since `web/public/docs/` is gitignored.
-  - The header nav is shared: `web/shared/site-nav.json` is imported by both
-    `web/src/components/Header.astro` and
-    `web/docs-site/components/site-header.tsx`. Edit it once.
-  - `web/docs-site/scripts/copy-to-web-public.mjs` flattens Next's bracketed
-    route-chunk directories (`(docs)/[[...slug]]`). Without it the Astro
-    Cloudflare adapter reads those brackets as a dynamic-route parameter and
-    fails the **entire** build with "Parameter name must match".
-  - Use `scripts/verify-build.sh` to check a build while `next dev` is running.
-    A normal build regenerates `.source`, which the dev server hot-reloads and
-    then dies on with "TypeError: a[d] is not a function".
+- `web/` — **deepdoc.tech, its hand-written product docs (`/docs`) and the hosted
+  app (cloud.deepdoc.tech) are one Astro project.** It is NOT a DeepDoc-generated
+  site: the generator documents a codebase, the product docs teach a person to use
+  the product. See "Web / Marketing Site" below for the structure and rules.
 - `deepdoc/site/builder/next_builder.py` — **canonical site builder**: `build_next_from_plan()` copies the Next.js + Fumadocs shell template from `next_template/` into configured `site_dir` (`deepdoc-site/` by default), writes `deepdoc.config.json` and `.env.local` pointing at configured `output_dir`. `mkdocs_builder.py` was deleted in `b75b4eb`; this is the only site builder.
   - **The builder owns 100% of `next_template/`** — every template file is overwritten on each run. Do not reintroduce a skip-if-exists check: it meant template fixes never reached an already-generated site (only `deepdoc.config.json` and `globals.css` were refreshed, so layout, `lib/*.ts` and chatbot changes never arrived on upgrade). Files the user adds are not part of the template and survive; `node_modules/`, `.next/`, `openapi/` and `public/` sit outside it.
   - Because `package.json` is rewritten every run, `_ensure_node_modules` compares a `node_modules/.deepdoc-pkg-sha` content hash rather than mtime (`shutil.copy2` preserves the source mtime).
@@ -276,10 +262,10 @@ A release is more than the version bump. Things that do not update themselves ar
 1. **Version strings, all equal:** `pyproject.toml` `version` (what the workflow tags and publishes), `deepdoc/__init__.py` `__version__` (drives `deepdoc --version` and the generated-site major-version compatibility warning), `web/src/layouts/Layout.astro` `softwareVersion` (marketing JSON-LD), and the "Project name" line at the top of this file. These have drifted before (0.6.1 shipped with `__version__` 0.6.0 and `softwareVersion` 0.5.2); `git grep -n '<old version>'` after bumping.
 2. **`CHANGELOG.md`:** move `## Unreleased` entries under `## [x.y.z] - YYYY-MM-DD`. The Release workflow uses that section as the GitHub Release notes.
 3. **Engine fingerprint:** if route or runtime-evidence semantics changed, bump it in `deepdoc/persistence_v2.py`.
-4. **User-facing docs:** if CLI behavior, config keys or providers changed, update `README.md` and the product docs in `web/docs-site/content/docs/` (`quickstart.mdx`, `commands.mdx`, `providers.mdx`, `troubleshooting.mdx`).
+4. **User-facing docs:** if CLI behavior, config keys or providers changed, update `README.md` and the product docs in `web/src/content/docs/` (`quickstart.mdx`, `commands.mdx`, `providers.mdx`, `troubleshooting.mdx`).
 5. **Ship:** branch → PR → `pytest` checks green → merge (merge commit; repo auto-merge is disabled). The push to `main` runs `release.yml`: tags `vX.Y.Z`, publishes to PyPI, creates the GitHub Release. Confirm with `gh run list --workflow=release.yml` and `curl -s https://pypi.org/pypi/deepdoc/json` (`info.version`).
 6. **Not automatic — do after the merge:**
-   - **Marketing + product docs site** (`deepdoc.tech`, `deepdoc.tech/docs`, `cloud.deepdoc.tech`): Cloudflare Pages is direct-upload, so nothing deploys on push. From `web/`: `npm run build` (builds `docs-site` first, then Astro; `bun run build` is equivalent where bun is installed) then `npx wrangler pages deploy dist --project-name=deepdoc`. Needed for `softwareVersion` and any docs/marketing change to go live.
+   - **Marketing + product docs site** (`deepdoc.tech`, `deepdoc.tech/docs`, `cloud.deepdoc.tech`): Cloudflare Pages is direct-upload, so nothing deploys on push. From `web/`: `npm run build` (`bun run build` is equivalent where bun is installed) then `npx wrangler pages deploy dist --project-name=deepdoc`. Needed for `softwareVersion` and any docs/marketing change to go live.
    - **Hosted runner image:** built from this repo's source, not from PyPI. Run `hosted-runner/aws/deploy-image.sh` so `cloud.deepdoc.tech` generations run the released code.
    - **VS Code extension:** separate track below; release it only if `vscode-extension/` changed.
 
@@ -384,170 +370,68 @@ python3 -m pytest -k "route or stale or chatbot" -q
 - Prefer the smallest command that exercises the edited area first.
 
 ## Web / Marketing Site (`web/`)
-An **Astro 5** static marketing/changelog/docs site (Tailwind v4 via `@tailwindcss/vite`) deployed to **Cloudflare Pages** (project `deepdoc`, direct-upload — no Git provider connected, confirmed 2026-07-24 via DNS/`wrangler pages project list`; earlier docs here saying Vercel were stale). Build with `bun run build`, dev with `bun run dev`, deploy with `npx wrangler pages deploy dist --project-name=deepdoc` from `web/`.
+One **Astro 5** project on **Cloudflare Pages** (project `deepdoc`, direct-upload — no Git provider connected) serves three surfaces: `deepdoc.tech` (marketing), `deepdoc.tech/docs` (product docs) and `cloud.deepdoc.tech` (hosted app). There is no Tailwind and no second framework: the Next.js + Fumadocs docs app was removed on 2026-11-12, and docs are now Astro pages over a content collection. Build with `npm run build` (or `bun run build`), dev with `npm run dev`, deploy with `npx wrangler pages deploy dist --project-name=deepdoc` from `web/`.
 
 ### Structure
 ```
 web/
-  astro.config.mjs          ← site URL, integrations (sitemap), Tailwind plugin
+  astro.config.mjs        ← mdx + sitemap + cloudflare adapter; Shiki dual theme (min-light/min-dark) and a `title="..."` transformer
   src/
-    layouts/Layout.astro     ← single shared layout; owns all <head> SEO/meta
-    pages/                    ← index.astro, docs.astro, changelog.astro (file-based routing)
-    components/               ← Header, Footer, Logo, PipelineOrbit, CodeToDocs (hero SVG animation)
-    styles/global.css
-  scripts/build-images.mjs  ← `npm run images`: sharp pre-optimizer for hero + OG assets
-  src/assets/                ← image masters (proof-docs*.png), never served directly
-  public/                    ← static assets: favicon.svg, robots.txt, og.jpg, generated proof-docs-*.webp
+    styles/tokens.css       ← THE palette and texture tokens (both themes). Single source for all three surfaces
+    styles/site.css         ← base + shared components (buttons, header, footer, frame, term); imports tokens.css
+    styles/docs.css         ← docs shell + prose
+    layouts/Layout.astro    ← <head>/SEO/theme bootstrap · layouts/Docs.astro ← sidebar, TOC, pager, search dialog
+    lib/nav.ts              ← header/footer links AND the docs reading order (`docsSections`)
+    content.config.ts       ← `docs` collection (glob over src/content/docs/**/*.mdx)
+    content/docs/**.mdx     ← the product docs
+    components/             ← Header, Footer, Logo, PixelStage (hero), docs/ (MDX components)
+    pages/index.astro       ← marketing (NOT prerendered, see below) · pages/docs/[...slug].astro + search.json.ts · pages/changelog.astro
+    pages/cloud/            ← the hosted app (see Hosted-generation)
+    lib/hosted/             ← hosted app server code and page_html.ts
+  scripts/build-images.mjs  ← `npm run images`: renders public/og.jpg from an SVG (no screenshot masters)
 ```
 
-### Brand logo (`components/Logo.astro`)
-Single source of truth for the mark + wordmark (used by Header and Footer). `variant="full"` renders a **merged lockup**: the accent D mark is the leading letter, followed by "eepDoc" — never render the mark next to the full word "DeepDoc" (reads as a repeated D). The mark is em-sized off `wordSize` to match the wordmark cap height. Its scoped `<style>` block owns all `dd-*` styling; do not style `dd-*` classes from `global.css`. Accessibility: the container carries `role="img" aria-label="DeepDoc"`; mark and partial word are `aria-hidden`.
+### Design language: ink and paper
+There is **no brand hue**. Dark mode is cream ink (`#ECEAE3`) on warm charcoal (`#0D0D0C`/`#151513`/`#1F1F1C`); light mode is near-black ink on warm paper (`#F5F4F0`). `--accent` resolves to ink, so "accent" means emphasis, not colour. Primary buttons are ink-filled. The only colour on a screen is semantic (`--danger`) or borrowed from content (GitHub language dots). The previous lime/teal accent, aurora and glows were removed on purpose (dark mode read as "too green"); `npm run test:tokens` fails if `#C2FF4D`, its rgba or `--glow-*` return.
+- **Texture replaces colour:** a fixed film-grain layer (`body::after` in tokens.css, `--grain`/`--grain-opacity`) and a fine 14px pixel grid (`--grid`, `.pixel-grid`) behind heroes and hosted screens. Keep both subtle.
+- **Fonts:** DM Sans (UI), Instrument Serif italic (one emphasised word per headline, `.em-serif`), JetBrains Mono (code, eyebrows, status). Mono is for code and labels only.
+- **Light mode is the reference look** and a raised panel is *lighter* than its page there (`--card`); one darker than the page reads as a hole.
+- Marketing copy is outcome-led ("organised the way readers look", "answers cite real files", "updates touch only what changed"), never "bucket"/"planner" on the landing page.
 
-### Landing hero (`index.astro`)
-Centered, product-led: source-grounded badge → sans display headline → short sub → equal hosted/local paths → full-width product window (`.hero-stage`/`.hero-window` in `global.css`) with the chat-proof card overlaid bottom-right (stacks static below 640px). `AuroraHeroBackground.astro` provides the decorative original lime-and-teal aurora behind the hero. It uses SVG/CSS only, respects reduced motion, and is simplified on mobile. Keep the animation slow and low-contrast so the headline and product proof remain dominant. `CodeToDocs.astro` remains unused.
+### One palette, three surfaces
+`tokens.css` is imported by `site.css` (marketing and docs) and inlined into the hosted app with `import TOKENS_CSS from "../../styles/tokens.css?raw"` in `lib/hosted/page_html.ts`, which interpolates it into both the app stylesheet and `MINI_PAGE_CSS`. **Do not re-declare palette variables in `page_html.ts`.** The raw text is embedded in a JavaScript string, so tokens.css must contain no backticks, `${` or backslashes; `npm run test:tokens` checks that, the import, and that both themes define the same tokens.
 
-### Features bento (`index.astro` "What it does")
-The three-card bento keeps proof close to each claim: source files map to doc areas, chatbot messages cite real files, and the update panel shows regenerated files. Cards enter on scroll, then their internal rows/messages/status indicators run quiet looping animations; respect `prefers-reduced-motion` and keep motion secondary to legibility.
+Theme crosses the subdomain via a `dd_theme` cookie on `.deepdoc.tech` (localStorage is per hostname). `Header.astro` writes it alongside localStorage; `Layout.astro`'s inline script prefers the cookie; the hosted app reads it server-side. **Omit `domain=` on localhost** or the browser drops the cookie.
 
-### Landing page copy & section rhythm
-Marketing copy is **outcome-led, not implementation-led** — say "your docs stay organized / answers cite real files / updates regenerate only what changed", never "bucket", "planner", or "evidence packs" on the landing page (the Pipeline orbit describes mechanics in plain language). Section order: hero → works-with strip → demo video → features bento → pipeline → getting started → CTA (the old "Product proof" section was removed as redundant with the hero window). `.section-raised` (in `global.css`) is applied to the video and getting-started sections to break up the dark stretches — keep roughly alternating dark/raised bands. Header is logo-only (no STABLE chip); nav links are 14px/500.
+### Landing hero (`components/PixelStage.astro`)
+A dependency-free canvas that *is* the product pitch: a repo as dim scrolling pixel runs on the left, its docs as tidy summarised lines on the right. The pointer draws on the left; hovering a doc line lights its source row and shows a `file:lines` label (what the chatbot does for real). Colour is read from the page's `--ink`, re-read on the `dd-theme` event, and the loop pauses off-screen. Keep it quiet: no per-frame allocation, 14px cells to align with `.pixel-grid`.
+
+### Docs
+- Pages are `src/content/docs/**/*.mdx` with `title` and `description` frontmatter. Slugs are public URLs (`/docs/theming/colours`); do not rename them casually.
+- **The sidebar is explicit.** Every page must appear in `docsSections` in `src/lib/nav.ts`, and every listed id must exist, or `[...slug].astro` throws at build. Reading order = prev/next order.
+- Components available without imports: `Callout` (`type="warn"`), `Steps`/`Step`, `Cards`/`Card`, `Accordions`/`Accordion`, `Tabs`/`Tab` (`value` must equal an entry of `items`), `TypeTable`. Internal links must be absolute `/docs/...`.
+- Code fences accept `title="file"`. Search is a client-side scan of the prerendered `/docs/search.json`; the dialog opens on ⌘K or `/`.
+- When CLI behaviour, config keys, providers or hosted limits change, update these pages (see the release checklist).
 
 ### SEO
-- All meta lives in `Layout.astro`: title, description, canonical, OG (incl. `og:image`/`og:image:alt`), Twitter card, `SoftwareApplication` JSON-LD, `theme-color`. Pages override via the `title`/`description`/`image`/`noindex` props.
-- `noindex={true}` on a `<Layout>` emits `<meta name="robots" content="noindex, nofollow">` — used for thin/placeholder pages (e.g. `changelog.astro`).
-- Sitemap is generated by `@astrojs/sitemap` at build (`/sitemap-index.xml`). Its `filter` in `astro.config.mjs` excludes `/changelog` so noindex pages stay out of the sitemap — keep the filter in sync when a page is marked `noindex`.
-- `public/robots.txt` allows all crawlers and points to the sitemap.
-- OG image is `public/og.jpg` (1200×630, ~77 KB) with `og:image:width`/`height`/`type` declared. Regenerate via `npm run images`, never hand-crop — several scrapers (WhatsApp) drop cards over ~300 KB.
-- `SoftwareApplication` JSON-LD carries `softwareVersion` — bump it in `Layout.astro` alongside `pyproject.toml`.
-- Meta descriptions must stay ≤160 chars and titles ≤60, or they truncate in the SERP.
-- Every page needs exactly one `<h1>`. `docs.astro` has a compact one at the top of its main column (it has no hero); don't remove it when reworking that page.
+All meta lives in `Layout.astro` (title, description, canonical, OG, Twitter, `SoftwareApplication` JSON-LD with `softwareVersion` — bump alongside `pyproject.toml`). `noindex` props emit `robots` meta. Keep descriptions ≤160 chars, titles ≤60, exactly one `<h1>` per page. The sitemap excludes `/cloud`. The OG card is generated by `npm run images`; never hand-crop.
 
-### Design tokens are shared with the marketing site
+### `index.astro` is deliberately not prerendered
+`/` is also the hosted app's shell on `cloud.deepdoc.tech`. Cloudflare Pages serves a prerendered path as a static asset *before* any Function/middleware runs, so a static `/` would show the marketing page on both domains. Docs and changelog have no such collision and are prerendered. Do not re-prerender `index.astro` without re-deriving this.
 
-**The dark neutral scale is warm, not blue.** Surfaces are `#0A0A09` / `#141412` /
-`#1E1E1B` (hue ~60, same family as the warm ink scale `#F0EFEA` / `#9E9D96` /
-`#5E5D56`). They used to be blue-violet (`#09090D` / `#10101A` / `#181820`), which put
-cream text on navy cards and read muddy — the cards on `/generate` were the worst of
-it. Do not reintroduce a cool tint on one side of the warm/cool line; light mode was
-always warm (`#F5F4F0`), so dark was the outlier. `--seg-track`/`--seg-thumb` in
-`page_html.ts` are hosted-only but follow the same scale.
+### Hosted app design (`lib/hosted/page_html.ts`)
+Everything below the palette is the app's own vocabulary: type ramp (`.t-eyebrow`/`.t-display`/`.t-sub`), radii, one easing curve, one button shape (`.btn` + `secondary`/`ghost`, `small`/`large`, text-only `.link-danger`/`.link-quiet`; do not add a sixth). Rules that must survive redesigns:
+- **Accent is ink.** Selection, focus rings and live status use `--accent`; primary buttons use `--solid`. Do not reintroduce a colour fill.
+- **One page width, owned by the render functions.** `--w-page` comes from `document.body.dataset.view` (`'app'` → 736px, else 1152px); `route()` deliberately does not set it, so each of `renderProjects`, `renderProjectDetail`, `renderGenerate`, `renderGenerating`, `renderPublicGallery`, `renderLoggedOut` and `renderPublicInProgress` sets it first. `--w-bar` (the app bar) is constant 1152px.
+- **One card grid, two configurations** (`.card-grid`/`.card`): the public gallery's cards carry a lazy screenshot (`.card-shot`/`.gallery-shot` over `WIRE_SVG`); `/projects` cards carry none. Both lead with a single `.card-new`, the primary CTA; do not re-add a header "Generate new" button.
+- **`.card[hidden]` and `.repo-item[hidden]` need explicit `display: none`**: both carry an author `display` that outranks `[hidden]`, and both are filtered by toggling `hidden`.
+- The gallery search field both filters examples (`data-name` haystack) and recognises a pasted GitHub link, stashing it in `localStorage.dd_pending_repo` for `consumePendingRepo()` after OAuth.
+- **Avatars only from `https://avatars.githubusercontent.com/`** via `safeAvatar()`; anything else is a monogram. Language dots use GitHub's colours from `LANG_COLORS`.
+- The generating card's top sweep is motion, not progress; `setGenCardState()` stops it on every terminal state. `prefers-reduced-motion` disables all animation.
+- **No backticks, `${` or backslashes inside the CSS**, comments included: the stylesheet is inside a JS template literal.
+- The bar links "Docs" to `https://deepdoc.tech/docs`; theme toggle shares the cookie above.
 
-
-`page_html.ts` can't import `src/styles/global.css` — it's an HTML string built in a
-Worker, not an Astro page — so its `:root` is a hand-copy of the marketing palette.
-**`npm run test:tokens` fails if the two drift**, for both themes and for the
-`MINI_PAGE_CSS` subset used by the standalone 403/stale pages. Run it after touching
-either file. The hosted app keeps the short names (`--ink`, `--surface`) rather than
-`--color-*`; renaming buys nothing until these become real `.astro` pages.
-
-Two tokens are intentionally *not* mirrored: `--accent-ink` (text on an accent-filled
-button — must be the light surface on light mode's `#4C8B00`) and `--danger` (needs
-darkening for light). Marketing has neither.
-
-**Theme crosses the subdomain via a `dd_theme` cookie on `.deepdoc.tech`.** localStorage
-is per-hostname and can never reach `cloud.`. The hosted app reads the cookie
-server-side, so its theme is correct in the first byte with no no-flash script.
-`Header.astro` writes the cookie alongside localStorage; `Layout.astro`'s inline script
-prefers cookie over localStorage (marketing pages are prerendered so they can't read it
-server-side). **Omit the `domain=` attribute on localhost** or the browser silently drops
-the cookie.
-
-### The hosted app's design system (`lib/hosted/page_html.ts`)
-
-Everything below the palette in that `<style>` block is the app's own vocabulary and is
-load-bearing for how the signed-in screens read. Reworked 2026-08-03 (the "minimal and
-expensive" pass); the rules that pass established:
-
-- **Accent is a state colour, not a fill.** `#C2FF4D` marks selection, focus rings,
-  live/ready status dots, and the brand mark. Nothing else. **Primary buttons are
-  ink-filled** via `--solid`/`--solid-ink` (near-white on dark, near-black on light).
-  A lime slab under every action was the single loudest thing on these screens; do not
-  put it back.
-- **Mono is for code only.** `--font-mono` is reserved for a pasted repo URL and inline
-  `code`. Repo names, page titles, labels and status text all render in `--font-sans`.
-  Mono-as-UI-text was what made the app read as a terminal toy rather than a product.
-- **One page width, owned by the render functions.** `--w-page` is set from
-  `document.body.dataset.view` (`'app'` → 736px, anything else → 1152px) and read by BOTH
-  `.appbar-inner` and `.page`, so the brand mark sits directly above the page title.
-  **`route()` deliberately does NOT set it** — `/projects` is a wide grid while
-  `/generate` and the detail page are narrow columns, so each of `renderProjects`,
-  `renderProjectDetail`, `renderGenerate`, `renderGenerating`, `renderPublicGallery`,
-  `renderLoggedOut` and `renderPublicInProgress` sets it as its first statement. A new
-  render path that forgets inherits the previous screen's width.
-- **One card grid, two configurations** (`.card-grid`/`.card`, 2026-08-03, modelled on
-  DeepWiki's layout). The public gallery's cards carry a real screenshot
-  (`.card-shot` + `.gallery-shot`); **`/projects` cards deliberately carry none** — on
-  your own list the name and build state are what you scan for, and a wall of thumbnails
-  of sites you already know is noise. Both grids lead with a single `.card-new` (accent
-  gradient, `+` glyph) which is the primary CTA; that replaced the header "Generate new"
-  button, so don't re-add one. `grid-auto-rows: minmax(150px, auto)` is what stops a row
-  of description-less cards coming out shorter than the row above it.
-- **`.card[hidden]` and `.repo-item[hidden]` both need explicit `display: none`** — both
-  carry an author-level `display` that outranks the UA's `[hidden]` rule, and both are
-  filtered by toggling `hidden`. Drop either rule and the matching search box silently
-  stops filtering.
-- **The gallery's search field does two jobs**: substring-filters the example cards
-  (against a `data-name` haystack of owner/repo + description + language) and recognises
-  a pasted GitHub link, offering to generate it. Because generating needs auth, the URL
-  is stashed in `localStorage.dd_pending_repo` and `renderGenerate()` consumes it exactly
-  once via `consumePendingRepo()` — that handoff is what stops the visitor having to find
-  and paste the link again after OAuth.
-- **Removed 2026-08-03, on purpose:** the gallery cards' rotating conic-gradient "border
-  beam" and the `attachTilt()` mousemove 3D tilt. The DeepWiki-style grid is calm and
-  flat; both effects fought it. (`fallbackHue()` was finally deleted in the 2026-11-12
-  pass, when the thumbnail placeholder stopped using per-owner colour.)
-- **Premium pass, 2026-11-12** (kept every rule above; the owner chose "refined, keep
-  the rules, plus site screenshots"):
-  - **Depth tokens** `--card`/`--card-hover`/`--edge`/`--shadow-card`/`--btn-shadow`/
-    `--solid-hover` are app-only, not mirrored. Every raised panel is `--card` with an
-    `inset 0 1px 0 var(--edge)` lit top edge. In light mode `--card` is *lighter* than
-    the page (`#FCFBF8`), because `--surface-raised` is darker than the page there and a
-    raised panel darker than its page reads as a hole.
-  - **Ambient light** is `body::before` (lime/teal/warm radial field, `--glow-*`) plus
-    `body::after` (masked dot grid, `--dots`), absolute at the top of every screen
-    including the mini pages. It is the only non-state use of lime, at ~10% alpha;
-    `#appbar-slot`/`#notice-slot`/`#content` sit above it with `z-index`.
-  - **`#appbar-slot` is the sticky element**, not `.appbar`. The bar used to be sticky
-    inside a 52px slot, its containing block, so it never actually stuck.
-  - **Gallery cards carry screenshots again** (`.card.has-shot` + `.card-shot`): lazy
-    `<img class="gallery-shot">` fading in (`.is-in` on load) over `WIRE_SVG`, an
-    outline of a docs page that also backs the detail page's no-preview state. The lead
-    card gets a matching `.new-shot` frame. `/projects` cards still carry none.
-  - **Avatars only from `https://avatars.githubusercontent.com/`** via `safeAvatar()`;
-    anything else renders a monogram, since a project row's avatar can fall back to a
-    client-supplied value and the gallery is public.
-  - **Language dots** use GitHub's colours from `LANG_COLORS` via `langHtml()`; they are
-    not accent and are the one source of hue in the grids.
-  - The detail page's preview sits in a **browser-window frame** (`.win-bar`, mono URL)
-    matching deepdoc.tech's hero; the generating card has a top **sweep line**
-    (`.gen-progress`) that is motion, not progress, and `setGenCardState()` stops it on
-    every terminal state.
-  - `prefers-reduced-motion` turns off all animation and transition globally.
-- **One button shape.** `.btn` plus `secondary`/`ghost`, `small`/`large`, and text-only
-  `.link-danger`/`.link-quiet` for destructive and tertiary actions. Do not add a sixth
-  button shape.
-- **Type ramp** is the fixed `.t-eyebrow`/`.t-display`/`.t-sub` classes plus the
-  component-level sizes (`.ask h1`, `.card-title`, …). Negative tracking above 18px is
-  what stops large text reading as scaled-up body copy.
-- **`--seg-track`/`--seg-thumb` exist because the neutral ramp only runs one direction.**
-  The visibility segmented control's active thumb must read as *raised* in both themes,
-  which means lighter than its track on dark and lighter than the page on light. Deriving
-  it from `--surface-*` gives a thumb that looks recessed on dark. They, the depth tokens
-  and the `--glow-*`/`--dots` tokens are the only hard-coded colours outside the mirrored
-  palette.
-- **`.repo-item` is a real `<button>`** (keyboard focus and Enter/Space for free), which
-  means it carries an author-level `display: block` that outranks the UA's `[hidden]`
-  rule — hence the explicit `.repo-item[hidden] { display: none }`. Delete that and
-  `filterRepos()` silently stops filtering.
-- **No backticks, `${` or backslashes inside the CSS**, comments included. The whole
-  stylesheet is inside a JS template literal; a backtick in a comment ends the string and
-  the Astro build fails with a bare `Expected ";"`, and a backslash escape such as a CSS
-  `content: '\2713'` is an octal escape, which template literals reject.
-
-Verify a change here with all three: `npm run test:tokens`, `npm run build`, and
-`npm run test:hosted` (the last one is the only thing that parses the client JS — it now
-also covers the gallery filter, the pasted-link detection and its escaping, and the
-`dd_pending_repo` handoff).
+Verify any change here with `npm run test:tokens`, `npm run build` and `npm run test:hosted` (the only thing that parses the client JS).
 
 ### Gallery thumbnails (`lib/hosted/thumb.ts`, `api/thumb/[owner]/[repo].ts`)
 
@@ -624,15 +508,8 @@ Stability invariants it protects — do not regress these:
 To exercise the real hostname locally without editing `/etc/hosts`, launch Chrome with
 `--host-resolver-rules="MAP cloud.localhost 127.0.0.1"` and visit `http://cloud.localhost:8788/`.
 
-### Image pipeline (`scripts/build-images.mjs`)
-Hero screenshots and the OG card are pre-optimized **offline** by sharp into `public/`, from masters in `src/assets/`. Run `npm run images` after replacing a master.
-
-Do **not** switch these to `astro:assets` `<Image>`: `index.astro` is server-rendered on purpose (it shares `/` with the hosted app shell via the `src/middleware.ts` hostname rewrite), and `@astrojs/cloudflare`'s `imageService: "compile"` can only optimize on *prerendered* pages — Cloudflare has no sharp at runtime. Static WebP plus a hand-written `srcset`/`sizes` is the working combination.
-
-The hero renders at ≤1104 CSS px (`max-w-6xl` minus `px-6`), so two widths (1104/2208) cover standard and retina. Both the light and dark variants are always fetched — `display:none` does not cancel an `<img>` download, and the theme is a `data-theme` attribute set by the header toggle, so a `prefers-color-scheme` `<picture>` would desync from a manual switch. Keeping both small (~48/125 KB) is the accepted tradeoff.
-
 ### Changelog
-`changelog.astro` is currently a placeholder (marked `noindex`). The canonical release history lives in root `CHANGELOG.md`.
+`pages/changelog.astro` renders the six most recent releases from the root `CHANGELOG.md` at build time (a `?raw` import and `@astrojs/markdown-remark`); a release needs a `## [x.y.z] - YYYY-MM-DD` heading and a non-empty body to appear. `### Fixed`-style headings render as `<h4>`.
 
 ### Cloudflare Pages deployment
 | Setting | Value |
@@ -664,9 +541,8 @@ side only.
   as two custom domains on that one project. This was a deliberate
   unification (near-zero hosted-product traffic at the time made it the
   cheapest possible moment) — see `docs/PRODUCTION_INFRA.md` for the
-  before/after and the exact cutover steps taken, and `docs/HOSTED_UI_SPEC.md`
-  for the full page/route spec (IA/visual content unchanged by this move —
-  only the framework and deploy target changed).
+  before/after and the exact cutover steps taken. The page/route inventory is
+  the "Route structure" list below plus `src/pages/cloud/`.
   - `web/astro.config.mjs` — `output: 'server'` + `@astrojs/cloudflare` adapter
     (**pinned to `12.6.13`** — the `13.x`/`14.x` lines require Astro 6/7, this
     project is on Astro 5.18.1; do not blindly `bun update` this package).
@@ -751,7 +627,7 @@ side only.
     to close) is the only account surface — identity + a "Projects (N) ›"
     link + "Generate new" + Log out **only**; it deliberately does not list
     projects inline (that was tried and explicitly rejected — see
-    `docs/HOSTED_UI_SPEC.md` rule 14). **The app bar reuses `deepdoc.tech`'s
+    the rule that the dropdown stays identity-and-links only). **The app bar reuses `deepdoc.tech`'s
     own `Header.astro`/`Logo.astro` recipe** (52px sticky bar, blurred
     background, the same "depth D" brand-mark SVG, still inlined as a JS
     string in `page_html.ts`'s `brandMarkHtml()` rather than a real shared

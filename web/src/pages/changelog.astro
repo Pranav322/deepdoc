@@ -1,50 +1,81 @@
 ---
 export const prerender = true;
+import { createMarkdownProcessor } from "@astrojs/markdown-remark";
 import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import { GITHUB } from "../lib/nav";
+// The repository's CHANGELOG.md is the one source. This page renders its most
+// recent releases at build time; the full history stays on GitHub.
+import source from "../../../CHANGELOG.md?raw";
+
+const SHOWN = 6;
+const parts = source.split(/^## /m).slice(1);
+const releases = parts
+  .map((chunk) => {
+    const [heading, ...rest] = chunk.split("\n");
+    const m = heading.match(/^\[([^\]]+)\]\s*-\s*(\d{4}-\d{2}-\d{2})/);
+    return m ? { version: m[1], date: m[2], body: rest.join("\n").trim() } : null;
+  })
+  .filter((r): r is { version: string; date: string; body: string } => !!r && r.body.length > 0)
+  .slice(0, SHOWN);
+
+const md = await createMarkdownProcessor();
+const rendered = await Promise.all(
+  releases.map(async (r) => ({ ...r, html: (await md.render(r.body.replace(/^### /gm, "#### "))).code }))
+);
 ---
 
-<Layout
-  title="Changelog — DeepDoc"
-  description="Release notes for DeepDoc."
-  noindex={true}
->
+<Layout title="Changelog · DeepDoc" description="What changed in each DeepDoc release.">
   <Header />
+  <main class="wrap changelog">
+    <p class="eyebrow">Changelog</p>
+    <h1 class="display">What changed.</h1>
+    <p class="lede">The latest releases. The complete history lives in the repository.</p>
 
-  <main class="mx-auto flex max-w-3xl flex-col px-6 py-24">
-    <div class="mb-3 font-mono text-xs uppercase tracking-[0.18em] text-[var(--color-ink-faint)]">
-      Changelog
+    <div class="releases">
+      {
+        rendered.map((r) => (
+          <article class="release">
+            <div class="release-meta">
+              <h2 class="mono">{r.version}</h2>
+              <time class="faint mono" datetime={r.date}>{r.date}</time>
+            </div>
+            <div class="release-body prose" set:html={r.html} />
+          </article>
+        ))
+      }
     </div>
-    <h1 class="text-4xl font-semibold tracking-tight text-[var(--color-ink)] md:text-5xl">
-      Release notes, soon.
-    </h1>
-    <p class="mt-5 max-w-xl text-base leading-relaxed text-[var(--color-ink-muted)]">
-      Per-release notes will land here once this page is wired up against the project's
-      <code class="rounded bg-[var(--color-surface-raised)] px-1.5 py-0.5 font-mono text-sm text-[var(--color-ink)]">CHANGELOG.md</code>.
-      Until then, the canonical history lives on GitHub.
-    </p>
 
-    <a
-      href="https://github.com/Pranav322/deepdoc/blob/main/CHANGELOG.md"
-      target="_blank"
-      rel="noreferrer"
-      class="mt-8 inline-flex w-fit items-center gap-2 rounded-lg border border-[var(--color-line-strong)] px-4 py-2.5 text-sm font-medium text-[var(--color-ink)] transition-all hover:-translate-y-px hover:border-white/25 hover:bg-[var(--color-surface-raised)]"
-    >
-      View CHANGELOG.md
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        width="14"
-        height="14"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        stroke-width="2"
-        stroke-linecap="round"
-        stroke-linejoin="round"
-      ><line x1="7" y1="17" x2="17" y2="7"></line><polyline points="7 7 17 7 17 17"></polyline></svg>
+    <a class="arrow-link all" href={`${GITHUB}/blob/main/CHANGELOG.md`} target="_blank" rel="noreferrer">
+      Full changelog on GitHub
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M7 17 17 7M8 7h9v9"/></svg>
     </a>
   </main>
-
   <Footer />
 </Layout>
+
+<style is:global>
+  .changelog { max-width: 880px; padding-top: 72px; padding-bottom: 96px; }
+  .changelog .display { margin-top: 14px; font-size: clamp(2.25rem, 5vw, 3.5rem); }
+  .changelog .lede { margin-top: 14px; }
+  .releases { margin-top: 56px; border-top: 1px solid var(--line); }
+  .release { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 32px; padding: 40px 0; border-bottom: 1px solid var(--line); }
+  .release-meta { position: sticky; top: 76px; align-self: start; display: flex; flex-direction: column; gap: 4px; }
+  .release-meta h2 { font-size: 1.125rem; font-weight: 500; letter-spacing: -0.01em; }
+  .release-meta time { font-size: 12px; }
+  .release-body { font-size: 15px; line-height: 1.7; color: var(--ink-muted); }
+  .release-body > * + * { margin-top: 1em; }
+  .release-body h4 { margin-top: 1.6em; font-family: var(--font-mono); font-size: 11px; font-weight: 500; letter-spacing: 0.1em; text-transform: uppercase; color: var(--ink-faint); }
+  .release-body ul { padding-left: 1.2em; list-style: disc; }
+  .release-body li + li { margin-top: 0.5em; }
+  .release-body li::marker { color: var(--ink-faint); }
+  .release-body strong { color: var(--ink); font-weight: 600; }
+  .release-body code { font-family: var(--font-mono); font-size: 0.86em; padding: 0.1em 0.38em; border: 1px solid var(--line); border-radius: 5px; background: var(--surface-raised); color: var(--ink); overflow-wrap: anywhere; }
+  .release-body a { color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong); text-underline-offset: 3px; }
+  .changelog .all { margin-top: 36px; }
+  @media (max-width: 720px) {
+    .release { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+    .release-meta { position: static; flex-direction: row; align-items: baseline; gap: 12px; }
+  }
+</style>

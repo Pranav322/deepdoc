@@ -5,17 +5,19 @@
 // URL that src/middleware.ts's hostname rewrite preserves — nothing here
 // needed to change to work through that rewrite.
 //
-// This is its own visual identity from deepdoc.tech's marketing site — same
-// brand accent (#C2FF4D) for continuity, but its own tinted neutral scale,
-// restrained accent usage, and editorial/technical layout. Do not
-// reintroduce the old "borrow the marketing card recipe verbatim" approach —
-// this app now owns its design system (see docs/HOSTED_UI_SPEC.md).
+// Visual identity is shared with deepdoc.tech and /docs: the palette is
+// src/styles/tokens.css, inlined below as TOKENS_CSS, so there is no second
+// copy to drift. Everything after the palette (type ramp, radii, the button
+// shape, card depth) is this app's own vocabulary. The app is an HTML string
+// built in a Worker, so it cannot import an Astro component or stylesheet.
 //
 // IA: /generate is the only post-login home (repo picker + paste + confirm).
 // All project management (list, visit, visibility, delete) lives under
 // /projects and /projects/:owner/:repo — never inline on /generate, never in
 // the profile dropdown (which is identity + nav links only).
 import { MAX_SAVED_PROJECTS, MAX_STARTS_PER_DAY } from "./session";
+// The one palette, shared with deepdoc.tech and /docs. Vite inlines it as a string.
+import TOKENS_CSS from "../../styles/tokens.css?raw";
 
 export type Theme = "dark" | "light";
 
@@ -28,41 +30,16 @@ export type Theme = "dark" | "light";
  * marketing by test-hosted-tokens.mjs like the main block.
  */
 const MINI_PAGE_CSS = `
-  :root {
-    --surface: #0A0A09; --surface-raised: #141412; --surface-high: #1E1E1B;
-    --ink: #F0EFEA; --ink-muted: #9E9D96; --ink-faint: #5E5D56;
-    --line: rgba(255,255,255,0.085); --line-strong: rgba(255,255,255,0.15); --accent: #C2FF4D; --accent-ink: #0A0A09;
-    --danger: #ff6b6b; --danger-dim: rgba(255,107,107,0.08);
-    --card: #121211; --edge: rgba(255,255,255,0.055);
-    --shadow: 0 30px 80px -24px rgba(0,0,0,0.75);
-    --solid: #F0EFEA; --solid-ink: #0A0A09; --solid-hover: #FFFFFF;
-    --btn-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 2px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
-    --glow-lime: rgba(194,255,77,0.10); --glow-teal: rgba(0,229,160,0.075); --dots: rgba(255,255,255,0.085);
-    --font-sans: 'DM Sans', -apple-system, sans-serif; --font-mono: 'JetBrains Mono', ui-monospace, monospace;
-  }
-  html[data-theme="light"] {
-    --surface: #F5F4F0; --surface-raised: #ECEAE4; --surface-high: #E2E0DA;
-    --ink: #111110; --ink-muted: #6B6B63; --ink-faint: #A8A89E;
-    --line: rgba(0,0,0,0.07); --line-strong: rgba(0,0,0,0.13); --accent: #4C8B00; --accent-ink: #F5F4F0;
-    --danger: #C0392B; --danger-dim: rgba(192,57,43,0.08);
-    --card: #FCFBF8; --edge: rgba(255,255,255,0.95);
-    --shadow: 0 30px 80px -28px rgba(17,17,16,0.28);
-    --solid: #111110; --solid-ink: #F5F4F0; --solid-hover: #2B2B28;
-    --btn-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.2), 0 0 0 1px #111110;
-    --glow-lime: rgba(140,210,20,0.16); --glow-teal: rgba(0,190,140,0.10); --dots: rgba(0,0,0,0.065);
-  }
+  ${TOKENS_CSS}
+  :root { --shadow: var(--shadow-lift); }
   * { box-sizing: border-box; }
   html, body { margin: 0; }
   body { position: relative; min-height: 100vh; background: var(--surface); color: var(--ink);
     font-family: var(--font-sans); font-feature-settings: "ss01"; -webkit-font-smoothing: antialiased;
     display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 96px 24px 72px; }
-  body::before, body::after { content: ''; position: absolute; left: 0; right: 0; top: 0; pointer-events: none; }
-  body::before { height: 720px;
-    background:
-      radial-gradient(42% 52% at 18% 6%, var(--glow-lime), transparent 70%),
-      radial-gradient(40% 48% at 84% 2%, var(--glow-teal), transparent 70%); }
-  body::after { height: 520px;
-    background-image: radial-gradient(circle, var(--dots) 1px, transparent 1.3px); background-size: 24px 24px;
+  body::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 520px; pointer-events: none;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 14px 14px;
     -webkit-mask-image: radial-gradient(ellipse 62% 78% at 50% 0%, black 8%, transparent 70%);
     mask-image: radial-gradient(ellipse 62% 78% at 50% 0%, black 8%, transparent 70%); }
   .mini-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 1; max-width: 1152px; height: 52px; margin: 0 auto;
@@ -166,74 +143,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:opsz,wght@9..40,400;9..40,500;9..40,600;9..40,700;9..40,800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
 <style>
-  /* ── Tokens ──────────────────────────────────────────────────────────
-     The palette block is a hand-copy of the marketing site's
-     (src/styles/global.css); web/scripts/test-hosted-tokens.mjs fails the
-     build if any shared value drifts, so both domains stay one product.
-
-     Everything after the palette is this app's own vocabulary: a type ramp,
-     a radius scale, one easing curve, and semantic tokens for surfaces,
-     depth and the solid button. The short names (--ink, --surface) are kept
-     rather than renamed to --color-*; the rename buys nothing until this
-     file becomes real .astro pages.
-
-     Accent discipline: #C2FF4D is a state colour here, not a fill. It marks
-     selection, focus, and live/ready status, and nothing else. Primary
-     buttons are ink-filled (near-white on dark, near-black on light) — a
-     lime slab under every action was the loudest thing on these screens.
-     The one place lime appears as atmosphere is the ambient glow at the top
-     of each screen, at single-digit opacity, echoing deepdoc.tech's hero. */
-  :root {
-    --surface: #0A0A09; --surface-raised: #141412; --surface-high: #1E1E1B;
-    --ink: #F0EFEA; --ink-muted: #9E9D96; --ink-faint: #5E5D56;
-    --line: rgba(255,255,255,0.085); --line-strong: rgba(255,255,255,0.15);
-    --accent: #C2FF4D; --accent-ink: #0A0A09; --accent-dim: rgba(194,255,77,0.09); --accent-line: rgba(194,255,77,0.3);
-    --danger: #ff6b6b; --danger-dim: rgba(255,107,107,0.08);
-    --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
-    --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
-    --shadow-lift: 0 30px 80px -24px rgba(0,0,0,0.75);
-    --solid: #F0EFEA; --solid-ink: #0A0A09; --solid-hover: #FFFFFF;
-    --hover: rgba(255,255,255,0.045); --press: rgba(255,255,255,0.075);
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.35);
-    --shadow-pop: 0 22px 50px -18px rgba(0,0,0,0.8);
-    --seg-track: #131311; --seg-thumb: #2A2A26;
-    /* App-only depth tokens, not mirrored from marketing. --card is the
-       surface every raised panel sits on; --edge is the 1px lit top edge
-       that makes a panel read as a physical layer rather than a flat box. */
-    --card: #121211; --card-hover: #171715;
-    --edge: rgba(255,255,255,0.055);
-    --shadow-card: 0 1px 0 rgba(0,0,0,0.45), 0 12px 32px -20px rgba(0,0,0,0.9);
-    --btn-shadow: inset 0 1px 0 rgba(255,255,255,0.6), 0 1px 2px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.06);
-    --glow-lime: rgba(194,255,77,0.10); --glow-teal: rgba(0,229,160,0.075); --glow-warm: rgba(240,239,234,0.05);
-    --dots: rgba(255,255,255,0.085);
-    --r-xs: 6px; --r-sm: 8px; --r-md: 11px; --r-lg: 14px; --r-xl: 20px;
-    --ease: cubic-bezier(0.22, 1, 0.36, 1);
-  }
-  /* Light theme mirrors global.css. Three values can't simply mirror it:
-     --accent-ink is the text on an accent surface and must be the light
-     surface against #4C8B00; --danger needs darkening to stay legible; and
-     --solid inverts, since the solid button is ink-on-surface either way.
-     --card is lighter than the page here (not darker, as --surface-raised
-     is): a raised panel that is darker than its page reads as a hole. */
-  html[data-theme="light"] {
-    --surface: #F5F4F0; --surface-raised: #ECEAE4; --surface-high: #E2E0DA;
-    --ink: #111110; --ink-muted: #6B6B63; --ink-faint: #A8A89E;
-    --line: rgba(0,0,0,0.07); --line-strong: rgba(0,0,0,0.13);
-    --accent: #4C8B00; --accent-ink: #F5F4F0; --accent-dim: rgba(76,139,0,0.09); --accent-line: rgba(76,139,0,0.3);
-    --danger: #C0392B; --danger-dim: rgba(192,57,43,0.08);
-    --shadow-lift: 0 30px 80px -28px rgba(17,17,16,0.28);
-    --solid: #111110; --solid-ink: #F5F4F0; --solid-hover: #2B2B28;
-    --hover: rgba(0,0,0,0.035); --press: rgba(0,0,0,0.06);
-    --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
-    --shadow-pop: 0 22px 50px -20px rgba(17,17,16,0.22);
-    --seg-track: #E4E2DC; --seg-thumb: #FCFBF8;
-    --card: #FCFBF8; --card-hover: #FFFFFF;
-    --edge: rgba(255,255,255,0.95);
-    --shadow-card: 0 1px 2px rgba(17,17,16,0.05), 0 12px 32px -22px rgba(17,17,16,0.22);
-    --btn-shadow: inset 0 1px 0 rgba(255,255,255,0.14), 0 1px 2px rgba(0,0,0,0.2), 0 0 0 1px #111110;
-    --glow-lime: rgba(140,210,20,0.16); --glow-teal: rgba(0,190,140,0.10); --glow-warm: rgba(255,255,255,0.8);
-    --dots: rgba(0,0,0,0.065);
-  }
+  ${TOKENS_CSS}
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
   body {
@@ -250,22 +160,13 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   ::selection { background: var(--accent-dim); color: var(--ink); }
   #content { flex: 1; display: flex; flex-direction: column; min-height: 60vh; }
 
-  /* Ambient light: the same lime/teal/warm field as deepdoc.tech's hero,
-     static and at a fraction of its strength, plus a dot grid that fades
-     out within the first screen. It sits under every view, so moving
-     between the marketing site and this app never feels like a change of
-     product. Absolute, not fixed: it belongs to the top of the page and
-     scrolls away with it. */
-  body::before, body::after { content: ''; position: absolute; left: 0; right: 0; top: 0;
-    pointer-events: none; z-index: 0; }
-  body::before { height: 760px;
-    background:
-      radial-gradient(42% 52% at 18% 6%, var(--glow-lime), transparent 70%),
-      radial-gradient(40% 48% at 84% 2%, var(--glow-teal), transparent 70%),
-      radial-gradient(52% 42% at 50% -4%, var(--glow-warm), transparent 75%); }
-  body::after { height: 560px;
-    background-image: radial-gradient(circle, var(--dots) 1px, transparent 1.3px);
-    background-size: 24px 24px;
+  /* Texture: a fine pixel grid fading out within the first screen, the same
+     one deepdoc.tech's hero sits on. The film grain is body::after in the
+     shared tokens. Absolute, not fixed: it belongs to the top of the page. */
+  body::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 560px;
+    pointer-events: none; z-index: 0;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 14px 14px;
     -webkit-mask-image: radial-gradient(ellipse 62% 78% at 50% 0%, black 8%, transparent 70%);
     mask-image: radial-gradient(ellipse 62% 78% at 50% 0%, black 8%, transparent 70%); }
   #notice-slot, #content { position: relative; z-index: 1; }
@@ -338,6 +239,9 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   .dd-mark .dd-echo { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
   .dd-mark .dd-echo-1 { opacity: 0.4; } .dd-mark .dd-echo-2 { opacity: 0.18; }
   .bar-tools { display: flex; align-items: center; gap: 6px; }
+  .bar-link { padding: 6px 10px; border-radius: var(--r-sm); font-size: 14px; font-weight: 500; color: var(--ink-muted);
+    text-decoration: none; transition: color 0.15s var(--ease); }
+  .bar-link:hover { color: var(--ink); }
   /* 32px hit area, muted until hover — matches Header.astro's toggle. */
   .theme-toggle { display: flex; align-items: center; justify-content: center; width: 32px; height: 32px;
     border-radius: var(--r-sm); border: 1px solid transparent; background: transparent; cursor: pointer;
@@ -479,7 +383,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
     box-shadow: inset 0 1px 0 var(--edge), var(--shadow-lift); text-align: center;
     animation: rise 0.24s var(--ease); }
   .modal::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 220px; pointer-events: none;
-    background: radial-gradient(60% 70% at 50% 0%, var(--glow-lime), transparent 72%); }
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 14px 14px;
+    -webkit-mask-image: radial-gradient(60% 80% at 50% 0%, black 0%, transparent 72%);
+    mask-image: radial-gradient(60% 80% at 50% 0%, black 0%, transparent 72%); }
   .modal > * { position: relative; }
   .modal h1 { font-size: 23px; font-weight: 600; letter-spacing: -0.028em; margin: 0 0 9px; }
   .modal p.modal-sub { font-size: 13.5px; line-height: 1.65; color: var(--ink-muted); margin: 0 auto; max-width: 36ch; }
@@ -668,10 +575,10 @@ export function tryPageHtml(theme: Theme = "dark"): string {
      terminal state. ──────────────────────────────────────────────────── */
   .gen-wrap { position: relative; flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 56px 24px 96px; }
   .gen-halo { position: absolute; left: 50%; top: 50%; width: min(760px, 100%); height: 520px; pointer-events: none;
-    background:
-      radial-gradient(closest-side at 42% 46%, var(--glow-lime), transparent),
-      radial-gradient(closest-side at 62% 58%, var(--glow-teal), transparent),
-      radial-gradient(closest-side, var(--glow-lime), transparent);
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 14px 14px;
+    -webkit-mask-image: radial-gradient(closest-side, black 0%, transparent 100%);
+    mask-image: radial-gradient(closest-side, black 0%, transparent 100%);
     transform: translate(-50%, -54%); animation: breathe 7s ease-in-out infinite; }
   .gen-card { position: relative; width: 100%; max-width: 480px; border: 1px solid var(--line-strong); border-radius: var(--r-xl);
     background: var(--card); box-shadow: inset 0 1px 0 var(--edge), var(--shadow-lift); overflow: hidden; animation: rise 0.3s var(--ease); }
@@ -1165,6 +1072,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
           <div class="appbar-inner">
             <a class="brand" href="/" onclick="return nav(event,'/')">\${brandMarkHtml()}</a>
             <div class="bar-tools">
+              <a class="bar-link" href="https://deepdoc.tech/docs" target="_blank" rel="noopener">Docs</a>
               \${themeToggleHtml()}
               <div class="account-wrap">
                 <button class="account-chip" aria-haspopup="menu" aria-expanded="\${state.ddOpen ? 'true' : 'false'}"
@@ -1285,6 +1193,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         <header class="appbar"><div class="appbar-inner">
           <a class="brand" href="https://deepdoc.tech" aria-label="DeepDoc home">\${brandMarkHtml()}</a>
           <div class="bar-tools">
+            <a class="bar-link" href="https://deepdoc.tech/docs" target="_blank" rel="noopener">Docs</a>
             \${themeToggleHtml()}
             <button class="btn small" onclick="openSignInFromGallery()">New docs site</button>
           </div>
@@ -1307,6 +1216,7 @@ export function tryPageHtml(theme: Theme = "dark"): string {
         <header class="appbar"><div class="appbar-inner">
           <a class="brand" href="/" aria-label="DeepDoc Cloud">\${brandMarkHtml()}</a>
           <div class="bar-tools">
+            <a class="bar-link" href="https://deepdoc.tech/docs" target="_blank" rel="noopener">Docs</a>
             \${themeToggleHtml()}
             <button class="btn small secondary" onclick="location.href='/'">See all examples</button>
           </div>

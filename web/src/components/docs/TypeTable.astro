@@ -1,0 +1,20 @@
+---
+interface Row { type: string; default?: string; description?: string }
+interface Props { type: Record<string, Row> }
+const { type } = Astro.props;
+---
+<div class="type-table">
+  <table>
+    <thead><tr><th>Key</th><th>Type</th><th>Default</th><th>What it does</th></tr></thead>
+    <tbody>
+      {Object.entries(type).map(([key, row]) => (
+        <tr>
+          <td><code>{key}</code></td>
+          <td><code>{row.type}</code></td>
+          <td>{row.default ? <code>{row.default}</code> : <span class="faint">-</span>}</td>
+          <td>{row.description}</td>
+        </tr>
+      ))}
+    </tbody>
+  </table>
+</div>

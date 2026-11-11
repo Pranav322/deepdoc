@@ -7,6 +7,24 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Changed
+
+- **One website, one design.** deepdoc.tech, its product docs and the hosted app at
+  cloud.deepdoc.tech now share a single "ink and paper" palette (`web/src/styles/tokens.css`):
+  no brand hue, warm charcoal in dark mode, a fine pixel grid and film grain for texture.
+  The product docs moved from a separate Next.js + Fumadocs app into the same Astro
+  project at `/docs` (same URLs), with a sidebar, table of contents, client-side
+  search (⌘K) and a new DeepDoc Cloud page. The landing page's hero is an interactive
+  pixel demo: code becomes docs, and hovering a doc line shows its source.
+- The README is now a short user-first overview that links to the docs.
+- The changelog page renders the latest releases from this file.
+
+### Removed
+
+- `web/docs-site/`, Tailwind, and unused landing components; stale planning and
+  generated-report markdown (`deepdoc/git-integration-plan.md`, `deepdoc/README.md`,
+  `benchmarks/results/*`, `docs/HOSTED_UI_SPEC.md`).
+
 ## [0.6.3] - 2026-11-12
 
 Found by running the README quick start, as a new user, on a small public FastAPI

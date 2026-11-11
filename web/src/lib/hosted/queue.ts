@@ -1,31 +1,33 @@
-// Ported verbatim from web/hosted/src/index.ts — the Azure Storage Queue
-// dispatch contract is unchanged by the Astro migration; only the caller
-// (Astro endpoints instead of a raw Worker fetch handler) is different.
+// Dispatch and status for generation jobs.
+//
+// Dispatch = write the job's input to R2, then start one ECS Fargate task that
+// reads it. There is no queue to run: the task starts immediately and exits when
+// the job ends, so idle cost is zero. Status comes back through R2 the same way
+// it always did, so this layer never talks to a running container.
 
-export interface CloudEnv {
+import { runGenerationTask, type AwsEnv } from "./aws";
+
+export interface CloudEnv extends AwsEnv {
   DB: D1Database;
   SITES: R2Bucket;
   GITHUB_CLIENT_ID: string;
   GITHUB_SECRET_ID: string;
-  QUEUE_MESSAGES_URL: string;
 }
 
-// Enqueue a generation request onto the Azure Storage Queue. The message text
-// is base64(JSON) — matches job.py's TextBase64DecodePolicy — wrapped in the
-// Storage Queue REST XML envelope. KEDA scales the Job on queue length, so this
-// enqueue is the entire dispatch: no runner to call, no replica to hit.
-export async function enqueueJob(env: CloudEnv, payload: unknown): Promise<boolean> {
-  const b64 = btoa(JSON.stringify(payload));
-  const body = `<QueueMessage><MessageText>${b64}</MessageText></QueueMessage>`;
-  const res = await fetch(env.QUEUE_MESSAGES_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/xml" },
-    body,
-  });
-  return res.ok;
+// The user's GitHub token is in `payload`, so it goes to R2 (private bucket, read
+// once and deleted by the task) and never into the RunTask call.
+export async function enqueueJob(env: CloudEnv, payload: { job_id: string } & Record<string, unknown>): Promise<boolean> {
+  const key = `jobs/${payload.job_id}/input.json`;
+  await env.SITES.put(key, JSON.stringify(payload), { httpMetadata: { contentType: "application/json" } });
+  const started = await runGenerationTask(env, payload.job_id);
+  if (!started) {
+    // Nothing will ever read it, so don't leave a token sitting in the bucket.
+    await env.SITES.delete(key).catch(() => undefined);
+  }
+  return started;
 }
 
-// Read a job's current status from R2 (jobs/{id}/status.json), which the Job
+// Read a job's current status from R2 (jobs/{id}/status.json), which the task
 // writes as it progresses. Durable and independent of any container.
 export async function fetchJobStatus(
   env: CloudEnv,

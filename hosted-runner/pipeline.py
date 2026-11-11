@@ -1,9 +1,8 @@
 """Shared generation pipeline: clone a repo, run deepdoc generate + deploy,
 upload the built site to R2, and publish progress to R2 as status.json.
 
-Both entrypoints reuse this — the legacy HTTP server (app.py) and the
-event-driven job consumer (job.py) — so there is exactly one source of truth
-for what a generation actually does.
+job.py (the ECS Fargate task entrypoint) is the only caller, so this is the one
+source of truth for what a generation actually does.
 """
 from __future__ import annotations
 
@@ -19,32 +18,45 @@ import urllib.request
 from pathlib import Path
 from typing import Callable
 
-DEEPDOC_YAML = """\
-project_name: {name}
-output_dir: docs
-site_dir: site
+def build_deepdoc_yaml(name: str) -> str:
+    """The .deepdoc.yaml written into every cloned repo.
 
-llm:
-  provider: azure
-  model: azure/DeepSeek-V4-Flash
-  api_key_env: AZURE_API_KEY
-  base_url: https://deepdoc-foundry.services.ai.azure.com/
-  max_tokens: null
-  temperature: 0.2
-  # Real deployment limits: 1,000,000 token context window, 128,000 token
-  # max output. The old context_window_tokens: 128000 was wrong — it was
-  # the *output* limit, not the context window — so the planner's classify
-  # step was budgeting off a window ~8x smaller than the model actually
-  # has, and a large repo (e.g. a 154K-token required classify prompt)
-  # could hard-fail on a false token-budget error after already burning
-  # hours in the scan phase.
-  context_window_tokens: 1000000
-  output_reserve_tokens: 128000
-  api_version: '2024-02-01'
+    The model is chosen by environment (set on the ECS task definition), so
+    swapping providers or models is a task-definition change, not a code change.
+    Defaults target Amazon Bedrock through the task role, so there is no API key
+    to store: LiteLLM's Bedrock provider signs with the task's IAM credentials.
+    """
+    model = os.environ.get("DEEPDOC_LLM_MODEL", "bedrock/converse/openai.gpt-oss-120b-1:0")
+    provider = os.environ.get("DEEPDOC_LLM_PROVIDER") or model.split("/", 1)[0]
+    api_key_env = os.environ.get("DEEPDOC_LLM_API_KEY_ENV", "")
+    # Capability numbers must be explicit: LiteLLM has no metadata for many
+    # Bedrock aliases, and an unknown model otherwise falls back (loudly) to a
+    # generic 128K window.
+    context = int(os.environ.get("DEEPDOC_LLM_CONTEXT_TOKENS", "128000"))
+    reserve = int(os.environ.get("DEEPDOC_LLM_OUTPUT_RESERVE_TOKENS", "16000"))
+    lines = [
+        f"project_name: {name}",
+        "output_dir: docs",
+        "site_dir: site",
+        "",
+        "llm:",
+        f"  provider: {provider}",
+        f"  model: {model}",
+        f"  api_key_env: '{api_key_env}'",
+        "  max_tokens: null",
+        "  temperature: 0.2",
+        f"  context_window_tokens: {context}",
+        f"  output_reserve_tokens: {reserve}",
+    ]
+    base_url = os.environ.get("DEEPDOC_LLM_BASE_URL")
+    api_version = os.environ.get("DEEPDOC_LLM_API_VERSION")
+    if base_url:
+        lines.append(f"  base_url: {base_url}")
+    if api_version:
+        lines.append(f"  api_version: '{api_version}'")
+    lines += ["", "chatbot:", "  enabled: false", ""]
+    return "\n".join(lines)
 
-chatbot:
-  enabled: false
-"""
 
 WORK_ROOT = Path(tempfile.gettempdir()) / "deepdoc-hosted-jobs"
 WORK_ROOT.mkdir(exist_ok=True)
@@ -54,7 +66,7 @@ WORK_ROOT.mkdir(exist_ok=True)
 _local_venv_bin = Path(__file__).resolve().parent / ".venv" / "bin" / "deepdoc"
 DEEPDOC_BIN = str(_local_venv_bin) if _local_venv_bin.is_file() else (shutil.which("deepdoc") or "deepdoc")
 
-R2_ACCOUNT_ID = "8a2cef39862f19036324a81881b974a9"
+R2_ACCOUNT_ID = os.environ.get("R2_ACCOUNT_ID", "8a2cef39862f19036324a81881b974a9")
 R2_BUCKET = "deepdoc-hosted-sites"
 R2_ENDPOINT = f"https://{R2_ACCOUNT_ID}.r2.cloudflarestorage.com"
 R2_ACCESS_KEY_ID = os.environ.get("R2_ACCESS_KEY_ID")
@@ -79,20 +91,18 @@ def _r2_client():
     )
 
 
-# Container Apps Jobs names each pod "{execution-name}-{replica-suffix}" and
-# sets HOSTNAME to that pod name (standard k8s behavior this platform runs
-# on) — confirmed against real logs ("Execution: 'deepdoc-gen-job-m4r9q',
-# Replica: 'deepdoc-gen-job-m4r9q-xv67h'"). Stripping the last dash segment
-# recovers the execution name, which the Worker needs to call the Azure
-# stop-execution API on delete.
-JOB_NAME = "deepdoc-gen-job"
-
-
 def _current_execution_name() -> str | None:
-    hostname = os.environ.get("HOSTNAME", "")
-    if hostname.startswith(JOB_NAME + "-") and "-" in hostname[len(JOB_NAME) + 1 :]:
-        return hostname.rsplit("-", 1)[0]
-    return None
+    """ARN of the ECS task this process runs in, so the Cloudflare app can stop
+    it when a project is deleted mid-run. Read from the task metadata endpoint
+    that Fargate injects; None outside ECS (local dev)."""
+    uri = os.environ.get("ECS_CONTAINER_METADATA_URI_V4")
+    if not uri:
+        return None
+    try:
+        with urllib.request.urlopen(f"{uri}/task", timeout=2) as resp:
+            return json.loads(resp.read()).get("TaskARN")
+    except (urllib.error.URLError, TimeoutError, OSError, ValueError):
+        return None
 
 
 def write_status(job_id: str, status: str, error: str | None = None, log: list | None = None) -> None:
@@ -249,10 +259,10 @@ def _run(
     # Popen + line-by-line streaming, not subprocess.run(capture_output=True):
     # capture_output fully buffers the child's stdout/stderr in memory and
     # only hands it back once the process exits, so a multi-hour scan/plan
-    # step produced literally nothing in Azure's logs until it was already
+    # step produced literally nothing in CloudWatch until it was already
     # done or dead — no way to tell "still working" from "hung" from
     # outside. Printing each line as it arrives makes it our own process's
-    # stdout in real time, which is what Azure's log stream actually reads.
+    # stdout in real time, which is what the awslogs driver actually reads.
     proc = subprocess.Popen(
         cmd, cwd=cwd, env=env,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
@@ -271,6 +281,56 @@ def _run(
         # of a bare "deepdoc deploy failed" — this tail is what the UI shows.
         detail_tail = "\n".join(combined.strip().splitlines()[-12:])
         raise RuntimeError(f"command failed ({proc.returncode}): {echoed}\n{detail_tail}")
+
+
+# ── Cost guard ───────────────────────────────────────────────────────────────
+# Two layers keep one generation under MAX_USD:
+#   1. preflight_estimate(): refuse a repo whose estimated cost is clearly over.
+#   2. budget/sitecustomize.py: a hard stop inside every `deepdoc` subprocess that
+#      counts real tokens from each LiteLLM response and exits when spend passes
+#      the cap. The estimate is a heuristic (multipliers below are NOT yet
+#      calibrated against real runs), so layer 2 is the one that actually bounds
+#      the bill.
+MAX_USD = float(os.environ.get("DEEPDOC_MAX_USD", "1.00"))
+PRICE_IN_PER_M = float(os.environ.get("DEEPDOC_PRICE_IN_PER_M", "0.15"))    # gpt-oss-120b on Bedrock
+PRICE_OUT_PER_M = float(os.environ.get("DEEPDOC_PRICE_OUT_PER_M", "0.60"))
+EST_INPUT_MULT = float(os.environ.get("DEEPDOC_EST_INPUT_MULT", "2.5"))     # prompt tokens per source token
+EST_OUTPUT_MULT = float(os.environ.get("DEEPDOC_EST_OUTPUT_MULT", "0.15"))  # completion tokens per source token
+
+_SKIP_DIRS = {".git", "node_modules", "vendor", "dist", "build", "static", "media", ".venv", "venv", "target", "out"}
+_SOURCE_EXTS = {".py", ".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs", ".go", ".php", ".vue", ".java", ".rs"}
+
+
+def estimate_source_tokens(repo_dir: Path) -> int:
+    total_bytes = 0
+    for root, dirs, files in os.walk(repo_dir):
+        dirs[:] = [d for d in dirs if d not in _SKIP_DIRS and "venv" not in d]
+        for name in files:
+            if Path(name).suffix.lower() in _SOURCE_EXTS and ".min." not in name:
+                try:
+                    total_bytes += min((Path(root) / name).stat().st_size, 1_000_000)
+                except OSError:
+                    pass
+    return total_bytes // 4
+
+
+def preflight_estimate(repo_dir: Path) -> tuple[float, int]:
+    tokens = estimate_source_tokens(repo_dir)
+    cost = (tokens * EST_INPUT_MULT * PRICE_IN_PER_M + tokens * EST_OUTPUT_MULT * PRICE_OUT_PER_M) / 1_000_000
+    return cost, tokens
+
+
+def budget_env(job_dir: Path) -> dict[str, str]:
+    """Env that arms the in-process spend cap for deepdoc subprocesses."""
+    budget_dir = str(Path(__file__).resolve().parent / "budget")
+    existing = os.environ.get("PYTHONPATH", "")
+    return {
+        "PYTHONPATH": budget_dir + (os.pathsep + existing if existing else ""),
+        "DEEPDOC_BUDGET_FILE": str(job_dir / "spend.json"),
+        "DEEPDOC_MAX_USD": str(MAX_USD),
+        "DEEPDOC_PRICE_IN_PER_M": str(PRICE_IN_PER_M),
+        "DEEPDOC_PRICE_OUT_PER_M": str(PRICE_OUT_PER_M),
+    }
 
 
 def run_generation(
@@ -300,10 +360,18 @@ def run_generation(
         )
         _run(["git", "clone", "--depth", "1", clone_url, str(repo_dir)], cwd=job_dir, log=log, redact=github_token)
 
-        (repo_dir / ".deepdoc.yaml").write_text(DEEPDOC_YAML.format(name=repo))
+        (repo_dir / ".deepdoc.yaml").write_text(build_deepdoc_yaml(repo))
+
+        est_cost, est_tokens = preflight_estimate(repo_dir)
+        log.append(f"preflight: ~{est_tokens:,} source tokens, estimated cost ~${est_cost:.2f} (cap ${MAX_USD:.2f})")
+        if est_cost > MAX_USD:
+            raise RuntimeError(
+                f"{owner}/{repo} is too large for the hosted tier: about {est_tokens:,} source tokens "
+                f"would cost roughly ${est_cost:.2f}, over the ${MAX_USD:.2f} per-generation limit."
+            )
 
         stage("generating")
-        _run([DEEPDOC_BIN, "generate", "--clean", "--yes"], cwd=repo_dir, log=log)
+        _run([DEEPDOC_BIN, "generate", "--clean", "--yes"], cwd=repo_dir, log=log, extra_env=budget_env(job_dir))
 
         stage("building")
         # basePath baked at build time to match the /{owner}/{repo}/ serving path.

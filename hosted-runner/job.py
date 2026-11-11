@@ -1,15 +1,17 @@
-"""Event-driven job entrypoint for Azure Container Apps Jobs.
+"""One-shot entrypoint for an ECS Fargate generation task.
 
-KEDA scales this job on the length of the `deepdoc-jobs` Azure Storage Queue;
-each execution runs this script, which pulls exactly one message, processes it,
-and exits. The container is ephemeral and isolated per execution — no shared
-memory, no long-lived server.
+The Cloudflare Pages app starts this task with ``ecs:RunTask`` and passes only a
+``JOB_ID`` environment override. The job's real inputs, including the user's
+GitHub token, are written by the Pages app to R2 at ``jobs/{id}/input.json``. They
+are deliberately not put in the RunTask call, because that call lands in CloudTrail
+and in the task description, both of which would then hold a user's GitHub token.
 
-Message contract (produced by the Cloudflare Worker's handleGenerate): the
-queue MessageText is base64 of a JSON object
+The task reads and deletes that object, runs the shared pipeline, writes status
+and the built site to R2, pings Cloudflare to reconcile, and exits. Compute is
+only billed while the task runs, so idle cost is zero.
+
+input.json contract (written by web/src/lib/hosted/queue.ts):
   {"job_id","owner","repo","github_token","visibility"}
-We configure TextBase64DecodePolicy so `msg.content` is the decoded JSON string
-— this must match how the Worker encodes it.
 """
 from __future__ import annotations
 
@@ -17,74 +19,64 @@ import json
 import os
 import sys
 
-from dotenv import load_dotenv
+from pipeline import (
+    R2_BUCKET,
+    _r2_client,
+    notify_completion,
+    run_generation,
+    write_status,
+)
 
-# Load a local .env when present (dev); in the container, env comes from
-# Container App secrets and this is a harmless no-op.
-from pathlib import Path
 
-load_dotenv(Path(__file__).resolve().parent.parent / ".env")
-
-from azure.storage.queue import QueueClient, TextBase64DecodePolicy  # noqa: E402
-
-from pipeline import notify_completion, run_generation, write_status  # noqa: E402
+def _load_input(job_id: str) -> dict | None:
+    client = _r2_client()
+    if client is None:
+        print("R2 credentials are not configured", file=sys.stderr)
+        return None
+    key = f"jobs/{job_id}/input.json"
+    try:
+        body = client.get_object(Bucket=R2_BUCKET, Key=key)["Body"].read()
+    except Exception as exc:  # noqa: BLE001
+        print(f"could not read {key}: {exc}", file=sys.stderr)
+        return None
+    # Delete before doing any work so the token never outlives its read, even if
+    # the task is killed mid-run.
+    try:
+        client.delete_object(Bucket=R2_BUCKET, Key=key)
+    except Exception as exc:  # noqa: BLE001
+        print(f"warning: could not delete {key}: {exc}", file=sys.stderr)
+    try:
+        return json.loads(body)
+    except ValueError:
+        return None
 
 
 def main() -> int:
-    conn = os.environ["QUEUE_CONN"]
-    queue_name = os.environ.get("QUEUE_NAME", "deepdoc-jobs")
-    qc = QueueClient.from_connection_string(
-        conn, queue_name, message_decode_policy=TextBase64DecodePolicy()
+    job_id = os.environ.get("JOB_ID", "").strip()
+    if not job_id:
+        print("JOB_ID is not set", file=sys.stderr)
+        return 2
+
+    payload = _load_input(job_id)
+    if not payload or not (payload.get("owner") and payload.get("repo")):
+        write_status(job_id, "failed", "The generation request could not be read. Please start it again.", [])
+        notify_completion()
+        return 1
+
+    owner, repo = payload["owner"], payload["repo"]
+    print(f"processing job {job_id} for {owner}/{repo}", flush=True)
+    write_status(job_id, "queued", None, ["task started"])
+
+    result = run_generation(
+        job_id, owner, repo, payload.get("github_token"),
+        lambda s, e, log: write_status(job_id, s, e, log),
     )
 
-    # Long visibility timeout: the message stays invisible for the whole
-    # generation so it isn't redelivered mid-run, and KEDA won't count it as
-    # still-pending and spin up a duplicate execution for the same job. Must
-    # match (or exceed) the Container Apps Job's replicaTimeout (86400s) —
-    # a shorter value here made the message reappear and get redelivered to
-    # a second execution while the first one was still legitimately running
-    # on a large repo, which is what happened to openclaw/openclaw.
-    msgs = qc.receive_messages(max_messages=1, visibility_timeout=86400)
-    msg = next(iter(msgs), None)
-    if msg is None:
-        print("no message to process; exiting")
-        return 0
-
-    try:
-        payload = json.loads(msg.content)
-    except Exception as exc:  # noqa: BLE001
-        print(f"unparseable message, discarding: {exc}")
-        qc.delete_message(msg)
-        return 0
-
-    job_id = payload.get("job_id")
-    owner = payload.get("owner")
-    repo = payload.get("repo")
-    token = payload.get("github_token")
-    if not (job_id and owner and repo):
-        print(f"message missing required fields, discarding: {payload.keys()}")
-        qc.delete_message(msg)
-        return 0
-
-    print(f"processing job {job_id} for {owner}/{repo}")
-    write_status(job_id, "queued", None, ["picked up by worker execution"])
-
-    result = run_generation(job_id, owner, repo, token, lambda s, e, log: write_status(job_id, s, e, log))
-
-    # Tell Cloudflare the moment a terminal status exists in R2, so
-    # projects.status in D1 updates now instead of whenever (if ever) the
-    # owning user next loads /api/projects. Deliberately after
-    # run_generation (result['status'] is always terminal here) and before
-    # the message delete below, so a crash between them just means the next
-    # scheduled/manual sweep catches it — never a lost or duplicated ping.
+    # Always after a terminal status exists in R2, so projects.status in D1 is
+    # corrected now instead of whenever the owner next loads their dashboard.
     notify_completion()
-
-    # Delete on ANY terminal state (done OR failed) so a message is never
-    # retried forever. A hard crash before this line leaves the message to
-    # reappear after the visibility timeout; --replica-retry-limit bounds that.
-    qc.delete_message(msg)
-    print(f"job {job_id} finished: {result['status']}")
-    return 0
+    print(f"job {job_id} finished: {result['status']}", flush=True)
+    return 0 if result["status"] == "done" else 1
 
 
 if __name__ == "__main__":

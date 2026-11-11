@@ -3,12 +3,22 @@ pages_build_output_dir = "./dist"
 compatibility_date = "2026-07-01"
 compatibility_flags = ["nodejs_compat"]
 
-# GITHUB_CLIENT_ID/GITHUB_SECRET_ID/QUEUE_MESSAGES_URL are set as
-# `wrangler pages secret put` for production, and as .dev.vars locally (not
-# [vars] here) — a plaintext var and a secret can't share the same binding
-# name. Custom domains (deepdoc.tech, cloud.deepdoc.tech) are configured on
+# GITHUB_CLIENT_ID, GITHUB_SECRET_ID, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY and
+# RECONCILE_SECRET are set as `wrangler pages secret put` for production, and as
+# .dev.vars locally (not [vars] here) — a plaintext var and a secret can't share
+# the same binding name. The non-secret ECS dispatch settings are in [vars] below.
+# Custom domains (deepdoc.tech, cloud.deepdoc.tech) are configured on
 # the Pages project directly (dashboard or `wrangler pages domain add`), not
 # here — that's a Workers-only `routes` concept, not a Pages one.
+
+[vars]
+# Set to "1" to refuse new generations (503) while the runner or its LLM is down.
+GENERATION_PAUSED = "0"
+AWS_REGION = "us-east-1"
+ECS_CLUSTER = "deepdoc"
+ECS_TASK_DEFINITION = "deepdoc-gen"
+ECS_SUBNETS = "subnet-0d049e01ac6cad87a,subnet-07771c56c72cccf9d,subnet-0a960d6ba8591074c,subnet-0fe6f69770fbcdd01,subnet-0359fc474e4e7ef5c,subnet-03b5798214b621521"
+ECS_SECURITY_GROUP = "sg-03e6fc4985c8fafae"
 
 [[d1_databases]]
 binding = "DB"

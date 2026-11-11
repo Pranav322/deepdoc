@@ -8,7 +8,7 @@ Guidance for coding agents working in this repository.
 - **IMPORTANT**: Whenever you need more knowledge about the exact execution flows, functions, classes, invariants, and cross-file relationships, take reference from [`deepdoc/CONCEPTS.md`](deepdoc/CONCEPTS.md). It is the exhaustive semantic and architectural map of the codebase.
 
 ## Repo Summary
-- Project name: `deepdoc` (v0.6.2)
+- Project name: `deepdoc` (v0.6.3)
 - Language/runtime: Python `>=3.10`
 - Packaging: setuptools via `pyproject.toml`
 - CLI entrypoint: `deepdoc = deepdoc.cli:main`
@@ -270,7 +270,18 @@ Two independent release tracks — do not mix:
 - **Python package**: root `CHANGELOG.md` + `pyproject.toml` + `.github/workflows/release.yml`. Push to `main` with a bumped version to auto-publish to PyPI.
 - **VS Code extension**: `vscode-extension/CHANGELOG.md` + `vscode-extension/package.json` + `.github/workflows/release-vscode-extension.yml`.
 
-Release steps: bump version → add CHANGELOG section → commit → push to `main`.
+### Python package release checklist
+A release is more than the version bump. Things that do not update themselves are listed in step 6 — check every one.
+
+1. **Version strings, all equal:** `pyproject.toml` `version` (what the workflow tags and publishes), `deepdoc/__init__.py` `__version__` (drives `deepdoc --version` and the generated-site major-version compatibility warning), `web/src/layouts/Layout.astro` `softwareVersion` (marketing JSON-LD), and the "Project name" line at the top of this file. These have drifted before (0.6.1 shipped with `__version__` 0.6.0 and `softwareVersion` 0.5.2); `git grep -n '<old version>'` after bumping.
+2. **`CHANGELOG.md`:** move `## Unreleased` entries under `## [x.y.z] - YYYY-MM-DD`. The Release workflow uses that section as the GitHub Release notes.
+3. **Engine fingerprint:** if route or runtime-evidence semantics changed, bump it in `deepdoc/persistence_v2.py`.
+4. **User-facing docs:** if CLI behavior, config keys or providers changed, update `README.md` and the product docs in `web/docs-site/content/docs/` (`quickstart.mdx`, `commands.mdx`, `providers.mdx`, `troubleshooting.mdx`).
+5. **Ship:** branch → PR → `pytest` checks green → merge (merge commit; repo auto-merge is disabled). The push to `main` runs `release.yml`: tags `vX.Y.Z`, publishes to PyPI, creates the GitHub Release. Confirm with `gh run list --workflow=release.yml` and `curl -s https://pypi.org/pypi/deepdoc/json` (`info.version`).
+6. **Not automatic — do after the merge:**
+   - **Marketing + product docs site** (`deepdoc.tech`, `deepdoc.tech/docs`, `cloud.deepdoc.tech`): Cloudflare Pages is direct-upload, so nothing deploys on push. From `web/`: `npm run build` (builds `docs-site` first, then Astro; `bun run build` is equivalent where bun is installed) then `npx wrangler pages deploy dist --project-name=deepdoc`. Needed for `softwareVersion` and any docs/marketing change to go live.
+   - **Hosted runner image:** built from this repo's source, not from PyPI. Run `hosted-runner/aws/deploy-image.sh` so `cloud.deepdoc.tech` generations run the released code.
+   - **VS Code extension:** separate track below; release it only if `vscode-extension/` changed.
 
 ## Install And Build Commands
 Prefer `python3` over `python`.

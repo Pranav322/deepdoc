@@ -100,7 +100,12 @@ def classify_source_kind(rel_path: str) -> str:
     if (
         lowered.startswith("docs/")
         or name in {"readme.md", "readme.mdx", "changelog.md", "history.md", "glossary.md"}
-        or any(token in name for token in ("readme", "changelog", "glossary", "notes", "history"))
+        or (
+            # Only prose files: a substring match on any name tagged source code
+            # like notes.py or order_history.py as docs, demoting it everywhere.
+            name.endswith((".md", ".mdx", ".rst", ".txt", ".adoc"))
+            and any(token in name for token in ("readme", "changelog", "glossary", "notes", "history"))
+        )
     ):
         return "docs"
     if name in {

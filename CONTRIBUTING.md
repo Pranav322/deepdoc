@@ -203,7 +203,12 @@ Releases are fully automated. When you push to `main`, the workflow checks wheth
    ### Features  
    - Added Y
    ```
-4. Commit and push to `main`. The workflow does the rest.
+4. Also bump `softwareVersion` in `web/src/layouts/Layout.astro` and the version
+   on the "Project name" line of `AGENTS.md`.
+5. Open a PR, wait for `pytest` to pass, and merge. The workflow publishes to PyPI.
+6. Then do the steps that are not automatic: deploy the website (Cloudflare Pages
+   is direct-upload) and rebuild the hosted runner image. The full checklist is
+   in `AGENTS.md` under "Python package release checklist".
 
 ### One-time PyPI setup (maintainers only)
 

@@ -1059,6 +1059,12 @@ def scan_repo(
     site_dir_str = str(cfg.get("site_dir") or "deepdoc-site")
     _DEEPDOC_GENERATED = {
         ".deepdoc",
+        # DeepDoc's own config. Scanning it produced a "Documentation Generation
+        # Configuration" page about DeepDoc inside the user's docs.
+        ".deepdoc.yaml",
+        # Legacy state copies persistence_v2 still writes to the repo root.
+        ".deepdoc_plan.json",
+        ".deepdoc_file_map.json",
         site_dir_str,
         "chatbot_backend",
         output_dir_str,

@@ -813,6 +813,21 @@ def _resolve_python_module_path(
     for candidate in candidates:
         if candidate in known_files:
             return candidate
+
+    if module_spec.startswith("."):
+        return ""
+    # An absolute import is resolved against sys.path, which in a ``src/`` (or
+    # ``backend/``, ``services/x/``) layout is a directory above the importing file,
+    # not the repo root: ``from app.api import notes`` in ``src/app/main.py`` means
+    # ``src/app/api/notes.py``. Try the file's own ancestors, nearest first, after
+    # the repo root so existing repo-root matches keep winning.
+    for root in (current_dir, *current_dir.parents):
+        if not root.parts:
+            continue  # the repo root was already tried above
+        for candidate in candidates:
+            prefixed = f"{root.as_posix()}/{candidate}"
+            if prefixed in known_files:
+                return prefixed
     return ""
 
 

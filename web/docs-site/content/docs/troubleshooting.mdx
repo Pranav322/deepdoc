@@ -15,6 +15,29 @@ description: Common failures and what they actually mean.
     pip install deepdoc --no-deps
     ```
   </Accordion>
+  <Accordion title='pip install "deepdoc[chatbot]" fails with ResolutionImpossible'>
+    You are probably on Python 3.15. The chatbot's local embedding model
+    (`fastembed`) needs `onnxruntime`, which only publishes wheels up to Python
+    3.14. Create the virtual environment with Python 3.10–3.14 instead:
+
+    ```bash
+    python3.14 -m venv .venv && source .venv/bin/activate
+    pip install "deepdoc[chatbot]"
+    ```
+  </Accordion>
+  <Accordion title="Chatbot sync failed: Could not load model nomic-ai/nomic-embed-text-v1.5">
+    The first run downloads the embedding model from Hugging Face, which
+    rate-limits anonymous downloads (HTTP 429). The docs are still generated; the
+    run ends as `partial`. Wait a few minutes, then run
+    `deepdoc generate --force`. Setting `HF_TOKEN` to a free Hugging Face token
+    avoids the limit.
+  </Accordion>
+  <Accordion title="deploy refuses: unresolved quality issues / update says no sync baseline">
+    A run that ended `partial` (an invalid page or a failed chatbot sync) blocks
+    `deepdoc deploy` and records no baseline for `deepdoc update`. Plain
+    `deepdoc generate` refuses because docs already exist, so use
+    `deepdoc generate --force`. `deepdoc status` shows which page is affected.
+  </Accordion>
   <Accordion title="npx not found / serve or deploy fails immediately">
     Both shell out to Node. Install Node.js 18 or newer from
     [nodejs.org](https://nodejs.org). The Python side works without it; only

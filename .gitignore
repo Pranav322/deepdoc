@@ -157,3 +157,10 @@ deepdoc/COVERAGE_FIX_BRIEF.md
 deepdoc/MCP_DESIGN_BRIEF.md
 deepdoc/SPEED_AUDIT.md
 deepdoc/SPEED_AUDIT_V2.md
+
+# Built copy of web/docs-site (npm run build:docs); regenerated on every build
+/web/public/docs/
+
+# Local agent-skill installs and their lock file
+/.skills/
+/skills-lock.json

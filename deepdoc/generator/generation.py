@@ -473,10 +473,12 @@ class BucketGenerationEngine:
         for spec_path in self.scan.openapi_paths:
             spec = parse_openapi_spec(self.repo_root / spec_path)
             if spec:
-                chunk = (
-                    f"\n## OpenAPI Spec ({spec_path}):\n"
-                    f"{spec_to_context_string(spec)[:per_spec_limit]}"
-                )
+                # Supplemental context only: a malformed spec must not abort the run.
+                try:
+                    rendered = spec_to_context_string(spec)[:per_spec_limit]
+                except Exception:
+                    continue
+                chunk = f"\n## OpenAPI Spec ({spec_path}):\n{rendered}"
                 parts.append(chunk)
                 total += len(chunk)
                 if total >= 6000:

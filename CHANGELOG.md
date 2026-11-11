@@ -7,6 +7,17 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+### Fixed
+
+- **`generate` crashed on an OpenAPI spec with empty values.** A spec containing
+  `info:` (or `paths`, `responses`, `tags`, … ) with nothing under it parses to
+  `None`, and `dict.get(key, default)` returns that `None`, so
+  `spec_to_context_string` raised `AttributeError` inside
+  `BucketGenerationEngine.__init__` and aborted the whole run. `deepdoc/openapi.py`
+  now coerces non-mapping/non-list values, `parse_openapi_spec` rejects a spec that
+  is not a mapping, and a spec that still cannot be rendered is skipped instead of
+  killing generation.
+
 ## [0.6.1] - 2026-09-01
 
 ### Fixed

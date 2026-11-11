@@ -15,11 +15,11 @@ import { fetchJobStatus } from "../../../../lib/hosted/queue";
  * manual `wrangler d1 execute UPDATE` each time, which does not scale and
  * was the whole point of this endpoint.
  *
- * Called on a schedule by an Azure Container Apps Job (`deepdoc-reconcile`,
- * `--trigger-type Schedule`) — see docs/PRODUCTION_INFRA.md. Cloudflare
- * Pages has no native Cron Triggers (verified against the Pages project
- * config API: no cron/trigger field exists), so the schedule lives on the
- * Azure side, which already runs the generation compute.
+ * Called by the generation task itself (hosted-runner/pipeline.py
+ * `notify_completion`) the moment a job reaches a terminal state, and by hand
+ * as an escape hatch — see docs/PRODUCTION_INFRA.md. Cloudflare Pages has no
+ * native Cron Triggers (verified against the Pages project config API: no
+ * cron/trigger field exists), so nothing polls this on a schedule.
  */
 const MAX_ROWS_PER_SWEEP = 100;
 

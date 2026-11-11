@@ -1,7 +1,7 @@
 import type { APIRoute } from "astro";
 import { requireSession } from "../../../../lib/hosted/session";
 import { fetchJobStatus } from "../../../../lib/hosted/queue";
-import { tryPageHtml, privateSitePage, stalePageHtml, failedPageHtml, readTheme } from "../../../../lib/hosted/page_html";
+import { tryPageHtml, privateSitePage, stalePageHtml, failedPageHtml, notFoundSitePage, readTheme } from "../../../../lib/hosted/page_html";
 
 const CONTENT_TYPES: Record<string, string> = {
   html: "text/html; charset=utf-8",
@@ -111,7 +111,12 @@ export const GET: APIRoute = async ({ params, locals, cookies }) => {
   }
 
   // Reuse the ownership-gate lookup from the top — no need to hit D1 again.
-  if (!jobRow) return new Response("Not found", { status: 404 });
+  if (!jobRow) {
+    return new Response(notFoundSitePage(owner, repo, env.GENERATION_PAUSED === "1", readTheme(cookies)), {
+      status: 404,
+      headers: { "Content-Type": "text/html; charset=utf-8" },
+    });
+  }
 
   const result = await fetchJobStatus(env, jobRow.job_id);
 

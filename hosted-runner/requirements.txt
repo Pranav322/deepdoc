@@ -1,6 +1,1 @@
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic
 boto3
-azure-storage-queue

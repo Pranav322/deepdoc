@@ -12,6 +12,16 @@ from typing import Any
 from urllib.parse import urlparse
 
 
+def _d(value: Any) -> dict:
+    """Coerce to a dict. YAML ``key:`` with no value parses to None, and
+    ``.get(key, default)`` returns that None instead of the default."""
+    return value if isinstance(value, dict) else {}
+
+
+def _l(value: Any) -> list:
+    return value if isinstance(value, list) else []
+
+
 def find_openapi_specs(repo_root: Path) -> list[Path]:
     """Find all OpenAPI/Swagger spec files in the repo."""
     candidates = [
@@ -35,16 +45,17 @@ def parse_openapi_spec(spec_path: Path) -> dict[str, Any] | None:
     try:
         content = spec_path.read_text(encoding="utf-8")
         if spec_path.suffix == ".json":
-            return json.loads(content)
+            parsed = json.loads(content)
         else:
             try:
                 import yaml
-                return yaml.safe_load(content)
+                parsed = yaml.safe_load(content)
             except ImportError:
                 # Try JSON anyway
-                return json.loads(content)
+                parsed = json.loads(content)
     except Exception:
         return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def extract_endpoints_from_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
@@ -55,9 +66,9 @@ def extract_endpoints_from_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
     # OpenAPI 3.x
     if "openapi" in spec:
-        servers = spec.get("servers", [])
+        servers = _l(spec.get("servers"))
         if servers:
-            server_url = str(servers[0].get("url", "") or "").strip()
+            server_url = str(_d(servers[0]).get("url", "") or "").strip()
             if server_url:
                 parsed = urlparse(server_url)
                 if parsed.scheme or parsed.netloc:
@@ -67,26 +78,27 @@ def extract_endpoints_from_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
 
     # Swagger 2.x
     elif "swagger" in spec:
-        base_path = spec.get("basePath", "")
+        base_path = str(spec.get("basePath") or "")
 
-    paths = spec.get("paths", {})
-    for path, methods in paths.items():
+    for path, methods in _d(spec.get("paths")).items():
+        path = str(path)
         full_path = base_path + path if not path.startswith("http") else path
 
-        for method, details in methods.items():
-            if method.lower() in ("get", "post", "put", "patch", "delete", "head", "options"):
+        for method, details in _d(methods).items():
+            details = _d(details)
+            if str(method).lower() in ("get", "post", "put", "patch", "delete", "head", "options"):
                 endpoint = {
                     "method": method.upper(),
                     "path": full_path,
-                    "summary": details.get("summary", ""),
-                    "description": details.get("description", ""),
-                    "operation_id": details.get("operationId", ""),
-                    "tags": details.get("tags", []),
+                    "summary": str(details.get("summary") or ""),
+                    "description": str(details.get("description") or ""),
+                    "operation_id": str(details.get("operationId") or ""),
+                    "tags": _l(details.get("tags")),
                     "parameters": _extract_parameters(details, spec),
                     "request_body": _extract_request_body(details, spec),
                     "responses": _extract_responses(details, spec),
-                    "security": details.get("security", spec.get("security", [])),
-                    "deprecated": details.get("deprecated", False),
+                    "security": _l(details.get("security", spec.get("security"))),
+                    "deprecated": bool(details.get("deprecated", False)),
                 }
                 endpoints.append(endpoint)
 
@@ -96,10 +108,10 @@ def extract_endpoints_from_spec(spec: dict[str, Any]) -> list[dict[str, Any]]:
 def spec_to_context_string(spec: dict[str, Any]) -> str:
     """Convert an OpenAPI spec into a compact string for LLM context."""
     lines = []
-    info = spec.get("info", {})
-    lines.append(f"API: {info.get('title', 'Unknown')} v{info.get('version', '?')}")
+    info = _d(spec.get("info"))
+    lines.append(f"API: {info.get('title') or 'Unknown'} v{info.get('version') or '?'}")
     if info.get("description"):
-        lines.append(f"Description: {info['description'][:200]}")
+        lines.append(f"Description: {str(info['description'])[:200]}")
 
     endpoints = extract_endpoints_from_spec(spec)
     lines.append(f"\nEndpoints ({len(endpoints)}):")
@@ -131,8 +143,8 @@ def spec_to_context_string(spec: dict[str, Any]) -> str:
 
 def _extract_parameters(details: dict, spec: dict) -> list[dict]:
     params = []
-    for p in details.get("parameters", []):
-        p = _resolve_ref(p, spec)
+    for p in _l(details.get("parameters")):
+        p = _d(_resolve_ref(p, spec))
         params.append({
             "name": p.get("name", "?"),
             "in": p.get("in", "?"),
@@ -144,26 +156,25 @@ def _extract_parameters(details: dict, spec: dict) -> list[dict]:
 
 
 def _extract_request_body(details: dict, spec: dict) -> str:
-    rb = details.get("requestBody", {})
+    rb = details.get("requestBody")
     if not rb:
         return ""
-    rb = _resolve_ref(rb, spec)
-    content = rb.get("content", {})
-    for _media_type, schema_info in content.items():
-        schema = _resolve_ref(schema_info.get("schema", {}), spec)
+    rb = _d(_resolve_ref(rb, spec))
+    for _media_type, schema_info in _d(rb.get("content")).items():
+        schema = _resolve_ref(_d(schema_info).get("schema", {}), spec)
         return json.dumps(schema, indent=2)[:500]
     return ""
 
 
 def _extract_responses(details: dict, spec: dict) -> dict[str, str]:
     responses = {}
-    for status, resp in details.get("responses", {}).items():
-        resp = _resolve_ref(resp, spec)
-        desc = resp.get("description", "")
-        content = resp.get("content", {})
+    for status, resp in _d(details.get("responses")).items():
+        resp = _d(_resolve_ref(resp, spec))
+        desc = str(resp.get("description") or "")
+        content = _d(resp.get("content"))
         if content:
             for _media_type, schema_info in content.items():
-                schema = _resolve_ref(schema_info.get("schema", {}), spec)
+                schema = _resolve_ref(_d(schema_info).get("schema", {}), spec)
                 desc += f" | schema: {json.dumps(schema)[:200]}"
                 break
         responses[str(status)] = desc[:300]
@@ -180,7 +191,7 @@ def _resolve_ref(obj: dict, spec: dict) -> dict:
     parts = ref.lstrip("#/").split("/")
     resolved = spec
     for part in parts:
-        resolved = resolved.get(part, {})
+        resolved = _d(resolved).get(part, {})
     return resolved if isinstance(resolved, dict) else obj
 
 

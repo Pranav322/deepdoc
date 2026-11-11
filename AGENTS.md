@@ -638,8 +638,11 @@ The hero renders at ≤1104 CSS px (`max-w-6xl` minus `px-6`), so two widths (11
 
 A secondary, no-CLI hosted flow: sign in with GitHub, pick a repo (yours —
 public or private — via a picker, or paste any public URL), and get a real
-generated docs site at a vanity `/owner/repo/` URL. Deployed on Azure +
-Cloudflare. **See `docs/PRODUCTION_INFRA.md` for the full resource inventory,
+generated docs site at a vanity `/owner/repo/` URL. The app, D1 and R2 run on
+Cloudflare; generation compute (ECS Fargate) runs on AWS. The LLM is `gpt-oss-120b` on a
+small Azure AI Foundry account (Bedrock quota on the AWS account is 0). Compute
+moved off Azure in October 2026 when that subscription was disabled.
+**See `docs/PRODUCTION_INFRA.md` for the full resource inventory,
 maintenance commands, and teardown steps** — this section covers the code/dev
 side only.
 
@@ -704,8 +707,9 @@ side only.
     manual regex-ordering comments** ("must stay last", "must be matched
     before") — a literal file always wins over a `[...path]` catch-all at the
     same position, so there's no ordering to get wrong here.
-  - Shared logic lives in `web/src/lib/hosted/`: `queue.ts` (`enqueueJob`/
-    `fetchJobStatus` — the Azure Storage Queue dispatch contract, unchanged),
+  - Shared logic lives in `web/src/lib/hosted/`: `queue.ts` (`enqueueJob` writes
+    the job input to R2 and starts a Fargate task; `fetchJobStatus` reads R2),
+    `aws.ts` (SigV4-signed ECS `RunTask`/`StopTask` via WebCrypto, no SDK),
     `session.ts` (session/quota helpers — cookie handling now goes through
     Astro's `cookies.get/set/delete` instead of manual `Cookie`/`Set-Cookie`
     header parsing), `page_html.ts` (the actual page markup + the entire
@@ -770,42 +774,47 @@ side only.
 - `api/examples.ts` dedupes by lowercased `owner/repo`: `owner_repo_jobs` is
   unique on `(owner, repo)` case-**sensitively**, so the same repo reached
   under a differently-cased owner produced two gallery cards for one site.
-- **Dispatch = queue + event-driven Container Apps Job (autoscaling, since
-  2026-07-24).** Generation compute is NO LONGER an always-on runner — the old
-  `deepdoc-runner` Container App is retired. `src/pages/cloud/api/generate.ts`
-  mints a `job_id` and enqueues `{job_id,owner,repo,github_token,visibility}`
-  (base64-JSON, via `src/lib/hosted/queue.ts`'s `enqueueJob`) onto the Azure
-  Storage Queue `deepdoc-jobs` via `QUEUE_MESSAGES_URL` (queue REST + add-only
-  SAS). A KEDA `azure-queue` scaler on the Container Apps **Job**
-  `deepdoc-gen-job` starts one isolated execution per message (min 0 / max 10,
-  4 vCPU / 8 GiB each) → **scale-to-zero when idle (~$0)**. The token rides in
-  the message (private queue, deleted after processing). Status/serving are R2:
-  the job writes `jobs/{id}/status.json` and the site `{owner}/{repo}/…`, and
-  the Pages Function reads both from R2 (`fetchJobStatus`) — it never talks to
-  a container. The site proxy (`cloud/[owner]/[repo]/[...path].ts`) serves
-  one of four terminal screens by status: served R2 bytes (`done`, files
-  present), `tryPageHtml` SPA shell (non-terminal — queued/cloning/generating/
-  building, incl. the null-status startup window), `failedPageHtml` (`failed` —
-  honest error page showing `status.json.error`), and `stalePageHtml` (**only**
-  `done` with files evicted from R2). Do not re-collapse `failed` into
-  `stalePageHtml` — its "generated successfully" copy is a lie for a failed job. **KEDA can occasionally spawn a duplicate no-op execution
-  (polling race); it's harmless — only one execution can lease a message, so
-  no duplicate generation. Stop a lingering one with `az containerapp job
-  stop`.**
-- `hosted-runner/` — the container image (`deepdoc-runner:vN` in ACR, build
-  context = **repo root**). Unaffected by the Astro unification — it talks to
-  Cloudflare D1/R2 via bindings/S3-API, never to whatever is consuming the
-  queue on the Cloudflare side. `pipeline.py` holds the shared clone → `deepdoc
-  generate` → `deepdoc deploy` → R2-upload logic plus `write_status` (R2
-  `jobs/{id}/status.json`). `job.py` is the Job entrypoint (`--command python
-  --args job.py`): dequeues one message from `deepdoc-jobs` with a 1-hr
-  visibility lease (so it isn't redelivered mid-run / double-counted), runs the
-  pipeline, deletes the message on any terminal state, exits. `app.py` (the old
-  FastAPI HTTP server) is legacy/vestigial post-cutover — kept but unused.
-  `DEEPDOC_BIN` resolves to a local `.venv/bin/deepdoc` if present else `PATH`
-  (do not re-hardcode the `.venv` path — that was a real bug). The message
-  encoding is **base64(JSON)** on both sides: the Cloudflare side `btoa()`s it,
-  `job.py` uses `TextBase64DecodePolicy` — keep them in sync.
+- **Dispatch = one ECS Fargate task per job (since October 2026; replaced the
+  Azure queue + Container Apps Job).** `src/pages/cloud/api/generate.ts` mints a
+  `job_id`, `enqueueJob` writes `jobs/{id}/input.json`
+  (`{job_id,owner,repo,github_token,visibility}`) to R2 and starts the
+  `deepdoc-gen` task (ARM64, 4 vCPU / 8 GiB) with `ecs:RunTask`, passing **only
+  `JOB_ID`**. The GitHub token must never be in the `RunTask` call: that call is
+  recorded in CloudTrail and in the task description. The task reads and deletes
+  the input object before doing any work. Idle cost is zero. Status/serving are
+  R2: the task writes `jobs/{id}/status.json` (with its task ARN as
+  `execution_name`, used by `StopTask` when a project is deleted) and the site
+  `{owner}/{repo}/…`, and the Pages Function reads both from R2
+  (`fetchJobStatus`) — it never talks to a container. The site proxy
+  (`cloud/[owner]/[repo]/[...path].ts`) serves one of four terminal screens by
+  status: served R2 bytes (`done`, files present), `tryPageHtml` SPA shell
+  (non-terminal — queued/cloning/generating/building, incl. the null-status
+  startup window), `failedPageHtml` (`failed` — honest error page showing
+  `status.json.error`), and `stalePageHtml` (**only** `done` with files evicted
+  from R2). Do not re-collapse `failed` into `stalePageHtml` — its "generated
+  successfully" copy is a lie for a failed job. The Pages env needs the
+  `deepdoc-dispatch` IAM key (secrets) and the `AWS_REGION`/`ECS_*` vars from
+  `web/wrangler.toml`; redeploy after changing a secret.
+- `hosted-runner/` — the container image (`deepdoc-runner` in ECR, build context
+  = **repo root**, see `.dockerignore`, built for linux/arm64 by
+  `hosted-runner/aws/deploy-image.sh`). It talks to Cloudflare D1/R2 via the
+  S3 API and a reconcile ping, never to the Pages layer otherwise. `pipeline.py`
+  holds the shared preflight → clone → `deepdoc generate` → `deepdoc deploy` →
+  R2-upload logic plus `write_status` (R2 `jobs/{id}/status.json`). `job.py` is
+  the task entrypoint (`python job.py`, `JOB_ID` env). `hosted-runner/aws/`
+  holds the idempotent infra scripts (`provision.sh`, `deploy-image.sh`,
+  `dispatch-key.sh`). `DEEPDOC_BIN` resolves to a local `.venv/bin/deepdoc` if
+  present else `PATH` (do not re-hardcode the `.venv` path — that was a real bug).
+  The LLM is chosen by task-definition env (`DEEPDOC_LLM_MODEL`, …) through
+  `pipeline.build_deepdoc_yaml`; `provision.sh` currently bakes in Azure Foundry
+  `azure/gpt-oss-120b` with the key injected from SSM `/deepdoc/azure-api-key`
+  (Bedrock via the task role remains possible by overriding the env).
+  **Per-generation cost cap** `DEEPDOC_MAX_USD` (code default 1.00, task definition
+  sets 0.50; whole-project spend budget is about $10): a heuristic
+  preflight in `pipeline.py` plus a hard stop in `hosted-runner/budget/sitecustomize.py`,
+  which wraps `litellm.completion` inside each `deepdoc` subprocess and exits 75
+  past the cap. If you change the model, change `DEEPDOC_PRICE_IN_PER_M` /
+  `DEEPDOC_PRICE_OUT_PER_M` too or the cap measures the wrong thing.
 - **Next.js `basePath` must be baked in at build time to match the serving
   URL, or CSS/JS 404s.** The generated static export assumes root-path
   hosting by default; since sites are served at `/{owner}/{repo}/`, not
@@ -816,33 +825,27 @@ side only.
   the vanity-URL redesign) before landing on baking the real owner/repo path
   directly rather than a job-id path. Do not revert to job-id-based serving
   paths without re-deriving this.
-- **Known-working Azure config for the custom `DeepSeek-V4-Flash` deployment**:
-  LiteLLM has no metadata for this alias, so `llm.context_window_tokens: 128000`
-  and `llm.output_reserve_tokens: 16000` must be set explicitly in
-  `.deepdoc.yaml`, and `llm.api_key_env` must be `AZURE_API_KEY` (not
-  `AZURE_OPENAI_API_KEY`). Omitting `context_window_tokens` fails fast with
-  `ModelCapabilityError` before any LLM call — `deepdoc/llm/token_budget.py`'s
-  intended fail-closed behavior, not a bug to work around. Foundry account
-  `deepdoc-foundry` (pre-existing) lives in Azure resource group
-  `deepdoc-main`/`eastus`, `base_url:
-  https://deepdoc-foundry.services.ai.azure.com/`.
-- Verified end-to-end live in real production (not just local), both before
-  and after the Astro unification: private-repo clone with an authenticated
-  token, a full generate→deploy run through the real deployed
-  Cloudflare → Container App → Foundry pipeline, the resulting site served
-  correctly at its real `cloud.deepdoc.tech/<owner>/<repo>/` URL with working
-  CSS, and the project persisting in D1 across requests (proving real state
-  persistence, not same-isolate luck).
+- **LLM capability numbers must be explicit for Bedrock aliases.** LiteLLM has no
+  metadata for many Bedrock model ids, so `pipeline.build_deepdoc_yaml` always
+  writes `llm.context_window_tokens` and `llm.output_reserve_tokens`; omitting
+  them logs the loud fallback in `deepdoc/llm/token_budget.py`. A **new AWS
+  account can have every Bedrock on-demand quota at 0** (checked 2026-10-24: all
+  models threw `ThrottlingException: Too many tokens per day`, quotas
+  non-adjustable via Service Quotas), which needs an AWS Support case.
+- **The AWS path completed a full generation on 2026-11-11** (`kennethreitz/records`,
+  16 pages, about 6.5 minutes, status `done`) via a manual `RunTask`, and
+  generation was unpaused (`GENERATION_PAUSED = "0"`) and deployed the same day.
+  A generation started through the real browser flow (GitHub sign-in, dispatch from
+  Pages) has not yet been exercised. The Azure price for `gpt-oss-120b` is still
+  unconfirmed, so `DEEPDOC_PRICE_*` may mis-measure the cap.
 - **Access control now enforced** (was previously absent) — sites default to
   private (owner-only, session-checked server-side including asset paths); a
   user opts into public via the dashboard toggle. See the accounts/visibility
   note above and `docs/PRODUCTION_INFRA.md`.
-- Known limitations accepted for this first production pass (see
-  `docs/PRODUCTION_INFRA.md` for the full list): runner job state is still
-  in-process memory (fine at min=max=1 replica, lost on restart); no Key
-  Vault (Container App secrets are sufficient at this scale); scale-to-zero
-  Container Apps Jobs is a deferred cost optimization over the current
-  always-on Container App.
+- Known limitations accepted for this pass (full list in
+  `docs/PRODUCTION_INFRA.md`): no Key Vault/Secrets Manager (secrets are SSM
+  SecureStrings and Pages secrets), no per-user concurrency gate, and no
+  automated cleanup of old status/site objects.
 
 ## Notes from the creator
 - Internal tool for a team working in: Python, Go, PHP, JS/TS — frameworks include Fastify, Express, Laravel, Django, Falcon, Go.

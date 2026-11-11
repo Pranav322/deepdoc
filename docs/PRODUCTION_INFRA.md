@@ -1,254 +1,194 @@
-# Production infrastructure — hosted-generation ("Try DeepDoc")
+# Production infrastructure — hosted generation ("Try DeepDoc")
 
-This is the maintenance reference for the real Azure + Cloudflare infrastructure
-behind the hosted "generate docs from a GitHub repo, no CLI" flow at
-**cloud.deepdoc.tech**. See `AGENTS.md`'s "Hosted-generation" section for the
-local dev setup this deploys from (`web/` + `hosted-runner/`).
+Maintenance reference for the infrastructure behind the hosted "generate docs
+from a GitHub repo, no CLI" flow at **cloud.deepdoc.tech**. `AGENTS.md`'s
+"Hosted-generation" section covers the code and local dev setup this deploys
+from (`web/` + `hosted-runner/`).
 
-**2026-07-25 — Cloudflare side unified.** `web/hosted/` (a standalone
-Cloudflare Worker) is retired. The hosted app now lives inside the same
-Astro project as the marketing site (`web/`), deployed as one Cloudflare
-**Pages** project (`deepdoc`) with two custom domains: `deepdoc.tech`
-(marketing, static) and `cloud.deepdoc.tech` (the hosted app, SSR via
-`@astrojs/cloudflare`). The Azure side (`hosted-runner/`, the queue, the
-Container Apps Job, Foundry) is completely unaffected — it only ever talked
-to Cloudflare D1/R2, never to the Worker/Pages layer directly, so none of
-that changed. See `AGENTS.md`'s "Hosted-generation" section for exactly what
-moved and why.
+## History in one paragraph
+
+Until October 2026 the generation compute and LLM ran on Azure (a Container Apps
+Job fed by a Storage Queue, models on Azure AI Foundry). That subscription was
+disabled (state `Warned`, read-only), which took generation down while the
+Cloudflare side kept serving. **Generation now runs on AWS (ECS Fargate +
+Bedrock). Cloudflare is unchanged and still owns the app, database and stored
+sites.** The old Azure resources are not used. A new, small Azure Foundry account
+(`deepdoc-foundry-e2`, see below) provides the LLM only.
 
 ## Resource inventory
 
-| Resource | Location | Purpose | Secret / credential location |
-|---|---|---|---|
-| `deepdocacr` (Azure Container Registry, Basic) | `deepdoc-main`/`eastus` | Stores the runner image (`deepdoc-runner:v5` = the queue-consumer) | ACR admin credentials — `az acr credential show -n deepdocacr` |
-| `deepdoc-runner-env` (Container Apps environment) | `deepdoc-main`/`eastus` | Hosting environment for the Job | n/a |
-| **`deepdoc-gen-job`** (Container Apps **Job**, event-triggered) | `deepdoc-main`/`eastus` | **The generation compute.** KEDA `azure-queue` scaler on `deepdoc-jobs`; **min 0 / max 10**, **4 vCPU / 8 GiB** per execution, `--command python --args job.py`. One queue message → one isolated execution → clone/generate/deploy → upload site + `status.json` to R2 → delete message → exit. **Scale-to-zero when idle (~$0).** | `azure-api-key`, `r2-access-key-id`, `r2-secret-access-key`, `queue-conn` — Container App Job secrets |
-| **`deepdocjobs`** (Storage account) + queue **`deepdoc-jobs`** | `deepdoc-main`/`eastus` | The dispatch queue the Cloudflare side enqueues to and the Job consumes | account key in the storage-account conn string; queue-scoped add-only SAS given to Cloudflare |
-| `workspace-deepdocmainsNTF` (Log Analytics, auto-created) | `deepdoc-main`/`eastus` | Job execution logs | n/a |
-| `deepdoc-foundry` (existing, pre-dates this deployment) | `deepdoc-main`/`eastus` | Azure AI Foundry account serving `DeepSeek-V4-Flash` | Foundry account key — `az cognitiveservices account keys list -g deepdoc-main -n deepdoc-foundry` |
-| `deepdoc-hosted-monthly` (Azure Cost Management budget) | subscription-level | Spend guardrail, ₹4,831/mo (≈$50 at time of setup), alerts at 50/80/100% actual + forecasted | n/a — alerts go to `pranavisverysad@gmail.com` |
-| **Cloudflare Pages project `deepdoc`** (single project, both domains) | Cloudflare account | Everything Cloudflare-side: marketing site (static) + hosted app (SSR, `web/src/pages/cloud/`) — OAuth, repo picker, **enqueue dispatch**, status/project management, vanity-URL site proxy. **Replaces the retired `deepdoc-hosted` Worker (2026-07-25).** | `wrangler pages secret put --project-name=deepdoc` — `GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`, `QUEUE_MESSAGES_URL` (queue `/messages` endpoint + add-SAS) |
-| D1 `deepdoc-hosted-db` (id `ba724999-e3e3-4eb3-bfed-9d85f49dd01e`) | Cloudflare account | Sessions, projects, quotas, OAuth CSRF state, owner/repo→job lookup | n/a — no external creds; bound to the Pages project via `web/wrangler.toml` |
-| R2 bucket `deepdoc-hosted-sites` | Cloudflare account | **Durable copy of every finished site** (`{owner}/{repo}/…`) **and job status** (`jobs/{id}/status.json`). The Job uploads both; the Pages Function serves sites and reads status straight from R2 — no compute to poll. | R2 API token (Object Read & Write, scoped to this bucket) — `R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` as Job secrets |
-| ~~`deepdoc-runner`~~ (old always-on Container App) | — | **RETIRED 2026-07-24** — replaced by the event-driven Job. Deleted to stop the ~$10/mo idle charge. | — |
-| ~~Worker `deepdoc-hosted`~~ | — | **RETIRED 2026-07-25** — merged into the `deepdoc` Pages project above. `cloud.deepdoc.tech` was detached from this Worker (via the Workers custom-domains API) and re-attached to the Pages project as a second custom domain. | — |
-| `deepdoc.tech` + `cloud.deepdoc.tech` (Pages custom domains) | Cloudflare zone `deepdoc.tech` | Public entry points — both on the same Pages project now | n/a |
-| GitHub OAuth App `DeepDoc Cloud (Production)` | github.com/settings/developers | Login for the hosted flow | Client ID/Secret — `wrangler pages secret put` (`GITHUB_CLIENT_ID`/`GITHUB_SECRET_ID`) |
+### Cloudflare (unchanged)
 
-**Cutover mechanics (2026-07-25, for reference):** Cloudflare Pages doesn't
-expose custom-domain management via `wrangler` CLI in this version, and a
-hostname can only be bound to one resource (Worker *or* Pages project) at a
-time. Cutover was: (1) `DELETE
-/accounts/{acct}/workers/domains/{domain_id}` to detach `cloud.deepdoc.tech`
-from the old Worker, (2) `POST
-/accounts/{acct}/pages/projects/deepdoc/domains` to attach it to the Pages
-project, both via the Cloudflare REST API directly (using wrangler's own
-stored OAuth token as a Bearer token — `~/Library/Preferences/.wrangler/config/default.toml`
-on macOS) since the CLI has no equivalent command. A Worker custom domain
-auto-manages its own DNS record as part of its lifecycle; detaching it
-**removes that DNS record**, so the new Pages custom domain needs its own
-CNAME added afterward if Cloudflare's same-account auto-provisioning doesn't
-pick it up immediately.
+| Resource | Purpose | Credential |
+|---|---|---|
+| Pages project `deepdoc` | Marketing site (static) and the hosted app (SSR, `web/src/pages/cloud/`): OAuth, repo picker, dispatch, status, vanity-URL site proxy. Custom domains `deepdoc.tech` and `cloud.deepdoc.tech` | Pages secrets, below |
+| D1 `deepdoc-hosted-db` (`ba724999-e3e3-4eb3-bfed-9d85f49dd01e`) | Sessions, projects, quotas, OAuth state, owner/repo to job lookup | bound via `web/wrangler.toml` |
+| R2 `deepdoc-hosted-sites` | Every finished site (`{owner}/{repo}/…`), job status (`jobs/{id}/status.json`) and, briefly, job input (`jobs/{id}/input.json`) | R2 S3 token, see AWS secrets |
+| GitHub OAuth App `DeepDoc Cloud (Production)` | Login | `GITHUB_CLIENT_ID` / `GITHUB_SECRET_ID` |
 
-## Accounts & per-site visibility (added later)
+Pages secrets (`wrangler pages secret put <NAME> --project-name=deepdoc`):
+`GITHUB_CLIENT_ID`, `GITHUB_SECRET_ID`, `AWS_ACCESS_KEY_ID`,
+`AWS_SECRET_ACCESS_KEY` (the `deepdoc-dispatch` IAM user), `RECONCILE_SECRET`.
+Pages plain vars live in `web/wrangler.toml` `[vars]`: `AWS_REGION`,
+`ECS_CLUSTER`, `ECS_TASK_DEFINITION`, `ECS_SUBNETS`, `ECS_SECURITY_GROUP`, and the
+kill switch `GENERATION_PAUSED` (`"1"` makes `POST /api/generate` return 503 instead
+of starting a job, shows a "generation is paused" notice on every app screen via
+`/api/me`, and swaps the generate form for a paused message; set it while the runner
+or its LLM is down, remove it and redeploy to go live). Unknown URLs on
+`cloud.deepdoc.tech` serve styled pages (`[...rest].ts`, `notFoundSitePage`), never
+Astro's bare 404.
+The old `AZURE_*` and `QUEUE_MESSAGES_URL` Pages secrets are unused and can be
+deleted (`wrangler pages secret delete <NAME> --project-name=deepdoc`).
+Pages binds secrets at deploy time: **redeploy after changing one**.
 
-- **Account view** at `/account` (SPA route, app shell served by the Worker):
-  identity, quota usage, and **Log out** (`POST /api/logout` — deletes the D1
-  session row and expires the `dd_session` cookie). Re-login is the normal
-  GitHub OAuth flow and can land on a different account.
-- **Every generated site has a visibility** (`private` | `public`), stored on
-  both `projects.visibility` (per-user dashboard control) and
-  `owner_repo_jobs.visibility` (the serving authority). New generations default
-  **private**; existing sites were backfilled `public`. Users toggle it from the
-  dashboard via `POST /api/projects/:owner/:repo/visibility`.
-- **`owner_repo_jobs.owner_login`** records the single DeepDoc user who owns each
-  repo's site (set once, first generation wins). `handleGenerate` refuses (409) a
-  second user trying to generate a repo someone else already owns — one canonical
-  site per repo.
-- **Private-site enforcement is server-side in the Worker** (`handleOwnerRepoSite`):
-  before serving *any* byte — including `/_next/*` assets — a private site
-  requires a session whose login matches `owner_login`, else a 403 "private"
-  page. This is a real trust boundary because the R2 bucket is not publicly
-  exposed; the Worker binding is the only read path. Verified in production:
-  anon + wrong-user blocked (403) on both HTML and asset paths, owner served,
-  public sites unaffected.
+### AWS (account `746244690345`, `us-east-1`)
 
-**Orphaned from an earlier abandoned plan**: an AWS Budget
-(`deepdoc-hosted-monthly`, $20/month) exists from a prior AWS-based
-architecture that was scrapped before any AWS resources were created. No AWS
-resources back this deployment — safe to delete that budget alert whenever
-convenient, it's not load-bearing.
+Created and refreshed by `hosted-runner/aws/provision.sh` (idempotent).
+
+| Resource | Purpose |
+|---|---|
+| ECR repo `deepdoc-runner` | The runner image (linux/arm64). `hosted-runner/aws/deploy-image.sh [tag]` builds and pushes it. Keeps the last 5 images. |
+| ECS cluster `deepdoc` + task definition `deepdoc-gen` | One Fargate task per generation: **ARM64, 4 vCPU / 8 GiB, 40 GiB scratch**, `python job.py`. Idle cost is zero. |
+| Role `deepdoc-ecs-execution` | Pulls the image, writes logs, reads `/deepdoc/*` SSM parameters. |
+| Role `deepdoc-gen-task` | What the generation code may do: invoke Bedrock models, nothing else. |
+| Security group `deepdoc-gen-egress` | Egress only, no inbound. Tasks use the default VPC with a public IP, so there is no NAT charge. |
+| Log group `/deepdoc/gen` | Task output, 14-day retention. |
+| IAM user `deepdoc-dispatch` | Used only by the Pages app: `ecs:RunTask` on `deepdoc-gen`, `ecs:StopTask`/`DescribeTasks` in the cluster, `iam:PassRole` for the two roles. `hosted-runner/aws/dispatch-key.sh <file>` rotates its key into a 0600 file without printing it. |
+| SSM SecureStrings `/deepdoc/azure-api-key`, `/deepdoc/r2-access-key-id`, `/deepdoc/r2-secret-access-key`, `/deepdoc/reconcile-secret` | Injected into the task as env vars. Set them with `aws ssm put-parameter --type SecureString --overwrite`. |
+
+LLM (since 2026-11-11): **`gpt-oss-120b` on Azure AI Foundry**, called from the AWS
+task with an API key, because Bedrock quota on this AWS account is 0. The Azure
+side is one resource group `deepdoc-rg` (eastus2) holding the AIServices account
+`deepdoc-foundry-e2` and a `gpt-oss-120b` deployment (GlobalStandard, 200K TPM). It
+costs nothing while idle. The key lives in SSM `/deepdoc/azure-api-key` and is
+injected as `AZURE_API_KEY`. DeepSeek-V4-Flash was the preferred model but had zero
+Azure quota in every region checked. The model and its capability numbers are
+task-definition env vars (`DEEPDOC_LLM_MODEL`, `_PROVIDER`, `_API_KEY_ENV`,
+`_BASE_URL`, `_API_VERSION`, `_CONTEXT_TOKENS`, `_OUTPUT_RESERVE_TOKENS`); changing
+the model is `provision.sh` with different env, not a code change. To rotate the
+Azure key, re-run `az cognitiveservices account keys list` into
+`aws ssm put-parameter --overwrite`; new tasks pick it up.
+
+**Spend limit: about $10 total.** AWS budget `deepdoc-hosted-monthly` is $10 with
+50/80/100% email alerts, but budgets only alert. The real brakes are the
+per-generation cap (`DEEPDOC_MAX_USD`, 0.50 in the task definition), the per-user
+limits in `api/generate.ts`, and `GENERATION_PAUSED`.
 
 ## Dispatch flow (how a generation runs)
 
-1. Worker `handleGenerate` mints a `job_id`, writes D1 bookkeeping, and
-   **enqueues** `{job_id, owner, repo, github_token, visibility}` (base64-JSON)
-   onto `deepdoc-jobs` via `QUEUE_MESSAGES_URL` (queue REST + add-SAS).
-2. KEDA (built into Container Apps) sees the queue length and starts a
-   `deepdoc-gen-job` execution — its own isolated 4 vCPU / 8 GiB container.
-3. `job.py` dequeues the one message (1-hr visibility lease), runs the shared
-   `pipeline.py` (clone → `deepdoc generate` → `deepdoc deploy`), uploads the
-   site + `jobs/{id}/status.json` to R2, then (since 2026-08-27, `deepdoc-runner:v9`)
-   calls `pipeline.notify_completion()` — a best-effort
-   `POST /api/internal/reconcile` telling Cloudflare a terminal status now
-   exists in R2 — before deleting the message and exiting.
-4. The Worker reads status from `jobs/{id}/status.json` and serves the site
-   from R2 — it never talks to a container directly.
+1. `api/generate.ts` mints a `job_id`, writes `jobs/{id}/input.json`
+   (`{job_id, owner, repo, github_token, visibility}`) to R2, then calls ECS
+   `RunTask` (SigV4, `web/src/lib/hosted/aws.ts`) passing only `JOB_ID`. The token
+   is deliberately not in the `RunTask` call: that call is recorded in CloudTrail
+   and in the task description.
+2. The Fargate task (`hosted-runner/job.py`) reads and **deletes** the input
+   object, then runs `pipeline.py`: preflight cost estimate, clone,
+   `deepdoc generate`, `deepdoc deploy`, upload the site to R2, write
+   `jobs/{id}/status.json` (including the task ARN as `execution_name`).
+3. On any terminal state it calls `pipeline.notify_completion()`, which pings
+   `POST /api/internal/reconcile` so D1 matches R2 within seconds.
+4. The Pages app reads status from R2 and serves sites from R2. It never talks to
+   a running container. Deleting a project stops the task via `StopTask`.
 
-## D1 status reconciliation (added 2026-08-27)
+### Per-generation cost cap
 
-`projects.status` in D1 is a **copy** of the real status in R2
-(`jobs/{id}/status.json`); it existed only to make `GET /api/projects` and the
-dashboard cheap to render. The one thing that refreshed that copy used to be
-`GET /api/projects` itself — scoped to the calling user's own rows, and only
-when they happened to load the page. A job whose owner never looked again
-left its row wrong forever. Found live: `usestrix/strix`, `laluka-osk`'s
-`shopware/shopware`, and `tss-pranavkumar/orgraph` sat stale from 9 minutes to
-28 days — two of the three had actually finished successfully.
+`DEEPDOC_MAX_USD` (code default `1.00`; the task definition sets `0.50`) is enforced
+twice. First verified end to end on 2026-11-11: `kennethreitz/records` (22 files,
+16 pages) generated, built and uploaded in about 6.5 minutes, status `done`.
 
-Two pieces fix this:
+- **Preflight** (`pipeline.preflight_estimate`): estimates source tokens from the
+  clone and refuses a repo whose estimated cost is over the cap. The multipliers
+  (`DEEPDOC_EST_INPUT_MULT`, `DEEPDOC_EST_OUTPUT_MULT`) are heuristics and have
+  **not yet been calibrated against a real run**.
+- **Hard stop** (`hosted-runner/budget/sitecustomize.py`): every `deepdoc`
+  subprocess wraps `litellm.completion`, prices real token usage from
+  `DEEPDOC_PRICE_IN_PER_M` / `DEEPDOC_PRICE_OUT_PER_M` (defaults are
+  gpt-oss-120b on Bedrock: 0.15 / 0.60) and exits with code 75 when spend passes
+  the cap. If you change the model, change the prices too, or the cap measures the
+  wrong thing.
 
-- **`POST /api/internal/reconcile`** (`web/src/pages/cloud/api/internal/reconcile.ts`) —
-  auth'd by the `RECONCILE_SECRET` shared secret (`X-Reconcile-Secret` header;
-  set via `wrangler pages secret put` on the Cloudflare side and as a
-  Container App Job secret named `reconcile-secret` on the Azure side —
-  **the same value on both**, no key exchange protocol). Sweeps every
-  `projects` row not in `('done','failed')`, re-reads `fetchJobStatus` for
-  each, writes back whatever changed. Same logic `api/projects/index.ts`
-  already had, just not scoped to one user. Capped at 100 rows/call
-  (`ORDER BY created_at ASC`, oldest first) so a large backlog drains over
-  a few calls rather than one slow request.
-  - Requires `Content-Type` (or an `Origin` header) on the POST — Astro's
-    default CSRF `checkOrigin` protection 403s a bare POST with neither. Not
-    specific to this route: `POST /api/logout` hits the same wall from curl.
-  - **Manual trigger** (debug, or to force an immediate sweep):
-    ```bash
-    curl -X POST https://cloud.deepdoc.tech/api/internal/reconcile \
-      -H "X-Reconcile-Secret: $(cat <secret>)" -H "Content-Type: application/json"
-    ```
-- **`pipeline.notify_completion()`** (`hosted-runner/pipeline.py`) — the real
-  fix, called from `job.py`'s `main()` right after `run_generation` returns
-  (`result['status']` is always terminal there). Pings the endpoint above so
-  Cloudflare corrects D1 within seconds of a job finishing, instead of
-  whenever (if ever) someone happens to look. Deliberately a bare "go check
-  R2" ping rather than `{job_id, status}` — no payload contract to keep in
-  sync between the two sides, one shared idea of "the truth is in R2." No-ops
-  silently if `RECONCILE_SECRET` isn't set (local dev) or the call fails
-  (network blip) — same best-effort contract as `write_status()`; a stale D1
-  row is a UI inconvenience, re-running a whole generation because a
-  notification ping failed would not be a fair trade.
+## Accounts and per-site visibility
 
-An earlier draft of this fix was a standalone Container Apps Job polling the
-sweep endpoint on a 15-minute cron. Scrapped once it was clear the runner
-container can just tell Cloudflare directly the moment it knows — push beats
-poll here: zero staleness window instead of up to 15 minutes, and zero
-recurring compute cost instead of a job running every 15 minutes forever.
-Confirmed (empirically, via the Pages project's own config API, not from
-memory) that Cloudflare Pages has no native Cron Triggers — if a
-poll-based fallback is ever needed again, it has to live on the Azure side.
+- **Every generated site has a visibility** (`private` | `public`), stored on
+  `projects.visibility` (dashboard control) and `owner_repo_jobs.visibility` (the
+  serving authority). New generations default to **private**.
+- **`owner_repo_jobs.owner_login`** records the single DeepDoc user who owns each
+  repo's site (first generation wins); `api/generate.ts` refuses (409) a second
+  user.
+- **Private-site enforcement is server-side** in the site proxy
+  (`web/src/pages/cloud/[owner]/[repo]/[...path].ts`): before serving any byte,
+  including `/_next/*` assets, a private site requires a session whose login
+  matches `owner_login`. The R2 bucket is not public, so this endpoint is the
+  only read path.
 
-The sweep endpoint remains useful on its own even with the push in place: it
-catches anything that finished before `v9`, any ping that failed to land, and
-serves as the manual escape hatch above.
+## D1 status reconciliation
 
-## Maintenance / inspection commands
+`projects.status` in D1 is a copy of the real status in R2. The task pings
+`POST /api/internal/reconcile` (`web/src/pages/cloud/api/internal/reconcile.ts`,
+authenticated by the `X-Reconcile-Secret` header) when a job ends; it sweeps every
+`projects` row not in `('done','failed')`, re-reads R2, and writes back changes
+(100 rows per call, oldest first). `RECONCILE_SECRET` must be the **same value**
+on the Pages secret and the SSM parameter `/deepdoc/reconcile-secret`, or the ping
+silently 401s and D1 drifts stale again (the job itself still succeeds).
+Manual sweep:
 
-**Job executions / logs:**
 ```bash
-az containerapp job execution list -n deepdoc-gen-job -g deepdoc-main -o table
-az monitor log-analytics query -w <workspace-id> \
-  --analytics-query "ContainerAppConsoleLogs_CL | where ContainerGroupName_s startswith 'deepdoc-gen-job' | order by TimeGenerated desc | take 50"
-# stop a stuck/lingering execution (see the KEDA note below):
-az containerapp job stop -n deepdoc-gen-job -g deepdoc-main --job-execution-name <exec-name>
+curl -X POST https://cloud.deepdoc.tech/api/internal/reconcile \
+  -H "X-Reconcile-Secret: $SECRET" -H "Content-Type: application/json"
 ```
 
-**Redeploy a new job image version:**
-```bash
-cd /path/to/codewiki
-az acr build -r deepdocacr -t deepdoc-runner:v6 -f hosted-runner/Dockerfile .
-az containerapp job update -n deepdoc-gen-job -g deepdoc-main --image deepdocacr.azurecr.io/deepdoc-runner:v6
-```
-`--image` only swaps the image; existing secrets/env vars (`reconcile-secret`
-→ `RECONCILE_SECRET` included) survive across this. Only needed once, when
-`reconcile-secret` doesn't exist yet:
-```bash
-az containerapp job secret set -n deepdoc-gen-job -g deepdoc-main --secrets "reconcile-secret=<value>"
-az containerapp job update -n deepdoc-gen-job -g deepdoc-main --set-env-vars "RECONCILE_SECRET=secretref:reconcile-secret"
-```
-If `RECONCILE_SECRET` is ever rotated, update it in **both** places — it must
-be the same value on the Cloudflare Pages secret (`wrangler pages secret put
-RECONCILE_SECRET`) and this Container App Job secret, or `notify_completion()`
-silently 401s (best-effort — it won't surface as a job failure, just as D1
-drifting stale again).
+## Maintenance commands
 
-**Manually enqueue a job** (debug — base64 the JSON to match `job.py`):
 ```bash
-CONN=$(az storage account show-connection-string -g deepdoc-main --name deepdocjobs --query connectionString -o tsv)
-B64=$(python3 -c 'import base64,json;print(base64.b64encode(json.dumps({"job_id":"dbg1","owner":"o","repo":"r","github_token":None,"visibility":"public"}).encode()).decode())')
-az storage message put --queue-name deepdoc-jobs --content "$B64" --connection-string "$CONN"
-```
+# Re-apply AWS infra (idempotent) / rebuild and push the runner image
+hosted-runner/aws/provision.sh
+hosted-runner/aws/deploy-image.sh
 
-**Inspect D1 / job status:**
-```bash
-cd web/hosted
+# Run a task by hand (needs jobs/<id>/input.json in R2 first)
+aws ecs run-task --cluster deepdoc --task-definition deepdoc-gen --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={subnets=[<subnet>],securityGroups=[<sg>],assignPublicIp=ENABLED}" \
+  --overrides '{"containerOverrides":[{"name":"runner","environment":[{"name":"JOB_ID","value":"dbg1"}]}]}'
+
+# Watch / list / stop
+aws logs tail /deepdoc/gen --follow
+aws ecs list-tasks --cluster deepdoc
+aws ecs stop-task --cluster deepdoc --task <arn>
+
+# Set a secret the task reads
+aws ssm put-parameter --name /deepdoc/r2-access-key-id --type SecureString --overwrite --value "<value>"
+
+# Inspect D1 / job status
+cd web
 npx wrangler d1 execute deepdoc-hosted-db --remote --command "SELECT * FROM projects ORDER BY created_at DESC LIMIT 20"
 npx wrangler r2 object get deepdoc-hosted-sites/jobs/<job_id>/status.json --remote --pipe
+
+# Redeploy the Pages app (after `bun run build`)
+npx wrangler pages deploy dist --project-name=deepdoc
 ```
 
-**Rotate the queue SAS the Worker uses** (regen add-SAS → set the Worker secret;
-no Azure-side coordination needed since it's read via the connection string):
-```bash
-CONN=$(az storage account show-connection-string -g deepdoc-main --name deepdocjobs --query connectionString -o tsv)
-SAS=$(az storage queue generate-sas --name deepdoc-jobs --account-name deepdocjobs --permissions a --expiry 2029-01-01T00:00:00Z --https-only --connection-string "$CONN" -o tsv)
-echo "https://deepdocjobs.queue.core.windows.net/deepdoc-jobs/messages?${SAS}" | npx wrangler secret put QUEUE_MESSAGES_URL  # then wrangler deploy
-```
+**Tear down the AWS side:** delete the ECS cluster and task definitions, the ECR
+repo, the `/deepdoc/*` SSM parameters, the `/deepdoc/gen` log group, the two task
+roles, the `deepdoc-dispatch` user and the `deepdoc-gen-egress` security group.
 
-**Redeploy the Worker:** `cd web/hosted && npx wrangler deploy`
+## Known limitations
 
-**Tear down everything** (dependency order):
-```bash
-az containerapp job delete -n deepdoc-gen-job -g deepdoc-main --yes
-az containerapp env delete -n deepdoc-runner-env -g deepdoc-main --yes
-az acr delete -n deepdocacr --yes
-az storage account delete -n deepdocjobs -g deepdoc-main --yes
-npx wrangler delete deepdoc-hosted          # from web/hosted/
-npx wrangler d1 delete deepdoc-hosted-db
-npx wrangler r2 bucket delete deepdoc-hosted-sites
-```
-
-## Known limitations (accepted for this pass)
-
-- **KEDA can start an extra no-op execution.** Because it polls queue length on
-  an interval, a single message can occasionally trigger a second execution
-  before the first has leased it. Only one execution can lease/process a given
-  message (atomic), so **there's never duplicate generation** — the extra one
-  finds an empty queue and exits. Rarely one lingers `Running`; stop it with
-  `az containerapp job stop` (it's billable while up). Not worth engineering
-  away at this scale, but watch it if you see idle cost.
-- The GitHub token rides in the queue message (private queue, deleted after
-  processing) — same trust level as the prior HTTPS dispatch; a token-broker is
-  future work.
-- No Key Vault — secrets are Container App Job / Worker secrets.
-- No automated cleanup of expired D1 sessions/oauth_states beyond the inline
-  login-time cleanup, of `jobs/{id}/status.json` objects, or of R2 site objects
-  when a project is deleted (delete only removes the D1 bookkeeping row).
-- **Foundry `DeepSeek-V4-Flash` quota is the real concurrency ceiling, not
-  Container Apps.** The env's core quota is 100 (10 executions × 4 vCPU max
-  10), plenty for several concurrent generations. But the deployment is
-  capped at 250 RPM / 250K TPM, `max_parallel_workers: 6` per generation, and
-  a single large-repo classify prompt can burn well over half that in one
-  call. `MAX_RETRIES = 3` on a 429 with backoff capped at 20s
-  (`deepdoc/generator/generation.py`), and `deepdoc deploy` refuses the whole
-  site if even one page failed — so sustained throttling under concurrent
-  load doesn't degrade gracefully, it kills the site outright. This is how
-  `shopware/shopware` failed (`stub docs present: core`). Honest concurrent
-  capacity today is 2-3 simultaneous generations, not the 6-7 the compute
-  ceiling would suggest. Raising the Flash deployment's capacity, or
-  spreading load across `DeepSeek-V4-Flash-0731` / `gpt-5-mini` (both
-  provisioned on `deepdoc-foundry` already, far higher TPM), is the fix if
-  concurrent usage grows.
+- **Bedrock inference quota can be zero on a new account.** On 2026-10-24 and again
+  on 2026-11-11 every on-demand model on this account had a daily-token quota of 0
+  (non-adjustable through Service Quotas), so every call failed with
+  `ThrottlingException: Too many tokens per day`. It needs an AWS Support case to
+  raise. That is why the LLM is on Azure Foundry for now.
+- **Azure price for `gpt-oss-120b` is unconfirmed.** `DEEPDOC_PRICE_*` still holds the
+  0.15 / 0.60 per-million defaults; check the Azure rate and update them so the hard
+  cap measures real spend. Actual cost of the first test run was not measured.
+- **Test leftovers in R2:** the 2026-11-11 test run wrote `kennethreitz/records/…` and
+  `jobs/test-1794398450/status.json`. No D1 row points at them so nothing serves them;
+  delete whenever convenient.
+- **Fargate quota** is 30 on-demand vCPUs (7 concurrent 4-vCPU tasks).
 - **No per-user concurrency gate.** `api/generate.ts` only enforces per-repo
-  dedup, `MAX_SAVED_PROJECTS = 2`, and `MAX_STARTS_PER_DAY = 2` — a user can
-  start two different repos at once and both generate in parallel. Verified
-  live: `laluka-osk` holds exactly two projects, both self-started
-  concurrently.
+  dedup, `MAX_SAVED_PROJECTS = 2` and `MAX_STARTS_PER_DAY = 2`.
+- **No automated cleanup** of expired D1 sessions, `jobs/{id}/status.json`
+  objects, or R2 site objects when a project is deleted (delete removes only the
+  D1 row).
+- **`deepdoc deploy` refuses the whole site if one page failed**, so a throttled
+  or capped run fails outright instead of degrading. This is how
+  `shopware/shopware` failed on the old Azure setup.

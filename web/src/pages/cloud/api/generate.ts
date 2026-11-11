@@ -67,6 +67,18 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
   const user = await requireSession(env, cookies);
   if (!user) return new Response(JSON.stringify({ error: "not authenticated" }), { status: 401 });
 
+  // Kill switch (a [vars] entry in wrangler.toml): lets us refuse new jobs while
+  // the runner or its LLM is unavailable, instead of accepting a request that would
+  // sit in "queued" forever.
+  if (env.GENERATION_PAUSED === "1") {
+    return new Response(
+      JSON.stringify({
+        error: "Generating new docs is paused for a short while as we move infrastructure. Existing sites are still available.",
+      }),
+      { status: 503, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   const body = (await request.json().catch(() => null)) as
     | {
         owner?: string;
@@ -129,7 +141,7 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
     // window between enqueue and the container writing its first status. That
     // is in-flight, not absent. Treating null as falsy here let a second
     // request through during exactly that window, enqueuing a duplicate job:
-    // two Container Apps executions for one repo, both writing the same R2
+    // two generation tasks for one repo, both writing the same R2
     // prefix, with D1 keeping only the second job_id so the first billed on
     // untracked. Same failure class as the openclaw/openclaw incident, and
     // the same null-is-in-flight lesson already learned in
@@ -193,10 +205,9 @@ export const POST: APIRoute = async ({ request, locals, cookies }) => {
   const avatarUrl = meta?.avatarUrl ?? body?.avatarUrl ?? null;
   const stars = meta?.stars ?? body?.stars ?? null;
 
-  // Dispatch = enqueue. This endpoint mints the job_id; a KEDA-scaled
-  // Container Apps Job picks the message up and processes it in its own
-  // isolated container. github_token rides in the message (private queue;
-  // deleted after processing).
+  // Dispatch: this endpoint mints the job_id, writes the job's input to R2 and
+  // starts one isolated Fargate task for it. github_token travels via R2 (read
+  // once, then deleted by the task), never in the RunTask call.
   const jobId = crypto.randomUUID().replace(/-/g, "").slice(0, 12);
   const enqueued = await enqueueJob(env, {
     job_id: jobId,

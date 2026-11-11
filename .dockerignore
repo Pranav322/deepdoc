@@ -1,0 +1,15 @@
+# Allowlist: the hosted runner image needs only the deepdoc package and the
+# runner itself. Everything else (web/, tests/, docs/, vscode-extension/, .git)
+# would bloat the build context and the image.
+*
+!pyproject.toml
+!README.md
+!LICENSE
+!deepdoc/
+!hosted-runner/
+**/__pycache__
+**/node_modules
+deepdoc/video
+deepdoc/generator/mdx_validator/node_modules
+hosted-runner/.venv
+hosted-runner/aws

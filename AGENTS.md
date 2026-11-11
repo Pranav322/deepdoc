@@ -524,6 +524,15 @@ Requires two Pages secrets: `CF_ACCOUNT_ID` and `CF_BROWSER_TOKEN` (an API token
 REST path is still `/browser-rendering/screenshot`). Without them the endpoint serves a
 designed SVG placeholder rather than failing.
 
+**The placeholder (`fallbackSvg`) is an SVG document on the app's own origin**, built from
+`owner`/`repo` taken straight from the request URL. Opened directly, it renders and runs
+like a page, so both values must go through `escapeXml()` and the response carries
+`Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'` plus `nosniff`.
+Until 2026-11-12 neither was true and `/api/thumb/<"><script>…>/x` was a reflected XSS
+on cloud.deepdoc.tech. Its design is an outline of a docs page titled with the repo name,
+in the gallery's neutrals, matching the client-side `WIRE_SVG` so a cold card looks like
+a page still loading.
+
 **Two variants per site, light and dark.** Generated docs sites use `next-themes`, which
 falls back to `prefers-color-scheme` and applies the result as a *class* on `<html>`. A
 headless browser reports no preference, so every capture came out light — glaring inside a

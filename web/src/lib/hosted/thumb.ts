@@ -30,43 +30,61 @@ export function parseTheme(v: string | null): ThumbTheme {
   return v === "light" ? "light" : "dark";
 }
 
-/** Deterministic hue per owner — the same one the old iframe fallback used. */
-export function fallbackHue(owner: string): number {
-  let hash = 0;
-  for (let i = 0; i < owner.length; i++) hash = (hash * 31 + owner.charCodeAt(i)) | 0;
-  return Math.abs(hash) % 360;
+function escapeXml(v: string): string {
+  return String(v ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&apos;");
 }
 
 /**
- * Shown while a real screenshot doesn't exist yet (or can't be made). Content
- * rather than a broken image, so a half-warm gallery reads as intentional.
+ * Shown while a real screenshot doesn't exist yet (or can't be made): a quiet
+ * outline of a docs page titled with the repo's name, in the gallery's own
+ * neutrals. It matches the wireframe the gallery card draws under its image
+ * while loading, so a cold card reads as a page still arriving rather than a
+ * different kind of tile. (It used to be a saturated per-owner gradient with
+ * a giant initial, which was the loudest thing in a half-warm gallery.)
  * Short max-age so cards upgrade to the real thing on a later visit.
+ *
+ * owner/repo come straight from the request URL, and this response is an SVG
+ * *document* on the app's own origin — opened directly, it renders and runs
+ * like a page. Both values are escaped, and the CSP below forbids script
+ * outright, so a crafted /api/thumb/... link can't execute anything.
  */
 export function fallbackSvg(owner: string, repo: string, theme: ThumbTheme = "dark"): Response {
-  const hue = fallbackHue(owner);
-  const initial = (owner[0] || "?").toUpperCase()
-    .replace(/[<>&"']/g, "");
-  // The placeholder has to suit the surface it sits on, or a light-mode
-  // gallery gets a row of near-black rectangles.
-  const stops = theme === "light"
-    ? [`hsl(${hue} 34% 82%)`, `hsl(${(hue + 40) % 360} 30% 72%)`]
-    : [`hsl(${hue} 42% 26%)`, `hsl(${(hue + 40) % 360} 38% 15%)`];
-  const ink = theme === "light" ? "rgba(0,0,0,0.42)" : "rgba(255,255,255,0.86)";
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${THUMB_W}" height="${THUMB_H}" viewBox="0 0 ${THUMB_W} ${THUMB_H}" role="img" aria-label="${owner}/${repo}">
-  <defs>
-    <linearGradient id="g" x1="0" y1="0" x2="1" y2="1">
-      <stop offset="0%" stop-color="${stops[0]}"/>
-      <stop offset="100%" stop-color="${stops[1]}"/>
-    </linearGradient>
-  </defs>
-  <rect width="${THUMB_W}" height="${THUMB_H}" fill="url(#g)"/>
-  <text x="50%" y="50%" text-anchor="middle" dominant-baseline="central"
-        font-family="DM Sans, ui-sans-serif, system-ui, sans-serif"
-        font-size="220" font-weight="700" fill="${ink}">${initial}</text>
+  const light = theme === "light";
+  const bg = light ? "#FBFAF7" : "#121211";
+  const ink = light ? "#111110" : "#F0EFEA";
+  const name = escapeXml(`${owner}/${repo}`);
+  // Long names would run off the content column; the title is decoration.
+  const title = escapeXml(repo.length > 28 ? `${repo.slice(0, 27)}…` : repo);
+  const bar = (x: number, y: number, w: number, h: number, o: number) =>
+    `<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="${h / 2}" fill="${ink}" opacity="${o}"/>`;
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${THUMB_W}" height="${THUMB_H}" viewBox="0 0 ${THUMB_W} ${THUMB_H}" role="img" aria-label="${name}">
+  <rect width="${THUMB_W}" height="${THUMB_H}" fill="${bg}"/>
+  <rect width="${THUMB_W}" height="64" fill="${ink}" opacity="0.035"/>
+  <rect y="64" width="${THUMB_W}" height="1" fill="${ink}" opacity="0.07"/>
+  ${bar(40, 24, 104, 16, 0.14)}
+  ${bar(920, 20, 300, 24, 0.07)}
+  <rect y="65" width="256" height="${THUMB_H - 65}" fill="${ink}" opacity="0.02"/>
+  <rect x="256" y="65" width="1" height="${THUMB_H - 65}" fill="${ink}" opacity="0.07"/>
+  ${bar(40, 108, 136, 12, 0.13)}${bar(40, 140, 168, 12, 0.07)}${bar(40, 172, 120, 12, 0.07)}${bar(40, 204, 152, 12, 0.07)}
+  ${bar(40, 264, 112, 12, 0.13)}${bar(40, 296, 160, 12, 0.07)}${bar(40, 328, 132, 12, 0.07)}
+  <text x="336" y="160" font-family="DM Sans, ui-sans-serif, system-ui, -apple-system, sans-serif" font-size="46"
+        font-weight="600" letter-spacing="-1.4" fill="${ink}" opacity="0.62">${title}</text>
+  ${bar(336, 204, 600, 14, 0.08)}${bar(336, 234, 552, 14, 0.08)}${bar(336, 264, 384, 14, 0.08)}
+  <rect x="336" y="312" width="600" height="160" rx="14" fill="${ink}" opacity="0.045"/>
+  ${bar(368, 348, 280, 12, 0.1)}${bar(368, 380, 392, 12, 0.1)}${bar(368, 412, 216, 12, 0.1)}
+  ${bar(336, 516, 584, 14, 0.08)}${bar(336, 546, 480, 14, 0.08)}
+  ${bar(1024, 120, 160, 12, 0.1)}${bar(1024, 152, 128, 10, 0.06)}${bar(1024, 180, 144, 10, 0.06)}${bar(1024, 208, 112, 10, 0.06)}
 </svg>`;
   return new Response(svg, {
     headers: {
       "Content-Type": "image/svg+xml; charset=utf-8",
+      "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'",
+      "X-Content-Type-Options": "nosniff",
       // Short, so a cold card picks up its real screenshot soon after one gets
       // made, and so retries naturally stagger instead of stampeding.
       "Cache-Control": "public, max-age=120",

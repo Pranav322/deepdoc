@@ -483,25 +483,55 @@ expensive" pass); the rules that pass established:
   and paste the link again after OAuth.
 - **Removed 2026-08-03, on purpose:** the gallery cards' rotating conic-gradient "border
   beam" and the `attachTilt()` mousemove 3D tilt. The DeepWiki-style grid is calm and
-  flat; both effects fought it. `fallbackHue()` went with them (dead since the live-iframe
-  previews were replaced by screenshots).
+  flat; both effects fought it. (`fallbackHue()` was finally deleted in the 2026-11-12
+  pass, when the thumbnail placeholder stopped using per-owner colour.)
+- **Premium pass, 2026-11-12** (kept every rule above; the owner chose "refined, keep
+  the rules, plus site screenshots"):
+  - **Depth tokens** `--card`/`--card-hover`/`--edge`/`--shadow-card`/`--btn-shadow`/
+    `--solid-hover` are app-only, not mirrored. Every raised panel is `--card` with an
+    `inset 0 1px 0 var(--edge)` lit top edge. In light mode `--card` is *lighter* than
+    the page (`#FCFBF8`), because `--surface-raised` is darker than the page there and a
+    raised panel darker than its page reads as a hole.
+  - **Ambient light** is `body::before` (lime/teal/warm radial field, `--glow-*`) plus
+    `body::after` (masked dot grid, `--dots`), absolute at the top of every screen
+    including the mini pages. It is the only non-state use of lime, at ~10% alpha;
+    `#appbar-slot`/`#notice-slot`/`#content` sit above it with `z-index`.
+  - **`#appbar-slot` is the sticky element**, not `.appbar`. The bar used to be sticky
+    inside a 52px slot, its containing block, so it never actually stuck.
+  - **Gallery cards carry screenshots again** (`.card.has-shot` + `.card-shot`): lazy
+    `<img class="gallery-shot">` fading in (`.is-in` on load) over `WIRE_SVG`, an
+    outline of a docs page that also backs the detail page's no-preview state. The lead
+    card gets a matching `.new-shot` frame. `/projects` cards still carry none.
+  - **Avatars only from `https://avatars.githubusercontent.com/`** via `safeAvatar()`;
+    anything else renders a monogram, since a project row's avatar can fall back to a
+    client-supplied value and the gallery is public.
+  - **Language dots** use GitHub's colours from `LANG_COLORS` via `langHtml()`; they are
+    not accent and are the one source of hue in the grids.
+  - The detail page's preview sits in a **browser-window frame** (`.win-bar`, mono URL)
+    matching deepdoc.tech's hero; the generating card has a top **sweep line**
+    (`.gen-progress`) that is motion, not progress, and `setGenCardState()` stops it on
+    every terminal state.
+  - `prefers-reduced-motion` turns off all animation and transition globally.
 - **One button shape.** `.btn` plus `secondary`/`ghost`, `small`/`large`, and text-only
   `.link-danger`/`.link-quiet` for destructive and tertiary actions. Do not add a sixth
   button shape.
-- **Type ramp** is the fixed `.t-display`/`.t-title`/`.t-body`/`.t-sub`/`.t-meta` classes.
-  Negative tracking above 18px is what stops large text reading as scaled-up body copy.
+- **Type ramp** is the fixed `.t-eyebrow`/`.t-display`/`.t-sub` classes plus the
+  component-level sizes (`.ask h1`, `.card-title`, …). Negative tracking above 18px is
+  what stops large text reading as scaled-up body copy.
 - **`--seg-track`/`--seg-thumb` exist because the neutral ramp only runs one direction.**
   The visibility segmented control's active thumb must read as *raised* in both themes,
   which means lighter than its track on dark and lighter than the page on light. Deriving
-  it from `--surface-*` gives a thumb that looks recessed on dark. These two are the only
-  hard-coded colours outside the mirrored palette.
+  it from `--surface-*` gives a thumb that looks recessed on dark. They, the depth tokens
+  and the `--glow-*`/`--dots` tokens are the only hard-coded colours outside the mirrored
+  palette.
 - **`.repo-item` is a real `<button>`** (keyboard focus and Enter/Space for free), which
   means it carries an author-level `display: block` that outranks the UA's `[hidden]`
   rule — hence the explicit `.repo-item[hidden] { display: none }`. Delete that and
   `filterRepos()` silently stops filtering.
-- **No backticks or `${` inside the CSS**, comments included. The whole stylesheet is
-  inside a JS template literal; a backtick in a comment ends the string and the Astro
-  build fails with a bare `Expected ";"`.
+- **No backticks, `${` or backslashes inside the CSS**, comments included. The whole
+  stylesheet is inside a JS template literal; a backtick in a comment ends the string and
+  the Astro build fails with a bare `Expected ";"`, and a backslash escape such as a CSS
+  `content: '\2713'` is an octal escape, which template literals reject.
 
 Verify a change here with all three: `npm run test:tokens`, `npm run build`, and
 `npm run test:hosted` (the last one is the only thing that parses the client JS — it now
@@ -523,6 +553,15 @@ Requires two Pages secrets: `CF_ACCOUNT_ID` and `CF_BROWSER_TOKEN` (an API token
 **Browser Run → Edit**; the dashboard renamed Browser Rendering to Browser Run, but the
 REST path is still `/browser-rendering/screenshot`). Without them the endpoint serves a
 designed SVG placeholder rather than failing.
+
+**The placeholder (`fallbackSvg`) is an SVG document on the app's own origin**, built from
+`owner`/`repo` taken straight from the request URL. Opened directly, it renders and runs
+like a page, so both values must go through `escapeXml()` and the response carries
+`Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'` plus `nosniff`.
+Until 2026-11-12 neither was true and `/api/thumb/<"><script>…>/x` was a reflected XSS
+on cloud.deepdoc.tech. Its design is an outline of a docs page titled with the repo name,
+in the gallery's neutrals, matching the client-side `WIRE_SVG` so a cold card looks like
+a page still loading.
 
 **Two variants per site, light and dark.** Generated docs sites use `next-themes`, which
 falls back to `prefers-color-scheme` and applies the result as a *class* on `<html>`. A

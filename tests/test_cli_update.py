@@ -33,6 +33,37 @@ def test_update_requires_saved_baseline_without_since(
     assert "No sync baseline found" in result.output
 
 
+def test_update_after_partial_generate_points_to_force(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """A partial first generate leaves no synced baseline, and plain `generate`
+    refuses over existing docs, so the error must name `generate --force`."""
+    monkeypatch.setattr(
+        cli,
+        "_load_or_exit",
+        lambda: {
+            "output_dir": "docs",
+            "generation_mode": "feature_buckets",
+            "llm": {"provider": "anthropic", "model": "test"},
+        },
+    )
+    monkeypatch.setattr(cli, "_find_repo_root", lambda: tmp_path)
+
+    import deepdoc.persistence_v2 as persistence_v2
+
+    monkeypatch.setattr(
+        persistence_v2,
+        "load_sync_state",
+        lambda repo_root: {"last_attempted_commit": "abc123", "status": "partial"},
+    )
+
+    result = CliRunner().invoke(cli.main, ["update"])
+
+    assert result.exit_code != 0
+    assert "deepdoc generate --force" in result.output
+    assert "partial" in result.output
+
+
 def test_update_uses_saved_baseline_by_default(monkeypatch, tmp_path: Path) -> None:
     repo_root = tmp_path
     captured: dict[str, object] = {}

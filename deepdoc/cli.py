@@ -664,6 +664,17 @@ def update(since, deploy, replan, strict_quality):
                 f"[dim]Diffing from last sync: {since[:10]}... "
                 f"(synced at {synced_at})[/dim]"
             )
+        elif sync_state and sync_state.get("last_attempted_commit"):
+            # A first generate that ended partial (an invalid page, a failed
+            # chatbot sync) records no synced baseline, and `generate` refuses to
+            # run over existing docs, so name the command that actually recovers.
+            raise click.ClickException(
+                "The last `deepdoc generate` finished with status "
+                f"'{sync_state.get('status', 'partial')}', so there is no synced "
+                "baseline to update from yet.\n"
+                "Run `deepdoc generate --force` to regenerate everything, then use "
+                "`deepdoc update` for later changes."
+            )
         else:
             raise click.ClickException(
                 "No sync baseline found. Run `deepdoc generate` first, or pass `--since <git-ref>`."
@@ -1287,7 +1298,8 @@ def _deploy():
         raise click.ClickException(
             "Refusing to deploy docs with unresolved quality issues:\n- "
             + "\n- ".join(blockers)
-            + "\nRun `deepdoc generate` again after fixing the generation issues."
+            + "\nRegenerate with `deepdoc generate --force` (docs already exist, so plain "
+            "`deepdoc generate` refuses), then deploy again."
         )
 
     _ensure_node_installed()

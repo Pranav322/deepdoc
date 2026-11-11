@@ -813,7 +813,27 @@ def _resolve_python_module_path(
     for candidate in candidates:
         if candidate in known_files:
             return candidate
-    return ""
+
+    if module_spec.startswith("."):
+        return ""
+    # An absolute import is resolved against sys.path, which in a ``src/`` (or
+    # ``backend/``, ``services/x/``) layout is a directory above the importing file,
+    # not the repo root: ``from app.api import notes`` in ``src/app/main.py`` means
+    # ``src/app/api/notes.py``. Try the file's own ancestors after the repo root, so
+    # repo-root matches keep winning. Which ancestor is actually on sys.path is
+    # unknown, so resolve only when exactly one ancestor yields a match: with both
+    # ``src/api.py`` and ``src/app/api.py`` present, ``import api`` is ambiguous and
+    # stays unresolved rather than guessed.
+    matches: list[str] = []
+    for root in (current_dir, *current_dir.parents):
+        if not root.parts:
+            continue  # the repo root was already tried above
+        for candidate in candidates:
+            prefixed = f"{root.as_posix()}/{candidate}"
+            if prefixed in known_files:
+                matches.append(prefixed)
+                break  # candidates are ordered by preference within one root
+    return matches[0] if len(matches) == 1 else ""
 
 
 def _resolve_falcon_endpoint(

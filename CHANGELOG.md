@@ -7,6 +7,45 @@ The automated release workflow reads the section that matches the version in
 
 ## Unreleased
 
+## [0.6.3] - 2026-11-12
+
+Found by running the README quick start, as a new user, on a small public FastAPI
+repo (`testdrivenio/fastapi-crud-async`). Before these fixes the first run could
+not be deployed.
+
+### Fixed
+
+- **FastAPI router prefixes were lost in a `src/` layout.** Absolute imports were
+  resolved only from the repo root, so `from app.api import notes` in
+  `src/app/main.py` never reached `src/app/api/notes.py` and
+  `include_router(..., prefix="/notes")` was dropped: routes were recorded as `/`
+  and `/{id}`. The docs then cited the real `/notes/...` routes, the claim validator
+  marked them ungrounded, and the page went `invalid`, which blocks `deepdoc deploy`.
+  The resolver now also tries the importing file's ancestor directories (repo root
+  still wins; if two ancestors match, the import stays unresolved instead of
+  guessed). The engine fingerprint changed, so existing projects replan once.
+- **Source files with doc-like words in their names were treated as docs.** Any
+  name containing `notes`, `history`, `readme`, `changelog` or `glossary` (for
+  example `notes.py`, `order_history.py`) was classified `docs` and lost code
+  priority. The rule now applies only to prose files (`.md`, `.mdx`, `.rst`,
+  `.txt`, `.adoc`).
+- **DeepDoc documented itself.** `.deepdoc.yaml` and the legacy
+  `.deepdoc_plan.json` / `.deepdoc_file_map.json` were scanned as project files,
+  producing a "Documentation Generation Configuration" page in the user's docs.
+  They are now always excluded.
+- **Dead-end recovery messages.** After a partial first run, `deepdoc update` said
+  "run `deepdoc generate` first" and `deepdoc deploy` said "run `deepdoc generate`
+  again", while plain `generate` refuses over existing docs. Both now point to
+  `deepdoc generate --force`.
+
+### Docs
+
+- README: the `chatbot` extra needs Python 3.10–3.14, or 3.10–3.13 on Intel Macs
+  (`onnxruntime` wheel availability); corrected the clone URL and the Azure
+  example's `output_dir`.
+- Troubleshooting: Python 3.15 install failure, Hugging Face 429 on the first
+  embedding-model download, and recovering from a `partial` run.
+
 ## [0.6.2] - 2026-11-12
 
 ### Fixed

@@ -9,39 +9,13 @@ import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
 import PixelField from "../components/PixelField.astro";
 import VideoStage from "../components/VideoStage.astro";
+import Bento from "../components/home/Bento.astro";
+import Pipeline from "../components/home/Pipeline.astro";
+import WaysIn from "../components/home/WaysIn.astro";
+import Stacks from "../components/home/Stacks.astro";
 import { CLOUD, GITHUB } from "../lib/nav";
 
 const headline = "Documentation that keeps pace with your".split(" ");
-
-const phases = [
-  { name: "Scan", note: "Parse the source. Find endpoints, jobs, models, integrations and OpenAPI specs.", cost: "No LLM", spends: false },
-  { name: "Plan", note: "Cluster the call graph, then name and group the clusters into sections.", cost: "A few calls", spends: true },
-  { name: "Generate", note: "Assemble evidence for each page, write it, validate it, repair it.", cost: "One call per page", spends: true },
-  { name: "API reference", note: "Stage any OpenAPI spec as an interactive reference page.", cost: "No LLM", spends: false },
-  { name: "Build", note: "Write the site, navigation, search and optional chatbot.", cost: "No LLM", spends: false },
-];
-
-const stacks = [
-  ["Python", "Django · DRF · FastAPI · Falcon"],
-  ["JavaScript / TypeScript", "Express · Fastify · NestJS"],
-  ["PHP", "Laravel"],
-  ["Go", "net/http and common routers"],
-  ["Vue", "Components and symbols"],
-  ["OpenAPI", "Imported as a reference"],
-];
-
-const terminal = [
-  ["$ ", "pip install deepdoc"],
-  ["$ ", "deepdoc init --provider anthropic"],
-  ["$ ", "export ANTHROPIC_API_KEY=sk-ant-..."],
-  ["$ ", "deepdoc generate"],
-  ["$ ", "deepdoc serve"],
-  ["", "  Docs → http://localhost:3000"],
-];
-// Built as a string: the Astro compiler does not accept expressions inside <pre>.
-const terminalHtml = terminal
-  .map(([prompt, text]) => `<span class="ln"><span class="p">${prompt}</span><span class="${prompt ? "t" : "o"}">${text}</span></span>`)
-  .join("");
 ---
 
 <Layout>
@@ -78,150 +52,21 @@ const terminalHtml = terminal
       </div>
     </section>
 
-    <!-- What it does -->
-    <section class="block">
-      <div class="wrap">
-        <div data-reveal>
-          <p class="eyebrow"><span class="px"></span>What it does</p>
-          <h2 class="h2 block-title">One command. A docs site your team won’t ignore.</h2>
-        </div>
-        <div class="trio" data-stagger>
-          <article>
-            <span class="num mono">01</span>
-            <h3>Organised the way readers look</h3>
-            <p class="muted">Architecture, endpoints, integrations and schemas grouped by domain, not one noisy page per file.</p>
-            <p class="proof mono">auth.py, middleware.ts <span>→</span> Auth &amp; Permissions</p>
-          </article>
-          <article>
-            <span class="num mono">02</span>
-            <h3>Answers that cite real files</h3>
-            <p class="muted">An assistant ships with the site. Every answer points to a file path and line range in your source.</p>
-            <p class="proof mono">billing/routes.py:41-88</p>
-          </article>
-          <article>
-            <span class="num mono">03</span>
-            <h3>Updates touch only what changed</h3>
-            <p class="muted">Run <code class="inline-code">deepdoc update</code> after a commit and only the affected pages regenerate.</p>
-            <p class="proof mono">3 files changed <span>→</span> 2 pages</p>
-          </article>
-        </div>
-      </div>
-    </section>
+    <Bento />
+    <Pipeline />
+    <WaysIn />
+    <Stacks />
 
-    <!-- Pipeline -->
-    <section class="block ruled">
-      <div class="wrap split">
-        <div data-reveal>
-          <p class="eyebrow"><span class="px"></span>Pipeline</p>
-          <h2 class="h2 block-title">Five phases. No magic.</h2>
-          <p class="muted side-note">
-            Every page is grounded in scanned evidence, repaired into valid Markdown and checked for source
-            coverage before the site builds. Only two phases spend tokens.
-          </p>
-          <a class="arrow-link" href="/docs/reference/how-it-works">
-            How it works
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-          </a>
-        </div>
-        <ol class="phases" data-stagger>
-          {phases.map((p, i) => (
-            <li>
-              <span class="mono idx">{String(i + 1).padStart(2, "0")}</span>
-              <div>
-                <strong>{p.name}</strong>
-                <span class="muted">{p.note}</span>
-              </div>
-              <em class:list={["mono", p.spends && "spends"]}>{p.cost}</em>
-            </li>
-          ))}
-        </ol>
-      </div>
-    </section>
-
-    <!-- Chat -->
-    <section class="block ruled">
-      <div class="wrap split">
-        <div data-reveal>
-          <p class="eyebrow"><span class="px"></span>Ask your docs</p>
-          <h2 class="h2 block-title">Evidence, not assertions.</h2>
-          <p class="muted side-note">
-            Retrieval runs over your source, symbols and docs. Where it finds no support it says so instead of guessing.
-            Pick fast lookup or a deeper research pass per question.
-          </p>
-          <a class="arrow-link" href="/docs/chatbot">
-            About the chatbot
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-          </a>
-        </div>
-        <div class="frame chat" aria-label="Example chatbot conversation" data-reveal>
-          <div class="frame-bar"><span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-title">/ask</span></div>
-          <div class="chat-body" data-chat>
-            <p class="bubble user">Where does billing verification happen?</p>
-            <div class="bubble bot">
-              Payment verification runs in the billing flow and is persisted through usage records.
-              <span class="ref mono">billing/routes.py:41-88</span>
-              <span class="ref mono">services/usage.py:12-57</span>
-            </div>
-            <p class="bubble user">How does the widget token flow work?</p>
-            <div class="bubble bot">
-              The widget fetches a short-lived token from <code class="inline-code">/api/widget-token</code> and attaches it to every chat request.
-              <span class="ref mono">api/widget.ts:18-64</span>
-            </div>
-            <div class="modes mono"><span class="on">fast</span><span>deep research</span><span>code-first</span></div>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <!-- Two ways in -->
-    <section class="block ruled">
-      <div class="wrap">
-        <div data-reveal>
-          <p class="eyebrow"><span class="px"></span>Get started</p>
-          <h2 class="h2 block-title">Two ways in.</h2>
-        </div>
-        <div class="ways" data-stagger>
-          <article class="way">
-            <h3>In the browser</h3>
-            <p class="muted">Sign in with GitHub, pick a repository (private ones too) and get a docs site at a stable address. Private by default.</p>
-            <a class="btn vivid" href={CLOUD}>Open DeepDoc Cloud</a>
-          </article>
-          <article class="way">
-            <h3>In your terminal</h3>
-            <div class="frame term-frame">
-              <pre class="term" data-term set:html={terminalHtml} />
-            </div>
-            <a class="arrow-link" href="/docs/quickstart">
-              Read the quickstart
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
-            </a>
-          </article>
-        </div>
-      </div>
-    </section>
-
-    <!-- Works with -->
-    <section class="block ruled">
-      <div class="wrap">
-        <p class="eyebrow" data-reveal><span class="px"></span>Works with</p>
-        <ul class="stacks" data-stagger>
-          {stacks.map(([name, detail]) => (
-            <li><strong>{name}</strong><span class="faint">{detail}</span></li>
-          ))}
-        </ul>
-        <p class="faint stack-note">
-          Other languages parse but are not fully supported. Endpoint, runtime and call-graph analysis cover the stacks above.
-        </p>
-      </div>
-    </section>
-
-    <!-- Closing -->
+    <!-- Closing: paintable, like the hero. -->
     <section class="closing">
-      <div class="closing-grid pixel-grid" aria-hidden="true"></div>
-      <div class="wrap closing-inner" data-reveal>
-        <h2 class="h2">Your codebase already tells a story. <span class="em-serif">Let it.</span></h2>
-        <div class="hero-cta">
-          <a class="btn vivid" href={CLOUD}>Generate docs for a repo</a>
+      <PixelField />
+      <div class="wrap closing-inner">
+        <h2 class="display closing-title" data-words>Your codebase already tells a story. <span class="em-serif">Let it.</span></h2>
+        <div class="hero-cta" data-reveal>
+          <a class="btn vivid" href={CLOUD}>
+            Generate docs for a repo
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+          </a>
           <a class="btn secondary" href="/docs">Read the docs</a>
         </div>
       </div>
@@ -231,7 +76,7 @@ const terminalHtml = terminal
   <Footer />
 </Layout>
 
-<style>
+<style is:global>
   /* Hero */
   .hero { position: relative; overflow: hidden; padding: 96px 0 64px; border-bottom: 1px solid var(--line); }
   .hero-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
@@ -247,100 +92,29 @@ const terminalHtml = terminal
   .copy.is-copied .copy-icon { display: none; }
   .copy.is-copied .check-icon { display: block; }
 
-  /* Blocks */
-  .block { padding: 104px 0; }
+  /* Section frame, shared by the components in components/home/. */
+  .block { padding: 120px 0; }
   .block.ruled { border-top: 1px solid var(--line); }
-  .block-title { margin-top: 14px; max-width: 640px; }
-  .side-note { margin: 18px 0 24px; max-width: 420px; }
-  .split { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; align-items: start; }
+  .block-title { margin-top: 16px; }
+  [data-words] .w { display: inline-block; }
 
-  .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 48px; }
-  .trio article {
-    padding: 26px 26px 24px; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
-    background: var(--card); box-shadow: inset 0 1px 0 var(--edge);
-    transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
-  }
-  .trio article:hover { border-color: var(--accent-line); box-shadow: inset 0 1px 0 var(--edge), var(--shadow-card); }
-  .trio h3 { margin: 16px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
-  .trio p.muted { font-size: 14.5px; }
-  .num { font-size: 12px; color: var(--accent); }
-  .proof {
-    display: inline-block; margin-top: 20px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px;
-    color: var(--ink-muted); border: 1px solid var(--line-strong); background: var(--surface-raised);
-  }
-  .proof span { color: var(--accent); }
-
-  .phases { border-top: 1px solid var(--line); }
-  .phases li {
-    display: grid; grid-template-columns: 28px minmax(0, 1fr) auto; gap: 14px; align-items: baseline;
-    padding: 18px 0; border-bottom: 1px solid var(--line);
-  }
-  .phases strong { display: block; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
-  .phases div span { display: block; margin-top: 3px; font-size: 14px; }
-  .phases .idx { font-size: 12px; color: var(--ink-faint); }
-  .phases em {
-    font-style: normal; font-size: 11px; white-space: nowrap; padding: 3px 9px; border-radius: 999px;
-    color: var(--ink-faint); border: 1px solid var(--line-strong);
-  }
-  /* Colour carries meaning here: only the phases that spend tokens get it. */
-  .phases em.spends { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
-
-  /* Chat demo */
-  .chat-body { padding: 22px; display: flex; flex-direction: column; gap: 12px; }
-  .bubble { max-width: 88%; padding: 11px 14px; border-radius: var(--r-md); font-size: 14px; line-height: 1.55; }
-  .bubble.user { align-self: flex-end; background: var(--surface-high); color: var(--ink); }
-  .bubble.bot { align-self: flex-start; border: 1px solid var(--line-strong); color: var(--ink-muted); }
-  .ref {
-    display: inline-block; margin: 8px 6px 0 0; padding: 2px 8px; border-radius: 999px;
-    border: 1px solid var(--accent-line); background: var(--accent-dim);
-    font-size: 11px; color: var(--accent);
-  }
-  .modes { display: flex; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--ink-faint); }
-  .modes span { padding: 3px 11px; border: 1px solid var(--line); border-radius: 999px; }
-  .modes .on { color: var(--solid-ink); background: var(--solid); border-color: var(--solid); }
-
-  /* Ways in */
-  .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 48px; }
-  .way {
-    display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding: 28px;
-    border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--card);
-    box-shadow: inset 0 1px 0 var(--edge);
-  }
-  .way:first-child { justify-content: space-between; }
-  .way h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
-  .way .frame { width: 100%; box-shadow: none; background: var(--surface); }
-  .way .term { padding: 14px 16px; font-size: 12.5px; }
-  .way .term :global(.p) { color: var(--accent); }
-  .way .term :global(.ln) { display: block; }
-
-  .stacks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 28px; border-top: 1px solid var(--line); }
-  .stacks li { display: flex; flex-direction: column; gap: 2px; padding: 18px 16px 18px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-  .stacks strong { font-weight: 600; letter-spacing: -0.01em; }
-  .stack-note { margin-top: 18px; font-size: 13px; max-width: 560px; }
-
-  .closing { position: relative; border-top: 1px solid var(--line); padding: 120px 0; overflow: hidden; }
-  .closing-grid {
-    position: absolute; inset: 0; pointer-events: none;
-    -webkit-mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, black 0%, transparent 75%);
-    mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, black 0%, transparent 75%);
-  }
-  .closing-inner { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; gap: 28px; }
-  .closing .h2 { max-width: 560px; }
+  /* Closing */
+  .closing { position: relative; overflow: hidden; border-top: 1px solid var(--line); padding: 150px 0 140px; }
+  .closing-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .closing-title { max-width: 780px; font-size: clamp(2.25rem, 5.4vw, 4rem); }
+  .closing .hero-cta { margin-top: 40px; }
 
   @media (max-width: 860px) {
     .hero { padding: 56px 0 44px; }
     .stage-wrap { margin-top: 44px; }
-    .block { padding: 64px 0; }
-    .split { grid-template-columns: minmax(0, 1fr); gap: 36px; }
-    .trio { grid-template-columns: minmax(0, 1fr); }
-    .ways { grid-template-columns: minmax(0, 1fr); }
-    .stacks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .closing { padding: 72px 0; }
+    .block { padding: 72px 0; }
+    .closing { padding: 96px 0 88px; }
   }
 </style>
 
 <script>
   import { animate, inView, scroll, stagger } from "motion";
+  import { ease, motionOn, revealWords, spotlight } from "../scripts/motion";
 
   // Copy-to-clipboard for the install command.
   document.querySelectorAll<HTMLButtonElement>("button.copy").forEach((btn) => {
@@ -353,18 +127,14 @@ const terminalHtml = terminal
     });
   });
 
-  // Motion. Layout.astro adds html.motion before first paint (and removes it
-  // again if this module never loads), which hides everything animated here.
-  const root = document.documentElement;
-  clearTimeout((window as any).__motionFallback);
+  spotlight();
 
-  if (root.classList.contains("motion")) {
-    const ease = [0.22, 1, 0.36, 1] as const;
-    const each = <T extends Element>(sel: string, scope: ParentNode = document) => Array.from(scope.querySelectorAll<T>(sel));
+  // Page-level motion. The section demos animate themselves (components/home).
+  if (motionOn()) {
+    const each = <T extends Element>(sel: string) => Array.from(document.querySelectorAll<T>(sel));
 
     // Hero: the headline arrives word by word, then the rest rises in order.
-    const words = each<HTMLElement>(".hero-title .w");
-    animate(words, { opacity: [0, 1], y: ["0.45em", "0em"], filter: ["blur(10px)", "blur(0px)"] }, { delay: stagger(0.055, { startDelay: 0.1 }), duration: 0.8, ease });
+    animate(each<HTMLElement>(".hero-title .w"), { opacity: [0, 1], y: ["0.45em", "0em"], filter: ["blur(10px)", "blur(0px)"] }, { delay: stagger(0.055, { startDelay: 0.1 }), duration: 0.8, ease });
     animate(each(".hero [data-rise]"), { opacity: [0, 1], y: [22, 0] }, { delay: stagger(0.09, { startDelay: 0.25 }), duration: 0.8, ease });
 
     // The video window starts tilted back and stands upright as it scrolls in.
@@ -376,20 +146,8 @@ const terminalHtml = terminal
       });
     }
 
-    // Sections: single blocks rise, groups rise one child after another.
-    inView("[data-reveal]", (el) => { animate(el, { opacity: [0, 1], y: [26, 0] }, { duration: 0.8, ease }); }, { amount: 0.3 });
-    inView("[data-stagger]", (el) => {
-      animate(Array.from(el.children), { opacity: [0, 1], y: [26, 0] }, { delay: stagger(0.08), duration: 0.75, ease });
-    }, { amount: 0.2 });
-
-    // The chat plays out like a conversation.
-    inView("[data-chat]", (el) => {
-      animate(Array.from(el.children), { opacity: [0, 1], y: [12, 0], scale: [0.97, 1] }, { delay: stagger(0.45, { startDelay: 0.3 }), duration: 0.5, ease });
-    }, { amount: 0.5 });
-
-    // The terminal prints line by line.
-    inView("[data-term]", (el) => {
-      animate(each(".ln", el), { opacity: [0, 1], x: [-8, 0] }, { delay: stagger(0.22, { startDelay: 0.35 }), duration: 0.35, ease });
-    }, { amount: 0.6 });
+    // Headings arrive word by word; everything else marked data-reveal rises.
+    revealWords();
+    inView("[data-reveal]", (el) => { animate(el, { opacity: [0, 1], y: [28, 0] }, { duration: 0.85, ease }); }, { amount: 0.25 });
   }
 </script>

@@ -384,7 +384,8 @@ web/
     lib/nav.ts              ← header/footer links AND the docs reading order (`docsSections`)
     content.config.ts       ← `docs` collection (glob over src/content/docs/**/*.mdx)
     content/docs/**.mdx     ← the product docs
-    components/             ← Header, Footer, Logo, PixelField + VideoStage (hero), docs/ (MDX components)
+    components/             ← Header, Footer, Logo, PixelField + VideoStage (hero), home/ (landing sections), docs/ (MDX components)
+    scripts/motion.ts       ← shared Motion helpers for the landing page
     pages/index.astro       ← marketing (NOT prerendered, see below) · pages/docs/[...slug].astro + search.json.ts · pages/changelog.astro
     pages/cloud/            ← the hosted app (see Hosted-generation)
     lib/hosted/             ← hosted app server code and page_html.ts
@@ -410,12 +411,24 @@ Theme crosses the subdomain via a `dd_theme` cookie on `.deepdoc.tech` (localSto
 ### Landing hero (`components/PixelField.astro`, `components/VideoStage.astro`)
 `PixelField` is a dependency-free canvas that fills its parent section; on the landing page that is the **entire hero** (headline and video), edge to edge, fading in under the header. Cells spark sparsely on their own in the `--p1`..`--p5` ramp, and the pointer paints a fading trail anywhere in the hero. Colours are re-read on theme change; the loop pauses off-screen and ambient sparks stop under `prefers-reduced-motion`. `VideoStage` is just the demo recording in a window (width-capped at 1100px) and its caption, directly under the hero text; it autoplays muted and loops while visible. **Do not** box the grid, move the video down the page, or replace it with an abstract demo (all rejected). The recording itself still shows the old lime branding and should be re-rendered from `deepdoc/video` when convenient.
 
+### Landing sections (`components/home/`)
+Below the hero the page shows the product instead of describing it. Each section is a component with its own markup, global styles and script; without motion every demo rests in its finished state, so the markup is the complete picture:
+- `Bento.astro` — four looping demos: files wiring into grouped pages (SVG paths measured from the DOM and redrawn on resize), a chat that plays out with citations, an update run where only changed pages rewrite, and theme swatches recolouring a mini page (the one place other hues appear, because it demonstrates `site.colors.primary`).
+- `Pipeline.astro` — a self-playing five-step tablist: the active step's bar fills over ~4s, then advances; hover pauses, click jumps. Only the two phases that spend tokens get an accent chip. Sample output lines are illustrative.
+- `WaysIn.astro` — the hosted repo picker being used, and the CLI being typed.
+- `Stacks.astro` — two opposing CSS marquees (four copies per row, sliding by 25%, so it is seamless at any width); they wrap and stand still under reduced motion.
+- The closing section reuses `PixelField`, so it is paintable like the hero.
+- Cards carrying `.spot` get a pointer-following highlight (`spotlight()`); it is ink-tinted, not coloured.
+An earlier version of these sections (text cards, a plain list, a static chat) was rejected as "blocks of text". Keep each section a working miniature of the feature.
+
 ### Animation (Motion)
-The landing page uses the vanilla `motion` package (the library formerly called Framer Motion; no React). All of it lives in the `<script>` at the bottom of `index.astro`:
-- Hero: headline words arrive one by one (`.hero-title .w`), then `[data-rise]` elements in order; the video frame (`#demo-frame`) is scroll-linked, tilting upright from `rotateX(16deg)` as it enters.
-- Sections: `[data-reveal]` blocks rise once in view; `[data-stagger]` containers reveal their children in sequence; `[data-chat]` plays the conversation; `[data-term]` prints the terminal line by line.
-- **Start states are CSS, not JS.** `Layout.astro`'s inline head script adds `html.motion` before first paint (only when reduced motion is off), and `site.css` hides the animated elements under that class, so nothing flashes. The same script removes the class after 2.5s if the page module never loads, and the module skips animating if the class is gone. Adding a new animated attribute means adding it to that CSS rule too.
-- The Astro compiler rejects expressions inside `<pre>`; the terminal markup is built as a string and passed with `set:html`.
+The landing page uses the vanilla `motion` package (the library formerly called Framer Motion; no React). Shared helpers are in `src/scripts/motion.ts`: `motionOn()`, `loopInView()` (runs a demo repeatedly only while it is on screen), `revealWords()`, `spotlight()`.
+- Hero: headline words arrive one by one, then `[data-rise]` elements; the video frame (`#demo-frame`) is scroll-linked, tilting upright from `rotateX(16deg)`.
+- `[data-reveal]` blocks rise once in view; `[data-words]` headings arrive word by word.
+- **Start states are CSS, not JS.** `Layout.astro`'s inline head script adds `html.motion` before first paint (only when reduced motion is off), and `site.css` (plus each component, for its own demo) hides animated elements under that class, so nothing flashes. The same script removes the class after 2.5s if no page module loads; importing `scripts/motion.ts` cancels that. A new animated attribute needs a matching start-state rule.
+- Every component must check `motionOn()` and leave static markup untouched when it is false.
+- The Astro compiler rejects JSX expressions inside `<pre>` and is fragile with `cond && <el/>` inside `.map()`; render both branches or build a string.
+- **Verifying in the Browser pane:** when the pane is hidden the page is a background tab, `requestAnimationFrame` stalls, and reveals freeze half-faded in screenshots. That is the preview, not a bug; force final states with an injected style to check layout.
 
 ### Docs
 - Pages are `src/content/docs/**/*.mdx` with `title` and `description` frontmatter. Slugs are public URLs (`/docs/theming/colours`); do not rename them casually.

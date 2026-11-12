@@ -215,13 +215,11 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 
-/* Start states for the Motion-driven animations (index.astro). html.motion is
+/* Start states for the Motion-driven animations (index.astro, components/home). html.motion is
    set before first paint by Layout.astro and only when motion is allowed. */
 html.motion [data-rise],
 html.motion [data-reveal],
-html.motion [data-stagger] > *,
-html.motion [data-chat] > *,
-html.motion [data-term] .ln,
+html.motion [data-words],
 html.motion .hero-title .w { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {

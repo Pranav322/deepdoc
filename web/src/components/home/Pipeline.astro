@@ -1,0 +1,181 @@
+---
+/**
+ * The five phases as a self-playing stepper. Each step's bar fills while it is
+ * active, then the next one takes over; clicking a step jumps to it. The panel
+ * below shows what that phase does and what its output looks like.
+ * Without motion the first phase is shown and the steps still work as tabs.
+ */
+const phases = [
+  {
+    name: "Scan", cost: "No LLM", spends: false,
+    note: "Parses your source locally and maps what is there: routes, models, background jobs, integrations and OpenAPI specs.",
+    out: ["parsed source · python, typescript", "38 endpoints across 6 routers", "models, jobs and integrations indexed"],
+  },
+  {
+    name: "Plan", cost: "A few calls", spends: true,
+    note: "Clusters the call graph into domains, then asks a model to name them and arrange them into sections.",
+    out: ["call graph clustered · 11 domains", "named and grouped into 5 sections", "plan saved · .deepdoc/plan.json"],
+  },
+  {
+    name: "Generate", cost: "One call per page", spends: true,
+    note: "Assembles the evidence for each page, writes it, validates it against the source and repairs what fails.",
+    out: ["evidence assembled per page", "42 pages written", "validated against source · 0 invalid"],
+  },
+  {
+    name: "API reference", cost: "No LLM", spends: false,
+    note: "If the repository has an OpenAPI spec, it is staged as an interactive reference alongside the written pages.",
+    out: ["openapi.yaml found", "staged as an interactive reference"],
+  },
+  {
+    name: "Build", cost: "No LLM", spends: false,
+    note: "Writes the site itself: navigation, search, theme and the optional chatbot. Ready to preview or deploy.",
+    out: ["site, navigation and search written", "ready · deepdoc serve"],
+  },
+];
+---
+
+<section class="block ruled" id="pipeline">
+  <div class="wrap">
+    <div class="block-head">
+      <p class="eyebrow" data-reveal><span class="px"></span>Pipeline</p>
+      <h2 class="h2 block-title" data-words>Five phases. No magic.</h2>
+      <p class="muted pipe-lede" data-reveal>
+        Every page is grounded in scanned evidence and checked against the source before the site builds.
+        Only two phases spend tokens.
+      </p>
+    </div>
+
+    <div class="pipe" data-pipe data-reveal>
+      <div class="pipe-steps" role="tablist" aria-label="Pipeline phases">
+        {phases.map((p, i) => (
+          <button type="button" role="tab" class="pipe-step" aria-selected={i === 0 ? "true" : "false"} data-i={i}>
+            <span class="pipe-bar"><i></i></span>
+            <span class="pipe-n mono">{String(i + 1).padStart(2, "0")}</span>
+            <strong>{p.name}</strong>
+          </button>
+        ))}
+      </div>
+
+      <div class="pipe-panels spot">
+        {phases.map((p, i) => (
+          <div class="pipe-panel" role="tabpanel" data-i={i} hidden={i !== 0}>
+            <div class="pipe-copy">
+              <span class="pipe-big mono">{String(i + 1).padStart(2, "0")}</span>
+              <h3>{p.name}</h3>
+              <p>{p.note}</p>
+              <em class:list={["mono", p.spends && "spends"]}>{p.cost}</em>
+            </div>
+            <div class="pipe-out mono" aria-hidden="true">
+              <p class="pipe-cmd"><span class="p">$</span> deepdoc generate</p>
+              {p.out.map((line) => <p class="pipe-ln"><span class="ok">✓</span> {line}</p>)}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+
+    <a class="arrow-link pipe-more" href="/docs/reference/how-it-works" data-reveal>
+      How it works
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+    </a>
+  </div>
+</section>
+
+<style is:global>
+  .pipe-lede { margin-top: 18px; max-width: 520px; }
+  .pipe { margin-top: 56px; }
+  .pipe-steps { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 12px; }
+  .pipe-step {
+    display: flex; flex-direction: column; align-items: flex-start; gap: 6px; padding: 0 0 4px; border: 0; background: none;
+    text-align: left; cursor: pointer; color: var(--ink-faint); transition: color 0.25s var(--ease);
+  }
+  .pipe-step:hover, .pipe-step[aria-selected="true"] { color: var(--ink); }
+  .pipe-step strong { font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
+  .pipe-n { font-size: 11px; }
+  .pipe-step[aria-selected="true"] .pipe-n { color: var(--accent); }
+  .pipe-bar { display: block; width: 100%; height: 2px; margin-bottom: 12px; border-radius: 2px; background: var(--line-strong); overflow: hidden; }
+  .pipe-bar i { display: block; width: 100%; height: 100%; background: var(--accent); transform: scaleX(0); transform-origin: 0 50%; }
+  .pipe-step.is-past .pipe-bar i, .pipe-step[aria-selected="true"] .pipe-bar i { transform: scaleX(1); }
+
+  .pipe-panels {
+    position: relative; overflow: hidden; margin-top: 28px; min-height: 250px;
+    border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--card); box-shadow: inset 0 1px 0 var(--edge);
+  }
+  .pipe-panel { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 6fr); min-height: 250px; }
+  .pipe-copy { position: relative; padding: 36px 36px 34px; }
+  .pipe-big { font-size: 12px; color: var(--accent); }
+  .pipe-copy h3 { margin-top: 10px; font-size: clamp(1.5rem, 2.6vw, 2rem); font-weight: 600; letter-spacing: -0.035em; line-height: 1.1; }
+  .pipe-copy p { margin: 12px 0 20px; max-width: 40ch; font-size: 15px; line-height: 1.6; color: var(--ink-muted); }
+  .pipe-copy em {
+    display: inline-block; font-style: normal; font-size: 11px; padding: 3px 10px; border-radius: 999px;
+    color: var(--ink-faint); border: 1px solid var(--line-strong);
+  }
+  /* Colour carries meaning: only the phases that spend tokens get it. */
+  .pipe-copy em.spends { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
+  .pipe-out { padding: 36px; border-left: 1px solid var(--line); background: var(--surface); font-size: 12.5px; line-height: 2; color: var(--ink-muted); }
+  .pipe-cmd { color: var(--ink); margin-bottom: 6px; }
+  .pipe-out .p, .pipe-out .ok { color: var(--accent); }
+  .pipe-more { margin-top: 24px; }
+
+  @media (max-width: 860px) {
+    .pipe-steps { gap: 6px; }
+    .pipe-step strong { font-size: 12.5px; }
+    .pipe-panel { grid-template-columns: minmax(0, 1fr); }
+    .pipe-copy { padding: 26px 24px; }
+    .pipe-out { padding: 22px 24px; border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+
+<script>
+  import { animate, inView, stagger } from "motion";
+  import { ease, motionOn } from "../../scripts/motion";
+
+  const pipe = document.querySelector<HTMLElement>("[data-pipe]");
+  if (pipe) {
+    const steps = Array.from(pipe.querySelectorAll<HTMLButtonElement>(".pipe-step"));
+    const panels = Array.from(pipe.querySelectorAll<HTMLElement>(".pipe-panel"));
+    const DWELL = 4.2;
+    let current = 0, timer: ReturnType<typeof animate> | null = null, playing = false, hovering = false;
+
+    function show(i: number, animateIn: boolean) {
+      current = i;
+      steps.forEach((s, n) => {
+        s.setAttribute("aria-selected", String(n === i));
+        s.classList.toggle("is-past", n < i);
+        const bar = s.querySelector<HTMLElement>(".pipe-bar i")!;
+        bar.style.transform = n < i ? "scaleX(1)" : n > i ? "scaleX(0)" : "";
+      });
+      panels.forEach((p, n) => (p.hidden = n !== i));
+      if (animateIn) {
+        const panel = panels[i];
+        animate(panel.querySelector(".pipe-copy")!, { opacity: [0, 1], y: [14, 0] }, { duration: 0.5, ease });
+        animate(Array.from(panel.querySelectorAll(".pipe-out p")), { opacity: [0, 1], x: [-10, 0] }, { duration: 0.4, delay: stagger(0.16, { startDelay: 0.15 }), ease });
+      }
+    }
+
+    function run() {
+      timer?.cancel();
+      if (!playing || hovering || !motionOn()) return;
+      const bar = steps[current].querySelector<HTMLElement>(".pipe-bar i")!;
+      timer = animate(bar, { scaleX: [0, 1] }, { duration: DWELL, ease: "linear" });
+      timer.finished.then(() => {
+        if (!playing || hovering) return;
+        show((current + 1) % steps.length, true);
+        run();
+      }).catch(() => {});
+    }
+
+    steps.forEach((s, i) => s.addEventListener("click", () => { show(i, motionOn()); run(); }));
+    pipe.addEventListener("pointerenter", () => { hovering = true; timer?.pause(); });
+    pipe.addEventListener("pointerleave", () => { hovering = false; timer ? timer.play() : run(); });
+
+    if (motionOn()) {
+      inView(pipe, () => {
+        playing = true;
+        show(current, true);
+        run();
+        return () => { playing = false; timer?.cancel(); };
+      }, { amount: 0.4 });
+    }
+  }
+</script>

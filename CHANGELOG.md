@@ -13,8 +13,9 @@ The automated release workflow reads the section that matches the version in
   cloud.deepdoc.tech now share one palette (`web/src/styles/tokens.css`): warm
   charcoal or paper surfaces and a single vermilion accent in place of the lime, with
   a fine pixel grid and film grain for texture. The landing page leads with the demo
-  recording on a full-width pixel grid you can paint with the pointer, and animates
-  in with Motion.
+  recording on a full-width pixel grid you can paint with the pointer. The sections
+  below it are live demos (files wiring into pages, a chat with citations, an update
+  run, a self-playing pipeline, the repo picker and CLI) animated with Motion.
   The product docs moved from a separate Next.js + Fumadocs app into the same Astro
   project at `/docs` (same URLs), with a sidebar, table of contents, client-side
   search (⌘K) and a new DeepDoc Cloud page.

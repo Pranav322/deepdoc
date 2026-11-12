@@ -1,139 +1,128 @@
-import {
-  AbsoluteFill,
-  interpolate,
-  random,
-  spring,
-  useCurrentFrame,
-  useVideoConfig,
-} from "remotion";
-import { C, F, SPRING } from "../constants";
+import { AbsoluteFill, Easing, interpolate, random, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { C, F, SPRING, T } from "../constants";
 
-const PARTICLE_COUNT = 26;
+// The hook. File names are real paths from the youtube-notes repository (the
+// same files its generated docs cite); "56" is the real scan count from the
+// run shown next (see data.ts). The line "Your codebase grows. The docs
+// don't." is the whole pitch, so it comes first.
+const FILES = [
+  "backend/app/main.py", "backend/app/models.py", "backend/app/db.py", "backend/app/services/ai.py",
+  "backend/app/services/transcript.py", "backend/pyproject.toml", "backend/requirements.txt", "backend/Dockerfile",
+  "docker-compose.yml", "README.md", "frontend/app/page.tsx", "frontend/app/layout.tsx",
+  "frontend/components/NoteInput.tsx", "frontend/components/NoteViewer.tsx", "frontend/components/NotesGallery.tsx",
+  "frontend/lib/api.ts", "frontend/package.json", "frontend/tsconfig.json", "frontend/vercel.json", "frontend/Dockerfile",
+  "frontend/app/api/[...path]/route.ts", "frontend/README.md",
+];
+
+const W = 1920, H = 1080, CX = W / 2, CY = H / 2;
+const clamp = { extrapolateLeft: "clamp", extrapolateRight: "clamp" } as const;
+
+// Seeded layout in six rows, three above the headline and three below, so the
+// files frame the line instead of sitting behind it. Chips are packed by their
+// measured width so they never overlap. Every render is identical.
+const ROWS: { y: number; count: number; shift: number }[] = [
+  { y: 168, count: 4, shift: -50 }, { y: 232, count: 4, shift: 70 }, { y: 296, count: 3, shift: -20 },
+  { y: 790, count: 4, shift: 60 }, { y: 854, count: 4, shift: -60 }, { y: 918, count: 3, shift: 30 },
+];
+const widthOf = (name: string) => name.length * 10.9 + 52;
+const GAP = 22;
+let cursor = 0;
+const chips = ROWS.flatMap((row, r) => {
+  const names = FILES.slice(cursor, cursor + row.count);
+  const total = names.reduce((sum, n) => sum + widthOf(n), 0) + GAP * (names.length - 1);
+  let x = (W - total) / 2 + row.shift;
+  return names.map((name) => {
+    const i = cursor++;
+    const left = x;
+    x += widthOf(name) + GAP;
+    const edge = Math.floor(random(`e${i}`) * 4);
+    const far = 700 + random(`f${i}`) * 500;
+    const from = [[-far, 0], [far, 0], [0, -far], [0, far]][edge];
+    return { name, x: left, y: row.y + (random(`y${i}`) - 0.5) * 10, fromX: from[0], fromY: from[1], delay: 4 + Math.floor(random(`d${i}`) * 46), hot: i % 7 === 2, phase: random(`b${i}`) * 6.28 };
+  });
+});
+
+const IN_END = 150; // chips converge and vanish; "One command." takes over
 
 export const Intro = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-  const t = frame / fps;
 
-  const fadeIn  = interpolate(frame, [0, 20], [0, 1], { extrapolateRight: "clamp" });
-  const fadeOut = interpolate(frame, [80, 105], [1, 0], { extrapolateLeft: "clamp" });
-  const opacity = Math.min(fadeIn, fadeOut);
+  const count = Math.round(interpolate(frame, [4, 64], [0, 56], { ...clamp, easing: Easing.out(Easing.cubic) }));
+  const converge = interpolate(frame, [104, 138], [0, 1], { ...clamp, easing: Easing.in(Easing.cubic) });
+  const exit = interpolate(frame, [T.INTRO - T.OVERLAP, T.INTRO], [0, 1], { ...clamp, easing: Easing.inOut(Easing.cubic) });
 
-  const logoSpring     = spring({ frame, fps, config: SPRING.soft });
-  const tagSpring      = spring({ frame: Math.max(0, frame - 6),  fps, config: SPRING.snappy });
-  const subtitleSpring = spring({ frame: Math.max(0, frame - 18), fps, config: SPRING.snappy });
+  const word = (start: number, i: number) => {
+    const p = interpolate(frame, [start + i * 5, start + i * 5 + 16], [0, 1], { ...clamp, easing: Easing.out(Easing.cubic) });
+    return { display: "inline-block", marginRight: "0.24em", opacity: p, transform: `translateY(${(1 - p) * 0.45}em)`, filter: `blur(${(1 - p) * 12}px)` } as const;
+  };
+
+  const l1 = ["Your", "codebase", "grows."];
+  const l2 = ["The", "docs", "don't."];
+  const headOut = interpolate(frame, [96, 112], [1, 0], clamp);
+
+  const oneIn = interpolate(frame, [118, 136], [0, 1], { ...clamp, easing: Easing.out(Easing.cubic) });
+  const cmd = "deepdoc generate";
+  const typed = cmd.slice(0, Math.max(0, Math.floor((frame - 134) / 1.6)));
+  const caretOn = Math.floor(frame / 12) % 2 === 0;
+  const cmdIn = spring({ frame: frame - 128, fps, config: SPRING.snappy });
 
   return (
-    <AbsoluteFill style={{ background: C.bg, overflow: "hidden", opacity }}>
-
-      {/* ── Aurora, full-bleed and generously blurred so it never reads
-          as a hard-edged rectangle (the old CSS-mask approach clipped
-          visibly at the panel edge) ─────────────────────────────── */}
-      <div style={{ position: "absolute", inset: -200, overflow: "hidden", pointerEvents: "none" }}>
-        <div style={{
-          position: "absolute", top: "-10%", left: "6%", width: "56%", height: "78%",
-          background: `radial-gradient(ellipse at 40% 40%, ${C.accentGlow} 0%, transparent 70%)`,
-          filter: "blur(120px)",
-          transform: `translate(${Math.sin(t * 0.6) * 36}px, ${Math.cos(t * 0.42) * 26}px)`,
-        }} />
-        <div style={{
-          position: "absolute", top: "-4%", right: "8%", width: "50%", height: "70%",
-          background: `radial-gradient(ellipse at 60% 35%, rgba(0,229,160,0.16) 0%, transparent 68%)`,
-          filter: "blur(130px)",
-          transform: `translate(${Math.sin(t * 0.4 + 1) * 30}px, ${Math.cos(t * 0.55) * 24}px)`,
-        }} />
-      </div>
-
-      {/* Vignette — feathers the aurora naturally instead of a mask edge */}
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        background: `radial-gradient(ellipse 64% 58% at 50% 42%, transparent 0%, ${C.bg} 90%)`,
-      }} />
-
-      {/* Dot grid */}
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)`,
-        backgroundSize: "40px 40px",
-        opacity: 0.5,
-      }} />
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        background: `radial-gradient(ellipse 58% 55% at 50% 42%, transparent 12%, ${C.bg} 86%)`,
-      }} />
-
-      {/* Particles — sparse, calm drift */}
-      {Array.from({ length: PARTICLE_COUNT }, (_, i) => {
-        const px   = random(`px-${i}`) * 1920;
-        const py   = random(`py-${i}`) * 1080;
-        const size = random(`ps-${i}`) * 2 + 1;
-        const spd  = random(`psp-${i}`) * 0.16 + 0.05;
-        const del  = random(`pd-${i}`) * 30;
-        const pOpacity = random(`po-${i}`) * 0.26 + 0.08;
-        const po = interpolate(frame, [del, del + 20], [0, pOpacity], {
-          extrapolateLeft: "clamp", extrapolateRight: "clamp",
-        });
+    <AbsoluteFill style={{ opacity: 1 - exit, transform: `scale(${1 + exit * 0.04})`, filter: `blur(${exit * 8}px)` }}>
+      {/* The files. */}
+      {chips.map((c, i) => {
+        const p = spring({ frame: frame - c.delay, fps, config: SPRING.soft });
+        const bob = Math.sin(frame / 38 + c.phase) * 7;
+        const cx = c.x + (1 - p) * c.fromX + (CX - c.x - 130) * converge;
+        const cy = c.y + (1 - p) * c.fromY + bob * (1 - converge) + (CY - c.y - 18) * converge;
+        const o = Math.min(1, p * 1.4) * (1 - converge) * 0.95;
+        if (o <= 0.01) return null;
         return (
-          <div key={i} style={{
-            position: "absolute",
-            left: px,
-            top: ((py - frame * spd * 0.6) % 1080 + 1080) % 1080,
-            width: size, height: size,
-            borderRadius: "50%",
-            background: i % 3 === 0 ? C.accent : "#fff",
-            opacity: po,
-          }} />
+          <div
+            key={c.name}
+            style={{
+              position: "absolute", left: cx, top: cy, display: "flex", alignItems: "center", gap: 10, padding: "9px 15px",
+              borderRadius: 9, background: C.surface, border: `1px solid ${c.hot ? C.accentLine : C.lineStrong}`,
+              fontFamily: F.mono, fontSize: 18, color: c.hot ? C.ink : C.inkMuted, whiteSpace: "nowrap",
+              opacity: o, transform: `scale(${1 - converge * 0.5})`, boxShadow: "0 14px 36px -14px rgba(0,0,0,0.7)",
+            }}
+          >
+            <span style={{ width: 8, height: 8, borderRadius: 2, background: c.hot ? C.accent : C.inkFaint }} />
+            {c.name}
+          </div>
         );
       })}
 
-      {/* Content */}
-      <div style={{
-        position: "absolute", inset: 0,
-        display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-      }}>
-        {/* Badge */}
-        <div style={{
-          display: "flex", alignItems: "center", gap: 9,
-          border: `1px solid ${C.lineStrong}`,
-          background: `${C.surface}dd`,
-          borderRadius: 100, padding: "9px 22px", marginBottom: 36,
-          fontFamily: F.mono, fontSize: 14, color: C.inkMuted, letterSpacing: "0.02em",
-          opacity: tagSpring, transform: `translateY(${(1 - tagSpring) * 16}px)`,
-        }}>
-          <span style={{
-            width: 7, height: 7, borderRadius: "50%",
-            background: C.accent, boxShadow: `0 0 12px ${C.accent}`,
-            display: "inline-block",
-          }} />
-          Docs that regenerate themselves, grounded in your code
-        </div>
-
-        {/* Logo */}
-        <h1 style={{
-          fontFamily: F.sans, fontSize: 148, fontWeight: 800,
-          letterSpacing: "-0.045em", lineHeight: 1,
-          margin: 0, textAlign: "center",
-          background: `linear-gradient(140deg, #ffffff 15%, ${C.accent} 100%)`,
-          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
-          opacity: logoSpring,
-          transform: `translateY(${(1 - logoSpring) * 50}px) scale(${0.92 + logoSpring * 0.08})`,
-        }}>
-          DeepDoc
-        </h1>
-
-        {/* Tagline */}
-        <p style={{
-          fontFamily: F.sans, fontSize: 28, fontWeight: 400,
-          color: C.inkMuted, textAlign: "center",
-          margin: "24px 0 0", maxWidth: 760, lineHeight: 1.5,
-          opacity: subtitleSpring * fadeIn,
-          transform: `translateY(${(1 - subtitleSpring) * 20}px)`,
-        }}>
-          Engineering docs your team will{" "}
-          <span style={{ color: C.ink, fontWeight: 600 }}>actually read.</span>
-        </p>
+      {/* Count of real source files. */}
+      <div style={{ position: "absolute", left: 0, right: 0, top: 78, textAlign: "center", opacity: interpolate(frame, [2, 18], [0, 1], clamp) * (1 - converge) }}>
+        <span style={{ display: "inline-flex", alignItems: "baseline", gap: 14, padding: "10px 22px", borderRadius: 999, border: `1px solid ${C.lineStrong}`, background: C.surface }}>
+          <span style={{ fontFamily: F.mono, fontSize: 34, fontWeight: 500, color: C.accent, minWidth: 52, textAlign: "right" }}>{count}</span>
+          <span style={{ fontFamily: F.mono, fontSize: 20, color: C.inkMuted }}>source files</span>
+        </span>
       </div>
+
+      {/* The line. */}
+      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", flexDirection: "column", opacity: headOut }}>
+        <div style={{ fontFamily: F.sans, fontSize: 132, fontWeight: 600, letterSpacing: "-0.05em", lineHeight: 1.02, textAlign: "center", color: C.ink }}>
+          <div>{l1.map((w, i) => <span key={w} style={word(26, i)}>{w}</span>)}</div>
+          <div>
+            {l2.slice(0, 2).map((w, i) => <span key={w} style={word(62, i)}>{w}</span>)}
+            <span style={{ ...word(62, 2), marginRight: 0, fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, letterSpacing: "-0.02em", fontSize: "1.06em", color: C.accent }}>don't.</span>
+          </div>
+        </div>
+      </AbsoluteFill>
+
+      {/* The turn: one command. */}
+      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", flexDirection: "column", opacity: oneIn, transform: `translateY(${(1 - oneIn) * 22}px)` }}>
+        <div style={{ fontFamily: F.sans, fontSize: 132, fontWeight: 600, letterSpacing: "-0.05em", lineHeight: 1.02, color: C.ink }}>
+          One <span style={{ fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, letterSpacing: "-0.02em", fontSize: "1.06em", color: C.accent }}>command.</span>
+        </div>
+        <div style={{ marginTop: 52, opacity: cmdIn, transform: `translateY(${(1 - cmdIn) * 14}px)`, padding: "20px 34px", borderRadius: 14, background: C.surface, border: `1px solid ${C.lineStrong}`, fontFamily: F.mono, fontSize: 38, color: C.ink, minWidth: 470, boxShadow: "0 30px 70px -26px rgba(0,0,0,0.8)" }}>
+          <span style={{ color: C.accent }}>$ </span>
+          {typed}
+          <span style={{ display: "inline-block", width: 17, height: 40, verticalAlign: "text-bottom", marginLeft: 2, background: caretOn ? C.accent : "transparent" }} />
+        </div>
+      </AbsoluteFill>
     </AbsoluteFill>
   );
 };

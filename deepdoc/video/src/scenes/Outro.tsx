@@ -1,124 +1,39 @@
-import {
-  AbsoluteFill,
-  interpolate,
-  spring,
-  useCurrentFrame,
-  useVideoConfig,
-} from "remotion";
+import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 import { C, F, SPRING } from "../constants";
 
-const TAGS = ["Python 3.10+", "Node 18+", "MIT License", "deepdoc.tech"];
+const WORDS = ["Documentation", "that", "keeps", "pace", "with", "your"];
+const D = "M14 9 H24 A15 15 0 0 1 24 39 H14";
 
 export const Outro = () => {
   const frame = useCurrentFrame();
   const { fps } = useVideoConfig();
-
-  const fadeIn  = interpolate(frame, [0, 22], [0, 1], { extrapolateRight: "clamp" });
-  const fadeOut = interpolate(frame, [108, 135], [1, 0], { extrapolateLeft: "clamp" });
-  const opacity = Math.min(fadeIn, fadeOut);
-
-  const titleSpring = spring({ frame, fps, config: SPRING.soft });
-  const cmdSpring   = spring({ frame: Math.max(0, frame - 16), fps, config: SPRING.snappy });
-  const tagsSpring  = spring({ frame: Math.max(0, frame - 30), fps, config: SPRING.snappy });
-
-  // Pulse on the accent dot
-  const pulse = 0.8 + Math.sin(frame * 0.18) * 0.2;
-
+  const rise = (delay: number) => {
+    const p = spring({ frame: frame - delay, fps, config: SPRING.soft });
+    return { opacity: p, transform: `translateY(${(1 - p) * 26}px)` };
+  };
+  const word = (i: number) => {
+    const p = interpolate(frame, [18 + i * 3, 34 + i * 3], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+    return { display: "inline-block", marginRight: "0.24em", opacity: p, transform: `translateY(${(1 - p) * 0.4}em)`, filter: `blur(${(1 - p) * 10}px)` } as const;
+  };
   return (
-    <AbsoluteFill style={{ background: C.bg, overflow: "hidden", opacity }}>
-
-      {/* Aurora — full-bleed + vignette, not a hard CSS mask edge */}
-      <div style={{ position: "absolute", inset: -200, overflow: "hidden", pointerEvents: "none" }}>
-        <div style={{
-          position: "absolute", top: "-16%", left: "2%",
-          width: "58%", height: "88%",
-          background: `radial-gradient(ellipse at 40% 40%, ${C.accentGlow} 0%, transparent 68%)`,
-          filter: "blur(130px)",
-        }} />
-        <div style={{
-          position: "absolute", bottom: "-14%", right: "2%",
-          width: "50%", height: "78%",
-          background: `radial-gradient(ellipse at 60% 60%, rgba(0,229,160,0.15) 0%, transparent 66%)`,
-          filter: "blur(140px)",
-        }} />
+    <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", flexDirection: "column" }}>
+      <div style={{ ...rise(4), display: "flex", alignItems: "center", fontFamily: F.sans, fontSize: 46, fontWeight: 600, letterSpacing: "-0.015em", color: C.ink }}>
+        <svg width="62" height="62" viewBox="0 0 48 48" fill="none" style={{ marginRight: 2, marginLeft: -16 }}>
+          <path d={D} transform="translate(6 6)" stroke={C.accent} strokeWidth="2" opacity="0.18" />
+          <path d={D} transform="translate(3 3)" stroke={C.accent} strokeWidth="2" opacity="0.4" />
+          <path fillRule="evenodd" fill={C.accent} d="M14 9 H24 A15 15 0 0 1 24 39 H14 Z M20 15 H24 A9 9 0 0 1 24 33 H20 Z" />
+        </svg>
+        eepDoc
       </div>
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        background: `radial-gradient(ellipse 66% 60% at 50% 50%, transparent 0%, ${C.bg} 90%)`,
-      }} />
-
-      {/* Dot grid */}
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        backgroundImage: `radial-gradient(circle, rgba(255,255,255,0.08) 1px, transparent 1px)`,
-        backgroundSize: "36px 36px",
-        opacity: 0.5,
-      }} />
-      <div style={{
-        position: "absolute", inset: 0, pointerEvents: "none",
-        background: `radial-gradient(ellipse 60% 56% at 50% 50%, transparent 12%, ${C.bg} 88%)`,
-      }} />
-
-      {/* Content */}
-      <div style={{
-        position: "absolute", inset: 0,
-        display: "flex", flexDirection: "column",
-        alignItems: "center", justifyContent: "center",
-      }}>
-        {/* Pulsing accent dot */}
-        <div style={{
-          width: 14, height: 14, borderRadius: "50%",
-          background: C.accent,
-          boxShadow: `0 0 ${20 * pulse}px ${C.accent}, 0 0 ${40 * pulse}px ${C.accentGlow}`,
-          marginBottom: 36,
-          opacity: titleSpring,
-          transform: `scale(${0.8 + titleSpring * 0.2})`,
-        }} />
-
-        {/* Domain */}
-        <h2 style={{
-          fontFamily: F.sans, fontSize: 100, fontWeight: 800,
-          letterSpacing: "-0.045em", margin: "0 0 16px", textAlign: "center",
-          background: `linear-gradient(140deg, #ffffff 20%, ${C.accent} 100%)`,
-          WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent", backgroundClip: "text",
-          opacity: titleSpring,
-          transform: `translateY(${(1 - titleSpring) * 48}px)`,
-        }}>
-          deepdoc.tech
-        </h2>
-
-        {/* Install command */}
-        <div style={{
-          fontFamily: F.mono, fontSize: 24, color: C.accent,
-          marginBottom: 52, letterSpacing: "0.01em",
-          padding: "12px 28px",
-          border: `1px solid ${C.accent}40`,
-          background: `${C.surface}cc`,
-          borderRadius: 12,
-          boxShadow: `0 0 40px ${C.accentDim}`,
-          opacity: cmdSpring,
-          transform: `translateY(${(1 - cmdSpring) * 22}px)`,
-        }}>
-          pip install deepdoc
+      <div style={{ marginTop: 34, maxWidth: 1300, textAlign: "center", fontFamily: F.sans, fontSize: 104, fontWeight: 600, letterSpacing: "-0.045em", lineHeight: 1.02, color: C.ink }}>
+        {WORDS.map((w, i) => <span key={w} style={word(i)}>{w}</span>)}
+        <span style={{ ...word(WORDS.length), marginRight: 0, fontFamily: F.serif, fontStyle: "italic", fontWeight: 400, letterSpacing: "-0.02em", fontSize: "1.06em", color: C.accent }}>codebase.</span>
+      </div>
+      <div style={{ ...rise(46), marginTop: 56, display: "flex", alignItems: "center", gap: 22 }}>
+        <div style={{ padding: "16px 26px", borderRadius: 12, background: C.surface, border: `1px solid ${C.lineStrong}`, fontFamily: F.mono, fontSize: 28, color: C.ink }}>
+          <span style={{ color: C.accent }}>$ </span>pip install deepdoc
         </div>
-
-        {/* Tags */}
-        <div style={{
-          display: "flex", gap: 12,
-          opacity: tagsSpring,
-          transform: `translateY(${(1 - tagsSpring) * 18}px)`,
-        }}>
-          {TAGS.map((tag) => (
-            <span key={tag} style={{
-              border: `1px solid ${C.lineStrong}`,
-              borderRadius: 100, padding: "8px 22px",
-              fontFamily: F.sans, fontSize: 15, color: C.inkMuted,
-              background: C.surface,
-            }}>
-              {tag}
-            </span>
-          ))}
-        </div>
+        <span style={{ fontFamily: F.mono, fontSize: 24, color: C.inkFaint }}>deepdoc.tech</span>
       </div>
     </AbsoluteFill>
   );

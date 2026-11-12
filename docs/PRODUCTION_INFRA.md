@@ -21,7 +21,7 @@ sites.** The old Azure resources are not used. A new, small Azure Foundry accoun
 
 | Resource | Purpose | Credential |
 |---|---|---|
-| Pages project `deepdoc` | Marketing site (static) and the hosted app (SSR, `web/src/pages/cloud/`): OAuth, repo picker, dispatch, status, vanity-URL site proxy. Custom domains `deepdoc.tech` and `cloud.deepdoc.tech` | Pages secrets, below |
+| Pages project `deepdoc` | Marketing site and product docs (static) and the hosted app (SSR, `web/src/pages/cloud/`): OAuth, repo picker, dispatch, status, vanity-URL site proxy. Custom domains `deepdoc.tech` and `cloud.deepdoc.tech` | Pages secrets, below |
 | D1 `deepdoc-hosted-db` (`ba724999-e3e3-4eb3-bfed-9d85f49dd01e`) | Sessions, projects, quotas, OAuth state, owner/repo to job lookup | bound via `web/wrangler.toml` |
 | R2 `deepdoc-hosted-sites` | Every finished site (`{owner}/{repo}/…`), job status (`jobs/{id}/status.json`) and, briefly, job input (`jobs/{id}/input.json`) | R2 S3 token, see AWS secrets |
 | GitHub OAuth App `DeepDoc Cloud (Production)` | Login | `GITHUB_CLIENT_ID` / `GITHUB_SECRET_ID` |

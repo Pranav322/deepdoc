@@ -1,0 +1,5 @@
+---
+interface Props { value: string }
+const { value } = Astro.props;
+---
+<div class="tab-panel" data-panel={value}><slot /></div>

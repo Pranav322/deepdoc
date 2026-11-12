@@ -1,0 +1,226 @@
+/* Base styles and shared components for deepdoc.tech and /docs.
+   Tokens live in tokens.css (also inlined into the hosted app). */
+@import "./tokens.css";
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  background: var(--surface);
+  color: var(--ink);
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  scrollbar-gutter: stable;
+  scroll-behavior: smooth;
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  color: var(--ink);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+h1, h2, h3, h4, p, figure, ul, ol { margin: 0; }
+ul, ol { padding: 0; list-style: none; }
+img, svg, video, canvas { display: block; max-width: 100%; }
+a { color: inherit; }
+button { font: inherit; color: inherit; }
+[hidden] { display: none !important; }
+
+::selection { background: var(--accent); color: var(--accent-ink); }
+
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+/* ── Layout ───────────────────────────────────────────────────────────── */
+.wrap { width: 100%; max-width: 1152px; margin: 0 auto; padding: 0 24px; }
+main { flex: 1; }
+
+/* ── Type ─────────────────────────────────────────────────────────────── */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--ink-faint);
+}
+.display {
+  font-weight: 600;
+  letter-spacing: -0.045em;
+  line-height: 1.02;
+  text-wrap: balance;
+}
+.h2 {
+  font-size: clamp(1.75rem, 3.4vw, 2.5rem);
+  font-weight: 600;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+  text-wrap: balance;
+}
+/* Emphasis: one word in serif italic, in the accent. */
+.em-serif {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+  font-size: 1.06em;
+  color: var(--accent);
+}
+/* The primary call to action: the one filled-with-colour control. */
+.btn.vivid {
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+.btn.vivid:hover { background: color-mix(in oklab, var(--accent) 88%, var(--ink)); }
+/* Pixel markers: tiny squares in the palette colours. */
+.px { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--p, var(--accent)); }
+.eyebrow .px { margin-right: 8px; transform: translateY(-1px); }
+.lede { font-size: 1.0625rem; line-height: 1.65; color: var(--ink-muted); text-wrap: pretty; }
+.muted { color: var(--ink-muted); }
+.faint { color: var(--ink-faint); }
+code, kbd, .mono { font-family: var(--font-mono); }
+.inline-code {
+  font-family: var(--font-mono);
+  font-size: 0.86em;
+  padding: 0.12em 0.4em;
+  border-radius: 5px;
+  border: 1px solid var(--line);
+  background: var(--surface-raised);
+  color: var(--ink);
+}
+
+/* ── Buttons: one shape, shared with the hosted app ───────────────────── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 40px; padding: 0 18px;
+  border-radius: var(--r-sm); border: 1px solid transparent;
+  background: var(--solid); color: var(--solid-ink); box-shadow: var(--btn-shadow);
+  font-size: 14px; font-weight: 600; letter-spacing: -0.008em;
+  text-decoration: none; white-space: nowrap; cursor: pointer;
+  transition: background 0.15s var(--ease), border-color 0.15s var(--ease), color 0.15s var(--ease), transform 0.1s var(--ease);
+}
+.btn:hover { background: var(--solid-hover); }
+.btn:active { transform: scale(0.985); }
+.btn.secondary {
+  background: var(--card); color: var(--ink); border-color: var(--line-strong);
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-sm);
+}
+.btn.secondary:hover { background: var(--card-hover); border-color: var(--accent-line); }
+.btn.small { height: 32px; padding: 0 12px; font-size: 13px; }
+.btn svg { flex-shrink: 0; }
+.link {
+  color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong);
+  text-underline-offset: 3px; transition: text-decoration-color 0.15s var(--ease);
+}
+.link:hover { text-decoration-color: var(--accent); color: var(--accent); }
+.arrow-link {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 14px; font-weight: 500; color: var(--accent); text-decoration: none;
+}
+.arrow-link svg { transition: transform 0.2s var(--ease); }
+.arrow-link:hover svg { transform: translateX(3px); }
+
+/* ── Header ───────────────────────────────────────────────────────────── */
+.site-header {
+  position: sticky; top: 0; z-index: 50;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in oklab, var(--surface) 82%, transparent);
+  backdrop-filter: blur(18px) saturate(1.4);
+  -webkit-backdrop-filter: blur(18px) saturate(1.4);
+}
+.site-header-inner { display: flex; align-items: center; justify-content: space-between; height: 52px; gap: 16px; }
+.site-header.is-wide .site-header-inner { max-width: none; }
+.brand-link { display: inline-flex; align-items: center; text-decoration: none; border-radius: 6px; transition: opacity 0.15s var(--ease); }
+.brand-link:hover { opacity: 0.8; }
+.site-nav { display: flex; align-items: center; gap: 2px; }
+.site-nav a.nav-item {
+  padding: 6px 11px; border-radius: 7px;
+  font-size: 14px; font-weight: 500; color: var(--ink-muted); text-decoration: none;
+  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.site-nav a.nav-item:hover, .site-nav a.nav-item[aria-current="page"] { color: var(--ink); }
+.site-nav .btn { margin-left: 8px; }
+.icon-btn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 32px; height: 32px; border-radius: var(--r-sm);
+  border: 1px solid transparent; background: transparent; color: var(--ink-muted); cursor: pointer;
+  transition: color 0.15s var(--ease), background 0.15s var(--ease);
+}
+.icon-btn:hover { color: var(--ink); background: var(--hover); }
+.theme-toggle .icon-moon { display: none; }
+html[data-theme="light"] .theme-toggle .icon-sun { display: none; }
+html[data-theme="light"] .theme-toggle .icon-moon { display: block; }
+@media (max-width: 640px) {
+  .site-nav a.nav-item.is-optional { display: none; }
+  .site-nav a.nav-item { padding: 6px 8px; }
+}
+@media (max-width: 520px) {
+  .site-nav .btn { display: none; }
+}
+
+/* ── Footer ───────────────────────────────────────────────────────────── */
+.site-footer { border-top: 1px solid var(--line); }
+.site-footer-inner {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+  gap: 16px 24px; padding-top: 28px; padding-bottom: 28px;
+  font-size: 13px; color: var(--ink-faint);
+}
+.site-footer-brand { display: flex; align-items: center; gap: 12px; }
+.site-footer nav { display: flex; flex-wrap: wrap; gap: 6px 20px; }
+.site-footer a { color: var(--ink-faint); text-decoration: none; transition: color 0.15s var(--ease); }
+.site-footer a:hover { color: var(--ink); }
+
+/* ── Window frame: the browser/terminal chrome used for every demo ────── */
+.frame {
+  position: relative; overflow: hidden;
+  border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+  background: var(--card);
+  box-shadow: inset 0 1px 0 var(--edge), var(--shadow-lift);
+}
+.frame-bar {
+  display: flex; align-items: center; gap: 7px; height: 38px; padding: 0 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in oklab, var(--surface-raised) 60%, var(--card));
+}
+.frame-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--line-strong); }
+.frame-title {
+  flex: 1; min-width: 0; margin-right: 34px; text-align: center;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint);
+}
+
+/* ── Terminal ─────────────────────────────────────────────────────────── */
+.term {
+  margin: 0; padding: 18px 20px; overflow-x: auto;
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.75; color: var(--ink);
+  white-space: pre; tab-size: 2;
+}
+.term .c { color: var(--ink-faint); }
+.term .p { color: var(--ink-faint); user-select: none; }
+.term .o { color: var(--ink-muted); }
+
+/* ── Motion ───────────────────────────────────────────────────────────── */
+@keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
+@keyframes fade { from { opacity: 0; } to { opacity: 1; } }
+
+/* Start states for the Motion-driven animations (index.astro, components/home). html.motion is
+   set before first paint by Layout.astro and only when motion is allowed. */
+html.motion [data-reveal],
+html.motion [data-words] { opacity: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

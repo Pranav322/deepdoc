@@ -1,0 +1,117 @@
+---
+/**
+ * A paintable pixel grid that fills its parent section.
+ *
+ * Cells spark on their own in the accent's tonal ramp (--p1..--p5), and the
+ * pointer paints a fading trail wherever it moves over the section, text and
+ * video included. Pure canvas, no dependencies. The parent must be
+ * position: relative; content above it needs its own stacking context.
+ */
+---
+
+<div class="pixel-field" aria-hidden="true"><canvas></canvas></div>
+
+<style>
+  .pixel-field {
+    position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 16px 16px;
+    /* Fade in under the header so the grid has no hard top edge. */
+    -webkit-mask-image: linear-gradient(to bottom, transparent 0, black 140px);
+    mask-image: linear-gradient(to bottom, transparent 0, black 140px);
+  }
+  .pixel-field canvas { position: absolute; inset: 0; width: 100%; height: 100%; }
+</style>
+
+<script>
+  document.querySelectorAll<HTMLElement>(".pixel-field").forEach((field) => {
+    const host = field.parentElement;
+    const canvas = field.querySelector("canvas");
+    if (host && canvas) paint(host, canvas);
+  });
+
+  function paint(host: HTMLElement, canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext("2d")!;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const CELL = 16, FADE = 2200;
+    let cols = 0, rows = 0, w = 0, h = 0;
+    let life = new Float32Array(0);
+    let tone = new Uint8Array(0);
+    let colours: string[] = [];
+
+    function readColours() {
+      const cs = getComputedStyle(document.documentElement);
+      colours = [1, 2, 3, 4, 5].map((i) => cs.getPropertyValue(`--p${i}`).trim() || "#FF5A2B");
+    }
+    function layout() {
+      const r = canvas.getBoundingClientRect();
+      w = Math.max(1, Math.round(r.width)); h = Math.max(1, Math.round(r.height));
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cols = Math.ceil(w / CELL); rows = Math.ceil(h / CELL);
+      life = new Float32Array(cols * rows);
+      tone = new Uint8Array(cols * rows);
+    }
+    function light(x: number, y: number, c: number, strength: number) {
+      if (x < 0 || y < 0 || x >= cols || y >= rows) return;
+      const i = y * cols + x;
+      if (strength >= life[i]) { life[i] = strength; tone[i] = c; }
+    }
+
+    // Pointer: a trail whose tone drifts along the ramp as you move.
+    let lastX = -1, lastY = -1, travelled = 0;
+    host.addEventListener("pointermove", (e) => {
+      const r = canvas.getBoundingClientRect();
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      const jump = lastX < 0 ? 0 : Math.hypot(px - lastX, py - lastY);
+      travelled += jump;
+      const c = Math.floor(travelled / 110) % colours.length;
+      // Fill every cell between the last point and this one, so fast moves leave no gaps.
+      const steps = Math.max(1, Math.ceil(jump / (CELL / 2)));
+      for (let s = 1; s <= steps; s++) {
+        const x = Math.floor((lastX < 0 ? px : lastX + ((px - lastX) * s) / steps) / CELL);
+        const y = Math.floor((lastY < 0 ? py : lastY + ((py - lastY) * s) / steps) / CELL);
+        light(x, y, c, 1);
+        if (Math.random() < 0.45) light(x + (Math.random() < 0.5 ? -1 : 1), y, c, 0.55);
+        if (Math.random() < 0.45) light(x, y + (Math.random() < 0.5 ? -1 : 1), c, 0.55);
+      }
+      lastX = px; lastY = py;
+      wake();
+    });
+    host.addEventListener("pointerleave", () => { lastX = lastY = -1; });
+
+    let raf = 0, prev = 0, visible = false, nextSpark = 0;
+    function frame(now: number) {
+      const dt = Math.min(64, now - (prev || now)); prev = now;
+      // Sparse ambient sparks, so the grid is alive before anyone touches it.
+      if (!reduced && now > nextSpark) {
+        nextSpark = now + 110;
+        light(Math.floor(Math.random() * cols), Math.floor(Math.random() * rows), Math.floor(Math.random() * colours.length), 0.5);
+      }
+      ctx.clearRect(0, 0, w, h);
+      let alive = false;
+      for (let i = 0; i < life.length; i++) {
+        const l = life[i];
+        if (l <= 0) continue;
+        alive = true;
+        ctx.globalAlpha = Math.min(1, l) * 0.92;
+        ctx.fillStyle = colours[tone[i]];
+        ctx.fillRect((i % cols) * CELL + 1, Math.floor(i / cols) * CELL + 1, CELL - 1, CELL - 1);
+        life[i] = l - dt / FADE;
+      }
+      ctx.globalAlpha = 1;
+      raf = visible && (alive || !reduced) ? requestAnimationFrame(frame) : 0;
+      if (!raf) prev = 0;
+    }
+    function wake() { if (!raf && visible) raf = requestAnimationFrame(frame); }
+
+    new ResizeObserver(layout).observe(canvas);
+    new IntersectionObserver((entries) => { visible = entries[0].isIntersecting; wake(); }).observe(host);
+    new MutationObserver(readColours).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    readColours();
+    layout();
+  }
+</script>

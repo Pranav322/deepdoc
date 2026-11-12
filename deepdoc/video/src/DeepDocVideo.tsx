@@ -1,66 +1,26 @@
-import { AbsoluteFill, Audio, interpolate, staticFile } from "remotion";
-import { TransitionSeries, linearTiming } from "@remotion/transitions";
-import { fade } from "@remotion/transitions/fade";
-import { T, TOTAL_DURATION } from "./constants";
-import { BuildScene } from "./scenes/BuildScene";
+import { AbsoluteFill, Audio, Sequence, interpolate, staticFile } from "remotion";
+import { Backdrop } from "./components/Backdrop";
+import { BROWSER_START, OUTRO_START, T, TERMINAL_START, TOTAL_DURATION } from "./constants";
+import { Browser } from "./scenes/Browser";
 import { Intro } from "./scenes/Intro";
 import { Outro } from "./scenes/Outro";
-import { PlannerScene } from "./scenes/PlannerScene";
-import { Problem } from "./scenes/Problem";
-import { ResultScene } from "./scenes/ResultScene";
-import { ScanScene } from "./scenes/ScanScene";
-import { TerminalScene } from "./scenes/TerminalScene";
+import { Terminal } from "./scenes/Terminal";
 
-const transition = (
-  <TransitionSeries.Transition
-    presentation={fade()}
-    timing={linearTiming({ durationInFrames: T.TRANSITION_DURATION })}
-  />
-);
-
+/**
+ * One continuous piece: a short hook, a real `deepdoc generate` run in a
+ * terminal, the real site it produced opening over it, then the sign-off.
+ */
 export const DeepDocVideo = () => {
   return (
-    <AbsoluteFill style={{ background: "#0a0a0a" }}>
-      <TransitionSeries>
-        <TransitionSeries.Sequence durationInFrames={T.INTRO_DURATION}>
-          <Intro />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.PROBLEM_DURATION}>
-          <Problem />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.SCAN_DURATION}>
-          <ScanScene />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.PLANNER_DURATION}>
-          <PlannerScene />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.GENERATE_DURATION}>
-          <TerminalScene />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.BUILD_DURATION}>
-          <BuildScene />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.RESULT_DURATION}>
-          <ResultScene />
-        </TransitionSeries.Sequence>
-        {transition}
-        <TransitionSeries.Sequence durationInFrames={T.OUTRO_DURATION}>
-          <Outro />
-        </TransitionSeries.Sequence>
-      </TransitionSeries>
+    <AbsoluteFill>
+      <Backdrop />
+      <Sequence durationInFrames={T.INTRO}><Intro /></Sequence>
+      <Sequence from={TERMINAL_START} durationInFrames={T.TERMINAL}><Terminal /></Sequence>
+      <Sequence from={BROWSER_START} durationInFrames={T.BROWSER}><Browser /></Sequence>
+      <Sequence from={OUTRO_START} durationInFrames={T.OUTRO}><Outro /></Sequence>
 
-      {/* Background music bed — "Aitech" by Kevin MacLeod (incompetech.com),
-          licensed CC BY 3.0 (https://creativecommons.org/licenses/by/3.0/).
-          This is the only audio in the piece: the old cross-fade "whoosh"/
-          "ding" cues pulled from a remote URL (remotion.media) at render
-          time — a stock sound plus a network dependency that could stall
-          or fail a render. Visual timing alone now carries every beat. */}
+      {/* Music: "Aitech" by Kevin MacLeod (incompetech.com), CC BY 3.0. See
+          CREDITS.md. The site plays this video muted. */}
       <Audio
         src={staticFile("audio/bg-music.mp3")}
         volume={(f) =>

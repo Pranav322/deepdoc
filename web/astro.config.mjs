@@ -1,25 +1,44 @@
 // @ts-check
 import { defineConfig } from "astro/config";
-import tailwindcss from "@tailwindcss/vite";
+import mdx from "@astrojs/mdx";
 import sitemap from "@astrojs/sitemap";
 import cloudflare from "@astrojs/cloudflare";
 
-// https://astro.build/config
+// One Astro project serves three surfaces:
+//   deepdoc.tech            marketing (src/pages/index.astro)
+//   deepdoc.tech/docs       product docs (src/content/docs + src/pages/docs)
+//   cloud.deepdoc.tech      hosted app (src/pages/cloud, via src/middleware.ts)
+// Everything except the hosted app is prerendered; only src/pages/cloud and the
+// marketing index (which shares "/" with the hosted shell) render per request.
 export default defineConfig({
   site: "https://deepdoc.tech",
-  // SSR needed for the hosted app (cloud.deepdoc.tech) merged in under
-  // src/pages/cloud/ — every marketing page keeps `export const prerender =
-  // true` so it stays fully static; only the hosted app is server-rendered.
   output: "server",
   adapter: cloudflare(),
   integrations: [
+    mdx(),
     sitemap({
-      // Keep noindex / placeholder pages out of the sitemap.
-      filter: (page) => !page.includes("/changelog"),
+      // Keep the hosted app out, but not the /docs/cloud page.
+      filter: (page) => !new URL(page).pathname.startsWith("/cloud"),
     }),
   ],
-  vite: {
-    plugins: [tailwindcss()],
+  markdown: {
+    // Colours come from CSS variables in docs.css, so code blocks follow the
+    // site's light/dark switch without a second render.
+    shikiConfig: {
+      themes: { light: "min-light", dark: "min-dark" },
+      defaultColor: false,
+      wrap: false,
+      transformers: [
+        {
+          // ```yaml title=".deepdoc.yaml" -> a filename bar above the block.
+          pre(node) {
+            const raw = this.options.meta?.__raw ?? "";
+            const m = raw.match(/title="([^"]+)"/);
+            if (m) node.properties["data-title"] = m[1];
+          },
+        },
+      ],
+    },
   },
   build: {
     inlineStylesheets: "auto",

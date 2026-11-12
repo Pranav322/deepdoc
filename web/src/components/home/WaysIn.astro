@@ -1,0 +1,188 @@
+---
+/**
+ * Two ways to start, each shown as the thing itself: the hosted repo picker
+ * being used, and the CLI being typed. Both rest in their finished state when
+ * motion is off.
+ */
+import { CLOUD } from "../../lib/nav";
+
+const repos = [
+  { name: "acme/api", meta: "Python · private" },
+  { name: "acme/web", meta: "TypeScript · private" },
+  { name: "acme/billing-worker", meta: "Go · public" },
+];
+// [text, kind]: "cmd" lines are typed, "out" lines appear.
+const lines: [string, "cmd" | "out"][] = [
+  ["pip install deepdoc", "cmd"],
+  ["deepdoc init --provider anthropic", "cmd"],
+  ["deepdoc generate", "cmd"],
+  ["✓ docs written to deepdoc-docs/", "out"],
+  ["deepdoc serve", "cmd"],
+  ["Docs → http://localhost:3000", "out"],
+];
+---
+
+<section class="block ruled" id="start">
+  <div class="wrap">
+    <div class="block-head">
+      <p class="eyebrow" data-reveal><span class="px"></span>Get started</p>
+      <h2 class="h2 block-title" data-words>Two ways in.</h2>
+    </div>
+
+    <div class="ways">
+      <article class="way spot" data-reveal>
+        <div class="way-viz" data-picker aria-hidden="true">
+          <div class="pk">
+            <div class="pk-search">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+              <span class="pk-typed" data-typed>acme/api</span><span class="caret"></span>
+            </div>
+            <ul class="pk-list">
+              {repos.map((r, i) => (
+                <li class:list={[i === 0 && "on"]}>
+                  <span class="pk-name">{r.name}</span><span class="pk-meta">{r.meta}</span>
+                </li>
+              ))}
+            </ul>
+            <div class="pk-foot">
+              <span class="pk-vis">Private</span>
+              <span class="pk-btn" data-go>Generate docs</span>
+            </div>
+          </div>
+        </div>
+        <div class="way-text">
+          <h3>In the browser</h3>
+          <p>Sign in with GitHub, pick a repository (private ones too) and get a docs site at a stable address. Private by default.</p>
+          <a class="btn vivid" href={CLOUD}>Open DeepDoc Cloud</a>
+        </div>
+      </article>
+
+      <article class="way spot" data-reveal>
+        <div class="way-viz" aria-hidden="true">
+          <div class="tw" data-typewriter>
+            {lines.map(([text, kind]) => (
+              <p class:list={["tw-line", kind]} data-text={text}><span class="p">{kind === "cmd" ? "$ " : ""}</span><span class="tw-text">{text}</span></p>
+            ))}
+            <span class="caret tw-caret"></span>
+          </div>
+        </div>
+        <div class="way-text">
+          <h3>In your terminal</h3>
+          <p>Install the CLI, bring your own model, and keep everything on your machine. Works with a local model too.</p>
+          <a class="btn secondary" href="/docs/quickstart">Read the quickstart</a>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 56px; }
+  .way {
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--card);
+    box-shadow: inset 0 1px 0 var(--edge); transition: border-color 0.3s var(--ease);
+  }
+  .way:hover { border-color: var(--accent-line); }
+  .way-viz { display: flex; align-items: center; justify-content: center; min-height: 290px; padding: 32px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .way-text { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; padding: 26px 28px 28px; }
+  .way-text h3 { font-size: 20px; font-weight: 600; letter-spacing: -0.025em; }
+  .way-text p { font-size: 14.5px; line-height: 1.55; color: var(--ink-muted); max-width: 44ch; }
+  .way-text .btn { margin-top: 10px; }
+
+  .caret { display: inline-block; width: 7px; height: 1.05em; vertical-align: text-bottom; background: var(--accent); animation: caret-blink 1s steps(2) infinite; }
+  @keyframes caret-blink { 50% { opacity: 0; } }
+
+  /* Repo picker */
+  .pk { width: 100%; max-width: 360px; border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--card); box-shadow: inset 0 1px 0 var(--edge), var(--shadow-card); overflow: hidden; }
+  .pk-search { display: flex; align-items: center; gap: 9px; height: 42px; padding: 0 14px; border-bottom: 1px solid var(--line); font-family: var(--font-mono); font-size: 12.5px; color: var(--ink); }
+  .pk-search svg { color: var(--ink-faint); flex-shrink: 0; }
+  .pk-search .caret { margin-left: -6px; height: 14px; width: 1.5px; }
+  .pk-list li { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 14px; border-bottom: 1px solid var(--line); transition: background 0.25s var(--ease); }
+  .pk-list li.on { background: var(--accent-dim); box-shadow: inset 2px 0 0 var(--accent); }
+  .pk-name { font-size: 13.5px; font-weight: 500; color: var(--ink); }
+  .pk-meta { font-size: 11.5px; color: var(--ink-faint); }
+  .pk-foot { display: flex; align-items: center; justify-content: space-between; padding: 12px 14px; }
+  .pk-vis { font-size: 11.5px; color: var(--ink-muted); padding: 3px 9px; border: 1px solid var(--line-strong); border-radius: 999px; }
+  .pk-btn { display: inline-flex; align-items: center; height: 30px; padding: 0 13px; border-radius: 7px; background: var(--solid); color: var(--solid-ink); font-size: 12.5px; font-weight: 600; }
+
+  /* Typewriter terminal */
+  .tw { width: 100%; max-width: 420px; padding: 18px 20px; border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--card); box-shadow: inset 0 1px 0 var(--edge), var(--shadow-card); font-family: var(--font-mono); font-size: 12.5px; line-height: 1.95; color: var(--ink); min-height: 190px; }
+  .tw-line { white-space: pre-wrap; }
+  .tw-line .p { color: var(--accent); }
+  .tw-line.out { color: var(--ink-muted); padding-left: 14px; }
+  .tw-caret { display: none; }
+  /* Start states: nothing is shown until the demo begins playing. */
+  html.motion .tw:not(.is-live) .tw-line { visibility: hidden; }
+  html.motion [data-picker]:not(.is-live) [data-typed] { visibility: hidden; }
+
+  @media (max-width: 860px) {
+    .ways { grid-template-columns: minmax(0, 1fr); }
+    .way-viz { min-height: 0; padding: 22px; }
+  }
+</style>
+
+<script>
+  import { animate } from "motion";
+  import { ease, loopInView, motionOn, sleep } from "../../scripts/motion";
+
+  // Repo picker: type a name, the match highlights, the button presses.
+  const picker = document.querySelector<HTMLElement>("[data-picker]");
+  if (picker && motionOn()) {
+    const typed = picker.querySelector<HTMLElement>("[data-typed]")!;
+    const rows = Array.from(picker.querySelectorAll<HTMLElement>(".pk-list li"));
+    const go = picker.querySelector<HTMLElement>("[data-go]")!;
+    const full = typed.textContent ?? "";
+    loopInView(picker, async (alive) => {
+      typed.textContent = "";
+      picker.classList.add("is-live");
+      rows.forEach((r) => r.classList.remove("on"));
+      animate(rows, { opacity: 1 }, { duration: 0.2 });
+      await sleep(500);
+      for (const ch of full) {
+        if (!alive()) return;
+        typed.textContent += ch;
+        await sleep(95);
+      }
+      await sleep(250);
+      rows[0].classList.add("on");
+      animate(rows.slice(1), { opacity: 0.35 }, { duration: 0.3 });
+      await sleep(900);
+      if (!alive()) return;
+      await animate(go, { scale: [1, 0.93, 1] }, { duration: 0.35, ease }).finished;
+      await sleep(4200);
+    }, 0.5);
+  }
+
+  // Terminal: commands are typed, output lines appear.
+  const tw = document.querySelector<HTMLElement>("[data-typewriter]");
+  if (tw && motionOn()) {
+    const lines = Array.from(tw.querySelectorAll<HTMLElement>(".tw-line"));
+    const caret = tw.querySelector<HTMLElement>(".tw-caret")!;
+    loopInView(tw, async (alive) => {
+      lines.forEach((l) => { l.style.display = "none"; l.querySelector<HTMLElement>(".tw-text")!.textContent = ""; });
+      tw.classList.add("is-live");
+      caret.style.display = "inline-block";
+      for (const line of lines) {
+        if (!alive()) return;
+        const text = line.dataset.text ?? "";
+        const target = line.querySelector<HTMLElement>(".tw-text")!;
+        line.style.display = "";
+        line.appendChild(caret);
+        if (line.classList.contains("cmd")) {
+          for (const ch of text) {
+            if (!alive()) return;
+            target.textContent += ch;
+            await sleep(34);
+          }
+          await sleep(420);
+        } else {
+          target.textContent = text;
+          animate(line, { opacity: [0, 1] }, { duration: 0.3 });
+          await sleep(520);
+        }
+      }
+      await sleep(5200);
+    }, 0.5);
+  }
+</script>

@@ -1,0 +1,398 @@
+---
+/**
+ * "What it does", shown rather than told: four cards, each a small looping
+ * demo of one behaviour. Without motion (reduced-motion, or no JS) every demo
+ * rests in its finished state, so the markup below is the complete picture.
+ */
+const files = [
+  { name: "auth/middleware.ts", g: "auth" },
+  { name: "auth/session.py", g: "auth" },
+  { name: "billing/routes.py", g: "billing" },
+  { name: "billing/usage.py", g: "billing" },
+  { name: "db/models.py", g: "data" },
+  { name: "workers/sync.go", g: "data" },
+];
+const pages = [
+  { title: "Auth & Permissions", g: "auth" },
+  { title: "Billing & Usage", g: "billing" },
+  { title: "Data & Jobs", g: "data" },
+];
+const updates = [
+  { page: "Billing & Usage", changed: true },
+  { page: "Auth & Permissions", changed: true },
+  { page: "Data & Jobs", changed: false },
+  { page: "API reference", changed: false },
+];
+const swatches = ["#FF5A2B", "#2F6BF2", "#1F9D6B", "#8B5CF6"];
+---
+
+<section class="block" id="what">
+  <div class="wrap">
+    <div class="block-head">
+      <p class="eyebrow" data-reveal><span class="px"></span>What it does</p>
+      <h2 class="h2 block-title" data-words>One command. A docs site your team won’t ignore.</h2>
+    </div>
+
+    <div class="bento">
+      <!-- 1. Files become pages -->
+      <article class="bn bn-map spot" data-reveal>
+        <div class="bn-viz map" data-map aria-hidden="true">
+          <ul class="map-files">
+            {files.map((f) => <li data-g={f.g}>{f.name}</li>)}
+          </ul>
+          <svg class="map-wires"></svg>
+          <ul class="map-pages">
+            {pages.map((p) => (
+              <li data-g={p.g}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5M9 13h6M9 17h4"/></svg>
+                {p.title}
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div class="bn-text">
+          <h3>Organised the way readers look</h3>
+          <p>Architecture, endpoints, integrations and schemas grouped by domain, not one noisy page per file.</p>
+        </div>
+      </article>
+
+      <!-- 2. Answers cite files -->
+      <article class="bn bn-chat spot" data-reveal>
+        <div class="bn-viz chat" aria-hidden="true">
+          <div class="chat-top"><span class="chat-title">Ask the docs</span><span class="chat-modes"><b>fast</b><i>deep</i></span></div>
+          <div class="chat-log" data-chat>
+          <p class="bubble user" data-msg>Where does billing verification happen?</p>
+          <div class="bot-wrap">
+            <span class="typing" data-typing><i></i><i></i><i></i></span>
+            <div class="bubble bot" data-msg>
+              In the billing flow, persisted through usage records.
+              <span class="refs"><span class="ref">billing/routes.py:41-88</span><span class="ref">services/usage.py:12-57</span></span>
+            </div>
+          </div>
+          <p class="bubble user" data-msg>How does the widget token flow work?</p>
+          <div class="bot-wrap">
+            <span class="typing" data-typing><i></i><i></i><i></i></span>
+            <div class="bubble bot" data-msg>
+              It fetches a short-lived token, then attaches it to every chat request.
+              <span class="refs"><span class="ref">api/widget.ts:18-64</span></span>
+            </div>
+          </div>
+          </div>
+          <div class="chat-input"><span>Ask about this codebase</span><span class="chat-send"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V5M5 12l7-7 7 7"/></svg></span></div>
+        </div>
+        <div class="bn-text">
+          <h3>Answers that cite real files</h3>
+          <p>An assistant ships with the site. Every answer points to a file path and line range in your source.</p>
+        </div>
+      </article>
+
+      <!-- 3. Only what changed -->
+      <article class="bn bn-update spot" data-reveal>
+        <div class="bn-viz upd" data-update aria-hidden="true">
+          <p class="upd-cmd"><span class="p">$</span> deepdoc update <span class="upd-chip">3 files changed</span></p>
+          <ul>
+            {updates.map((u) => (
+              <li class:list={[u.changed ? "is-changed is-done" : "is-same"]}>
+                <span class="upd-ico"></span>
+                <span class="upd-name">{u.page}</span>
+                <span class="upd-tag">{u.changed ? "rewritten" : "unchanged"}</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div class="bn-text">
+          <h3>Updates touch only what changed</h3>
+          <p>After a commit, only the affected pages regenerate.</p>
+        </div>
+      </article>
+
+      <!-- 4. Theming is free -->
+      <article class="bn bn-theme spot" data-reveal>
+        <div class="bn-viz thm" data-theme-demo aria-hidden="true" style={`--tm:${swatches[0]}`}>
+          <div class="thm-page">
+            <div class="thm-side"><i class="on"></i><i></i><i></i><i></i></div>
+            <div class="thm-main"><b></b><i></i><i></i><i class="short"></i><u></u></div>
+          </div>
+          <div class="thm-row">
+            {swatches.map((c, i) => <button type="button" class:list={["thm-sw", i === 0 && "on"]} data-c={c} style={`--c:${c}`} tabindex="-1"></button>)}
+          </div>
+          <p class="thm-code">primary: <span data-hex>"{swatches[0]}"</span></p>
+        </div>
+        <div class="bn-text">
+          <h3>Restyle it for free</h3>
+          <p>Colours, logo and navigation re-apply from the saved plan. No LLM calls.</p>
+        </div>
+      </article>
+    </div>
+  </div>
+</section>
+
+<style is:global>
+  .block-head { max-width: 680px; }
+  .bento { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 16px; margin-top: 56px; }
+  .bn {
+    position: relative; overflow: hidden; display: flex; flex-direction: column;
+    border: 1px solid var(--line-strong); border-radius: var(--r-xl); background: var(--card);
+    box-shadow: inset 0 1px 0 var(--edge);
+    transition: border-color 0.3s var(--ease);
+  }
+  .bn:hover { border-color: var(--accent-line); }
+  .bn-map { grid-column: 1 / 8; }
+  .bn-chat { grid-column: 8 / 13; grid-row: 1 / 3; }
+  .bn-update { grid-column: 1 / 5; }
+  .bn-theme { grid-column: 5 / 8; }
+  .bn-viz { position: relative; flex: 1; min-height: 220px; padding: 28px; border-bottom: 1px solid var(--line); background: var(--surface); }
+  .bn-text { padding: 22px 28px 26px; }
+  .bn-text h3 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+  .bn-text p { margin-top: 6px; font-size: 14.5px; line-height: 1.55; color: var(--ink-muted); }
+
+  /* Pointer spotlight, shared by every .spot card on the page. */
+  .spot::after {
+    content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity 0.3s var(--ease);
+    background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 0%), color-mix(in oklab, var(--ink) 7%, transparent), transparent 60%);
+  }
+  .spot:hover::after { opacity: 1; }
+
+  /* 1. map */
+  .map { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 72px; align-items: center; }
+  .map-files, .map-pages { display: flex; flex-direction: column; gap: 8px; position: relative; z-index: 1; }
+  .map-files li {
+    align-self: flex-start; padding: 5px 10px; border-radius: 7px; border: 1px solid var(--line-strong); background: var(--card);
+    font-family: var(--font-mono); font-size: 11.5px; color: var(--ink-muted);
+    transition: color 0.3s var(--ease), border-color 0.3s var(--ease);
+  }
+  .map-files li.on { color: var(--ink); border-color: var(--accent-line); }
+  .map-pages { gap: 14px; }
+  .map-pages li {
+    display: flex; align-items: center; gap: 10px; padding: 13px 14px; border-radius: var(--r-md);
+    border: 1px solid var(--line-strong); background: var(--card); box-shadow: inset 0 1px 0 var(--edge);
+    font-size: 14px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink);
+    transition: border-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
+  }
+  .map-pages li svg { color: var(--ink-faint); transition: color 0.3s var(--ease); flex-shrink: 0; }
+  .map-pages li.on { border-color: var(--accent); box-shadow: inset 0 1px 0 var(--edge), 0 0 0 3px var(--accent-dim); }
+  .map-pages li.on svg { color: var(--accent); }
+  .map-wires { position: absolute; inset: 0; width: 100%; height: 100%; overflow: visible; }
+  .map-wires path { fill: none; stroke: var(--line-strong); stroke-width: 1.25; }
+  .map-wires path.live { stroke: var(--accent); stroke-width: 1.5; stroke-dasharray: 1; stroke-dashoffset: 0; }
+
+  /* 2. chat */
+  .bn-viz.chat { display: flex; flex-direction: column; gap: 16px; min-height: 420px; padding: 20px; }
+  .chat-top { display: flex; align-items: center; justify-content: space-between; padding: 0 4px 14px; border-bottom: 1px solid var(--line); }
+  .chat-title { font-size: 13px; font-weight: 600; letter-spacing: -0.01em; color: var(--ink); }
+  .chat-modes { display: flex; gap: 4px; padding: 3px; border-radius: 999px; border: 1px solid var(--line-strong); font-family: var(--font-mono); font-size: 10.5px; }
+  .chat-modes b, .chat-modes i { padding: 2px 9px; border-radius: 999px; font-style: normal; font-weight: 500; color: var(--ink-faint); }
+  .chat-modes b { background: var(--solid); color: var(--solid-ink); }
+  .chat-log { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; gap: 12px; padding: 0 4px; }
+  .chat-input {
+    display: flex; align-items: center; justify-content: space-between; height: 44px; padding: 0 8px 0 14px;
+    border: 1px solid var(--line-strong); border-radius: var(--r-md); background: var(--card); box-shadow: inset 0 1px 0 var(--edge);
+    font-size: 13px; color: var(--ink-faint);
+  }
+  .chat-send { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px; background: var(--accent); color: var(--accent-ink); }
+  .bn .bubble { max-width: 90%; padding: 10px 13px; border-radius: var(--r-md); font-size: 13.5px; line-height: 1.5; }
+  .bn .bubble.user { align-self: flex-end; background: var(--surface-high); color: var(--ink); }
+  .bn .bubble.bot { border: 1px solid var(--line-strong); background: var(--card); color: var(--ink-muted); }
+  .bot-wrap { position: relative; align-self: flex-start; max-width: 90%; }
+  .bot-wrap .bubble.bot { max-width: none; }
+  .refs { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+  .ref {
+    padding: 2px 8px; border-radius: 999px; border: 1px solid var(--accent-line); background: var(--accent-dim);
+    font-family: var(--font-mono); font-size: 10.5px; color: var(--accent);
+  }
+  .typing { position: absolute; left: 0; top: 0; display: none; gap: 4px; padding: 13px 14px; border-radius: var(--r-md); border: 1px solid var(--line-strong); background: var(--card); }
+  .typing i { width: 5px; height: 5px; border-radius: 50%; background: var(--ink-faint); animation: typing-dot 1s ease-in-out infinite; }
+  .typing i:nth-child(2) { animation-delay: 0.15s; }
+  .typing i:nth-child(3) { animation-delay: 0.3s; }
+  @keyframes typing-dot { 0%, 60%, 100% { transform: translateY(0); opacity: 0.45; } 30% { transform: translateY(-3px); opacity: 1; } }
+
+  /* 3. update */
+  .upd { font-family: var(--font-mono); font-size: 12px; }
+  .upd-cmd { display: flex; align-items: center; gap: 8px; color: var(--ink); }
+  .upd-cmd .p { color: var(--accent); }
+  .upd-chip { margin-left: auto; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--line-strong); font-size: 10.5px; color: var(--ink-muted); }
+  .upd ul { margin-top: 16px; border-top: 1px solid var(--line); }
+  .upd li { display: flex; align-items: center; gap: 10px; padding: 9px 0; border-bottom: 1px solid var(--line); color: var(--ink-muted); }
+  .upd-name { flex: 1; font-family: var(--font-sans); font-size: 13.5px; color: var(--ink); }
+  .upd li.is-same .upd-name { color: var(--ink-faint); }
+  .upd-tag { font-size: 10.5px; color: var(--ink-faint); }
+  .upd li.is-done .upd-tag { color: var(--accent); }
+  .upd-ico { position: relative; width: 14px; height: 14px; flex-shrink: 0; border-radius: 50%; border: 1.5px solid var(--line-strong); }
+  .upd li.is-working .upd-ico { border-color: var(--accent-line); border-top-color: var(--accent); animation: upd-spin 0.7s linear infinite; }
+  .upd li.is-done .upd-ico { border-color: var(--accent); background: var(--accent); }
+  .upd li.is-done .upd-ico::after {
+    content: ""; position: absolute; left: 3px; top: 3.5px; width: 6px; height: 3px;
+    border-left: 1.5px solid var(--accent-ink); border-bottom: 1.5px solid var(--accent-ink); transform: rotate(-45deg);
+  }
+  @keyframes upd-spin { to { transform: rotate(360deg); } }
+
+  /* 4. theme */
+  .thm { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; }
+  .thm-page { display: grid; grid-template-columns: 34% 1fr; width: 100%; max-width: 230px; aspect-ratio: 16 / 10; border: 1px solid var(--line-strong); border-radius: 9px; overflow: hidden; background: var(--card); }
+  .thm-side { display: flex; flex-direction: column; gap: 6px; padding: 10px 8px; border-right: 1px solid var(--line); }
+  .thm-side i, .thm-main i { display: block; height: 5px; border-radius: 3px; background: var(--line-strong); }
+  .thm-side i.on { background: var(--tm); transition: background 0.4s var(--ease); }
+  .thm-main { display: flex; flex-direction: column; gap: 6px; padding: 10px; }
+  .thm-main b { display: block; width: 55%; height: 8px; border-radius: 3px; background: var(--ink-muted); margin-bottom: 2px; }
+  .thm-main i.short { width: 60%; }
+  .thm-main u { display: block; width: 38%; height: 12px; margin-top: 3px; border-radius: 4px; background: var(--tm); transition: background 0.4s var(--ease); }
+  .thm-row { display: flex; gap: 8px; }
+  .thm-sw { width: 18px; height: 18px; padding: 0; border-radius: 50%; border: 0; background: var(--c); cursor: pointer; outline: 1.5px solid transparent; outline-offset: 2px; transition: outline-color 0.2s var(--ease), transform 0.2s var(--ease); }
+  .thm-sw:hover { transform: scale(1.12); }
+  .thm-sw.on { outline-color: var(--ink); }
+  .thm-code { font-family: var(--font-mono); font-size: 11px; color: var(--ink-faint); }
+  .thm-code span { color: var(--ink); }
+
+  /* Start states (only while html.motion is set). */
+  html.motion .bn [data-msg] { opacity: 0; }
+
+  @media (max-width: 960px) {
+    .bn-map, .bn-chat, .bn-update, .bn-theme { grid-column: 1 / -1; grid-row: auto; }
+    .bn-viz.chat { min-height: 0; }
+  }
+  @media (max-width: 520px) {
+    .map { gap: 28px; }
+    .map-files li { font-size: 10.5px; padding: 4px 7px; }
+    .map-pages li { font-size: 12.5px; padding: 10px; }
+    .bn-viz { padding: 20px; }
+  }
+</style>
+
+<script>
+  import { animate, stagger } from "motion";
+  import { ease, loopInView, motionOn, sleep } from "../../scripts/motion";
+
+  // ── 1. Files become pages ────────────────────────────────────────────
+  const map = document.querySelector<HTMLElement>("[data-map]");
+  if (map) {
+    const svg = map.querySelector("svg")!;
+    const files = Array.from(map.querySelectorAll<HTMLElement>(".map-files li"));
+    const pages = Array.from(map.querySelectorAll<HTMLElement>(".map-pages li"));
+    const wires = new Map<HTMLElement, { base: SVGPathElement; live: SVGPathElement }>();
+
+    const draw = () => {
+      const box = map.getBoundingClientRect();
+      svg.innerHTML = "";
+      wires.clear();
+      for (const f of files) {
+        const p = pages.find((x) => x.dataset.g === f.dataset.g);
+        if (!p) continue;
+        const a = f.getBoundingClientRect(), b = p.getBoundingClientRect();
+        const x1 = a.right - box.left, y1 = a.top + a.height / 2 - box.top;
+        const x2 = b.left - box.left, y2 = b.top + b.height / 2 - box.top;
+        const mid = (x1 + x2) / 2;
+        const d = `M${x1} ${y1} C${mid} ${y1}, ${mid} ${y2}, ${x2} ${y2}`;
+        const make = (cls: string) => {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", d);
+          path.setAttribute("pathLength", "1");
+          if (cls) path.setAttribute("class", cls);
+          svg.appendChild(path);
+          return path;
+        };
+        const base = make("");
+        const live = make("live");
+        if (motionOn()) live.style.strokeDashoffset = "1";
+        wires.set(f, { base, live });
+      }
+    };
+    new ResizeObserver(draw).observe(map);
+    draw();
+
+    if (motionOn()) {
+      loopInView(map, async (alive) => {
+        for (const page of pages) {
+          if (!alive()) return;
+          const group = files.filter((f) => f.dataset.g === page.dataset.g);
+          group.forEach((f) => f.classList.add("on"));
+          const lines = group.map((f) => wires.get(f)?.live).filter(Boolean) as SVGPathElement[];
+          await animate(lines, { strokeDashoffset: [1, 0] }, { duration: 0.7, delay: stagger(0.12), ease }).finished;
+          page.classList.add("on");
+          animate(page, { scale: [1, 1.035, 1] }, { duration: 0.45, ease });
+          await sleep(350);
+        }
+        await sleep(2600);
+        if (!alive()) return;
+        const all = Array.from(wires.values()).map((w) => w.live);
+        await animate(all, { opacity: [1, 0] }, { duration: 0.5 }).finished;
+        files.forEach((f) => f.classList.remove("on"));
+        pages.forEach((p) => p.classList.remove("on"));
+        all.forEach((l) => { l.style.strokeDashoffset = "1"; l.style.opacity = "1"; });
+        await sleep(500);
+      });
+    }
+  }
+
+  // ── 2. The chat plays out ────────────────────────────────────────────
+  const chat = document.querySelector<HTMLElement>(".bn [data-chat]");
+  if (chat && motionOn()) {
+    const steps = Array.from(chat.children) as HTMLElement[];
+    loopInView(chat, async (alive) => {
+      for (const step of steps) {
+        if (!alive()) return;
+        if (step.classList.contains("bot-wrap")) {
+          const typing = step.querySelector<HTMLElement>("[data-typing]")!;
+          const bubble = step.querySelector<HTMLElement>("[data-msg]")!;
+          typing.style.display = "flex";
+          await animate(typing, { opacity: [0, 1] }, { duration: 0.2 }).finished;
+          await sleep(900);
+          typing.style.display = "none";
+          await animate(bubble, { opacity: [0, 1], y: [8, 0] }, { duration: 0.45, ease }).finished;
+          const refs = Array.from(bubble.querySelectorAll(".ref"));
+          await animate(refs, { opacity: [0, 1], scale: [0.85, 1] }, { duration: 0.35, delay: stagger(0.12), ease }).finished;
+          await sleep(900);
+        } else {
+          await animate(step, { opacity: [0, 1], y: [10, 0], scale: [0.97, 1] }, { duration: 0.45, ease }).finished;
+          await sleep(450);
+        }
+      }
+      await sleep(4200);
+      if (!alive()) return;
+      const shown = Array.from(chat.querySelectorAll("[data-msg]"));
+      await animate(shown, { opacity: 0 }, { duration: 0.4 }).finished;
+      await sleep(400);
+    }, 0.3);
+  }
+
+  // ── 3. Only what changed regenerates ─────────────────────────────────
+  const upd = document.querySelector<HTMLElement>("[data-update]");
+  if (upd && motionOn()) {
+    const rows = Array.from(upd.querySelectorAll<HTMLElement>("li"));
+    const changed = rows.filter((r) => r.classList.contains("is-changed"));
+    loopInView(upd, async (alive) => {
+      changed.forEach((r) => { r.classList.remove("is-done"); r.classList.add("is-working"); r.querySelector(".upd-tag")!.textContent = "rewriting"; });
+      await animate(rows, { opacity: [0, 1], x: [-8, 0] }, { duration: 0.4, delay: stagger(0.08), ease }).finished;
+      for (const r of changed) {
+        await sleep(1100);
+        if (!alive()) return;
+        r.classList.remove("is-working");
+        r.classList.add("is-done");
+        r.querySelector(".upd-tag")!.textContent = "rewritten";
+        animate(r.querySelector(".upd-ico")!, { scale: [0.6, 1.25, 1] }, { duration: 0.4, ease });
+      }
+      await sleep(3600);
+    }, 0.5);
+  }
+
+  // ── 4. Theme swatches ────────────────────────────────────────────────
+  const thm = document.querySelector<HTMLElement>("[data-theme-demo]");
+  if (thm) {
+    const swatches = Array.from(thm.querySelectorAll<HTMLButtonElement>(".thm-sw"));
+    const hex = thm.querySelector<HTMLElement>("[data-hex]")!;
+    let index = 0, pausedUntil = 0;
+    const pick = (i: number) => {
+      index = i;
+      const c = swatches[i].dataset.c!;
+      thm.style.setProperty("--tm", c);
+      hex.textContent = `"${c}"`;
+      swatches.forEach((s, n) => s.classList.toggle("on", n === i));
+    };
+    swatches.forEach((s, i) => s.addEventListener("click", () => { pausedUntil = performance.now() + 6000; pick(i); }));
+    if (motionOn()) {
+      loopInView(thm, async (alive) => {
+        await sleep(2200);
+        if (alive() && performance.now() > pausedUntil) pick((index + 1) % swatches.length);
+      }, 0.5);
+    }
+  }
+</script>

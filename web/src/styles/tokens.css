@@ -1,0 +1,146 @@
+/* DeepDoc design tokens: the single source for deepdoc.tech, /docs and the
+   hosted app at cloud.deepdoc.tech.
+
+   Marketing and docs pages get this through site.css. The hosted app is an
+   HTML string built in a Worker, so lib/hosted/page_html.ts inlines this same
+   file with a Vite raw import. There is no second copy to keep in sync.
+
+   Ink and paper, with one colour. Surfaces are warm charcoal (dark) or warm
+   paper (light). The single accent is vermilion: links, selection, focus,
+   live status, the logo mark and the one filled call to action. --p1..--p5
+   are a tonal ramp of that same hue (deep ember to pale flame, ending in
+   ink), used only by the paintable pixel grid and small pixel markers, so
+   the page reads as one colour at several temperatures rather than a
+   rainbow. No gradients on text and no blurred colour washes.
+   Texture comes from a film grain over everything and a fine pixel grid.
+
+   Plain CSS only, and no backslashes: this text is also embedded in a
+   JavaScript string. */
+:root {
+  --surface: #0D0D0C;
+  --surface-raised: #151513;
+  --surface-high: #1F1F1C;
+  --ink: #ECEAE3;
+  --ink-muted: #A3A199;
+  --ink-faint: #6F6D65;
+  --line: rgba(236, 234, 227, 0.09);
+  --line-strong: rgba(236, 234, 227, 0.16);
+
+  --accent: #FF5A2B;
+  --accent-ink: #0D0D0C;
+  --accent-dim: rgba(255, 90, 43, 0.12);
+  --accent-line: rgba(255, 90, 43, 0.45);
+  --p1: #D9360B;
+  --p2: #FF5A2B;
+  --p3: #FF8548;
+  --p4: #FFB27A;
+  --p5: #ECEAE3;
+  --danger: #FF6B6B;
+  --danger-dim: rgba(255, 107, 107, 0.08);
+
+  /* Raised panels, and the solid (ink-filled) button. */
+  --card: #131312;
+  --card-hover: #181816;
+  --edge: rgba(236, 234, 227, 0.055);
+  --solid: #ECEAE3;
+  --solid-ink: #0D0D0C;
+  --solid-hover: #FFFFFF;
+  --hover: rgba(236, 234, 227, 0.045);
+  --press: rgba(236, 234, 227, 0.075);
+  --seg-track: #141412;
+  --seg-thumb: #2A2A26;
+
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --shadow-card: 0 1px 0 rgba(0, 0, 0, 0.45), 0 12px 32px -20px rgba(0, 0, 0, 0.9);
+  --shadow-pop: 0 22px 50px -18px rgba(0, 0, 0, 0.8);
+  --shadow-lift: 0 30px 80px -24px rgba(0, 0, 0, 0.75);
+  --btn-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 1px 2px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255, 255, 255, 0.06);
+
+  /* Texture. --grid is the pixel-grid line colour, --grain the noise tile. */
+  --grid: rgba(236, 234, 227, 0.055);
+  --grain-opacity: 0.085;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .93 0 0 0 0 .92 0 0 0 0 .89 0 0 0 .7 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: 'Instrument Serif', 'Iowan Old Style', Georgia, serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  --r-xs: 6px;
+  --r-sm: 8px;
+  --r-md: 11px;
+  --r-lg: 14px;
+  --r-xl: 20px;
+  --ease: cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+html[data-theme="light"] {
+  --surface: #F5F4F0;
+  --surface-raised: #ECEAE4;
+  --surface-high: #E2E0DA;
+  --ink: #111110;
+  --ink-muted: #63635B;
+  --ink-faint: #99988F;
+  --line: rgba(17, 17, 16, 0.08);
+  --line-strong: rgba(17, 17, 16, 0.15);
+
+  --accent: #C93A0A;
+  --accent-ink: #FFFFFF;
+  --accent-dim: rgba(201, 58, 10, 0.08);
+  --accent-line: rgba(201, 58, 10, 0.4);
+  --p1: #A82E06;
+  --p2: #D9440F;
+  --p3: #F06A2E;
+  --p4: #F5A06B;
+  --p5: #111110;
+  --danger: #C0392B;
+  --danger-dim: rgba(192, 57, 43, 0.08);
+
+  /* A raised panel is lighter than the page here. One that is darker than
+     its page reads as a hole, not a layer. */
+  --card: #FCFBF8;
+  --card-hover: #FFFFFF;
+  --edge: rgba(255, 255, 255, 0.95);
+  --solid: #111110;
+  --solid-ink: #F5F4F0;
+  --solid-hover: #2B2B28;
+  --hover: rgba(17, 17, 16, 0.04);
+  --press: rgba(17, 17, 16, 0.07);
+  --seg-track: #E4E2DC;
+  --seg-thumb: #FCFBF8;
+
+  --shadow-sm: 0 1px 2px rgba(17, 17, 16, 0.05);
+  --shadow-card: 0 1px 2px rgba(17, 17, 16, 0.05), 0 12px 32px -22px rgba(17, 17, 16, 0.22);
+  --shadow-pop: 0 22px 50px -20px rgba(17, 17, 16, 0.22);
+  --shadow-lift: 0 30px 80px -28px rgba(17, 17, 16, 0.28);
+  --btn-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.14), 0 1px 2px rgba(0, 0, 0, 0.2), 0 0 0 1px #111110;
+
+  --grid: rgba(17, 17, 16, 0.06);
+  --grain-opacity: 0.11;
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.82' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 .07 0 0 0 0 .07 0 0 0 0 .06 0 0 0 .7 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Film grain: one fixed layer over the whole viewport. It sits above the
+   content on purpose, so photographs, panels and type all share one surface,
+   and never takes pointer events. */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9000;
+  pointer-events: none;
+  background-image: var(--grain);
+  background-size: 180px 180px;
+  opacity: var(--grain-opacity);
+}
+
+/* The static pixel grid, for surfaces without the interactive canvas. */
+.pixel-grid {
+  background-image:
+    linear-gradient(var(--grid) 1px, transparent 1px),
+    linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+  background-size: 14px 14px;
+}
+
+@media print {
+  body::after { display: none; }
+}

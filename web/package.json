@@ -3,26 +3,24 @@
   "version": "0.1.0",
   "type": "module",
   "private": true,
-  "description": "Marketing site for DeepDoc.",
+  "description": "deepdoc.tech, its docs, and the hosted app at cloud.deepdoc.tech.",
   "scripts": {
     "dev": "astro dev",
     "start": "astro dev",
-    "build": "npm run build:docs && astro build",
-    "images": "node scripts/build-images.mjs",
-    "test:hosted": "node scripts/test-hosted-client.mjs",
-    "test:tokens": "node scripts/test-hosted-tokens.mjs",
+    "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",
-    "build:docs": "cd docs-site && npm install --silent && npm run build",
-    "build:site-only": "astro build"
+    "images": "node scripts/build-images.mjs",
+    "test:hosted": "node scripts/test-hosted-client.mjs",
+    "test:tokens": "node scripts/test-hosted-tokens.mjs"
   },
   "dependencies": {
     "@astrojs/check": "^0.9.4",
     "@astrojs/cloudflare": "12.6.13",
+    "@astrojs/mdx": "^4.3.14",
     "@astrojs/sitemap": "^3.7.3",
-    "@tailwindcss/vite": "^4.0.0",
     "astro": "^5.0.0",
-    "tailwindcss": "^4.0.0",
+    "motion": "^14.12.0",
     "typescript": "^5.6.3"
   },
   "devDependencies": {

@@ -1,0 +1,67 @@
+---
+/**
+ * Supported stacks as two slow, opposing marquees. Each row is rendered four
+ * times so the loop is seamless; the copies are hidden from assistive tech. With
+ * reduced motion the rows wrap and stand still.
+ */
+const rowA = ["Python", "Django", "Django REST Framework", "FastAPI", "Falcon", "Go", "net/http"];
+const rowB = ["TypeScript", "JavaScript", "Express", "Fastify", "NestJS", "PHP", "Laravel", "Vue", "OpenAPI"];
+---
+
+<section class="block ruled stacks-block" id="stacks">
+  <div class="wrap">
+    <div class="block-head">
+      <p class="eyebrow" data-reveal><span class="px"></span>Works with</p>
+      <h2 class="h2 block-title" data-words>The stacks your backend already runs on.</h2>
+    </div>
+  </div>
+
+  <div class="mq" data-reveal>
+    {[rowA, rowB].map((row, r) => (
+      <div class:list={["mq-row", r === 1 && "rev"]}>
+        <div class="mq-track">
+          {[0, 1, 2, 3].map((copy) => (
+            <ul aria-hidden={copy > 0 ? "true" : undefined}>
+              {row.map((name) => <li>{name}</li>)}
+            </ul>
+          ))}
+        </div>
+      </div>
+    ))}
+  </div>
+
+  <div class="wrap">
+    <p class="faint stack-note" data-reveal>
+      Endpoint, runtime and call-graph analysis cover these stacks. Other languages may parse, but are not fully supported.
+    </p>
+  </div>
+</section>
+
+<style is:global>
+  .stacks-block { overflow: hidden; }
+  .mq {
+    margin-top: 56px; display: flex; flex-direction: column; gap: 14px;
+    -webkit-mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+    mask-image: linear-gradient(90deg, transparent, black 12%, black 88%, transparent);
+  }
+  .mq-track { display: flex; width: max-content; animation: mq-slide 40s linear infinite; }
+  .mq-row.rev .mq-track { animation-direction: reverse; animation-duration: 52s; }
+  .mq:hover .mq-track { animation-play-state: paused; }
+  .mq ul { display: flex; flex-shrink: 0; }
+  .mq li {
+    display: flex; align-items: center; margin-right: 14px; padding: 12px 22px; white-space: nowrap;
+    border: 1px solid var(--line-strong); border-radius: 999px; background: var(--card); box-shadow: inset 0 1px 0 var(--edge);
+    font-size: clamp(1rem, 1.6vw, 1.25rem); font-weight: 500; letter-spacing: -0.02em; color: var(--ink-muted);
+    transition: color 0.2s var(--ease), border-color 0.2s var(--ease);
+  }
+  .mq li:hover { color: var(--ink); border-color: var(--accent-line); }
+  /* Four copies per row, sliding by exactly one: seamless on any screen width. */
+  @keyframes mq-slide { to { transform: translateX(-25%); } }
+  .stack-note { margin-top: 36px; font-size: 13px; max-width: 560px; }
+  @media (prefers-reduced-motion: reduce) {
+    .mq { -webkit-mask-image: none; mask-image: none; padding: 0 24px; }
+    .mq-track { width: auto; flex-wrap: wrap; }
+    .mq ul { flex-wrap: wrap; row-gap: 12px; }
+    .mq ul[aria-hidden="true"] { display: none; }
+  }
+</style>

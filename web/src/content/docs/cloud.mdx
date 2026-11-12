@@ -1,0 +1,52 @@
+---
+title: DeepDoc Cloud
+description: Generate a docs site from a GitHub repository in the browser, with nothing to install.
+---
+
+[cloud.deepdoc.tech](https://cloud.deepdoc.tech) runs the same generator as the CLI for you. Sign in with GitHub, pick a repository and get a documentation site at a stable address.
+
+## How it works
+
+<Steps>
+  <Step>
+    **Sign in with GitHub.** DeepDoc asks for the `repo` and `read:user` scopes. `repo` is what lets it list and clone your private repositories.
+  </Step>
+  <Step>
+    **Pick a repository.** Choose one of yours from the list, or paste the URL of any public repository.
+  </Step>
+  <Step>
+    **Choose who can see it.** Sites are private by default and visible only to you. Switch to public whenever you like.
+  </Step>
+  <Step>
+    **Generate.** The status page follows the run through cloning, generating and building. When it finishes, the site is live at `cloud.deepdoc.tech/owner/repo/`.
+  </Step>
+</Steps>
+
+## Visibility
+
+| | Who can open the site |
+|---|---|
+| **Private** (default) | Only you, signed in. Every asset is checked, not just the page. |
+| **Public** | Anyone with the link. It can also appear in the public gallery. |
+
+Change it from the project's page at any time.
+
+## Limits
+
+Cloud is a free hosted demo, so it is deliberately small.
+
+| Limit | Value |
+|---|---|
+| Saved projects per account | 2 |
+| Generations started per day | 2 |
+| Spend per generation | Capped. A run that would exceed the cap stops. |
+
+Regenerating an existing project refreshes it in place. Deleting a project frees a slot.
+
+<Callout title="Need more than that?">
+  Install the CLI. It has no limits, works with any provider including a local model, and keeps your source on your machine. See the [Quickstart](/docs/quickstart).
+</Callout>
+
+## What you get
+
+The generated site is the same one `deepdoc generate` builds locally, with navigation, search and diagrams. The chatbot is not included in hosted sites.

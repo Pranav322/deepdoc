@@ -1,12 +1,14 @@
 {
   "name": "deepdoc-video",
   "version": "1.0.0",
-  "description": "Remotion explainer video for DeepDoc",
+  "description": "The DeepDoc demo video: a real run and the real site it produced (Remotion)",
   "private": true,
   "scripts": {
     "start": "remotion studio",
     "render": "remotion render src/index.tsx DeepDocVideo --output out/DeepDocVideo.mp4 --codec h264",
-    "build": "remotion render src/index.tsx DeepDocVideo --output out/DeepDocVideo.mp4 --codec h264"
+    "build": "remotion render src/index.tsx DeepDocVideo --output out/DeepDocVideo.mp4 --codec h264",
+    "poster": "remotion still src/index.tsx DeepDocVideo out/poster.jpg --frame=400 --image-format=jpeg",
+    "capture": "node scripts/capture-site.mjs public/site"
   },
   "dependencies": {
     "@remotion/cli": "^4.0.0",
@@ -19,6 +21,7 @@
   "devDependencies": {
     "@types/react": "^18.3.12",
     "@types/react-dom": "^18.3.1",
+    "playwright-core": "^1.56.0",
     "typescript": "^5.6.3"
   },
   "remotion": {

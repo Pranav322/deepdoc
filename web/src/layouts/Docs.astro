@@ -1,0 +1,230 @@
+---
+import "../styles/docs.css";
+import Layout from "./Layout.astro";
+import Header from "../components/Header.astro";
+import { docsSections, docsOrder, docHref, GITHUB } from "../lib/nav";
+
+interface Heading { depth: number; slug: string; text: string }
+interface Props {
+  id: string;
+  title: string;
+  description: string;
+  headings: Heading[];
+  titles: Record<string, string>;
+}
+const { id, title, description, headings, titles } = Astro.props;
+
+const section = docsSections.find((s) => s.pages.includes(id));
+const index = docsOrder.indexOf(id);
+const prev = index > 0 ? docsOrder[index - 1] : null;
+const next = index >= 0 && index < docsOrder.length - 1 ? docsOrder[index + 1] : null;
+const toc = headings.filter((h) => h.depth === 2 || h.depth === 3);
+const current = docHref(id);
+const pageTitle = id === "index" ? "DeepDoc docs" : `${title} · DeepDoc docs`;
+---
+
+<Layout title={pageTitle} description={description}>
+  <Header wide />
+
+  <div class="docs-bar">
+    <button type="button" id="side-toggle" aria-expanded="false" aria-controls="docs-side">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h10"/></svg>
+      Menu
+    </button>
+    <span>{section?.title}</span>
+  </div>
+
+  <div class="docs-shell">
+    <aside class="docs-side" id="docs-side" aria-label="Documentation">
+      <button type="button" class="search-open" id="search-open" aria-label="Search the docs">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+        <span>Search</span><kbd>⌘K</kbd>
+      </button>
+      {
+        docsSections.map((s) => (
+          <div class="side-group">
+            <p class="eyebrow side-title">{s.title}</p>
+            <ul class="side-links">
+              {s.pages.map((p) => (
+                <li>
+                  <a href={docHref(p)} aria-current={docHref(p) === current ? "page" : undefined}>{titles[p] ?? p}</a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ))
+      }
+    </aside>
+
+    <main class="docs-main">
+      <article class="docs-article">
+        <p class="eyebrow docs-eyebrow">{section?.title}</p>
+        <h1 class="docs-title">{title}</h1>
+        <p class="docs-desc">{description}</p>
+        <hr class="docs-rule" />
+        <div class="prose" id="prose"><slot /></div>
+
+        <nav class="docs-pager" aria-label="Previous and next">
+          {prev && (<a href={docHref(prev)} class="prev"><span class="dir">Previous</span><span class="ttl">{titles[prev]}</span></a>)}
+          {next && (<a href={docHref(next)} class="next"><span class="dir">Next</span><span class="ttl">{titles[next]}</span></a>)}
+        </nav>
+        <p class="docs-edit">
+          <a href={`${GITHUB}/edit/main/web/src/content/docs/${id}.mdx`} target="_blank" rel="noreferrer">Edit this page on GitHub</a>
+        </p>
+      </article>
+    </main>
+
+    {toc.length > 1 && (
+      <aside class="docs-toc" aria-label="On this page">
+        <p class="eyebrow">On this page</p>
+        <ul>
+          {toc.map((h) => (
+            <li><a href={`#${h.slug}`} class={`depth-${h.depth}`} data-slug={h.slug}>{h.text}</a></li>
+          ))}
+        </ul>
+      </aside>
+    )}
+  </div>
+
+  <div class="search-veil" id="search-veil" role="dialog" aria-modal="true" aria-label="Search the docs">
+    <div class="search-box">
+      <input id="search-input" type="search" placeholder="Search the docs" autocomplete="off" spellcheck="false" />
+      <div class="search-results" id="search-results" role="listbox"></div>
+    </div>
+  </div>
+</Layout>
+
+<script>
+  // Mobile sidebar.
+  const side = document.getElementById("docs-side");
+  const toggle = document.getElementById("side-toggle");
+  toggle?.addEventListener("click", () => {
+    const open = side?.classList.toggle("is-open");
+    toggle.setAttribute("aria-expanded", String(!!open));
+  });
+  side?.addEventListener("click", (e) => {
+    if ((e.target as HTMLElement).closest("a")) side.classList.remove("is-open");
+  });
+
+  // Copy buttons on code blocks.
+  document.querySelectorAll<HTMLPreElement>("#prose pre").forEach((pre) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "copy-code";
+    btn.setAttribute("aria-label", "Copy code");
+    btn.innerHTML =
+      '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>';
+    btn.addEventListener("click", async () => {
+      try {
+        await navigator.clipboard.writeText(pre.querySelector("code")?.textContent ?? "");
+        btn.style.color = "var(--ink)";
+        setTimeout(() => (btn.style.color = ""), 1200);
+      } catch {}
+    });
+    pre.appendChild(btn);
+  });
+
+  // Wrap tables so wide ones scroll instead of breaking the layout.
+  document.querySelectorAll<HTMLTableElement>("#prose > table").forEach((t) => {
+    const wrap = document.createElement("div");
+    wrap.className = "table-wrap";
+    t.replaceWith(wrap);
+    wrap.appendChild(t);
+  });
+
+  // Table of contents: highlight the section being read.
+  const links = Array.from(document.querySelectorAll<HTMLAnchorElement>(".docs-toc a"));
+  if (links.length) {
+    const byId = new Map(links.map((a) => [a.dataset.slug!, a]));
+    const heads = links.map((a) => document.getElementById(a.dataset.slug!)).filter(Boolean) as HTMLElement[];
+    const pick = () => {
+      let active = heads[0];
+      for (const h of heads) if (h.getBoundingClientRect().top < 120) active = h;
+      links.forEach((a) => a.classList.toggle("is-active", a === byId.get(active?.id)));
+    };
+    addEventListener("scroll", pick, { passive: true });
+    pick();
+  }
+
+  // Search.
+  type Doc = { id: string; href: string; title: string; section: string; text: string; headings: string[] };
+  const veil = document.getElementById("search-veil")!;
+  const input = document.getElementById("search-input") as HTMLInputElement;
+  const list = document.getElementById("search-results")!;
+  let docs: Doc[] | null = null;
+  let hits: Doc[] = [];
+  let sel = 0;
+
+  async function load() {
+    if (docs) return;
+    try { docs = await (await fetch("/docs/search.json")).json(); } catch { docs = []; }
+  }
+  function snippet(d: Doc, q: string) {
+    const i = d.text.toLowerCase().indexOf(q);
+    if (i < 0) return d.text.slice(0, 140);
+    const start = Math.max(0, i - 50);
+    return (start ? "…" : "") + d.text.slice(start, start + 150);
+  }
+  function render() {
+    const q = input.value.trim().toLowerCase();
+    if (!docs) return;
+    if (!q) hits = docs.slice(0, 7);
+    else {
+      const terms = q.split(/\s+/);
+      hits = docs
+        .map((d) => {
+          const t = d.title.toLowerCase(), hd = d.headings.join(" ").toLowerCase(), body = d.text.toLowerCase();
+          let score = 0;
+          for (const w of terms) {
+            if (t.includes(w)) score += 10;
+            if (hd.includes(w)) score += 4;
+            if (body.includes(w)) score += 1;
+            else return { d, score: 0 };
+          }
+          return { d, score };
+        })
+        .filter((x) => x.score > 0)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 8)
+        .map((x) => x.d);
+    }
+    sel = 0;
+    list.innerHTML = hits.length
+      ? hits
+          .map(
+            (d, i) =>
+              `<a href="${d.href}" role="option" aria-selected="${i === 0}"><div><span class="r-title">${esc(d.title)}</span><span class="r-sec">${esc(d.section)}</span></div>${
+                q ? `<div class="r-snip">${esc(snippet(d, q))}</div>` : ""
+              }</a>`
+          )
+          .join("")
+      : `<div class="search-empty">No results for “${esc(input.value)}”</div>`;
+  }
+  const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  function mark() {
+    list.querySelectorAll("a").forEach((a, i) => a.setAttribute("aria-selected", String(i === sel)));
+    list.querySelectorAll("a")[sel]?.scrollIntoView({ block: "nearest" });
+  }
+  async function open() {
+    veil.classList.add("is-open");
+    input.value = "";
+    await load();
+    render();
+    input.focus();
+  }
+  const close = () => veil.classList.remove("is-open");
+
+  document.getElementById("search-open")?.addEventListener("click", open);
+  veil.addEventListener("mousedown", (e) => { if (e.target === veil) close(); });
+  input.addEventListener("input", render);
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown") { e.preventDefault(); sel = Math.min(sel + 1, hits.length - 1); mark(); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); sel = Math.max(sel - 1, 0); mark(); }
+    else if (e.key === "Enter" && hits[sel]) location.href = hits[sel].href;
+  });
+  addEventListener("keydown", (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") { e.preventDefault(); veil.classList.contains("is-open") ? close() : open(); }
+    else if (e.key === "Escape") close();
+    else if (e.key === "/" && !/input|textarea/i.test((e.target as HTMLElement).tagName)) { e.preventDefault(); open(); }
+  });
+</script>

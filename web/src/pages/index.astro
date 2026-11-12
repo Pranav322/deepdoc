@@ -1,749 +1,161 @@
 ---
-// NOT prerendered (unlike docs.astro/changelog.astro): this exact path (/)
-// is also where the hosted app's shell lives (src/pages/cloud/index.ts),
-// reached via src/middleware.ts rewriting cloud.deepdoc.tech requests.
-// Cloudflare Pages serves a prerendered path as a static asset *before* the
-// Function/middleware ever runs, so if this were prerendered, "/" would
-// always serve the marketing homepage regardless of hostname. Rendering
-// per-request (still deterministic, same output) lets middleware branch
-// correctly. docs.astro/changelog.astro have no such collision and can stay
-// static.
+// Not prerendered, on purpose. "/" is also the hosted app's shell on
+// cloud.deepdoc.tech (src/pages/cloud/index.ts, reached through the hostname
+// rewrite in src/middleware.ts). Cloudflare Pages serves a prerendered path as
+// a static asset before any Function runs, so a static "/" would show this
+// page on both domains. Docs and changelog have no such collision.
 import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
-import PipelineOrbit from "../components/PipelineOrbit.astro";
-import AuroraHeroBackground from "../components/AuroraHeroBackground.astro";
+import PixelField from "../components/PixelField.astro";
+import VideoStage from "../components/VideoStage.astro";
+import Bento from "../components/home/Bento.astro";
+import Pipeline from "../components/home/Pipeline.astro";
+import WaysIn from "../components/home/WaysIn.astro";
+import Stacks from "../components/home/Stacks.astro";
+import { CLOUD, GITHUB } from "../lib/nav";
 
-const features = [
-  {
-    num: "01",
-    title: "Bucket-based generation",
-    body: "Architecture, endpoints, integrations, and schemas planned as cohesive docs — not one noisy page per file. The planner classifies your repo, proposes buckets, assigns files and symbols to a final reader-first structure.",
-  },
-  {
-    num: "02",
-    title: "Evidence-grounded chatbot",
-    body: "An embedded assistant ships with the docs site. Answers are hydrated from indexed source with exact file paths and line ranges, with fast lookup, deep research, and code-first modes.",
-  },
-  {
-    num: "03",
-    title: "Incremental updates",
-    body: "`deepdoc update` diffs against the last synced commit and regenerates only affected buckets. Smart enough to do a targeted replan when new integrations or endpoints appear.",
-  },
-];
-
-const pipeline = [
-  { step: "Scan",     note: "Parse source. Detect endpoints, runtime surfaces, integrations, OpenAPI specs." },
-  { step: "Plan",     note: "Multi-step LLM planner. Classify repo, propose buckets, assign files." },
-  { step: "Generate", note: "Build evidence packs. LLM call per bucket. Python-side repair and grounding checks." },
-  { step: "API Ref",      note: "Stage OpenAPI specs into a single MkDocs Swagger UI page when a spec exists." },
-  { step: "Build",    note: "Write site scaffold, page tree, nav, search, and optional chatbot widget." },
-];
-
-const langs = ["Python", "TypeScript", "JavaScript", "Go", "PHP", "Vue", "OpenAPI"];
-
+const headline = "Documentation that keeps pace with your".split(" ");
 ---
 
 <Layout>
   <Header />
 
-  <!-- Sections stay at this indent level so adding the landmark doesn't
-       reflow ~400 lines of markup. -->
   <main>
-
-  <!-- ── Hero ─────────────────────────────────────────────────────── -->
-  <section
-    id="hero-cursor-zone"
-    class="relative overflow-hidden"
-    style="border-bottom: 1px solid var(--color-line);"
-  >
-    <AuroraHeroBackground />
-    <div class="hero-scrim" aria-hidden="true"></div>
-
-    <div class="relative z-10 mx-auto max-w-6xl px-6 pt-16 pb-14 md:pt-24 md:pb-20">
-      <div class="flex flex-col items-center text-center">
-
-        <!-- Identity badge -->
-        <div
-          class="mb-5 inline-flex items-center gap-2"
-          style="font-family: var(--font-mono); font-size: 11px; letter-spacing: 0.08em; color: var(--color-ink-muted); text-transform: uppercase;"
-        >
-          <span class="not-yc-mark" aria-hidden="true">YC</span>
-          Not backed by YC
-        </div>
-
-        <!-- Headline -->
-        <h1
-          class="marketing-display"
-          style="font-size: clamp(2.75rem, 5.2vw, 4.5rem); color: var(--color-ink); max-width: 1160px;"
-        >
-          <span class="hero-headline-line">Documentation that keeps pace</span>
-          <span class="hero-headline-line">with your <span class="hero-accent">codebase.</span></span>
+    <!-- Hero: the paintable grid covers the whole section, headline and video. -->
+    <section class="hero" id="hero">
+      <PixelField />
+      <div class="wrap hero-inner">
+        <p class="rise eyebrow" style="--d:0"><span class="px"></span>Open source · MIT · Not backed by YC</p>
+        <h1 class="display hero-title">
+          {headline.map((w, i) => <span class="w" style={`--i:${i}`}>{w}</span>)}<span class="w em-serif" style={`--i:${headline.length}`}>codebase.</span>
         </h1>
-
-        <!-- Sub -->
-        <p
-          class="mt-6 max-w-xl leading-relaxed"
-          style="font-size: 1.0625rem; color: var(--color-ink-muted); font-family: var(--font-sans);"
-        >
-          Turn your repository into a navigable docs site, then keep it accurate
-          as code changes—with answers tied back to the source.
+        <p class="rise lede hero-lede" style="--d:2">
+          DeepDoc reads your repository and writes a docs site with a chatbot that cites real files,
+          then regenerates only the pages your commits touch.
         </p>
-
-        <div class="hero-paths mt-9" aria-label="Choose how to use DeepDoc">
-          <a href="https://cloud.deepdoc.tech/" class="hero-path hero-path-hosted">
-            <span>Explore the live demo</span>
+        <div class="rise hero-cta" style="--d:3">
+          <a class="btn vivid" href={CLOUD}>
+            Generate docs for a repo
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </a>
-          <a href="#get-started" class="hero-path hero-path-local">
-            <span>Install DeepDoc locally</span>
+          <button class="btn secondary mono copy" type="button" data-copy="pip install deepdoc" aria-label="Copy install command">
+            <span class="copy-text">pip install deepdoc</span>
+            <svg class="copy-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+            <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
+          </button>
+        </div>
+        <p class="rise hero-meta faint" style="--d:4">Python 3.10+ · Bring your own model · <a class="link" href={GITHUB} target="_blank" rel="noreferrer">View on GitHub</a></p>
+      </div>
+      <div class="rise stage-wrap" style="--d:5">
+        <VideoStage />
+      </div>
+    </section>
+
+    <Bento />
+    <Pipeline />
+    <WaysIn />
+    <Stacks />
+
+    <!-- Closing: paintable, like the hero. -->
+    <section class="closing">
+      <PixelField />
+      <div class="wrap closing-inner">
+        <h2 class="display closing-title" data-words>Your codebase already tells a story. <span class="em-serif">Let it.</span></h2>
+        <div class="hero-cta" data-reveal>
+          <a class="btn vivid" href={CLOUD}>
+            Generate docs for a repo
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </a>
-        </div>
-
-          <p
-            class="mt-8"
-            style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);"
-          >
-            Python 3.10+ &middot; MIT license &middot; Bring your own LLM &middot;
-            <a
-              href="https://github.com/Pranav322/deepdoc"
-              target="_blank"
-              rel="noreferrer"
-              style="color: var(--color-ink-faint); text-decoration: underline; text-underline-offset: 2px; transition: color 0.15s;"
-              onmouseover="this.style.color='var(--color-ink)'"
-              onmouseout="this.style.color='var(--color-ink-faint)'"
-            >View on GitHub</a>
-          </p>
-        </div>
-
-        <!-- Full-width product window -->
-        <div class="hero-stage">
-          <div class="hero-window">
-            <div class="proof-bar">
-              <span class="dot red"></span>
-              <span class="dot yellow"></span>
-              <span class="dot green"></span>
-              <span class="proof-url">https://cloud.deepdoc.tech/pranav322/codewiki</span>
-            </div>
-            <div class="hero-image-wrap">
-              {/* ponytail: both theme variants are fetched even though CSS hides one
-                  — display:none doesn't cancel an <img> download. Kept because the
-                  theme is a data-attribute set by the header toggle, so a
-                  prefers-color-scheme <picture> would desync from a manual switch.
-                  At 48/125 KB each that's cheaper than JS-driven src injection.
-                  Files come from `npm run images`. */}
-              <img
-                src="/proof-docs-dark-2208.webp"
-                srcset="/proof-docs-dark-1104.webp 1104w, /proof-docs-dark-2208.webp 2208w"
-                sizes="(max-width: 1152px) 100vw, 1104px"
-                width="2208"
-                height="1231"
-                alt="Generated DeepDoc documentation site for the codewiki repository, showing domain-grouped sidebar navigation, an architecture diagram, and the built-in chatbot bar."
-                class="proof-image-dark"
-                loading="eager"
-                fetchpriority="high"
-                decoding="async"
-              />
-              <img
-                src="/proof-docs-2208.webp"
-                srcset="/proof-docs-1104.webp 1104w, /proof-docs-2208.webp 2208w"
-                sizes="(max-width: 1152px) 100vw, 1104px"
-                width="2208"
-                height="1231"
-                alt="Generated DeepDoc documentation site for the codewiki repository, showing domain-grouped sidebar navigation, an architecture diagram, and the built-in chatbot bar."
-                class="proof-image-light"
-                loading="eager"
-                decoding="async"
-              />
-            </div>
-          </div>
-
-          <div class="hero-status-strip" aria-label="DeepDoc product capabilities">
-            <div><strong>Reader-first docs</strong><span>organized by domain</span></div>
-            <div><strong>Source-backed answers</strong><span>files and line ranges</span></div>
-            <div><strong>Focused updates</strong><span>only changed pages regenerate</span></div>
-          </div>
-
-         
-        </div>
-    </div>
-  </section>
-
-  <!-- ── Language strip ──────────────────────────────────────────── -->
-  <section
-    class="border-b border-[var(--color-line)]"
-    style="border-bottom: 1px solid var(--color-line);"
-  >
-    <div class="mx-auto max-w-6xl px-6 py-4 flex items-center gap-3 flex-wrap">
-      <span
-        style="font-size: 11px; font-family: var(--font-mono); color: var(--color-ink-faint); text-transform: uppercase; letter-spacing: 0.12em; white-space: nowrap;"
-      >
-        Works with
-      </span>
-      <span
-        style="width: 1px; height: 12px; background: var(--color-line-strong);"
-        aria-hidden="true"
-      ></span>
-      {
-        langs.map((l) => (
-          <span
-            style="font-size: 12px; font-family: var(--font-sans); color: var(--color-ink-muted);"
-          >
-            {l}
-          </span>
-        ))
-      }
-    </div>
-  </section>
-
-  <!-- ── Demo video ──────────────────────────────────────────────── -->
-  <section class="section-raised">
-    <div class="mx-auto max-w-6xl px-6 py-16">
-      <div class="mb-8 flex items-end justify-between gap-4 flex-wrap">
-        <div>
-          <div
-            style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
-          >
-            See it in action
-          </div>
-          <h2
-            class="display"
-            style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
-          >
-            Watch the pipeline run.
-          </h2>
-        </div>
-        <span style="font-size: 12px; color: var(--color-ink-faint); font-family: var(--font-sans);">
-          41 sec · all five phases
-        </span>
-      </div>
-
-      <div
-        class="overflow-hidden rounded-2xl"
-        style="border: 1px solid var(--color-line-strong); box-shadow: 0 24px 72px rgba(0,0,0,0.55); background: #0a0a0e; aspect-ratio: 16 / 9; position: relative;"
-      >
-        <video
-          id="demo-video"
-          src="https://pub-8f896d606470418f9c3a4a670bf154c4.r2.dev/demo.mp4"
-          controls
-          muted
-          preload="metadata"
-          playsinline
-          aria-label="Screen recording of deepdoc generate running all five pipeline phases against a repository, 41 seconds"
-          style="position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block;"
-        >
-          {/* The recording has no narration — its only audio is the background
-              music from deepdoc/video. The track identifies that non-speech
-              audio; not `default`, so it stays off unless a viewer turns it on. */}
-          <track kind="captions" src="/demo-captions.vtt" srclang="en" label="English" />
-        </video>
-        <!-- Shown only if video fails to load -->
-        <noscript>
-          <div
-            class="flex items-center justify-center"
-            style="position: absolute; inset: 0; color: var(--color-ink-faint); font-family: var(--font-sans); font-size: 13px; text-align: center; padding: 24px;"
-          >
-            Run <code style="margin: 0 6px; font-family: var(--font-mono); color: var(--color-accent);">deepdoc/video → npm run render</code> to generate the demo video.
-          </div>
-        </noscript>
-      </div>
-    </div>
-  </section>
-
-  <!-- Demo video auto-plays (muted, per browser autoplay policy) once it's
-       actually visible, and pauses the moment it scrolls out of view —
-       no reason to keep decoding/playing an offscreen video. Muted stays
-       the default even after re-entering the viewport; the native controls
-       let a visitor unmute/pause manually without fighting the observer. -->
-  <script>
-    (function () {
-      const video = document.getElementById('demo-video');
-      if (!video || !('IntersectionObserver' in window)) return;
-      const observer = new IntersectionObserver(
-        (entries) => {
-          for (const entry of entries) {
-            if (entry.isIntersecting) {
-              video.play().catch(() => {});
-            } else {
-              video.pause();
-            }
-          }
-        },
-        { threshold: 0.4 },
-      );
-      observer.observe(video);
-    })();
-  </script>
-
-  <!-- ── Features ────────────────────────────────────────────────── -->
-  <section style="border-bottom: 1px solid var(--color-line);">
-    <div class="mx-auto max-w-6xl px-6 py-16">
-      <div class="mb-10 max-w-xl">
-        <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
-          What it does
-        </div>
-        <h2 class="display" style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);">
-          One command. A docs site<br />your team won't ignore.
-        </h2>
-      </div>
-
-      <div class="features-bento">
-        <div class="feat-card feat-card-wide">
-          <div class="feat-num">01</div>
-          <h3 class="feat-title">Your docs stay organized</h3>
-          <p class="feat-body">Architecture, endpoints, integrations, and schemas — grouped the way readers actually look for them, not one noisy page per file.</p>
-          <div class="feat-visual">
-            <div class="feat-visual-row"><span class="feat-visual-files">auth.py, middleware.ts</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Auth &amp; Permissions</span></div>
-            <div class="feat-visual-row"><span class="feat-visual-files">billing/routes.py, usage.py</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Billing &amp; Usage</span></div>
-            <div class="feat-visual-row"><span class="feat-visual-files">api/webhooks.ts, stripe.py</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Integrations</span></div>
-            <div class="feat-visual-row"><span class="feat-visual-files">db/models.py, migrations/*.sql</span><span class="feat-visual-arrow">→</span><span class="feat-visual-bucket">Data &amp; Schema</span></div>
-          </div>
-        </div>
-
-        <div class="feat-card feat-card-tall">
-          <div class="feat-num">02</div>
-          <h3 class="feat-title">AI answers cite real files</h3>
-          <p class="feat-body">Ask your docs anything. Every answer points to exact file paths and line ranges from your actual source — not hallucinations.</p>
-          <div class="feat-chat">
-            <div class="feat-chat-bubble user">Where does billing verification happen?</div>
-            <div class="feat-chat-bubble bot">Payment verification runs in the Razorpay billing flow, persisted through usage records.<div class="feat-chat-ref">↗ billing/routes.py:41-88</div><div class="feat-chat-ref">↗ services/usage.py:12-57</div></div>
-            <div class="feat-chat-bubble user">How does the widget token flow work?</div>
-            <div class="feat-chat-bubble bot">The widget fetches a short-lived token from <code style="font-size:11px; opacity:0.8;">/api/widget-token</code>, then attaches it to every chat request.<div class="feat-chat-ref">↗ api/widget.ts:18-64</div></div>
-            <div class="feat-chat-bubble bot feat-chat-typing" aria-hidden="true"><span class="feat-typing-dot"></span><span class="feat-typing-dot"></span><span class="feat-typing-dot"></span></div>
-          </div>
-          <div class="feat-modes"><span class="feat-mode active">fast lookup</span><span class="feat-mode">deep research</span><span class="feat-mode">code-first</span></div>
-        </div>
-
-        <div class="feat-card feat-card-wide">
-          <div class="feat-num">03</div>
-          <h3 class="feat-title">Updates regenerate only what changed</h3>
-          <p class="feat-body">Push a commit, run <code style="font-family: var(--font-mono); font-size: 12px; opacity: 0.85;">deepdoc update</code>, and only the affected pages regenerate.</p>
-          <div class="feat-diff">
-            <div class="feat-diff-header">deepdoc update — 3 files changed</div>
-            <div class="feat-diff-row"><span class="feat-diff-dot changed"></span><span class="feat-diff-label">billing/routes.py</span><span class="feat-diff-tag regen">regenerate</span></div>
-            <div class="feat-diff-row"><span class="feat-diff-dot changed"></span><span class="feat-diff-label">services/stripe.py</span><span class="feat-diff-tag regen">regenerate</span></div>
-            <div class="feat-diff-row"><span class="feat-diff-dot unchanged"></span><span class="feat-diff-label">db/models.py</span><span class="feat-diff-tag skip">skip</span></div>
-          </div>
+          <a class="btn secondary" href="/docs">Read the docs</a>
         </div>
       </div>
-    </div>
-  </section>
-
-  <!-- ── Pipeline ────────────────────────────────────────────────── -->
-  <section style="border-bottom: 1px solid var(--color-line);">
-    <div class="mx-auto max-w-6xl px-6 py-16">
-      <div class="mb-10 max-w-xl">
-        <div style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;">
-          Pipeline
-        </div>
-        <h2 class="display" style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);">
-          Five phases. No magic.
-        </h2>
-        <p style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.7; color: var(--color-ink-muted); max-width: 480px;">
-          Every page is grounded in scanned evidence, repaired into valid Markdown,
-          and checked for source coverage before the site builds.
-        </p>
-      </div>
-
-      <PipelineOrbit />
-    </div>
-  </section>
-
-  <!-- ── Getting started ─────────────────────────────────────────── -->
-  <section id="get-started" class="section-raised" style="scroll-margin-top: 76px;">
-    <div class="mx-auto max-w-6xl px-6 py-12">
-      <div class="grid grid-cols-1 items-center gap-8 lg:grid-cols-2">
-        <!-- Left: copy -->
-        <div>
-          <div
-            style="font-family: var(--font-mono); font-size: 11px; text-transform: uppercase; letter-spacing: 0.15em; color: var(--color-ink-faint); margin-bottom: 10px;"
-          >
-            Getting started
-          </div>
-          <h2
-            class="display"
-            style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink);"
-          >
-            Run it in your repo.
-          </h2>
-          <p
-            style="margin-top: 14px; font-family: var(--font-sans); font-size: 14px; line-height: 1.75; color: var(--color-ink-muted); max-width: 420px;"
-          >
-            From your repository root, initialize DeepDoc with your preferred provider. It writes
-            <code style="font-family: var(--font-mono); font-size: 12px; color: var(--color-ink);">.deepdoc.yaml</code>, then generates and serves your docs locally.
-          </p>
-          <a
-            href="/docs"
-            class="inline-flex items-center gap-1.5 mt-8 transition-colors"
-            style="font-family: var(--font-sans); font-size: 13px; font-weight: 500; color: var(--color-accent); text-decoration: none;"
-            onmouseover="this.style.opacity='0.75'"
-            onmouseout="this.style.opacity='1'"
-          >
-            Read the full docs
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="13"
-              height="13"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            ><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
-          </a>
-        </div>
-
-        <!-- Right: terminal -->
-        <div class="terminal-block">
-          <div class="terminal-header">
-            <span class="dot red"></span>
-            <span class="dot yellow"></span>
-            <span class="dot green"></span>
-            <span class="terminal-title">bash</span>
-          </div>
-          <div class="terminal-body"><span class="c"># 1 — install</span>
-$ pip install deepdoc
-
-<span class="c"># 2 — configure a provider (creates .deepdoc.yaml)</span>
-$ deepdoc init --provider anthropic
-$ export ANTHROPIC_API_KEY=sk-ant-...
-
-<span class="c"># 3 — generate, then preview (Node.js 18+)</span>
-$ deepdoc generate
-<span class="acc">✓</span> 47 pages generated in 1m 12s
-
-$ deepdoc serve
-  Docs → http://localhost:3000</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- ── CTA strip ───────────────────────────────────────────────── -->
-  <section style="position: relative; overflow: hidden;">
-    <canvas id="cta-canvas" aria-hidden="true" style="position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; display: block;"></canvas>
-    <div class="mx-auto max-w-6xl px-6 py-16 flex flex-col items-center text-center gap-6" style="position: relative; z-index: 1;">
-      <h2
-        class="display"
-        style="font-size: clamp(1.75rem, 4vw, 2.75rem); color: var(--color-ink); max-width: 520px;"
-      >
-        Your codebase already tells a story.
-        <span class="accent-italic"> Let it.</span>
-      </h2>
-      <p
-        style="font-family: var(--font-sans); font-size: 14px; color: var(--color-ink-muted); max-width: 380px; line-height: 1.7;"
-      >
-        MIT licensed. No account. No cloud. Runs entirely in your terminal.
-      </p>
-      <button
-        id="copy-install-2"
-        type="button"
-        class="flex items-center gap-2.5 rounded-lg px-5 h-10"
-        style="background: var(--color-accent); color: var(--color-surface); font-family: var(--font-mono); font-size: 13px; font-weight: 500; cursor: pointer; transition: opacity 0.15s;"
-        onmouseover="this.style.opacity='0.88'"
-        onmouseout="this.style.opacity='1'"
-      >
-        <span>pip install deepdoc</span>
-        <svg
-          id="copy-icon-2"
-          xmlns="http://www.w3.org/2000/svg"
-          width="13"
-          height="13"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          stroke-width="2"
-          stroke-linecap="round"
-          stroke-linejoin="round"
-          style="opacity: 0.6;"
-        ><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg>
-        <svg id="check-icon-2" class="hidden" xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 4 4L19 6"></path></svg>
-        <span id="copy-status-2" class="sr-only" aria-live="polite"></span>
-      </button>
-    </div>
-  </section>
+    </section>
   </main>
 
   <Footer />
-
-  <!-- "Try the Demo" navigates straight to cloud.deepdoc.tech now, which
-       shows a public gallery of real generated docs to unauthenticated
-       visitors instead of an immediate sign-in wall — see page_html.ts's
-       renderPublicGallery(). No modal needed on this domain anymore. -->
-  <script>
-    document.getElementById('try-free-btn')?.addEventListener('click', () => {
-      location.href = 'https://cloud.deepdoc.tech/';
-    });
-  </script>
-
 </Layout>
 
+<style is:global>
+  /* Hero */
+  .hero { position: relative; overflow: hidden; padding: 96px 0 64px; border-bottom: 1px solid var(--line); }
+  .hero-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .hero-title { margin-top: 20px; max-width: 860px; font-size: clamp(2.5rem, 6.2vw, 4.75rem); }
+  .hero-title .w { display: inline-block; margin-right: 0.24em; }
+
+  /* The hero entrance is pure CSS on purpose. It used to wait for the Motion
+     bundle, so the grid painted first and the text arrived late. Now it plays
+     from first paint with no script. Reduced motion turns animations off in
+     site.css, which leaves everything in its final state. */
+  .hero-title .w { animation: hero-word 0.9s var(--ease) both; animation-delay: calc(var(--i, 0) * 55ms + 80ms); }
+  .hero .rise { animation: hero-rise 0.9s var(--ease) both; animation-delay: calc(var(--d, 0) * 90ms + 240ms); }
+  .hero .pixel-field { animation: fade 1.2s var(--ease) both; }
+  @keyframes hero-word { from { opacity: 0; transform: translateY(0.45em); filter: blur(10px); } to { opacity: 1; transform: none; filter: blur(0); } }
+  @keyframes hero-rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
+  .hero-title .w:last-child { margin-right: 0; }
+  .hero-lede { margin-top: 22px; max-width: 580px; }
+  .hero-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 32px; }
+  .hero-meta { margin-top: 22px; font-size: 13px; }
+  .stage-wrap { position: relative; z-index: 1; margin-top: 64px; }
+  .copy { gap: 10px; }
+  .copy .check-icon { display: none; }
+  .copy.is-copied .copy-icon { display: none; }
+  .copy.is-copied .check-icon { display: block; }
+
+  /* Section frame, shared by the components in components/home/. */
+  .block { padding: 120px 0; }
+  .block.ruled { border-top: 1px solid var(--line); }
+  .block-title { margin-top: 16px; }
+  [data-words] .w { display: inline-block; }
+
+  /* Closing */
+  .closing { position: relative; overflow: hidden; border-top: 1px solid var(--line); padding: 150px 0 140px; }
+  .closing-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
+  .closing-title { max-width: 780px; font-size: clamp(2.25rem, 5.4vw, 4rem); }
+  .closing .hero-cta { margin-top: 40px; }
+
+  @media (max-width: 860px) {
+    .hero { padding: 56px 0 44px; }
+    .stage-wrap { margin-top: 44px; }
+    .block { padding: 72px 0; }
+    .closing { padding: 96px 0 88px; }
+  }
+</style>
+
 <script>
-  // ── Copy buttons ──────────────────────────────────────────────────
-  function attachCopy(btnId: string, srId?: string, iconId?: string, checkId?: string) {
-    const btn = document.getElementById(btnId);
-    const sr = srId ? document.getElementById(srId) : null;
-    const icon = iconId ? document.getElementById(iconId) : null;
-    const check = checkId ? document.getElementById(checkId) : null;
-    if (!btn) return;
+  import { animate, inView, scroll, stagger } from "motion";
+  import { ease, motionOn, revealWords, spotlight } from "../scripts/motion";
+
+  // Copy-to-clipboard for the install command.
+  document.querySelectorAll<HTMLButtonElement>("button.copy").forEach((btn) => {
     btn.addEventListener("click", async () => {
       try {
-        await navigator.clipboard.writeText("pip install deepdoc");
-        if (icon) icon.classList.add("hidden");
-        if (check) check.classList.remove("hidden");
-        if (sr) sr.textContent = "Copied to clipboard";
-        setTimeout(() => {
-          if (icon) icon.classList.remove("hidden");
-          if (check) check.classList.add("hidden");
-          if (sr) sr.textContent = "";
-        }, 1800);
+        await navigator.clipboard.writeText(btn.dataset.copy ?? "");
+        btn.classList.add("is-copied");
+        setTimeout(() => btn.classList.remove("is-copied"), 1600);
       } catch {}
     });
+  });
+
+  spotlight();
+
+  // Page-level motion. The section demos animate themselves (components/home).
+  if (motionOn()) {
+    const each = <T extends Element>(sel: string) => Array.from(document.querySelectorAll<T>(sel));
+
+    // The hero entrance is CSS (see the .rise rules above); nothing to do here.
+
+    // The video window starts tilted back and stands upright as it scrolls in.
+    const frame = document.getElementById("demo-frame");
+    if (frame) {
+      scroll(animate(frame, { rotateX: [16, 0], scale: [0.9, 1], y: [48, 0] }, { ease: "linear" }), {
+        target: frame,
+        offset: ["start end", "start 0.38"],
+      });
+    }
+
+    // Headings arrive word by word; everything else marked data-reveal rises.
+    revealWords();
+    inView("[data-reveal]", (el) => { animate(el, { opacity: [0, 1], y: [28, 0] }, { duration: 0.85, ease }); }, { amount: 0.25 });
   }
-  attachCopy("copy-install-2", "copy-status-2", "copy-icon-2", "check-icon-2");
-
-  // ── Feature cards: staggered scroll reveal ────────────────────────
-  (function () {
-    document.documentElement.classList.add("js");
-    const cards = document.querySelectorAll<HTMLElement>(".feat-card");
-    if (!cards.length || !("IntersectionObserver" in window)) {
-      cards.forEach((c) => c.classList.add("in-view"));
-      return;
-    }
-    const ob = new IntersectionObserver(
-      (entries) => {
-        for (const entry of entries) {
-          if (entry.isIntersecting) {
-            entry.target.classList.add("in-view");
-            ob.unobserve(entry.target);
-          }
-        }
-      },
-      { threshold: 0.15 }
-    );
-    cards.forEach((card, i) => {
-      card.style.setProperty("--reveal-delay", `${(i % 3) * 110}ms`);
-      ob.observe(card);
-    });
-  })();
-
-  // ── Hero terminal typewriter ──────────────────────────────────────
-  (function () {
-    const el = document.getElementById("hero-terminal");
-    if (!el) return;
-
-    type Segment = { text: string; cls?: string };
-    type Line = {
-      segments: Segment[];
-      charDelay: number;    // ms per character while typing
-      postDelay: number;    // ms pause after line finishes
-      instant?: boolean;    // appear all at once (no typing)
-    };
-
-    const lines: Line[] = [
-      { segments: [{ text: "# 1 — install", cls: "c" }],                         charDelay: 0, postDelay: 120, instant: true },
-      { segments: [{ text: "$ pip install deepdoc" }],                             charDelay: 38, postDelay: 680 },
-      { segments: [{ text: "" }],                                                   charDelay: 0, postDelay: 80,  instant: true },
-      { segments: [{ text: "# 2 — initialize against your repo", cls: "c" }],      charDelay: 0, postDelay: 80,  instant: true },
-      { segments: [{ text: "$ deepdoc init --with-chatbot --provider anthropic" }], charDelay: 28, postDelay: 220 },
-      { segments: [{ text: "$ export ANTHROPIC_API_KEY=sk-ant-..." }],              charDelay: 28, postDelay: 560 },
-      { segments: [{ text: "" }],                                                   charDelay: 0, postDelay: 80,  instant: true },
-      { segments: [{ text: "# 3 — generate and preview", cls: "c" }],              charDelay: 0, postDelay: 80,  instant: true },
-      { segments: [{ text: "$ deepdoc generate" }],                                 charDelay: 40, postDelay: 1400 },
-      { segments: [{ text: "✓", cls: "acc" }, { text: " 47 pages generated in 1m 12s" }], charDelay: 0, postDelay: 120, instant: true },
-      { segments: [{ text: "✓", cls: "acc" }, { text: " Chatbot index built (1,247 chunks)" }], charDelay: 0, postDelay: 500, instant: true },
-      { segments: [{ text: "" }],                                                   charDelay: 0, postDelay: 80,  instant: true },
-      { segments: [{ text: "$ deepdoc serve" }],                                    charDelay: 40, postDelay: 380 },
-      { segments: [{ text: "  Docs   → http://localhost:3000" }],                   charDelay: 0, postDelay: 60,  instant: true },
-      { segments: [{ text: "  Chat   → http://localhost:3000/ask" }],               charDelay: 0, postDelay: 0,   instant: true },
-    ];
-
-    // Build DOM for a completed line
-    function renderLine(line: Line): HTMLSpanElement {
-      const span = document.createElement("span");
-      for (const seg of line.segments) {
-        if (seg.cls) {
-          const s = document.createElement("span");
-          s.className = seg.cls;
-          s.textContent = seg.text;
-          span.appendChild(s);
-        } else {
-          span.appendChild(document.createTextNode(seg.text));
-        }
-      }
-      return span;
-    }
-
-    // Flatten line segments into a single string for typing
-    function lineText(line: Line): string {
-      return line.segments.map(s => s.text).join("");
-    }
-
-    let cursor: HTMLSpanElement | null = null;
-
-    function ensureCursor() {
-      if (!cursor) {
-        cursor = document.createElement("span");
-        cursor.id = "tw-cursor";
-        cursor.style.cssText =
-          "display:inline-block;width:7px;height:1em;vertical-align:text-bottom;background:var(--color-accent);animation:tw-blink 1s step-end infinite;margin-left:1px;";
-      }
-      return cursor;
-    }
-
-    // Inject blink keyframes once
-    const style = document.createElement("style");
-    style.textContent = "@keyframes tw-blink{0%,100%{opacity:1}50%{opacity:0}}";
-    document.head.appendChild(style);
-
-    async function sleep(ms: number) {
-      return new Promise<void>(r => setTimeout(r, ms));
-    }
-
-    async function run() {
-      const cur = ensureCursor();
-      el!.appendChild(cur);
-
-      for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const fullText = lineText(line);
-
-        // Newline before every line except the first
-        if (i > 0) el!.insertBefore(document.createTextNode("\n"), cur);
-
-        if (line.instant || fullText === "") {
-          // Insert full rendered line instantly
-          const rendered = renderLine(line);
-          el!.insertBefore(rendered, cur);
-        } else {
-          // Type character by character
-          const node = document.createTextNode("");
-          el!.insertBefore(node, cur);
-          for (const ch of fullText) {
-            node.textContent += ch;
-            await sleep(line.charDelay);
-          }
-        }
-
-        await sleep(line.postDelay);
-      }
-
-      // Cursor stays blinking at end — done
-    }
-
-    run();
-  })();
-
-  // ── CTA canvas: upward-drifting code fragments ────────────────────
-  (function () {
-    const canvas = document.getElementById("cta-canvas") as HTMLCanvasElement | null;
-    if (!canvas) return;
-
-    const FRAGMENTS = [
-      "deepdoc generate", "deepdoc update", "deepdoc init", "deepdoc serve",
-      "pip install deepdoc", "deepdoc status", "deepdoc benchmark",
-      "bucket_type", "evidence[]", "call_graph", "owned_files", "DocBucket",
-      "topology", "scan_repo()", "--with-chatbot", "POST /query",
-      "POST /deep-research", "MkDocs", "faiss", "fastembed",
-      "pipeline_v2", "chatbot.enabled", "1,247 chunks", "47 pages",
-      "anthropic", "gpt-4o", "endpoint", "integration", "feature",
-      "nav_shaping", "evidence_pack", "llm_step", "slug", "schema",
-      "call_graph.py", "planner/", "generator/", "chatbot/",
-      ".deepdoc/", "deepdoc.yaml", "✓ compiled", "✓ grounded",
-      "stream=True", "chunk_size=512", "top_k=8", "rerank",
-    ];
-
-    const ctx = canvas.getContext("2d")!;
-    let w = 0, h = 0, dpr = 1;
-
-    type Particle = {
-      x: number; y: number;
-      text: string;
-      speed: number;
-      opacity: number;
-      targetOpacity: number;
-      size: number;
-    };
-
-    const particles: Particle[] = [];
-
-    function rand(min: number, max: number) { return Math.random() * (max - min) + min; }
-
-    function spawn(startAtRandom = false): Particle {
-      return {
-        x: rand(0.02, 0.98),
-        y: startAtRandom ? rand(0, 1) : 1.05,
-        text: FRAGMENTS[Math.floor(Math.random() * FRAGMENTS.length)],
-        speed: rand(0.00025, 0.0008),
-        opacity: 0,
-        targetOpacity: rand(0.07, 0.2),
-        size: rand(10, 14),
-      };
-    }
-
-    function isLight() {
-      return document.documentElement.getAttribute("data-theme") === "light";
-    }
-
-    function resize() {
-      dpr = Math.min(devicePixelRatio, 2);
-      w = canvas!.offsetWidth;
-      h = canvas!.offsetHeight;
-      canvas!.width = w * dpr;
-      canvas!.height = h * dpr;
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    }
-
-    // Pre-seed particles spread across canvas
-    for (let i = 0; i < 28; i++) particles.push(spawn(true));
-
-    let raf = 0;
-
-    function frame() {
-      ctx.clearRect(0, 0, w, h);
-
-      const light = isLight();
-      // Dark: chartreuse. Light: muted green.
-      const [r, g, b] = light ? [76, 139, 0] : [194, 255, 77];
-
-      ctx.font = `400 ${particles[0]?.size ?? 12}px 'JetBrains Mono', monospace`;
-
-      for (const p of particles) {
-        p.y -= p.speed;
-
-        // Fade in from bottom, fade out near top
-        const fadeZone = 0.15;
-        if (p.y > 1 - fadeZone) {
-          p.opacity = Math.max(0, (1 - p.y) / fadeZone) * p.targetOpacity;
-        } else if (p.y < fadeZone) {
-          p.opacity = Math.max(0, p.y / fadeZone) * p.targetOpacity;
-        } else {
-          p.opacity = Math.min(p.opacity + 0.003, p.targetOpacity);
-        }
-
-        if (p.y < -0.05) {
-          // Reset
-          Object.assign(p, spawn(false));
-        }
-
-        ctx.font = `400 ${p.size}px 'JetBrains Mono', monospace`;
-        ctx.fillStyle = `rgba(${r},${g},${b},${p.opacity})`;
-        ctx.fillText(p.text, p.x * w, p.y * h);
-      }
-
-      raf = requestAnimationFrame(frame);
-    }
-
-    const ro = new ResizeObserver(resize);
-    ro.observe(canvas);
-    resize();
-
-    const io = new IntersectionObserver(entries => {
-      if (entries[0].isIntersecting) { if (!raf) frame(); }
-      else { cancelAnimationFrame(raf); raf = 0; }
-    });
-    io.observe(canvas);
-
-    frame();
-  })();
 </script>

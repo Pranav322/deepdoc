@@ -1,0 +1,35 @@
+---
+export const prerender = true;
+import { getCollection, render } from "astro:content";
+import Docs from "../../layouts/Docs.astro";
+import { mdxComponents } from "../../components/docs";
+import { docsOrder } from "../../lib/nav";
+
+export async function getStaticPaths() {
+  const entries = await getCollection("docs");
+  const known = new Set(entries.map((e) => e.id));
+
+  // The sidebar order is explicit, so a page missing from it (or listed but
+  // absent) is a mistake worth failing the build over.
+  const unlisted = entries.filter((e) => !docsOrder.includes(e.id)).map((e) => e.id);
+  const missing = docsOrder.filter((id) => !known.has(id));
+  if (unlisted.length || missing.length) {
+    throw new Error(
+      `docs nav out of sync. Not in docsSections: [${unlisted.join(", ")}]. Listed but no file: [${missing.join(", ")}]. Edit src/lib/nav.ts.`
+    );
+  }
+
+  const titles = Object.fromEntries(entries.map((e) => [e.id, e.data.title]));
+  return entries.map((entry) => ({
+    params: { slug: entry.id === "index" ? undefined : entry.id },
+    props: { entry, titles },
+  }));
+}
+
+const { entry, titles } = Astro.props;
+const { Content, headings } = await render(entry);
+---
+
+<Docs id={entry.id} title={entry.data.title} description={entry.data.description} headings={headings} titles={titles}>
+  <Content components={mdxComponents} />
+</Docs>

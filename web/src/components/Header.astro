@@ -1,104 +1,66 @@
 ---
 import Logo from "./Logo.astro";
-import siteNav from "../../shared/site-nav.json";
-const pathname = Astro.url.pathname;
-// Shared with the docs site — see web/shared/site-nav.json
-const nav = siteNav.items;
+import { CLOUD, headerLinks } from "../lib/nav";
+
+interface Props {
+  /** Docs pages use the full width so the sidebar can sit against the edge. */
+  wide?: boolean;
+}
+const { wide = false } = Astro.props;
+const path = Astro.url.pathname;
 ---
 
-<header
-  class="sticky top-0 z-30"
-  style="border-bottom: 1px solid var(--color-line); background: color-mix(in oklab, var(--color-surface) 86%, transparent); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px);"
->
-  <div class="mx-auto flex h-[52px] max-w-6xl items-center justify-between px-6">
+<header class:list={["site-header", wide && "is-wide"]}>
+  <div class:list={["site-header-inner", !wide && "wrap", wide && "wide-pad"]}>
+    <a href="/" class="brand-link" aria-label="DeepDoc home"><Logo size={21} /></a>
 
-    <!-- Brand logo -->
-    <a href="/" class="group flex items-center transition-opacity hover:opacity-80" style="text-decoration: none;">
-      <Logo size={26} wordSize="1.2rem" />
-    </a>
-
-    <!-- Nav + theme toggle -->
-    <div class="flex items-center gap-1">
-      <nav class="flex items-center gap-0.5">
-        {
-          nav.map((item) => {
-            const isActive = !item.external && pathname === item.href;
-            return (
-              <a
-                href={item.href}
-                class="rounded-md px-3 py-1.5 text-[14px] transition-colors"
-                style={`font-family: var(--font-sans); color: ${isActive ? 'var(--color-ink)' : 'color-mix(in srgb, var(--color-ink) 72%, var(--color-ink-muted))'}; font-weight: 500; text-decoration: none;`}
-                target={item.external ? "_blank" : undefined}
-                rel={item.external ? "noreferrer" : undefined}
-                aria-current={isActive ? "page" : undefined}
-                onmouseover="this.style.color='var(--color-ink)'"
-                onmouseout={`this.style.color='${isActive ? 'var(--color-ink)' : 'color-mix(in srgb, var(--color-ink) 72%, var(--color-ink-muted))'}'`}
-              >
-                {item.label}
-              </a>
-            );
-          })
-        }
-      </nav>
-
-      <!-- Theme toggle -->
-      <button
-        id="theme-toggle"
-        type="button"
-        aria-label="Toggle light/dark mode"
-        class="ml-1 flex h-8 w-8 items-center justify-center rounded-md transition-colors"
-        style="color: var(--color-ink-muted); border: 1px solid transparent;"
-      >
-        <svg id="icon-sun" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <nav class="site-nav" aria-label="Primary">
+      {
+        headerLinks.map((item) => {
+          const current = !item.external && (path === item.href || path.startsWith(item.href + "/"));
+          return (
+            <a
+              href={item.href}
+              class:list={["nav-item", item.optional && "is-optional"]}
+              target={item.external ? "_blank" : undefined}
+              rel={item.external ? "noreferrer" : undefined}
+              aria-current={current ? "page" : undefined}
+            >
+              {item.label}
+            </a>
+          );
+        })
+      }
+      <button id="theme-toggle" type="button" class="icon-btn theme-toggle" aria-label="Toggle light and dark mode">
+        <svg class="icon-sun" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
           <circle cx="12" cy="12" r="4"></circle>
-          <line x1="12" y1="2" x2="12" y2="4"></line>
-          <line x1="12" y1="20" x2="12" y2="22"></line>
-          <line x1="4.22" y1="4.22" x2="5.64" y2="5.64"></line>
-          <line x1="18.36" y1="18.36" x2="19.78" y2="19.78"></line>
-          <line x1="2" y1="12" x2="4" y2="12"></line>
-          <line x1="20" y1="12" x2="22" y2="12"></line>
-          <line x1="4.22" y1="19.78" x2="5.64" y2="18.36"></line>
-          <line x1="18.36" y1="5.64" x2="19.78" y2="4.22"></line>
+          <path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"></path>
         </svg>
-        <svg id="icon-moon" xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="hidden">
-          <path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"></path>
+        <svg class="icon-moon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path>
         </svg>
       </button>
-    </div>
+      <a href={CLOUD} class="btn small vivid">Try it free</a>
+    </nav>
   </div>
 </header>
 
+<style>
+  .wide-pad { padding: 0 24px; }
+</style>
+
 <script>
-  function applyTheme(theme: string) {
-    document.documentElement.setAttribute("data-theme", theme);
-    localStorage.setItem("theme", theme);
-    // localStorage is scoped per hostname, so it can never reach
-    // cloud.deepdoc.tech. A cookie on .deepdoc.tech is the only channel that
-    // spans both, and the hosted app reads it server-side. The domain
-    // attribute must be omitted on localhost or the browser drops the cookie
-    // outright.
-    document.cookie =
-      "dd_theme=" + theme + ";path=/;max-age=31536000;samesite=lax" +
-      (location.hostname.endsWith("deepdoc.tech") ? ";domain=.deepdoc.tech;secure" : "");
-    const sun = document.getElementById("icon-sun");
-    const moon = document.getElementById("icon-moon");
-    const glow = document.getElementById("accent-glow");
-    if (theme === "light") {
-      sun?.classList.add("hidden");
-      moon?.classList.remove("hidden");
-      if (glow) glow.style.opacity = "0";
-    } else {
-      sun?.classList.remove("hidden");
-      moon?.classList.add("hidden");
-      if (glow) glow.style.opacity = "1";
-    }
-  }
-
-  const current = document.documentElement.getAttribute("data-theme") ?? "dark";
-  applyTheme(current);
-
+  // Theme lives in a cookie on .deepdoc.tech so the hosted app at
+  // cloud.deepdoc.tech reads the same choice. Omit the domain on localhost or
+  // the browser silently drops the cookie.
   document.getElementById("theme-toggle")?.addEventListener("click", () => {
     const next = document.documentElement.getAttribute("data-theme") === "light" ? "dark" : "light";
-    applyTheme(next);
+    document.documentElement.setAttribute("data-theme", next);
+    try { localStorage.setItem("theme", next); } catch {}
+    const onProd = location.hostname.endsWith("deepdoc.tech");
+    document.cookie =
+      "dd_theme=" + next + ";path=/;max-age=31536000;samesite=lax" +
+      (onProd ? ";domain=.deepdoc.tech;secure" : "");
+    document.dispatchEvent(new CustomEvent("dd-theme", { detail: next }));
   });
 </script>

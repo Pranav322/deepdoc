@@ -93,6 +93,14 @@ const jsonLd = {
                 : "dark";
         } catch (e) {}
         document.documentElement.setAttribute("data-theme", theme);
+        // Motion: hide what will animate in, before first paint. If the page's
+        // script never runs (blocked, failed), show everything after a moment.
+        if (!window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+          document.documentElement.classList.add("motion");
+          window.__motionFallback = setTimeout(function () {
+            document.documentElement.classList.remove("motion");
+          }, 2500);
+        }
       })();
     </script>
   </head>

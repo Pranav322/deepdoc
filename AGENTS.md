@@ -384,19 +384,20 @@ web/
     lib/nav.ts              ← header/footer links AND the docs reading order (`docsSections`)
     content.config.ts       ← `docs` collection (glob over src/content/docs/**/*.mdx)
     content/docs/**.mdx     ← the product docs
-    components/             ← Header, Footer, Logo, VideoStage (hero), docs/ (MDX components)
+    components/             ← Header, Footer, Logo, PixelField + VideoStage (hero), docs/ (MDX components)
     pages/index.astro       ← marketing (NOT prerendered, see below) · pages/docs/[...slug].astro + search.json.ts · pages/changelog.astro
     pages/cloud/            ← the hosted app (see Hosted-generation)
     lib/hosted/             ← hosted app server code and page_html.ts
   scripts/build-images.mjs  ← `npm run images`: renders public/og.jpg from an SVG (no screenshot masters)
 ```
 
-### Design language: ink and paper, with colour
-Surfaces are warm charcoal in dark mode (`#0D0D0C`/`#151513`/`#1F1F1C`, cream ink `#ECEAE3`) and warm paper in light (`#F5F4F0`). On top of that sit two colour layers, both defined in `tokens.css`:
-- **One accent, violet** (`--accent`: `#A594FF` dark, `#5B45E0` light). It marks links, selection, focus rings, live status, the logo mark and the single primary call to action (`.btn.vivid`). Everyday buttons stay ink-filled (`--solid`).
-- **A five-colour pixel palette** (`--p1`..`--p5`: blue, violet, pink, orange, teal; `--grad` is the headline gradient). It is the playful layer: the drawable grid behind the hero video, the emphasised headline word (`.em-serif`), `.px` pixel markers on eyebrows, and per-card tints on the landing page.
-- **History, so it is not repeated:** the original lime `#C2FF4D` made dark mode read as "too green" and was removed (2026-11-12). A first replacement with no hue at all was rejected the same day as boring. Do not go back to either; `npm run test:tokens` fails if the lime returns.
-- **Texture:** a fixed film-grain layer (`body::after`, `--grain`/`--grain-opacity`) and a fine pixel grid (`--grid`, `.pixel-grid`) behind heroes and hosted screens.
+### Design language: ink and paper, one accent
+Surfaces are warm charcoal in dark mode (`#0D0D0C`/`#151513`/`#1F1F1C`, cream ink `#ECEAE3`) and warm paper in light (`#F5F4F0`). Colour is deliberately scarce, all defined in `tokens.css`:
+- **One accent, vermilion** (`--accent`: `#FF5A2B` dark, `#C93A0A` light). It marks links, selection, focus rings, live status, the logo mark, the emphasised headline word (`.em-serif`), `.px` pixel markers and the single filled call to action (`.btn.vivid`). Everyday buttons stay ink-filled (`--solid`).
+- **`--p1`..`--p5` are a tonal ramp of that same hue** (deep ember to pale flame, ending in ink), used only by the paintable pixel grid and the social card. The page should read as one colour at several temperatures, never a rainbow.
+- **Colour should carry meaning where it appears**: e.g. in the pipeline list only the two phases that spend tokens get an accent chip; source citations in the chat demo are accent.
+- **Rejected, do not repeat** (all 2026-11-12): the original lime `#C2FF4D` (dark mode read as "too green"); no hue at all ("boring"); a violet accent with a blue/violet/pink/orange palette, gradient headline text, per-card rainbow tints and blurred radial colour washes ("AI sloppy"). No gradient text and no glow blobs. `npm run test:tokens` fails if the lime returns.
+- **Texture:** a fixed film-grain layer (`body::after`, `--grain`/`--grain-opacity`) and a fine pixel grid (`--grid`, `.pixel-grid`).
 - **Fonts:** DM Sans (UI), Instrument Serif italic (one emphasised word per headline), JetBrains Mono (code, eyebrows, status).
 - In light mode a raised panel is *lighter* than its page (`--card`); one darker than the page reads as a hole.
 - Marketing copy is outcome-led ("organised the way readers look", "answers cite real files", "updates touch only what changed"), never "bucket"/"planner" on the landing page.
@@ -406,8 +407,15 @@ Surfaces are warm charcoal in dark mode (`#0D0D0C`/`#151513`/`#1F1F1C`, cream in
 
 Theme crosses the subdomain via a `dd_theme` cookie on `.deepdoc.tech` (localStorage is per hostname). `Header.astro` writes it alongside localStorage; `Layout.astro`'s inline script prefers the cookie; the hosted app reads it server-side. **Omit `domain=` on localhost** or the browser drops the cookie.
 
-### Landing hero (`components/VideoStage.astro`)
-The demo recording sits directly under the headline, in a window on a **full-bleed** pixel-grid band (the GitHub-homepage pattern the owner asked for): the grid runs edge to edge and fades in from the hero, and only the video is width-capped (1100px). Do not put the grid back inside a bordered, rounded box; that version was rejected as "a slightly bigger box". The grid is a dependency-free canvas: cells spark in the palette colours on their own, and the pointer paints a fading colour trail anywhere on the stage, including the margins around the video. Colours are read from `--p1`..`--p5` and re-read on theme change; the loop pauses off-screen and ambient sparks stop under `prefers-reduced-motion`. The video autoplays muted and loops while visible. **Do not move the video back down the page or replace it with an abstract demo**: an earlier "code pixels become doc pixels" canvas was rejected as meaningless. The recording itself still shows the old lime branding and should be re-rendered from `deepdoc/video` when convenient.
+### Landing hero (`components/PixelField.astro`, `components/VideoStage.astro`)
+`PixelField` is a dependency-free canvas that fills its parent section; on the landing page that is the **entire hero** (headline and video), edge to edge, fading in under the header. Cells spark sparsely on their own in the `--p1`..`--p5` ramp, and the pointer paints a fading trail anywhere in the hero. Colours are re-read on theme change; the loop pauses off-screen and ambient sparks stop under `prefers-reduced-motion`. `VideoStage` is just the demo recording in a window (width-capped at 1100px) and its caption, directly under the hero text; it autoplays muted and loops while visible. **Do not** box the grid, move the video down the page, or replace it with an abstract demo (all rejected). The recording itself still shows the old lime branding and should be re-rendered from `deepdoc/video` when convenient.
+
+### Animation (Motion)
+The landing page uses the vanilla `motion` package (the library formerly called Framer Motion; no React). All of it lives in the `<script>` at the bottom of `index.astro`:
+- Hero: headline words arrive one by one (`.hero-title .w`), then `[data-rise]` elements in order; the video frame (`#demo-frame`) is scroll-linked, tilting upright from `rotateX(16deg)` as it enters.
+- Sections: `[data-reveal]` blocks rise once in view; `[data-stagger]` containers reveal their children in sequence; `[data-chat]` plays the conversation; `[data-term]` prints the terminal line by line.
+- **Start states are CSS, not JS.** `Layout.astro`'s inline head script adds `html.motion` before first paint (only when reduced motion is off), and `site.css` hides the animated elements under that class, so nothing flashes. The same script removes the class after 2.5s if the page module never loads, and the module skips animating if the class is gone. Adding a new animated attribute means adding it to that CSS rule too.
+- The Astro compiler rejects expressions inside `<pre>`; the terminal markup is built as a string and passed with `set:html`.
 
 ### Docs
 - Pages are `src/content/docs/**/*.mdx` with `title` and `description` frontmatter. Slugs are public URLs (`/docs/theming/colours`); do not rename them casually.
@@ -424,7 +432,7 @@ All meta lives in `Layout.astro` (title, description, canonical, OG, Twitter, `S
 
 ### Hosted app design (`lib/hosted/page_html.ts`)
 Everything below the palette is the app's own vocabulary: type ramp (`.t-eyebrow`/`.t-display`/`.t-sub`), radii, one easing curve, one button shape (`.btn` + `secondary`/`ghost`, `small`/`large`, text-only `.link-danger`/`.link-quiet`; do not add a sixth). Rules that must survive redesigns:
-- **Accent is a state colour, not a fill.** Selection, focus rings, live status and the brand mark use `--accent` (violet); buttons use the ink-filled `--solid`.
+- **Accent is a state colour, not a fill.** Selection, focus rings, live status and the brand mark use `--accent` (vermilion); buttons use the ink-filled `--solid`.
 - **One page width, owned by the render functions.** `--w-page` comes from `document.body.dataset.view` (`'app'` → 736px, else 1152px); `route()` deliberately does not set it, so each of `renderProjects`, `renderProjectDetail`, `renderGenerate`, `renderGenerating`, `renderPublicGallery`, `renderLoggedOut` and `renderPublicInProgress` sets it first. `--w-bar` (the app bar) is constant 1152px.
 - **One card grid, two configurations** (`.card-grid`/`.card`): the public gallery's cards carry a lazy screenshot (`.card-shot`/`.gallery-shot` over `WIRE_SVG`); `/projects` cards carry none. Both lead with a single `.card-new`, the primary CTA; do not re-add a header "Generate new" button.
 - **`.card[hidden]` and `.repo-item[hidden]` need explicit `display: none`**: both carry an author `display` that outranks `[hidden]`, and both are filtered by toggling `hidden`.

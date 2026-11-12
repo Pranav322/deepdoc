@@ -5,11 +5,13 @@
    HTML string built in a Worker, so lib/hosted/page_html.ts inlines this same
    file with a Vite raw import. There is no second copy to keep in sync.
 
-   Ink and paper, with colour. Surfaces are warm charcoal (dark) or warm paper
-   (light). One accent, violet, marks links, selection, focus and live status.
-   A five-colour pixel palette (--p1..--p5) is the playful layer: the drawable
-   grid behind the hero video, headline emphasis, and small pixel markers.
-   No green-led look: the old lime accent made dark mode read as "too green".
+   Ink and paper, with one colour. Surfaces are warm charcoal (dark) or warm
+   paper (light). The single accent is vermilion: links, selection, focus,
+   live status, the logo mark and the one filled call to action. --p1..--p5
+   are a tonal ramp of that same hue (deep ember to pale flame, ending in
+   ink), used only by the paintable pixel grid and small pixel markers, so
+   the page reads as one colour at several temperatures rather than a
+   rainbow. No gradients on text and no blurred colour washes.
    Texture comes from a film grain over everything and a fine pixel grid.
 
    Plain CSS only, and no backslashes: this text is also embedded in a
@@ -24,16 +26,15 @@
   --line: rgba(236, 234, 227, 0.09);
   --line-strong: rgba(236, 234, 227, 0.16);
 
-  --accent: #A594FF;
+  --accent: #FF5A2B;
   --accent-ink: #0D0D0C;
-  --accent-dim: rgba(165, 148, 255, 0.13);
-  --accent-line: rgba(165, 148, 255, 0.5);
-  --p1: #5B8CFF;
-  --p2: #A78BFA;
-  --p3: #F472B6;
-  --p4: #FB923C;
-  --p5: #2DD4BF;
-  --grad: linear-gradient(100deg, #7AA2FF 0%, #B79CFF 34%, #F98AC4 68%, #FDA35C 100%);
+  --accent-dim: rgba(255, 90, 43, 0.12);
+  --accent-line: rgba(255, 90, 43, 0.45);
+  --p1: #D9360B;
+  --p2: #FF5A2B;
+  --p3: #FF8548;
+  --p4: #FFB27A;
+  --p5: #ECEAE3;
   --danger: #FF6B6B;
   --danger-dim: rgba(255, 107, 107, 0.08);
 
@@ -82,16 +83,15 @@ html[data-theme="light"] {
   --line: rgba(17, 17, 16, 0.08);
   --line-strong: rgba(17, 17, 16, 0.15);
 
-  --accent: #5B45E0;
+  --accent: #C93A0A;
   --accent-ink: #FFFFFF;
-  --accent-dim: rgba(91, 69, 224, 0.09);
-  --accent-line: rgba(91, 69, 224, 0.42);
-  --p1: #2F6BF2;
-  --p2: #7C5CF0;
-  --p3: #E0489A;
-  --p4: #F0761A;
-  --p5: #0E9F8E;
-  --grad: linear-gradient(100deg, #2F6BF2 0%, #7C5CF0 34%, #E0489A 68%, #F0761A 100%);
+  --accent-dim: rgba(201, 58, 10, 0.08);
+  --accent-line: rgba(201, 58, 10, 0.4);
+  --p1: #A82E06;
+  --p2: #D9440F;
+  --p3: #F06A2E;
+  --p4: #F5A06B;
+  --p5: #111110;
   --danger: #C0392B;
   --danger-dim: rgba(192, 57, 43, 0.08);
 

@@ -38,11 +38,8 @@ const MINI_PAGE_CSS = `
     font-family: var(--font-sans); font-feature-settings: "ss01"; -webkit-font-smoothing: antialiased;
     display: flex; flex-direction: column; align-items: center; justify-content: center; padding: 96px 24px 72px; }
   body::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 520px; pointer-events: none;
-    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-      radial-gradient(38% 70% at 24% 0%, color-mix(in oklab, var(--p1) 22%, transparent), transparent 70%),
-      radial-gradient(36% 66% at 52% 0%, color-mix(in oklab, var(--p2) 20%, transparent), transparent 70%),
-      radial-gradient(38% 70% at 78% 0%, color-mix(in oklab, var(--p3) 22%, transparent), transparent 70%);
-    background-size: 14px 14px, 14px 14px, 100% 100%, 100% 100%, 100% 100%;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 14px 14px;
     -webkit-mask-image: radial-gradient(ellipse 72% 82% at 50% 0%, black 8%, transparent 72%);
     mask-image: radial-gradient(ellipse 72% 82% at 50% 0%, black 8%, transparent 72%); }
   .mini-bar { position: absolute; top: 0; left: 0; right: 0; z-index: 1; max-width: 1152px; height: 52px; margin: 0 auto;
@@ -163,16 +160,13 @@ export function tryPageHtml(theme: Theme = "dark"): string {
   ::selection { background: var(--accent-dim); color: var(--ink); }
   #content { flex: 1; display: flex; flex-direction: column; min-height: 60vh; }
 
-  /* Texture: a fine pixel grid and a soft wash of the palette, fading out
-     within the first screen, the same treatment as deepdoc.tech's hero. The film grain is body::after in the
+  /* Texture: a fine pixel grid fading out within the first screen, the same
+     one deepdoc.tech's hero sits on. The film grain is body::after in the
      shared tokens. Absolute, not fixed: it belongs to the top of the page. */
   body::before { content: ''; position: absolute; left: 0; right: 0; top: 0; height: 560px;
     pointer-events: none; z-index: 0;
-    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px),
-      radial-gradient(38% 70% at 24% 0%, color-mix(in oklab, var(--p1) 22%, transparent), transparent 70%),
-      radial-gradient(36% 66% at 52% 0%, color-mix(in oklab, var(--p2) 20%, transparent), transparent 70%),
-      radial-gradient(38% 70% at 78% 0%, color-mix(in oklab, var(--p3) 22%, transparent), transparent 70%);
-    background-size: 14px 14px, 14px 14px, 100% 100%, 100% 100%, 100% 100%;
+    background-image: linear-gradient(var(--grid) 1px, transparent 1px), linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 14px 14px;
     -webkit-mask-image: radial-gradient(ellipse 72% 82% at 50% 0%, black 8%, transparent 72%);
     mask-image: radial-gradient(ellipse 72% 82% at 50% 0%, black 8%, transparent 72%); }
   #notice-slot, #content { position: relative; z-index: 1; }

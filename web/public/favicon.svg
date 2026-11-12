@@ -1,7 +1,7 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
   <style>
-    .bg { fill: #0D0D0C; } .fg { fill: #A594FF; } .st { stroke: #A594FF; }
-    @media (prefers-color-scheme: light) { .bg { fill: #F5F4F0; } .fg { fill: #5B45E0; } .st { stroke: #5B45E0; } }
+    .bg { fill: #0D0D0C; } .fg { fill: #FF5A2B; } .st { stroke: #FF5A2B; }
+    @media (prefers-color-scheme: light) { .bg { fill: #F5F4F0; } .fg { fill: #C93A0A; } .st { stroke: #C93A0A; } }
   </style>
   <rect class="bg" width="48" height="48" rx="11"/>
   <g transform="translate(-4 -2)">

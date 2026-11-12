@@ -69,23 +69,19 @@ main { flex: 1; }
   line-height: 1.08;
   text-wrap: balance;
 }
-/* Emphasis: one word in serif italic, painted with the pixel palette. */
+/* Emphasis: one word in serif italic, in the accent. */
 .em-serif {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.02em;
   font-size: 1.06em;
-  padding-right: 0.08em;
-  background: var(--grad);
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
+  color: var(--accent);
 }
 /* The primary call to action: the one filled-with-colour control. */
 .btn.vivid {
   background: var(--accent); color: var(--accent-ink);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 24px -8px var(--accent-line);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.25), 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 .btn.vivid:hover { background: color-mix(in oklab, var(--accent) 88%, var(--ink)); }
 /* Pixel markers: tiny squares in the palette colours. */
@@ -218,7 +214,15 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 /* ── Motion ───────────────────────────────────────────────────────────── */
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: none; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
-.reveal { animation: rise 0.7s var(--ease) both; animation-delay: calc(var(--d, 0) * 70ms); }
+
+/* Start states for the Motion-driven animations (index.astro). html.motion is
+   set before first paint by Layout.astro and only when motion is allowed. */
+html.motion [data-rise],
+html.motion [data-reveal],
+html.motion [data-stagger] > *,
+html.motion [data-chat] > *,
+html.motion [data-term] .ln,
+html.motion .hero-title .w { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

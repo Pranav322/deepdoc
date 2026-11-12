@@ -7,46 +7,60 @@
 import Layout from "../layouts/Layout.astro";
 import Header from "../components/Header.astro";
 import Footer from "../components/Footer.astro";
+import PixelField from "../components/PixelField.astro";
 import VideoStage from "../components/VideoStage.astro";
 import { CLOUD, GITHUB } from "../lib/nav";
 
+const headline = "Documentation that keeps pace with your".split(" ");
+
 const phases = [
-  { name: "Scan", note: "Parse the source. Find endpoints, jobs, models, integrations and OpenAPI specs.", cost: "No LLM" },
-  { name: "Plan", note: "Cluster the call graph, then name and group the clusters into sections.", cost: "A few calls" },
-  { name: "Generate", note: "Assemble evidence for each page, write it, validate it, repair it.", cost: "One call per page" },
-  { name: "API reference", note: "Stage any OpenAPI spec as an interactive reference page.", cost: "No LLM" },
-  { name: "Build", note: "Write the site, navigation, search and optional chatbot.", cost: "No LLM" },
+  { name: "Scan", note: "Parse the source. Find endpoints, jobs, models, integrations and OpenAPI specs.", cost: "No LLM", spends: false },
+  { name: "Plan", note: "Cluster the call graph, then name and group the clusters into sections.", cost: "A few calls", spends: true },
+  { name: "Generate", note: "Assemble evidence for each page, write it, validate it, repair it.", cost: "One call per page", spends: true },
+  { name: "API reference", note: "Stage any OpenAPI spec as an interactive reference page.", cost: "No LLM", spends: false },
+  { name: "Build", note: "Write the site, navigation, search and optional chatbot.", cost: "No LLM", spends: false },
 ];
 
-// Dots use each language's GitHub colour.
 const stacks = [
-  ["Python", "Django · DRF · FastAPI · Falcon", "#3572A5"],
-  ["JavaScript / TypeScript", "Express · Fastify · NestJS", "#3178C6"],
-  ["PHP", "Laravel", "#777BB4"],
-  ["Go", "net/http and common routers", "#00ADD8"],
-  ["Vue", "Components and symbols", "#41B883"],
-  ["OpenAPI", "Imported as a reference", "#F0761A"],
+  ["Python", "Django · DRF · FastAPI · Falcon"],
+  ["JavaScript / TypeScript", "Express · Fastify · NestJS"],
+  ["PHP", "Laravel"],
+  ["Go", "net/http and common routers"],
+  ["Vue", "Components and symbols"],
+  ["OpenAPI", "Imported as a reference"],
 ];
+
+const terminal = [
+  ["$ ", "pip install deepdoc"],
+  ["$ ", "deepdoc init --provider anthropic"],
+  ["$ ", "export ANTHROPIC_API_KEY=sk-ant-..."],
+  ["$ ", "deepdoc generate"],
+  ["$ ", "deepdoc serve"],
+  ["", "  Docs → http://localhost:3000"],
+];
+// Built as a string: the Astro compiler does not accept expressions inside <pre>.
+const terminalHtml = terminal
+  .map(([prompt, text]) => `<span class="ln"><span class="p">${prompt}</span><span class="${prompt ? "t" : "o"}">${text}</span></span>`)
+  .join("");
 ---
 
 <Layout>
   <Header />
 
   <main>
-    <!-- Hero -->
-    <section class="hero">
-      <div class="hero-wash" aria-hidden="true"></div>
-      <div class="hero-grid pixel-grid" aria-hidden="true"></div>
+    <!-- Hero: the paintable grid covers the whole section, headline and video. -->
+    <section class="hero" id="hero">
+      <PixelField />
       <div class="wrap hero-inner">
-        <p class="eyebrow reveal hero-eyebrow" style="--d:0"><span class="px" style="--p:var(--p1)"></span><span class="px" style="--p:var(--p3)"></span><span class="px" style="--p:var(--p4)"></span>Open source · MIT · Not backed by YC</p>
-        <h1 class="display hero-title reveal" style="--d:1">
-          Documentation that keeps pace with your <span class="em-serif">codebase.</span>
+        <p class="eyebrow" data-rise><span class="px"></span>Open source · MIT · Not backed by YC</p>
+        <h1 class="display hero-title">
+          {headline.map((w) => <span class="w">{w}</span>)}<span class="w em-serif">codebase.</span>
         </h1>
-        <p class="lede hero-lede reveal" style="--d:2">
+        <p class="lede hero-lede" data-rise>
           DeepDoc reads your repository and writes a docs site with a chatbot that cites real files,
           then regenerates only the pages your commits touch.
         </p>
-        <div class="hero-cta reveal" style="--d:3">
+        <div class="hero-cta" data-rise>
           <a class="btn vivid" href={CLOUD}>
             Generate docs for a repo
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -57,9 +71,9 @@ const stacks = [
             <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
           </button>
         </div>
-        <p class="hero-meta faint reveal" style="--d:4">Python 3.10+ · Bring your own model · <a class="link" href={GITHUB} target="_blank" rel="noreferrer">View on GitHub</a></p>
+        <p class="hero-meta faint" data-rise>Python 3.10+ · Bring your own model · <a class="link" href={GITHUB} target="_blank" rel="noreferrer">View on GitHub</a></p>
       </div>
-      <div class="stage-wrap reveal" style="--d:5">
+      <div class="stage-wrap" data-rise>
         <VideoStage />
       </div>
     </section>
@@ -67,23 +81,25 @@ const stacks = [
     <!-- What it does -->
     <section class="block">
       <div class="wrap">
-        <p class="eyebrow"><span class="px" style="--p:var(--p1)"></span>What it does</p>
-        <h2 class="h2 block-title">One command. A docs site your team won’t ignore.</h2>
-        <div class="trio">
-          <article style="--c:var(--p1)">
-            <span class="num mono"><span class="px" style="--p:var(--p1)"></span>01</span>
+        <div data-reveal>
+          <p class="eyebrow"><span class="px"></span>What it does</p>
+          <h2 class="h2 block-title">One command. A docs site your team won’t ignore.</h2>
+        </div>
+        <div class="trio" data-stagger>
+          <article>
+            <span class="num mono">01</span>
             <h3>Organised the way readers look</h3>
             <p class="muted">Architecture, endpoints, integrations and schemas grouped by domain, not one noisy page per file.</p>
             <p class="proof mono">auth.py, middleware.ts <span>→</span> Auth &amp; Permissions</p>
           </article>
-          <article style="--c:var(--p3)">
-            <span class="num mono"><span class="px" style="--p:var(--p3)"></span>02</span>
+          <article>
+            <span class="num mono">02</span>
             <h3>Answers that cite real files</h3>
             <p class="muted">An assistant ships with the site. Every answer points to a file path and line range in your source.</p>
             <p class="proof mono">billing/routes.py:41-88</p>
           </article>
-          <article style="--c:var(--p4)">
-            <span class="num mono"><span class="px" style="--p:var(--p4)"></span>03</span>
+          <article>
+            <span class="num mono">03</span>
             <h3>Updates touch only what changed</h3>
             <p class="muted">Run <code class="inline-code">deepdoc update</code> after a commit and only the affected pages regenerate.</p>
             <p class="proof mono">3 files changed <span>→</span> 2 pages</p>
@@ -95,8 +111,8 @@ const stacks = [
     <!-- Pipeline -->
     <section class="block ruled">
       <div class="wrap split">
-        <div>
-          <p class="eyebrow"><span class="px" style="--p:var(--p2)"></span>Pipeline</p>
+        <div data-reveal>
+          <p class="eyebrow"><span class="px"></span>Pipeline</p>
           <h2 class="h2 block-title">Five phases. No magic.</h2>
           <p class="muted side-note">
             Every page is grounded in scanned evidence, repaired into valid Markdown and checked for source
@@ -107,15 +123,15 @@ const stacks = [
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </a>
         </div>
-        <ol class="phases">
+        <ol class="phases" data-stagger>
           {phases.map((p, i) => (
-            <li style={`--c:var(--p${i + 1})`}>
+            <li>
               <span class="mono idx">{String(i + 1).padStart(2, "0")}</span>
               <div>
                 <strong>{p.name}</strong>
                 <span class="muted">{p.note}</span>
               </div>
-              <em class="mono">{p.cost}</em>
+              <em class:list={["mono", p.spends && "spends"]}>{p.cost}</em>
             </li>
           ))}
         </ol>
@@ -125,8 +141,8 @@ const stacks = [
     <!-- Chat -->
     <section class="block ruled">
       <div class="wrap split">
-        <div>
-          <p class="eyebrow"><span class="px" style="--p:var(--p3)"></span>Ask your docs</p>
+        <div data-reveal>
+          <p class="eyebrow"><span class="px"></span>Ask your docs</p>
           <h2 class="h2 block-title">Evidence, not assertions.</h2>
           <p class="muted side-note">
             Retrieval runs over your source, symbols and docs. Where it finds no support it says so instead of guessing.
@@ -137,9 +153,9 @@ const stacks = [
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
           </a>
         </div>
-        <div class="frame chat" aria-label="Example chatbot conversation">
+        <div class="frame chat" aria-label="Example chatbot conversation" data-reveal>
           <div class="frame-bar"><span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-title">/ask</span></div>
-          <div class="chat-body">
+          <div class="chat-body" data-chat>
             <p class="bubble user">Where does billing verification happen?</p>
             <div class="bubble bot">
               Payment verification runs in the billing flow and is persisted through usage records.
@@ -160,10 +176,12 @@ const stacks = [
     <!-- Two ways in -->
     <section class="block ruled">
       <div class="wrap">
-        <p class="eyebrow"><span class="px" style="--p:var(--p4)"></span>Get started</p>
-        <h2 class="h2 block-title">Two ways in.</h2>
-        <div class="ways">
-          <article class="way way-cloud">
+        <div data-reveal>
+          <p class="eyebrow"><span class="px"></span>Get started</p>
+          <h2 class="h2 block-title">Two ways in.</h2>
+        </div>
+        <div class="ways" data-stagger>
+          <article class="way">
             <h3>In the browser</h3>
             <p class="muted">Sign in with GitHub, pick a repository (private ones too) and get a docs site at a stable address. Private by default.</p>
             <a class="btn vivid" href={CLOUD}>Open DeepDoc Cloud</a>
@@ -171,12 +189,7 @@ const stacks = [
           <article class="way">
             <h3>In your terminal</h3>
             <div class="frame term-frame">
-              <pre class="term"><span class="p">$ </span>pip install deepdoc
-<span class="p">$ </span>deepdoc init --provider anthropic
-<span class="p">$ </span>export ANTHROPIC_API_KEY=sk-ant-...
-<span class="p">$ </span>deepdoc generate
-<span class="p">$ </span>deepdoc serve
-<span class="o">  Docs → http://localhost:3000</span></pre>
+              <pre class="term" data-term set:html={terminalHtml} />
             </div>
             <a class="arrow-link" href="/docs/quickstart">
               Read the quickstart
@@ -190,10 +203,10 @@ const stacks = [
     <!-- Works with -->
     <section class="block ruled">
       <div class="wrap">
-        <p class="eyebrow"><span class="px" style="--p:var(--p5)"></span>Works with</p>
-        <ul class="stacks">
-          {stacks.map(([name, detail, colour]) => (
-            <li><strong><span class="px" style={`--p:${colour}`}></span>{name}</strong><span class="faint">{detail}</span></li>
+        <p class="eyebrow" data-reveal><span class="px"></span>Works with</p>
+        <ul class="stacks" data-stagger>
+          {stacks.map(([name, detail]) => (
+            <li><strong>{name}</strong><span class="faint">{detail}</span></li>
           ))}
         </ul>
         <p class="faint stack-note">
@@ -204,8 +217,8 @@ const stacks = [
 
     <!-- Closing -->
     <section class="closing">
-      <div class="closing-wash pixel-grid" aria-hidden="true"></div>
-      <div class="wrap closing-inner">
+      <div class="closing-grid pixel-grid" aria-hidden="true"></div>
+      <div class="wrap closing-inner" data-reveal>
         <h2 class="h2">Your codebase already tells a story. <span class="em-serif">Let it.</span></h2>
         <div class="hero-cta">
           <a class="btn vivid" href={CLOUD}>Generate docs for a repo</a>
@@ -220,35 +233,22 @@ const stacks = [
 
 <style>
   /* Hero */
-  .hero { position: relative; overflow: hidden; padding: 88px 0 0; }
-  .hero-wash {
-    position: absolute; inset: 0 0 auto 0; height: 620px; pointer-events: none; opacity: 0.2;
-    background:
-      radial-gradient(38% 60% at 22% 0%, var(--p1), transparent 70%),
-      radial-gradient(34% 56% at 52% -8%, var(--p2), transparent 70%),
-      radial-gradient(38% 60% at 80% 0%, var(--p3), transparent 70%);
-  }
-  html[data-theme="light"] .hero-wash { opacity: 0.14; }
-  .hero-grid {
-    position: absolute; inset: 0; pointer-events: none;
-    -webkit-mask-image: radial-gradient(ellipse 70% 62% at 50% 0%, black 0%, transparent 72%);
-    mask-image: radial-gradient(ellipse 70% 62% at 50% 0%, black 0%, transparent 72%);
-  }
-  .hero-inner { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
-  .hero-eyebrow .px { margin-right: 4px; }
-  .hero-eyebrow .px:last-of-type { margin-right: 10px; }
+  .hero { position: relative; overflow: hidden; padding: 96px 0 64px; border-bottom: 1px solid var(--line); }
+  .hero-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
   .hero-title { margin-top: 20px; max-width: 860px; font-size: clamp(2.5rem, 6.2vw, 4.75rem); }
+  .hero-title .w { display: inline-block; margin-right: 0.24em; }
+  .hero-title .w:last-child { margin-right: 0; }
   .hero-lede { margin-top: 22px; max-width: 580px; }
   .hero-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 32px; }
   .hero-meta { margin-top: 22px; font-size: 13px; }
-  .stage-wrap { position: relative; margin-top: 24px; }
+  .stage-wrap { position: relative; z-index: 1; margin-top: 64px; }
   .copy { gap: 10px; }
   .copy .check-icon { display: none; }
   .copy.is-copied .copy-icon { display: none; }
   .copy.is-copied .check-icon { display: block; }
 
   /* Blocks */
-  .block { padding: 96px 0; }
+  .block { padding: 104px 0; }
   .block.ruled { border-top: 1px solid var(--line); }
   .block-title { margin-top: 14px; max-width: 640px; }
   .side-note { margin: 18px 0 24px; max-width: 420px; }
@@ -256,23 +256,19 @@ const stacks = [
 
   .trio { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 48px; }
   .trio article {
-    position: relative; overflow: hidden; padding: 26px 26px 24px;
-    border: 1px solid var(--line-strong); border-radius: var(--r-lg);
-    background: linear-gradient(180deg, color-mix(in oklab, var(--c) 11%, var(--card)), var(--card) 62%);
-    box-shadow: inset 0 1px 0 var(--edge);
-    transition: transform 0.25s var(--ease), border-color 0.25s var(--ease);
+    padding: 26px 26px 24px; border: 1px solid var(--line-strong); border-radius: var(--r-lg);
+    background: var(--card); box-shadow: inset 0 1px 0 var(--edge);
+    transition: border-color 0.25s var(--ease), box-shadow 0.25s var(--ease);
   }
-  .trio article::before { content: ""; position: absolute; top: 0; left: 0; right: 0; height: 2px; background: var(--c); }
-  .trio article:hover { transform: translateY(-3px); border-color: color-mix(in oklab, var(--c) 55%, var(--line-strong)); }
+  .trio article:hover { border-color: var(--accent-line); box-shadow: inset 0 1px 0 var(--edge), var(--shadow-card); }
   .trio h3 { margin: 16px 0 8px; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
   .trio p.muted { font-size: 14.5px; }
-  .num { display: inline-flex; align-items: center; gap: 8px; font-size: 12px; color: var(--c); }
+  .num { font-size: 12px; color: var(--accent); }
   .proof {
     display: inline-block; margin-top: 20px; padding: 4px 10px; border-radius: 999px; font-size: 11.5px;
-    color: var(--ink); border: 1px solid color-mix(in oklab, var(--c) 40%, transparent);
-    background: color-mix(in oklab, var(--c) 10%, transparent);
+    color: var(--ink-muted); border: 1px solid var(--line-strong); background: var(--surface-raised);
   }
-  .proof span { color: var(--c); }
+  .proof span { color: var(--accent); }
 
   .phases { border-top: 1px solid var(--line); }
   .phases li {
@@ -281,56 +277,49 @@ const stacks = [
   }
   .phases strong { display: block; font-size: 16px; font-weight: 600; letter-spacing: -0.015em; }
   .phases div span { display: block; margin-top: 3px; font-size: 14px; }
-  .phases .idx { color: var(--c); }
+  .phases .idx { font-size: 12px; color: var(--ink-faint); }
   .phases em {
     font-style: normal; font-size: 11px; white-space: nowrap; padding: 3px 9px; border-radius: 999px;
-    color: var(--c); border: 1px solid color-mix(in oklab, var(--c) 45%, transparent);
-    background: color-mix(in oklab, var(--c) 10%, transparent);
+    color: var(--ink-faint); border: 1px solid var(--line-strong);
   }
+  /* Colour carries meaning here: only the phases that spend tokens get it. */
+  .phases em.spends { color: var(--accent); border-color: var(--accent-line); background: var(--accent-dim); }
 
   /* Chat demo */
   .chat-body { padding: 22px; display: flex; flex-direction: column; gap: 12px; }
   .bubble { max-width: 88%; padding: 11px 14px; border-radius: var(--r-md); font-size: 14px; line-height: 1.55; }
-  .bubble.user { align-self: flex-end; background: var(--accent-dim); border: 1px solid var(--accent-line); color: var(--ink); }
+  .bubble.user { align-self: flex-end; background: var(--surface-high); color: var(--ink); }
   .bubble.bot { align-self: flex-start; border: 1px solid var(--line-strong); color: var(--ink-muted); }
   .ref {
     display: inline-block; margin: 8px 6px 0 0; padding: 2px 8px; border-radius: 999px;
-    border: 1px solid var(--line-strong); background: var(--surface-raised);
+    border: 1px solid var(--accent-line); background: var(--accent-dim);
     font-size: 11px; color: var(--accent);
   }
   .modes { display: flex; gap: 8px; margin-top: 6px; font-size: 11.5px; color: var(--ink-faint); }
   .modes span { padding: 3px 11px; border: 1px solid var(--line); border-radius: 999px; }
-  .modes .on { color: var(--accent-ink); background: var(--accent); border-color: var(--accent); }
+  .modes .on { color: var(--solid-ink); background: var(--solid); border-color: var(--solid); }
 
   /* Ways in */
-  .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 48px; }
+  .ways { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; margin-top: 48px; }
   .way {
     display: flex; flex-direction: column; align-items: flex-start; gap: 16px; padding: 28px;
     border: 1px solid var(--line-strong); border-radius: var(--r-lg); background: var(--card);
     box-shadow: inset 0 1px 0 var(--edge);
   }
-  .way-cloud {
-    background:
-      radial-gradient(70% 90% at 100% 0%, color-mix(in oklab, var(--p3) 16%, transparent), transparent 70%),
-      radial-gradient(70% 90% at 0% 100%, color-mix(in oklab, var(--p1) 16%, transparent), transparent 70%),
-      var(--card);
-    border-color: var(--accent-line); justify-content: space-between;
-  }
-  .way .term .p { color: var(--accent); }
-  .way .term .o { color: var(--p5); }
+  .way:first-child { justify-content: space-between; }
   .way h3 { font-size: 19px; font-weight: 600; letter-spacing: -0.02em; }
   .way .frame { width: 100%; box-shadow: none; background: var(--surface); }
   .way .term { padding: 14px 16px; font-size: 12.5px; }
+  .way .term :global(.p) { color: var(--accent); }
+  .way .term :global(.ln) { display: block; }
 
   .stacks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 28px; border-top: 1px solid var(--line); }
   .stacks li { display: flex; flex-direction: column; gap: 2px; padding: 18px 16px 18px 0; border-bottom: 1px solid var(--line); font-size: 14px; }
-  .stacks strong { display: flex; align-items: center; gap: 9px; font-weight: 600; letter-spacing: -0.01em; }
-  .stacks .faint { padding-left: 17px; }
+  .stacks strong { font-weight: 600; letter-spacing: -0.01em; }
   .stack-note { margin-top: 18px; font-size: 13px; max-width: 560px; }
 
-  .closing { position: relative; border-top: 1px solid var(--line); padding: 112px 0; }
-  .closing::before { content: ""; position: absolute; top: -1px; left: 0; right: 0; height: 2px; background: var(--grad); opacity: 0.9; }
-  .closing-wash {
+  .closing { position: relative; border-top: 1px solid var(--line); padding: 120px 0; overflow: hidden; }
+  .closing-grid {
     position: absolute; inset: 0; pointer-events: none;
     -webkit-mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, black 0%, transparent 75%);
     mask-image: radial-gradient(ellipse 60% 90% at 50% 100%, black 0%, transparent 75%);
@@ -339,7 +328,8 @@ const stacks = [
   .closing .h2 { max-width: 560px; }
 
   @media (max-width: 860px) {
-    .hero { padding: 56px 0 0; }
+    .hero { padding: 56px 0 44px; }
+    .stage-wrap { margin-top: 44px; }
     .block { padding: 64px 0; }
     .split { grid-template-columns: minmax(0, 1fr); gap: 36px; }
     .trio { grid-template-columns: minmax(0, 1fr); }
@@ -350,6 +340,8 @@ const stacks = [
 </style>
 
 <script>
+  import { animate, inView, scroll, stagger } from "motion";
+
   // Copy-to-clipboard for the install command.
   document.querySelectorAll<HTMLButtonElement>("button.copy").forEach((btn) => {
     btn.addEventListener("click", async () => {
@@ -360,4 +352,44 @@ const stacks = [
       } catch {}
     });
   });
+
+  // Motion. Layout.astro adds html.motion before first paint (and removes it
+  // again if this module never loads), which hides everything animated here.
+  const root = document.documentElement;
+  clearTimeout((window as any).__motionFallback);
+
+  if (root.classList.contains("motion")) {
+    const ease = [0.22, 1, 0.36, 1] as const;
+    const each = <T extends Element>(sel: string, scope: ParentNode = document) => Array.from(scope.querySelectorAll<T>(sel));
+
+    // Hero: the headline arrives word by word, then the rest rises in order.
+    const words = each<HTMLElement>(".hero-title .w");
+    animate(words, { opacity: [0, 1], y: ["0.45em", "0em"], filter: ["blur(10px)", "blur(0px)"] }, { delay: stagger(0.055, { startDelay: 0.1 }), duration: 0.8, ease });
+    animate(each(".hero [data-rise]"), { opacity: [0, 1], y: [22, 0] }, { delay: stagger(0.09, { startDelay: 0.25 }), duration: 0.8, ease });
+
+    // The video window starts tilted back and stands upright as it scrolls in.
+    const frame = document.getElementById("demo-frame");
+    if (frame) {
+      scroll(animate(frame, { rotateX: [16, 0], scale: [0.9, 1], y: [48, 0] }, { ease: "linear" }), {
+        target: frame,
+        offset: ["start end", "start 0.38"],
+      });
+    }
+
+    // Sections: single blocks rise, groups rise one child after another.
+    inView("[data-reveal]", (el) => { animate(el, { opacity: [0, 1], y: [26, 0] }, { duration: 0.8, ease }); }, { amount: 0.3 });
+    inView("[data-stagger]", (el) => {
+      animate(Array.from(el.children), { opacity: [0, 1], y: [26, 0] }, { delay: stagger(0.08), duration: 0.75, ease });
+    }, { amount: 0.2 });
+
+    // The chat plays out like a conversation.
+    inView("[data-chat]", (el) => {
+      animate(Array.from(el.children), { opacity: [0, 1], y: [12, 0], scale: [0.97, 1] }, { delay: stagger(0.45, { startDelay: 0.3 }), duration: 0.5, ease });
+    }, { amount: 0.5 });
+
+    // The terminal prints line by line.
+    inView("[data-term]", (el) => {
+      animate(each(".ln", el), { opacity: [0, 1], x: [-8, 0] }, { delay: stagger(0.22, { startDelay: 0.35 }), duration: 0.35, ease });
+    }, { amount: 0.6 });
+  }
 </script>

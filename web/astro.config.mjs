@@ -17,7 +17,8 @@ export default defineConfig({
   integrations: [
     mdx(),
     sitemap({
-      filter: (page) => !page.includes("/cloud"),
+      // Keep the hosted app out, but not the /docs/cloud page.
+      filter: (page) => !new URL(page).pathname.startsWith("/cloud"),
     }),
   ],
   markdown: {

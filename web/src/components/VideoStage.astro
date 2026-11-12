@@ -1,36 +1,37 @@
 ---
 /**
- * The demo recording in a window. It sits on the hero's paintable pixel grid
- * (PixelField), so this component is only the frame and its caption.
+ * The demo video in a window. It sits on the hero's paintable pixel grid
+ * (PixelField), so this component is only the frame and its caption. The
+ * video draws its own windows, so the frame here has no title bar.
  * The frame tilts upright as it scrolls into view (see the motion script in
  * index.astro), which is why it lives inside a perspective wrapper.
  */
-const VIDEO = "https://pub-8f896d606470418f9c3a4a670bf154c4.r2.dev/demo.mp4";
+// Rendered from deepdoc/video (npm run build, then the ffmpeg step in its
+// README section of AGENTS.md) and served from this site.
+const VIDEO = "/demo.mp4";
+const POSTER = "/demo-poster.jpg";
 ---
 
 <div class="vstage">
   <div class="frame vstage-frame" id="demo-frame">
-    <div class="frame-bar">
-      <span class="frame-dot"></span><span class="frame-dot"></span><span class="frame-dot"></span>
-      <span class="frame-title">deepdoc generate</span>
-    </div>
     <div class="vstage-video">
       <video
         id="demo-video"
         src={VIDEO}
+        poster={POSTER}
         autoplay
         muted
         loop
         playsinline
         controls
         preload="metadata"
-        aria-label="Screen recording of deepdoc generate running all five pipeline phases against a repository, 41 seconds"
+        aria-label="A real deepdoc generate run on the youtube-notes repository, followed by the documentation site it produced. 38 seconds, no narration."
       >
         <track kind="captions" src="/demo-captions.vtt" srclang="en" label="English" />
       </video>
     </div>
   </div>
-  <p class="vstage-note mono">41 seconds · a real run · scan, plan, generate, API reference, build</p>
+  <p class="vstage-note mono">A real run on Pranav322/youtube-notes · 6m 12s, shown in 38 seconds</p>
 </div>
 
 <style>

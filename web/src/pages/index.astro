@@ -59,7 +59,7 @@ const stacks = [
         </div>
         <p class="hero-meta faint reveal" style="--d:4">Python 3.10+ · Bring your own model · <a class="link" href={GITHUB} target="_blank" rel="noreferrer">View on GitHub</a></p>
       </div>
-      <div class="wrap stage-wrap reveal" style="--d:5">
+      <div class="stage-wrap reveal" style="--d:5">
         <VideoStage />
       </div>
     </section>
@@ -220,7 +220,7 @@ const stacks = [
 
 <style>
   /* Hero */
-  .hero { position: relative; overflow: hidden; padding: 88px 0 72px; }
+  .hero { position: relative; overflow: hidden; padding: 88px 0 0; }
   .hero-wash {
     position: absolute; inset: 0 0 auto 0; height: 620px; pointer-events: none; opacity: 0.2;
     background:
@@ -241,7 +241,7 @@ const stacks = [
   .hero-lede { margin-top: 22px; max-width: 580px; }
   .hero-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 32px; }
   .hero-meta { margin-top: 22px; font-size: 13px; }
-  .stage-wrap { position: relative; margin-top: 56px; }
+  .stage-wrap { position: relative; margin-top: 24px; }
   .copy { gap: 10px; }
   .copy .check-icon { display: none; }
   .copy.is-copied .copy-icon { display: none; }
@@ -339,7 +339,7 @@ const stacks = [
   .closing .h2 { max-width: 560px; }
 
   @media (max-width: 860px) {
-    .hero { padding: 56px 0 48px; }
+    .hero { padding: 56px 0 0; }
     .block { padding: 64px 0; }
     .split { grid-template-columns: minmax(0, 1fr); gap: 36px; }
     .trio { grid-template-columns: minmax(0, 1fr); }

@@ -1,19 +1,21 @@
 import { AbsoluteFill, Audio, Sequence, interpolate, staticFile } from "remotion";
 import { Backdrop } from "./components/Backdrop";
-import { BROWSER_START, OUTRO_START, T, TOTAL_DURATION } from "./constants";
+import { BROWSER_START, OUTRO_START, T, TERMINAL_START, TOTAL_DURATION } from "./constants";
 import { Browser } from "./scenes/Browser";
+import { Intro } from "./scenes/Intro";
 import { Outro } from "./scenes/Outro";
 import { Terminal } from "./scenes/Terminal";
 
 /**
- * One continuous piece: a real `deepdoc generate` run in a terminal, the real
- * site it produced opening over it, then the sign-off. No title cards.
+ * One continuous piece: a short hook, a real `deepdoc generate` run in a
+ * terminal, the real site it produced opening over it, then the sign-off.
  */
 export const DeepDocVideo = () => {
   return (
     <AbsoluteFill>
       <Backdrop />
-      <Sequence durationInFrames={T.TERMINAL}><Terminal /></Sequence>
+      <Sequence durationInFrames={T.INTRO}><Intro /></Sequence>
+      <Sequence from={TERMINAL_START} durationInFrames={T.TERMINAL}><Terminal /></Sequence>
       <Sequence from={BROWSER_START} durationInFrames={T.BROWSER}><Browser /></Sequence>
       <Sequence from={OUTRO_START} durationInFrames={T.OUTRO}><Outro /></Sequence>
 

@@ -31,14 +31,17 @@ export const SPRING = {
 
 export const FPS = 30;
 
-// One continuous piece in three parts. The terminal and browser overlap for
-// OVERLAP frames so the site appears to open over the finished run.
+// One continuous piece in four parts. Each part overlaps the next by OVERLAP
+// frames so the terminal rises as the hook fades, and the site opens over the
+// finished run.
 export const T = {
+  INTRO: 180,    // 6 s hook
   TERMINAL: 570, // 19 s
   BROWSER: 480,  // 16 s
   OUTRO: 135,    // 4.5 s
   OVERLAP: 30,
 };
-export const BROWSER_START = T.TERMINAL - T.OVERLAP;
+export const TERMINAL_START = T.INTRO - T.OVERLAP;
+export const BROWSER_START = TERMINAL_START + T.TERMINAL - T.OVERLAP;
 export const OUTRO_START = BROWSER_START + T.BROWSER - T.OVERLAP;
 export const TOTAL_DURATION = OUTRO_START + T.OUTRO;

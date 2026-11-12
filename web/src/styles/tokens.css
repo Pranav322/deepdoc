@@ -5,12 +5,12 @@
    HTML string built in a Worker, so lib/hosted/page_html.ts inlines this same
    file with a Vite raw import. There is no second copy to keep in sync.
 
-   Ink and paper. There is no brand hue: dark mode is cream ink on warm
-   charcoal, light mode is near-black ink on warm paper. "Accent" therefore
-   means emphasis, and resolves to ink. The only colour on any screen is
-   semantic (danger) or borrowed from the content itself (GitHub language
-   dots, real screenshots). Depth comes from texture: a film grain over
-   everything and a fine pixel grid behind the heroes.
+   Ink and paper, with colour. Surfaces are warm charcoal (dark) or warm paper
+   (light). One accent, violet, marks links, selection, focus and live status.
+   A five-colour pixel palette (--p1..--p5) is the playful layer: the drawable
+   grid behind the hero video, headline emphasis, and small pixel markers.
+   No green-led look: the old lime accent made dark mode read as "too green".
+   Texture comes from a film grain over everything and a fine pixel grid.
 
    Plain CSS only, and no backslashes: this text is also embedded in a
    JavaScript string. */
@@ -24,10 +24,16 @@
   --line: rgba(236, 234, 227, 0.09);
   --line-strong: rgba(236, 234, 227, 0.16);
 
-  --accent: #ECEAE3;
+  --accent: #A594FF;
   --accent-ink: #0D0D0C;
-  --accent-dim: rgba(236, 234, 227, 0.07);
-  --accent-line: rgba(236, 234, 227, 0.3);
+  --accent-dim: rgba(165, 148, 255, 0.13);
+  --accent-line: rgba(165, 148, 255, 0.5);
+  --p1: #5B8CFF;
+  --p2: #A78BFA;
+  --p3: #F472B6;
+  --p4: #FB923C;
+  --p5: #2DD4BF;
+  --grad: linear-gradient(100deg, #7AA2FF 0%, #B79CFF 34%, #F98AC4 68%, #FDA35C 100%);
   --danger: #FF6B6B;
   --danger-dim: rgba(255, 107, 107, 0.08);
 
@@ -76,10 +82,16 @@ html[data-theme="light"] {
   --line: rgba(17, 17, 16, 0.08);
   --line-strong: rgba(17, 17, 16, 0.15);
 
-  --accent: #111110;
-  --accent-ink: #F5F4F0;
-  --accent-dim: rgba(17, 17, 16, 0.055);
-  --accent-line: rgba(17, 17, 16, 0.32);
+  --accent: #5B45E0;
+  --accent-ink: #FFFFFF;
+  --accent-dim: rgba(91, 69, 224, 0.09);
+  --accent-line: rgba(91, 69, 224, 0.42);
+  --p1: #2F6BF2;
+  --p2: #7C5CF0;
+  --p3: #E0489A;
+  --p4: #F0761A;
+  --p5: #0E9F8E;
+  --grad: linear-gradient(100deg, #2F6BF2 0%, #7C5CF0 34%, #E0489A 68%, #F0761A 100%);
   --danger: #C0392B;
   --danger-dim: rgba(192, 57, 43, 0.08);
 

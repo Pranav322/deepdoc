@@ -1,0 +1,169 @@
+---
+/**
+ * The hero: the real demo recording in a window, sitting on a pixel grid.
+ *
+ * The grid is alive. Cells light up in the palette colours on their own, and
+ * the pointer paints a trail wherever it moves across the stage, including
+ * over the margins around the video. Pure canvas, no dependencies; colours
+ * are read from the --p1..--p5 tokens so both themes work.
+ */
+const VIDEO = "https://pub-8f896d606470418f9c3a4a670bf154c4.r2.dev/demo.mp4";
+---
+
+<div class="vstage" id="vstage">
+  <div class="vstage-glow" aria-hidden="true"></div>
+  <canvas id="pixel-field" aria-hidden="true"></canvas>
+  <div class="frame vstage-frame">
+    <div class="frame-bar">
+      <span class="frame-dot" style="background: var(--p3)"></span>
+      <span class="frame-dot" style="background: var(--p4)"></span>
+      <span class="frame-dot" style="background: var(--p5)"></span>
+      <span class="frame-title">deepdoc generate</span>
+    </div>
+    <div class="vstage-video">
+      <video
+        id="demo-video"
+        src={VIDEO}
+        autoplay
+        muted
+        loop
+        playsinline
+        controls
+        preload="metadata"
+        aria-label="Screen recording of deepdoc generate running all five pipeline phases against a repository, 41 seconds"
+      >
+        <track kind="captions" src="/demo-captions.vtt" srclang="en" label="English" />
+      </video>
+    </div>
+  </div>
+</div>
+<p class="vstage-note mono">41 seconds · a real run · scan, plan, generate, API reference, build</p>
+
+<style>
+  .vstage {
+    position: relative; overflow: hidden;
+    padding: clamp(14px, 5vw, 64px);
+    border: 1px solid var(--line-strong); border-radius: var(--r-xl);
+    background-color: var(--card);
+    background-image:
+      linear-gradient(var(--grid) 1px, transparent 1px),
+      linear-gradient(90deg, var(--grid) 1px, transparent 1px);
+    background-size: 16px 16px;
+    box-shadow: inset 0 1px 0 var(--edge), var(--shadow-lift);
+  }
+  /* A soft wash of the palette under the grid, so the stage has colour at rest. */
+  .vstage-glow {
+    position: absolute; inset: 0; pointer-events: none; opacity: 0.22;
+    background:
+      radial-gradient(42% 60% at 8% 0%, var(--p1), transparent 70%),
+      radial-gradient(40% 55% at 96% 6%, var(--p3), transparent 70%),
+      radial-gradient(46% 60% at 88% 100%, var(--p4), transparent 72%),
+      radial-gradient(44% 60% at 6% 100%, var(--p2), transparent 72%);
+  }
+  html[data-theme="light"] .vstage-glow { opacity: 0.16; }
+  #pixel-field { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+  .vstage-frame { position: relative; z-index: 1; background: #0B0B0C; }
+  .vstage-video { aspect-ratio: 16 / 9; background: #0B0B0C; }
+  .vstage-video video { width: 100%; height: 100%; object-fit: cover; }
+  .vstage-note { margin-top: 16px; text-align: center; font-size: 12px; color: var(--ink-faint); }
+</style>
+
+<script>
+  const stage = document.getElementById("vstage");
+  const canvas = document.getElementById("pixel-field") as HTMLCanvasElement | null;
+  if (stage && canvas) paint(stage, canvas);
+
+  function paint(stage: HTMLElement, canvas: HTMLCanvasElement) {
+    const ctx = canvas.getContext("2d")!;
+    const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+    const CELL = 16, FADE = 2400;
+    let cols = 0, rows = 0, w = 0, h = 0;
+    let life = new Float32Array(0);
+    let hue = new Uint8Array(0);
+    let colours: string[] = [];
+
+    function readColours() {
+      const cs = getComputedStyle(document.documentElement);
+      colours = [1, 2, 3, 4, 5].map((i) => cs.getPropertyValue(`--p${i}`).trim() || "#A594FF");
+    }
+    function layout() {
+      const r = canvas.getBoundingClientRect();
+      w = Math.max(1, Math.round(r.width)); h = Math.max(1, Math.round(r.height));
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas.width = w * dpr; canvas.height = h * dpr;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      cols = Math.ceil(w / CELL); rows = Math.ceil(h / CELL);
+      life = new Float32Array(cols * rows);
+      hue = new Uint8Array(cols * rows);
+    }
+    function light(x: number, y: number, c: number, strength = 1) {
+      if (x < 0 || y < 0 || x >= cols || y >= rows) return;
+      const i = y * cols + x;
+      if (strength >= life[i]) { life[i] = strength; hue[i] = c; }
+    }
+
+    // Pointer: a trail whose colour drifts through the palette as you move.
+    let lastX = -1, lastY = -1, travelled = 0;
+    stage.addEventListener("pointermove", (e) => {
+      const r = canvas.getBoundingClientRect();
+      const px = e.clientX - r.left, py = e.clientY - r.top;
+      if (lastX >= 0) travelled += Math.hypot(px - lastX, py - lastY);
+      const c = Math.floor(travelled / 90) % colours.length;
+      // Fill the cells between the last point and this one, so fast moves leave no gaps.
+      const steps = lastX < 0 ? 1 : Math.max(1, Math.ceil(Math.hypot(px - lastX, py - lastY) / (CELL / 2)));
+      for (let s = 1; s <= steps; s++) {
+        const x = Math.floor((lastX < 0 ? px : lastX + ((px - lastX) * s) / steps) / CELL);
+        const y = Math.floor((lastY < 0 ? py : lastY + ((py - lastY) * s) / steps) / CELL);
+        light(x, y, c, 1);
+        if (Math.random() < 0.5) light(x + (Math.random() < 0.5 ? -1 : 1), y, c, 0.6);
+        if (Math.random() < 0.5) light(x, y + (Math.random() < 0.5 ? -1 : 1), c, 0.6);
+      }
+      lastX = px; lastY = py;
+      wake();
+    });
+    stage.addEventListener("pointerleave", () => { lastX = lastY = -1; });
+
+    let raf = 0, prev = 0, visible = false, nextSpark = 0;
+    function frame(now: number) {
+      const dt = Math.min(64, now - (prev || now)); prev = now;
+      // Ambient sparks, so the grid has colour before anyone touches it.
+      if (!reduced && now > nextSpark) {
+        nextSpark = now + 60;
+        for (let n = 0; n < 3; n++) {
+          const x = Math.floor(Math.random() * cols), y = Math.floor(Math.random() * rows);
+          light(x, y, Math.floor(Math.random() * colours.length), 0.75);
+        }
+      }
+      ctx.clearRect(0, 0, w, h);
+      let alive = false;
+      for (let i = 0; i < life.length; i++) {
+        const l = life[i];
+        if (l <= 0) continue;
+        alive = true;
+        ctx.globalAlpha = Math.min(1, l) * 0.9;
+        ctx.fillStyle = colours[hue[i]];
+        ctx.fillRect((i % cols) * CELL + 1, Math.floor(i / cols) * CELL + 1, CELL - 1, CELL - 1);
+        life[i] = l - dt / FADE;
+      }
+      ctx.globalAlpha = 1;
+      raf = visible && (alive || !reduced) ? requestAnimationFrame(frame) : 0;
+      if (!raf) prev = 0;
+    }
+    function wake() { if (!raf && visible) raf = requestAnimationFrame(frame); }
+
+    new ResizeObserver(layout).observe(canvas);
+    new IntersectionObserver((entries) => { visible = entries[0].isIntersecting; wake(); }).observe(stage);
+    new MutationObserver(readColours).observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+    readColours();
+    layout();
+  }
+
+  // Play the recording only while it is on screen.
+  const video = document.getElementById("demo-video") as HTMLVideoElement | null;
+  if (video && "IntersectionObserver" in window) {
+    new IntersectionObserver(
+      (entries) => entries.forEach((e) => (e.isIntersecting ? video.play().catch(() => {}) : video.pause())),
+      { threshold: 0.35 }
+    ).observe(video);
+  }
+</script>

@@ -10,12 +10,13 @@ The automated release workflow reads the section that matches the version in
 ### Changed
 
 - **One website, one design.** deepdoc.tech, its product docs and the hosted app at
-  cloud.deepdoc.tech now share a single "ink and paper" palette (`web/src/styles/tokens.css`):
-  no brand hue, warm charcoal in dark mode, a fine pixel grid and film grain for texture.
+  cloud.deepdoc.tech now share one palette (`web/src/styles/tokens.css`): warm
+  charcoal or paper surfaces, a violet accent in place of the lime, and a five-colour
+  pixel palette, with a fine pixel grid and film grain for texture. The landing page
+  leads with the demo recording on a pixel grid you can paint with the pointer.
   The product docs moved from a separate Next.js + Fumadocs app into the same Astro
   project at `/docs` (same URLs), with a sidebar, table of contents, client-side
-  search (⌘K) and a new DeepDoc Cloud page. The landing page's hero is an interactive
-  pixel demo: code becomes docs, and hovering a doc line shows its source.
+  search (⌘K) and a new DeepDoc Cloud page.
 - The README is now a short user-first overview that links to the docs.
 - The changelog page renders the latest releases from this file.
 

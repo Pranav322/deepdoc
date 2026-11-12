@@ -35,10 +35,9 @@ a { color: inherit; }
 button { font: inherit; color: inherit; }
 [hidden] { display: none !important; }
 
-/* Inverted selection: ink on paper flips to paper on ink. */
-::selection { background: var(--ink); color: var(--surface); }
+::selection { background: var(--accent); color: var(--accent-ink); }
 
-:focus-visible { outline: 2px solid var(--ink); outline-offset: 3px; border-radius: 4px; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
 
 .sr-only {
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
@@ -70,14 +69,28 @@ main { flex: 1; }
   line-height: 1.08;
   text-wrap: balance;
 }
-/* Emphasis without colour: one word set in serif italic. */
+/* Emphasis: one word in serif italic, painted with the pixel palette. */
 .em-serif {
   font-family: var(--font-serif);
   font-style: italic;
   font-weight: 400;
   letter-spacing: -0.02em;
   font-size: 1.06em;
+  padding-right: 0.08em;
+  background: var(--grad);
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
 }
+/* The primary call to action: the one filled-with-colour control. */
+.btn.vivid {
+  background: var(--accent); color: var(--accent-ink);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28), 0 8px 24px -8px var(--accent-line);
+}
+.btn.vivid:hover { background: color-mix(in oklab, var(--accent) 88%, var(--ink)); }
+/* Pixel markers: tiny squares in the palette colours. */
+.px { display: inline-block; width: 8px; height: 8px; border-radius: 2px; background: var(--p, var(--accent)); }
+.eyebrow .px { margin-right: 8px; transform: translateY(-1px); }
 .lede { font-size: 1.0625rem; line-height: 1.65; color: var(--ink-muted); text-wrap: pretty; }
 .muted { color: var(--ink-muted); }
 .faint { color: var(--ink-faint); }
@@ -115,10 +128,10 @@ code, kbd, .mono { font-family: var(--font-mono); }
   color: var(--ink); text-decoration: underline; text-decoration-color: var(--line-strong);
   text-underline-offset: 3px; transition: text-decoration-color 0.15s var(--ease);
 }
-.link:hover { text-decoration-color: var(--ink); }
+.link:hover { text-decoration-color: var(--accent); color: var(--accent); }
 .arrow-link {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 14px; font-weight: 500; color: var(--ink); text-decoration: none;
+  font-size: 14px; font-weight: 500; color: var(--accent); text-decoration: none;
 }
 .arrow-link svg { transition: transform 0.2s var(--ease); }
 .arrow-link:hover svg { transform: translateX(3px); }

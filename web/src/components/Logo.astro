@@ -1,8 +1,8 @@
 ---
 /**
  * DeepDoc mark and wordmark. The "depth D": a geometric D with two receding
- * echo strokes, read as layers (deep). The mark inherits currentColor, so it
- * is ink on both themes.
+ * echo strokes, read as layers (deep). The mark is drawn in the accent
+ * colour; the wordmark is ink.
  *
  *   variant="full"  the mark is the leading "D", followed by "eepDoc"
  *   variant="mark"  mark only
@@ -39,8 +39,8 @@ const merged = variant === "full";
     margin-left: -0.33em; margin-right: 0.04em;
     transform: translateY(-0.05em);
   }
-  .dd-front { fill: currentColor; }
-  .dd-echo { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+  .dd-front { fill: var(--accent); }
+  .dd-echo { fill: none; stroke: var(--accent); stroke-width: 2; stroke-linecap: round; }
   .dd-echo-1 { opacity: 0.4; }
   .dd-echo-2 { opacity: 0.18; }
   .dd-word { font-family: var(--font-sans); font-weight: 600; letter-spacing: -0.015em; }

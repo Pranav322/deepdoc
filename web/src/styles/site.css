@@ -217,10 +217,8 @@ html[data-theme="light"] .theme-toggle .icon-moon { display: block; }
 
 /* Start states for the Motion-driven animations (index.astro, components/home). html.motion is
    set before first paint by Layout.astro and only when motion is allowed. */
-html.motion [data-rise],
 html.motion [data-reveal],
-html.motion [data-words],
-html.motion .hero-title .w { opacity: 0; }
+html.motion [data-words] { opacity: 0; }
 
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }

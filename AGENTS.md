@@ -432,8 +432,8 @@ An earlier version of these sections (text cards, a plain list, a static chat) w
 
 ### Animation (Motion)
 The landing page uses the vanilla `motion` package (the library formerly called Framer Motion; no React). Shared helpers are in `src/scripts/motion.ts`: `motionOn()`, `loopInView()` (runs a demo repeatedly only while it is on screen), `revealWords()`, `spotlight()`.
-- Hero: headline words arrive one by one, then `[data-rise]` elements; the video frame (`#demo-frame`) is scroll-linked, tilting upright from `rotateX(16deg)`.
-- `[data-reveal]` blocks rise once in view; `[data-words]` headings arrive word by word.
+- Hero: **pure CSS, deliberately.** Headline words (`.hero-title .w`, `--i`) and `.rise` blocks (`--d`) animate with CSS keyframes in `index.astro`, so they play on first paint. It used to be Motion-driven behind `html.motion`, which made the grid paint first and the text arrive only after the JS bundle ran (reported as "background loads first, then the text"). Do not move first-screen content behind a script. The video frame (`#demo-frame`) is scroll-linked with Motion, tilting upright from `rotateX(16deg)`.
+- Below the fold: `[data-reveal]` blocks rise once in view; `[data-words]` headings arrive word by word.
 - **Start states are CSS, not JS.** `Layout.astro`'s inline head script adds `html.motion` before first paint (only when reduced motion is off), and `site.css` (plus each component, for its own demo) hides animated elements under that class, so nothing flashes. The same script removes the class after 2.5s if no page module loads; importing `scripts/motion.ts` cancels that. A new animated attribute needs a matching start-state rule.
 - Every component must check `motionOn()` and leave static markup untouched when it is false.
 - The Astro compiler rejects JSX expressions inside `<pre>` and is fragile with `cond && <el/>` inside `.map()`; render both branches or build a string.

@@ -26,15 +26,15 @@ const headline = "Documentation that keeps pace with your".split(" ");
     <section class="hero" id="hero">
       <PixelField />
       <div class="wrap hero-inner">
-        <p class="eyebrow" data-rise><span class="px"></span>Open source · MIT · Not backed by YC</p>
+        <p class="rise eyebrow" style="--d:0"><span class="px"></span>Open source · MIT · Not backed by YC</p>
         <h1 class="display hero-title">
-          {headline.map((w) => <span class="w">{w}</span>)}<span class="w em-serif">codebase.</span>
+          {headline.map((w, i) => <span class="w" style={`--i:${i}`}>{w}</span>)}<span class="w em-serif" style={`--i:${headline.length}`}>codebase.</span>
         </h1>
-        <p class="lede hero-lede" data-rise>
+        <p class="rise lede hero-lede" style="--d:2">
           DeepDoc reads your repository and writes a docs site with a chatbot that cites real files,
           then regenerates only the pages your commits touch.
         </p>
-        <div class="hero-cta" data-rise>
+        <div class="rise hero-cta" style="--d:3">
           <a class="btn vivid" href={CLOUD}>
             Generate docs for a repo
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
@@ -45,9 +45,9 @@ const headline = "Documentation that keeps pace with your".split(" ");
             <svg class="check-icon" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 4 4L19 6"/></svg>
           </button>
         </div>
-        <p class="hero-meta faint" data-rise>Python 3.10+ · Bring your own model · <a class="link" href={GITHUB} target="_blank" rel="noreferrer">View on GitHub</a></p>
+        <p class="rise hero-meta faint" style="--d:4">Python 3.10+ · Bring your own model · <a class="link" href={GITHUB} target="_blank" rel="noreferrer">View on GitHub</a></p>
       </div>
-      <div class="stage-wrap" data-rise>
+      <div class="rise stage-wrap" style="--d:5">
         <VideoStage />
       </div>
     </section>
@@ -82,6 +82,16 @@ const headline = "Documentation that keeps pace with your".split(" ");
   .hero-inner { position: relative; z-index: 1; display: flex; flex-direction: column; align-items: center; text-align: center; }
   .hero-title { margin-top: 20px; max-width: 860px; font-size: clamp(2.5rem, 6.2vw, 4.75rem); }
   .hero-title .w { display: inline-block; margin-right: 0.24em; }
+
+  /* The hero entrance is pure CSS on purpose. It used to wait for the Motion
+     bundle, so the grid painted first and the text arrived late. Now it plays
+     from first paint with no script. Reduced motion turns animations off in
+     site.css, which leaves everything in its final state. */
+  .hero-title .w { animation: hero-word 0.9s var(--ease) both; animation-delay: calc(var(--i, 0) * 55ms + 80ms); }
+  .hero .rise { animation: hero-rise 0.9s var(--ease) both; animation-delay: calc(var(--d, 0) * 90ms + 240ms); }
+  .hero .pixel-field { animation: fade 1.2s var(--ease) both; }
+  @keyframes hero-word { from { opacity: 0; transform: translateY(0.45em); filter: blur(10px); } to { opacity: 1; transform: none; filter: blur(0); } }
+  @keyframes hero-rise { from { opacity: 0; transform: translateY(22px); } to { opacity: 1; transform: none; } }
   .hero-title .w:last-child { margin-right: 0; }
   .hero-lede { margin-top: 22px; max-width: 580px; }
   .hero-cta { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 32px; }
@@ -133,9 +143,7 @@ const headline = "Documentation that keeps pace with your".split(" ");
   if (motionOn()) {
     const each = <T extends Element>(sel: string) => Array.from(document.querySelectorAll<T>(sel));
 
-    // Hero: the headline arrives word by word, then the rest rises in order.
-    animate(each<HTMLElement>(".hero-title .w"), { opacity: [0, 1], y: ["0.45em", "0em"], filter: ["blur(10px)", "blur(0px)"] }, { delay: stagger(0.055, { startDelay: 0.1 }), duration: 0.8, ease });
-    animate(each(".hero [data-rise]"), { opacity: [0, 1], y: [22, 0] }, { delay: stagger(0.09, { startDelay: 0.25 }), duration: 0.8, ease });
+    // The hero entrance is CSS (see the .rise rules above); nothing to do here.
 
     // The video window starts tilted back and stands upright as it scrolls in.
     const frame = document.getElementById("demo-frame");
